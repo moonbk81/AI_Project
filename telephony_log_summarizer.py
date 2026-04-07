@@ -92,7 +92,9 @@ class TelephonyLogSummarizer:
     def analyze_telephony(self, lines):
         all_sessions, oos_history = [], []
         current_session, last_v, last_d = None, None, None
-        last_slot_id = -1
+        # last_slot_id = -1
+        # last_slot_states: 각 슬롯별 마지막 상태 저장용 딕셔너리
+        last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
         target_phone_id = None # PHONE0 or PHONE1
         pre_context = deque(maxlen=20)
         in_radio = False
@@ -114,19 +116,38 @@ class TelephonyLogSummarizer:
                 if self.patterns['SST_POLL'].search(clean_line) and "newSS={" in clean_line:
                     ss_data = clean_line.split("newSS={")[1].rsplit("}", 1)[0]
                     v_reg, d_reg = self._parse_sst(ss_data, 'v_reg'), self._parse_sst(ss_data, 'd_reg')
-                    slotId = "0" if '0' in tag else "1"
-                    if (v_reg != last_v or d_reg != last_d) and (slotId == last_slot_id):
+                    # 태그 이름이나 로그 내용을 통해 Slot ID 판별
+                    slot_id = "1" if ('RILD2' in tag or 'SST-1' in tag or 'PHONE1' in clean_line) else "0"
+                    # 해당 슬롯의 이전 상태와 비교
+                    prev = last_slot_states[slot_id]
+                    if (v_reg != prev["v"] or d_reg != prev["d"]):
+                        # OOS 원인 추정을 위한 직전 로그 분석
+                        recent_logs = list(pre_context)
+                        context_summary = " ".join(recent_logs[-10:]).lower()
+                        
+                        # 원인 추정 알고리izing
+                        reason = "Unknown"
+                        rej = self._parse_sst(ss_data, 'rej_cause')
+                        if rej != "0" and rej != "Unknown":
+                            reason = f"NW_REJECT_CAUSE_{rej}"
+                        elif "rrc connection release" in context_summary:
+                            reason = "RRC_RELEASE_BY_NW"
+                        elif "out_of_service" in context_summary or "no_service" in context_summary:
+                            reason = "SIGNAL_LOSS_OR_SHADOW_AREA"
                         oos_history.append({
                             "time": ts,
-                            "slotId": slotId,
+                            "slotId": slot_id,
+                            "event_tpye": "OOS_ENTER" if (v_reg != "0" or d_reg != "0") else "OOS_RECOVER",
                             "voice_reg": v_reg,
                             "data_reg": d_reg,
                             "rat": self._parse_sst(ss_data, 'rat'),
+                            "root_cause_candidate": reason,
                             "operator": f"{self._parse_sst(ss_data, 'op_long')} ({self._parse_sst(ss_data, 'op_short')})",
                             "rej_cause": self._parse_sst(ss_data, 'rej_cause'),
-                            "emergency": self._parse_sst(ss_data, 'is_emergency')})
-                        last_v, last_d = v_reg, d_reg
-                        last_slot_id = slotId
+                            "emergency": self._parse_sst(ss_data, 'is_emergency'),
+                            "context_snapshot": recent_logs[-15:] # RAG 지식창고용 상세 데이터
+                            })
+                        last_slot_states[slot_id] = {"v": v_reg, "d": d_reg}
 
                 # [중요] 세션 시작 판정
                 is_cs = self.patterns['CS_START'].search(clean_line)
@@ -186,7 +207,9 @@ class TelephonyLogSummarizer:
                     if self.patterns['FAIL_EV'].search(clean_line):
                         if ims_m:
                             current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
-                    if ims_m and ims_m.group(1) != "501" and ("onCallTerminated" in clean_line or "onCallSessionTerminated" in clean_line):
+                    normal_clear = False
+                    if ims_m: normal_clear = True if ims_m.group(1) == "501" or ims_m.group(1) == "510" else False
+                    if ims_m and normal_clear and ("onCallTerminated" in clean_line or "onCallSessionTerminated" in clean_line):
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
                         
                     cs_m = self.patterns['CS_REASON'].search(clean_line)
