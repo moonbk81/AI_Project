@@ -67,6 +67,7 @@ class TelephonyLogSummarizer:
         }
         self.ps_exclude_tags = {'RILD', 'RILD2', 'RILJ'}
         self.re_hex_data = re.compile(r'([0-9a-fA-F]{2}\s){3,}')
+        self.network_exclude_tags = {'ImsPhoneConnection', 'ImsPhoneCallTracker'}
 
         # [ANR/Crash Patterns]
         self.re_pid_line = re.compile(r'----- pid (\d+) at ', re.I)
@@ -96,7 +97,7 @@ class TelephonyLogSummarizer:
         # last_slot_states: 각 슬롯별 마지막 상태 저장용 딕셔너리
         last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
         target_phone_id = None # PHONE0 or PHONE1
-        pre_context = deque(maxlen=20)
+        pre_context = deque(maxlen=50)
         in_radio = False
 
         for i, line in enumerate(lines):
@@ -120,10 +121,11 @@ class TelephonyLogSummarizer:
                     slot_id = "1" if ('RILD2' in tag or 'SST-1' in tag or 'PHONE1' in clean_line) else "0"
                     # 해당 슬롯의 이전 상태와 비교
                     prev = last_slot_states[slot_id]
-                    if (v_reg != prev["v"] or d_reg != prev["d"]):
+                    if (v_reg[0] != prev["v"] or d_reg[0] != prev["d"]):
                         # OOS 원인 추정을 위한 직전 로그 분석
-                        recent_logs = list(pre_context)
-                        context_summary = " ".join(recent_logs[-10:]).lower()
+                        # recent_logs = list(pre_context)
+                        recent_logs = [l for l in list(pre_context) if not any(t in l for t in self.network_exclude_tags)]
+                        context_summary = " ".join(recent_logs[-20:]).lower()
                         
                         # 원인 추정 알고리izing
                         reason = "Unknown"
@@ -137,7 +139,7 @@ class TelephonyLogSummarizer:
                         oos_history.append({
                             "time": ts,
                             "slotId": slot_id,
-                            "event_tpye": "OOS_ENTER" if (v_reg != "0" or d_reg != "0") else "OOS_RECOVER",
+                            "event_tpye": "OOS_ENTER" if (v_reg[0] != "0" or d_reg[0] != "0") else "OOS_RECOVER",
                             "voice_reg": v_reg,
                             "data_reg": d_reg,
                             "rat": self._parse_sst(ss_data, 'rat'),
@@ -147,7 +149,7 @@ class TelephonyLogSummarizer:
                             "emergency": self._parse_sst(ss_data, 'is_emergency'),
                             "context_snapshot": recent_logs[-15:] # RAG 지식창고용 상세 데이터
                             })
-                        last_slot_states[slot_id] = {"v": v_reg, "d": d_reg}
+                        last_slot_states[slot_id] = {"v": v_reg[0], "d": d_reg[0]}
 
                 # [중요] 세션 시작 판정
                 is_cs = self.patterns['CS_START'].search(clean_line)
