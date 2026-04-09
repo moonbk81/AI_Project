@@ -28,7 +28,11 @@ class RagPayloadBuilder:
         if "context" in data_dict: metadata["raw_context"] = json.dumps(data_dict["context"], ensure_ascii=False)
         if "stack" in data_dict: metadata["raw_stack"] = json.dumps(data_dict["stack"], ensure_ascii=False)
         if "call_stack" in data_dict: metadata["raw_stack"] = json.dumps(data_dict["call_stack"], ensure_ascii=False)
-            
+        # [신규 추가] RADIO_POWER의 원본 로그 저장
+        if "request_raw" in data_dict: metadata["raw_request"] = data_dict["request_raw"]
+        if "response_raw" in data_dict: metadata["raw_response"] = data_dict["response_raw"]
+        
+        if "request_time" in data_dict: metadata["time"] = data_dict["request_time"]
         if "start_time" in data_dict: metadata["time"] = data_dict["start_time"]
         elif "time" in data_dict: metadata["time"] = data_dict["time"]
         
@@ -51,6 +55,11 @@ class RagPayloadBuilder:
             doc = self._build_markdown_doc(item, type_name)
             meta = self._extract_metadata(item, type_name)
             rag_payload.append({"document": doc, "metadata": meta})
+
+        # [신규 추가] Radio Power 이벤트 처리
+        if "radio_power" in report_data:
+            for rp in report_data["radio_power"]:
+                add_to_payload(rp, "Radio_Power_Event")
 
         if "telephony" in report_data:
             for session in report_data["telephony"].get("sessions", []):

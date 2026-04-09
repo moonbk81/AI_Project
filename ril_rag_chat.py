@@ -138,14 +138,22 @@ class RilRagChatbot:
         print("🔎 [참고 원본 로그 (엔지니어 확인용)]")
         for i, meta in enumerate(retrieved_metas):
             print(f"\n--- 참고 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}) ---")
-            # 메타데이터에 숨겨둔 원본 로그(raw_logs) 출력
-            raw_logs = json.loads(meta.get('raw_logs', '[]'))
+            
+            # 1. Call/OOS 로그 출력
+            raw_logs = json.loads(meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]'))))
             if raw_logs:
-                for log in raw_logs[:5]: # 너무 길면 첫 5줄만 출력
+                for log in raw_logs[:5]: 
                     print(f"  {log}")
-                if len(raw_logs) > 5:
-                    print("  ... (중략) ...")
-            else:
+                if len(raw_logs) > 5: print("  ... (중략) ...")
+            
+            # 2. RADIO_POWER 로그 출력
+            raw_req = meta.get('raw_request')
+            raw_resp = meta.get('raw_response')
+            if raw_req or raw_resp:
+                if raw_req: print(f"  [REQ]  {raw_req}")
+                if raw_resp: print(f"  [RESP] {raw_resp}")
+            
+            if not raw_logs and not raw_req and not raw_resp:
                 print("  (원본 로그 데이터 없음)")
         print("="*60 + "\n")
 
