@@ -17,47 +17,78 @@ class RilRagChatbot:
             self.device = "cpu"
 
         # offline BGE-M3 Model            
-        offline_model_path = "/home/bongki81/project/AI_Sepcialist/bge-m3-offline"
+        # offline_model_path = "/home/bongki81/project/AI_Sepcialist/bge-m3-offline"
 
         print(f"🚀 BGE-M3 모델 로딩... (가속 장치: {self.device})")
         # SentenceTransformer가 알아서 최적화하여 BGE-M3를 로드합니다.
-        #self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
-        self.embed_model = SentenceTransformer(offline_model_path, device=self.device)
+        self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
+        # self.embed_model = SentenceTransformer(offline_model_path, device=self.device)
 
         # 2. ChromaDB 로드
         self.client = chromadb.PersistentClient(path=db_path)
         self.collection = self.client.get_or_create_collection(name="ril_knowledge")
         print("✅ 초기화 완료!\n")
 
-    def ingest_payload(self, payload_file):
-        """rag_payload.json 데이터를 Vector DB에 적재합니다."""
-        if not os.path.exists(payload_file):
-            print(f"❌ 페이로드 파일이 없습니다: {payload_file}")
+    def ingest_folder(self, folder_path="./payloads"):
+        """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
+        import glob
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+            print(f"📂 '{folder_path}' 폴더가 생성되었습니다. 분석된 JSON 파일을 넣어주세요.")
             return
 
-        with open(payload_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # 이미 적재된 데이터가 있는지 확인 (중복 방지)
-        if self.collection.count() > 0:
-            print(f"📦 DB에 이미 {self.collection.count()}개의 데이터가 있습니다. 적재를 건너뜁니다.")
+        # 1. payloads 폴더 내의 모든 json 파일 찾기
+        json_files = glob.glob(os.path.join(folder_path, "*.json"))
+        if not json_files:
+            print(f"⚠️ '{folder_path}' 폴더에 적재할 데이터가 없습니다.")
             return
 
-        documents = [item["document"] for item in data]
-        metadatas = [item["metadata"] for item in data]
-        ids = [f"doc_{i}" for i in range(len(data))]
+        # 2. DB에서 이미 처리된 파일 목록(source_file 메타데이터) 조회
+        # 전체 데이터를 가져와서 이미 저장된 파일명 세트(Set)를 만듭니다.
+        existing_data = self.collection.get(include=["metadatas"])
+        processed_files = set()
+        if existing_data and existing_data["metadatas"]:
+            for meta in existing_data["metadatas"]:
+                if "source_file" in meta:
+                    processed_files.add(meta["source_file"])
 
-        print(f"🧠 {len(documents)}개의 데이터를 임베딩 중입니다. 잠시만 기다려주세요...")
-        # 딕셔너리로 ['dense_vecs']를 찾을 필요 없이 바로 벡터가 나옵니다.
-        embeddings = self.embed_model.encode(documents)
-        
-        self.collection.add(
-            embeddings=embeddings.tolist(),
-            documents=documents,
-            metadatas=metadatas,
-            ids=ids
-        )
-        print("✅ DB 적재 완료!\n")
+        # 3. 신규 파일만 필터링
+        new_files = [f for f in json_files if os.path.basename(f) not in processed_files]
+
+        if not new_files:
+            print("✨ 모든 파일이 이미 최신 상태입니다. (추가 적재 없음)")
+            return
+
+        print(f"📦 총 {len(new_files)}개의 새로운 로그 파일을 발견했습니다. 적재 시작...")
+
+        for file_path in new_files:
+            filename = os.path.basename(file_path)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # 파일명을 ID의 접두어로 사용하여 고유성 보장
+            base_id = os.path.splitext(filename)[0]
+            documents = [item["document"] for item in data]
+            metadatas = [item["metadata"] for item in data]
+            
+            # 모든 메타데이터에 파일명 기록 (이게 있어야 나중에 중복 체크가 가능합니다)
+            for m in metadatas:
+                m['source_file'] = filename
+
+            ids = [f"{base_id}_{i}" for i in range(len(data))]
+
+            print(f"🔄 '{filename}' 임베딩 중... ({len(documents)}개 지식 추출)")
+            embeddings = self.embed_model.encode(documents).tolist()
+
+            # Batch 적재
+            self.collection.add(
+                embeddings=embeddings,
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids
+            )
+
+        print(f"\n✅ 지식 창고 업데이트 완료!")
 
     def ask(self, user_query):
         """질문을 받아 검색하고 Gemma-2B에게 물어봅니다."""
@@ -120,10 +151,10 @@ class RilRagChatbot:
 
 # --- 실행부 ---
 if __name__ == "__main__":
-    payload_path = "rag_payload.json" # 회사에서 가져온 파일 경로
+    payload_path = "/Users/moonbk/Project/AI_Project/payloads" # 회사에서 가져온 파일 경로
     
     chatbot = RilRagChatbot()
-    chatbot.ingest_payload(payload_path)
+    chatbot.ingest_folder(payload_path)
     
     print("💬 RIL RAG 챗봇이 준비되었습니다! (종료하려면 'quit' 또는 'exit' 입력)")
     while True:
