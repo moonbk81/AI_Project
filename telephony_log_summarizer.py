@@ -35,6 +35,36 @@ class TelephonyLogSummarizer:
             'is_emergency': re.compile(r'm?IsEmergencyOnly\s*=\s*([^,\s]+)', re.I),
             'rej_cause': re.compile(r'm?RejectCause\s*=\s*([^,\s]+)', re.I)
         }
+        
+        # 에러 메시지로 간주할 키워드들
+        self.radio_power_error_keywords = [
+            'GENERIC_FAILURE', 'RADIO_NOT_AVAILABLE',
+            'REQUEST_NOT_SUPPORTED', 'INVALID_ARGUMENTS', 'INTERNAL_ERR',
+            'MODEM_ERR', 'FAILURE', 'ERROR'
+        ]
+
+        # Request 정규식: > RADIO_POWER on = true/false
+        self.re_radio_power_req = re.compile(
+            r'(?P<timestamp>\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+'
+            r'radio\s+(?P<pid>\d+)\s+(?P<tid>\d+)\s+'
+            r'(?P<level>[VDIWEFS])\s+RILJ\s*:\s*'
+            r'\[(?P<seq>\d+)\]\s*>\s*RADIO_POWER\s+'
+            r'on\s*=\s*(?P<on>\w+)\s+'
+            r'forEmergencyCall\s*=\s*(?P<for_emergency>\w+)\s+'
+            r'preferredForEmergencyCall\s*=\s*(?P<preferred_emergency>\w+)\s+'
+            r'\[(?P<phone>PHONE\d+)\]'
+        )
+
+        # Response 정규식: < RADIO_POWER (뒤에 에러 메시지가 있으면 failed)
+        # 정상: [1008]< RADIO_POWER  [PHONE0]
+        # 에러: [1010]< RADIO_POWER RadioNotAvailable [PHONE0]
+        self.re_radio_power_resp = re.compile(
+            r'(?P<timestamp>\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+'
+            r'radio\s+(?P<pid>\d+)\s+(?P<tid>\d+)\s+'
+            r'(?P<level>[VDIWEFS])\s+RILJ\s*:\s*'
+            r'\[(?P<seq>\d+)\]\s*<\s*RADIO_POWER\s*'
+            r'(?P<content>.*)'
+        )
 
         # [Filtering Constants]
         self.valid_tags = {
@@ -89,11 +119,83 @@ class TelephonyLogSummarizer:
             if "(" in val and ")" not in val: val += ")"
             return val
         return "Unknown"
+    
+    def analyze_radio_power(self, log_lines):
+        requests = {}  # seq -> request info
+        responses = {}  # seq -> response info
+        results = []  # 최종 결과 리스트
+        
+        for line in log_lines:
+            # Request 파싱
+            req_match = self.re_radio_power_req.search(line)
+            if req_match:
+                seq = req_match.group('seq')
+                requests[seq] = {
+                    'timestamp': req_match.group('timestamp'),
+                    'seq': seq,
+                    'on': req_match.group('on').lower() == 'true',
+                    'for_emergency': req_match.group('for_emergency').lower() == 'true',
+                    'preferred_emergency': req_match.group('preferred_emergency').lower() == 'true',
+                    'phone': req_match.group('phone'),
+                    'raw_line': line.strip()
+                }
+                continue
+            
+            # Response 파싱
+            resp_match = self.re_radio_power_resp.search(line)
+            if resp_match:
+                seq = resp_match.group('seq')
+                content = resp_match.group('content').strip()
+                
+                # 성공/실패 판별: 에러 키워드가 있으면 실패
+                is_error = any(err_keyword in content.upper() for err_keyword in [kw.upper() for kw in self.radio_power_error_keywords])
+                
+                # PHONE 정보 추출 (뒤에 [PHONE0] 형식으로 있음)
+                phone_match = re.search(r'\[(PHONE\d+)\]', content)
+                phone = phone_match.group(1) if phone_match else ''
+                
+                # 에러 메시지 추출 (PHONE 부분 제거)
+                error_msg = ''
+                if is_error:
+                    # 에러 키워드만 추출
+                    for kw in self.radio_power_error_keywords:
+                        if kw.upper() in content.upper():
+                            error_msg = kw
+                            break
+                
+                responses[seq] = {
+                    'timestamp': resp_match.group('timestamp'),
+                    'seq': seq,
+                    'phone': phone,
+                    'error_msg': error_msg,
+                    'success': not is_error,  # 에러 키워드가 없으면 성공
+                    'raw_line': line.strip()
+                }
+        
+        # Request와 Response 매칭
+        for seq, req in requests.items():
+            resp = responses.get(seq)
+            result = {
+                'seq': seq,
+                'request_time': req['timestamp'],
+                'response_time': resp['timestamp'] if resp else None,
+                'phone': req['phone'],
+                'on': req['on'],
+                'for_emergency': req['for_emergency'],
+                'preferred_emergency': req['preferred_emergency'],
+                'success': resp['success'] if resp else False,
+                'error_msg': resp['error_msg'] if resp else 'NO_RESPONSE',
+                'request_raw': req['raw_line'],
+                'response_raw': resp['raw_line'] if resp else None
+            }
+            results.append(result)
+        
+        return results
 
     def analyze_telephony(self, lines):
         all_sessions, oos_history = [], []
         current_session, last_v, last_d = None, None, None
-        # last_slot_id = -1
+
         # last_slot_states: 각 슬롯별 마지막 상태 저장용 딕셔너리
         last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
         target_phone_id = None # PHONE0 or PHONE1
@@ -117,6 +219,7 @@ class TelephonyLogSummarizer:
                 if self.patterns['SST_POLL'].search(clean_line) and "newSS={" in clean_line:
                     ss_data = clean_line.split("newSS={")[1].rsplit("}", 1)[0]
                     v_reg, d_reg = self._parse_sst(ss_data, 'v_reg'), self._parse_sst(ss_data, 'd_reg')
+
                     # 태그 이름이나 로그 내용을 통해 Slot ID 판별
                     slot_id = "1" if ('RILD2' in tag or 'SST-1' in tag or 'PHONE1' in clean_line) else "0"
                     # 해당 슬롯의 이전 상태와 비교
@@ -124,10 +227,27 @@ class TelephonyLogSummarizer:
                     if (v_reg[0] != prev["v"] or d_reg[0] != prev["d"]):
                         # OOS 원인 추정을 위한 직전 로그 분석
                         # recent_logs = list(pre_context)
-                        recent_logs = [l for l in list(pre_context) if not any(t in l for t in self.network_exclude_tags)]
+                        recent_logs = [l for l in list(pre_context) if not (any(t in l for t in self.network_exclude_tags))]
                         context_summary = " ".join(recent_logs[-20:]).lower()
                         
-                        # 원인 추정 알고리izing
+                        # event_type 판정: 이전 상태와 비교하여 상태 변화 방향 결정
+                        # prev_in_service: 이전에 서비스 가능 상태였는지 (둘 다 "0"이면 서비스 가능)
+                        # now_in_service: 현재 서비스 가능 상태인지
+                        prev_in_service = (prev["v"] == "0" and prev["d"] == "0")
+                        now_in_service = (v_reg[0] == "0" and d_reg[0] == "0")
+                        
+                        # OOS_RECOVER: 서비스 불가 → 서비스 가능 (복구)
+                        # OOS_ENTER: 서비스 가능 → 서비스 불가 (진입)
+                        # 기타: 상태 변화지만 둘 다 서비스 불가 or 둘 다 서비스 가능 (세부 상태 변화)
+                        if not prev_in_service and now_in_service:
+                            event_type = "OOS_RECOVER"
+                        elif prev_in_service and not now_in_service:
+                            event_type = "OOS_ENTER"
+                        else:
+                            # 둘 다 서비스 불가 상태에서의 변화 (예: 1→2, 2→1 등)
+                            event_type = "OOS_STATE_CHANGE"
+                        
+                        # 원인 추정 알고리zing
                         reason = "Unknown"
                         rej = self._parse_sst(ss_data, 'rej_cause')
                         if rej != "0" and rej != "Unknown":
@@ -136,10 +256,12 @@ class TelephonyLogSummarizer:
                             reason = "RRC_RELEASE_BY_NW"
                         elif "out_of_service" in context_summary or "no_service" in context_summary:
                             reason = "SIGNAL_LOSS_OR_SHADOW_AREA"
+                        if v_reg[0] == "0" or d_reg[0] =="0": reason = "None"
+                        
                         oos_history.append({
                             "time": ts,
                             "slotId": slot_id,
-                            "event_tpye": "OOS_ENTER" if (v_reg[0] != "0" or d_reg[0] != "0") else "OOS_RECOVER",
+                            "event_type": event_type,
                             "voice_reg": v_reg,
                             "data_reg": d_reg,
                             "rat": self._parse_sst(ss_data, 'rat'),
@@ -211,7 +333,9 @@ class TelephonyLogSummarizer:
                             current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
                     normal_clear = False
                     if ims_m: normal_clear = True if ims_m.group(1) == "501" or ims_m.group(1) == "510" else False
-                    if ims_m and normal_clear and ("onCallTerminated" in clean_line or "onCallSessionTerminated" in clean_line):
+                    if normal_clear:
+                        current_session["status"], current_session["fail_reason"] = "SUCESS", f"{ims_m.group(1)}: {ims_m.group(2)}"
+                    elif ims_m and not normal_clear:
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
                         
                     cs_m = self.patterns['CS_REASON'].search(clean_line)
@@ -336,6 +460,7 @@ class TelephonyLogSummarizer:
         with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
         res = {}
+        if mode in ['all']: res['radio_power'] = self.analyze_radio_power(lines)
         if mode in ['call', 'all']: res['telephony'] = self.analyze_telephony(lines)
         if mode in ['anr', 'all']: res['anr_context'] = self.analyze_anr(lines)
         if mode in ['crash', 'all']: res['crash_context'] = self.analyze_crash(lines)
@@ -352,6 +477,8 @@ class TelephonyLogSummarizer:
                 lines = f.readlines()
 
             result = {}
+            if mode in ['all']:
+                result['radio_power'] = self.analyze_radio_power(lines)
             if mode in ['call', 'all']:
                 result['telephony'] = self.analyze_telephony(lines)
             if mode in ['anr', 'all']:

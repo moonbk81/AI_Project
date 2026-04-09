@@ -8,12 +8,22 @@ from sentence_transformers import SentenceTransformer
 class RilRagChatbot:
     def __init__(self, db_path="./ril_vector_db"):
         print("⚙️ 시스템 초기화 중...")
-        # 1. BGE-M3 (임베딩 모델) 로드 - MPS 가속 사용
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        # 1. BGE-M3 (임베딩 모델) 로드 - GPU 가속 사용 (MPS > CUDA > CPU 순서)
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        else:
+            self.device = "cpu"
+
+        # offline BGE-M3 Model            
+        offline_model_path = "/home/bongki81/project/AI_Sepcialist/bge-m3-offline"
+
         print(f"🚀 BGE-M3 모델 로딩... (가속 장치: {self.device})")
         # SentenceTransformer가 알아서 최적화하여 BGE-M3를 로드합니다.
-        self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
-        
+        #self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
+        self.embed_model = SentenceTransformer(offline_model_path, device=self.device)
+
         # 2. ChromaDB 로드
         self.client = chromadb.PersistentClient(path=db_path)
         self.collection = self.client.get_or_create_collection(name="ril_knowledge")
