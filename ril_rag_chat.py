@@ -16,13 +16,14 @@ class RilRagChatbot:
         else:
             self.device = "cpu"
 
-        # offline BGE-M3 Model            
-        # offline_model_path = "/home/bongki81/project/AI_Sepcialist/bge-m3-offline"
-
         print(f"🚀 BGE-M3 모델 로딩... (가속 장치: {self.device})")
         # SentenceTransformer가 알아서 최적화하여 BGE-M3를 로드합니다.
-        self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
-        # self.embed_model = SentenceTransformer(offline_model_path, device=self.device)
+        if self.device == "cuda" or self.device == "cpu":
+            # offline BGE-M3 Model            
+            offline_model_path = "/home/bongki81/project/AI_Project/bge-m3-offline"
+            self.embed_model = SentenceTransformer(offline_model_path, device=self.device)
+        else:
+            self.embed_model = SentenceTransformer('BAAI/bge-m3', device=self.device)
 
         # 2. ChromaDB 로드
         self.client = chromadb.PersistentClient(path=db_path)
@@ -97,29 +98,64 @@ class RilRagChatbot:
         # 1. 질문 임베딩 생성 
         # (반드시 문자열인 'user_query'가 들어가야 합니다!)
         query_embedding = self.embed_model.encode(user_query).tolist()
+        
+        # [신규] 사용자의 질문 키워드에 따라 강제 필터(서랍) 지정
+        search_filter = None
+        user_query_lower = user_query.lower()
+        
+        if "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
+            search_filter = {"log_type": "Call_Session"}
+        elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower:
+            search_filter = {"log_type": "OOS_Event"}
+        elif "radio" in user_query_lower or "전원" in user_query_lower:
+            search_filter = {"log_type": "Radio_Power_Event"}
+
+        print(f"🔍 [시스템] 적용된 필터: {search_filter if search_filter else '전체 검색'}")
 
         # 2. ChromaDB 검색
         # (위에서 뽑아낸 숫자리스트를 DB에 던져서 유사한 로그 3개를 찾습니다)
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=3
-        )
+        if search_filter:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=10,
+                where=search_filter  # 지정된 서랍(Type)에서만 검색
+            )
+        else:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=10
+            )
         
         if not results['documents'][0]:
             return "검색된 관련 로그가 없습니다."
+        
+        context = "\n\n".join(results['documents'][0])
 
         # 2. 검색된 Document(본문)를 컨텍스트로 구성
         retrieved_docs = "\n\n".join(results['documents'][0])
         retrieved_metas = results['metadatas'][0]
+        
+        print("\n" + "*"*50)
+        print("  [Debugging] BGE-M3가 찾아온 컨닝 페이퍼 원문:")
+        print(context)
+        print("*"*50 + "\n")
 
         # 3. Gemma-2B 프롬프트 구성
         system_prompt = (
-            "너는 안드로이드 무선 통신(RIL, Telephony) 로그 분석 전문가야. "
-            "아래에 제공된 '검색된 로그 요약'을 바탕으로 사용자의 질문에 답변해줘. "
-            "원인과 해결책을 논리적이고 명확하게 설명해야 해."
+            "너는 주어진 [로그 원문]에서만 데이터를 추출하는 정보 추출 봇이다. "
+            "절대로 예시를 베껴 쓰지 마라. 오직 [로그 원문]에 존재하는 실제 값만 출력해라.\n\n"
+            "[추출 예시 (형식만 참고할 것)]\n"
+            "질문: 망 이탈 로그에서 voice_reg와 rat 값을 알려줘\n"
+            "답변:\n"
+            "- Voice Reg: 1\n"
+            "- RAT: LTE\n\n"
+            "[규칙]\n"
+            "1. 사용자가 특정 값을 요구하면 [로그 원문]을 뒤져서 '- Key: Value' 형태로만 출력해라.\n"
+            "2. [로그 원문]에 해당 값이 없으면 무조건 '찾을 수 없음'이라고만 적어라."
         )
-        
-        user_prompt = f"[검색된 로그 요약]\n{retrieved_docs}\n\n[질문]\n{user_query}"
+
+        user_prompt = f"{system_prompt}\n\n[로그 원문]\n{context}\n\n질문: {user_query}\n답변:\n"
+
 
         print("🤖 Gemma-2B가 분석 중입니다...\n")
         # 4. Ollama를 통해 Gemma-2B 호출
@@ -159,7 +195,7 @@ class RilRagChatbot:
 
 # --- 실행부 ---
 if __name__ == "__main__":
-    payload_path = "/Users/moonbk/Project/AI_Project/payloads" # 회사에서 가져온 파일 경로
+    payload_path = os.getcwd() + "/payloads" # 회사에서 가져온 파일 경로
     
     chatbot = RilRagChatbot()
     chatbot.ingest_folder(payload_path)

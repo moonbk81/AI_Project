@@ -41,10 +41,16 @@ class RagPayloadBuilder:
 
         return metadata
 
-    def build_payload(self, output_filename):
+    def build_payload(self, output_filename=None):
         if not os.path.exists(self.input_file):
             print(f"❌ 파일을 찾을 수 없습니다: {self.input_file}")
             return
+
+        # output_filename이 없으면 input filename에 _rag_payload 붙여서 자동 생성
+        if output_filename is None:
+            input_basename = os.path.basename(self.input_file)
+            name_without_ext = os.path.splitext(input_basename)[0]
+            output_filename = f"{name_without_ext}_rag_payload.json"
 
         with open(self.input_file, 'r', encoding='utf-8') as f:
             report_data = json.load(f)
@@ -101,7 +107,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build RAG Payload (Doc + Metadata) from JSON")
     parser.add_argument("input_json", help="원본 diag_report_all.json 파일 경로")
     # 도움말에도 payloads 폴더에 저장된다고 명시해줍니다.
-    parser.add_argument("output_json", help="저장될 파일 이름 (자동으로 payloads/ 폴더에 저장됨)", default="rag_payload.json", nargs='?')
-    
+    parser.add_argument("output_json", help="저장될 파일 이름 (미입력 시 input 파일명_rag_payload.json으로 자동 생성, payloads/ 폴더에 저장됨)", default=None, nargs='?')
+
     args = parser.parse_args()
     RagPayloadBuilder(args.input_json).build_payload(args.output_json)
