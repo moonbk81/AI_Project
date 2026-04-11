@@ -90,88 +90,100 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query):
-        # 1. 질문 임베딩 생성
+    def ask(self, user_query, current_file=None):
+        # 1. 질문 임베딩 생성 및 기본 필터
         query_embedding = self.embed_model.encode(user_query).tolist()
-
-        # 2. 질문 키워드에 따른 서랍(log_type) 필터링
-        search_filter = None
         user_query_lower = user_query.lower()
-
+        base_filter = None
+        
         if "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
-            search_filter = {"log_type": "Call_Session"}
-        elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower:
-            search_filter = {"log_type": "OOS_Event"}
-        elif "radio" in user_query_lower or "전원" in user_query_lower:
-            search_filter = {"log_type": "Radio_Power_Event"}
+            base_filter = {"log_type": "Call_Session"}
+        elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower or "out of service" in user_query_lower \
+             or "no service" in user_query_lower or "signal lost" in user_query_lower:
+            base_filter = {"log_type": "OOS_Event"}
+        elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
+            base_filter = {"log_type": "Radio_Power_Event"}
+        elif "crash" in user_query_lower or "fatal" in user_query_lower:
+            base_filter = {"log_type": "Crash_Log"}
+        elif "anr" in user_query_lower or "not responding" in user_query_lower:
+            base_filter = {"log_type": "ANR_Log"}
 
-        print(f"\n🔍 [시스템] 적용된 DB 필터: {search_filter if search_filter else '전체 검색'}")
+        # 2. 투트랙 필터 구성
+        where_current = None
+        where_past = None
 
-        # 3. ChromaDB 검색 (n_results=10으로 넉넉하게)
-        if search_filter:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=10,
-                where=search_filter
-            )
+        if current_file:
+            print(f"\n🎯 [투트랙 검색] 1. 현재 대상 파일 집중 분석: {current_file}")
+            if base_filter:
+                where_current = {"$and": [base_filter, {"source_file": current_file}]}
+                where_past = {"$and": [base_filter, {"source_file": {"$ne": current_file}}]}
+            else:
+                where_current = {"source_file": current_file}
+                where_past = {"source_file": {"$ne": current_file}}
         else:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=10
-            )
+            print(f"\n🔍 [일반 검색] 특정 대상 파일 없음. DB 전체 검색 실행")
+            where_current = base_filter
 
-        if not results['documents'] or not results['documents'][0]:
+        # 3. DB 쿼리 실행 (현재 로그 5개, 과거 사례 5개 각각 추출)
+        results_current = self.collection.query(
+            query_embeddings=[query_embedding], n_results=5, where=where_current
+        ) if where_current else None
+
+        results_past = self.collection.query(
+            query_embeddings=[query_embedding], n_results=5, where=where_past
+        ) if where_past else None
+
+        # 4. 결과물 조립 및 LLM 지시문 분리
+        current_context = ""
+        past_context = ""
+        retrieved_ids = []
+        retrieved_metas = []
+
+        if results_current and results_current['documents'] and results_current['documents'][0]:
+            current_context = "\n\n".join(results_current['documents'][0])
+            retrieved_ids.extend(results_current['ids'][0])
+            retrieved_metas.extend(results_current['metadatas'][0])
+
+        if results_past and results_past['documents'] and results_past['documents'][0]:
+            past_context = "\n\n".join(results_past['documents'][0])
+            retrieved_ids.extend(results_past['ids'][0])
+            retrieved_metas.extend(results_past['metadatas'][0])
+
+        if not current_context and not past_context:
             return "검색된 관련 로그가 없습니다.", [], []
 
-        # 4. 검색 결과 조립 및 디버깅 출력
-        context = "\n\n".join(results['documents'][0])
-        retrieved_ids = results['ids'][0]
-        retrieved_metas = results['metadatas'][0]
-
-        print("\n" + "*"*50)
-        print("👀 [디버깅] BGE-M3가 찾아온 컨닝 페이퍼 원문:")
-        print(context)
-        print("*"*50 + "\n")
-
-        # 5. Gemma-2B 프롬프트 구성 (앵무새 방지 및 철벽 방어)
+        # 5. 투트랙 맞춤형 LLM 프롬프트
         system_prompt = (
-            "너는 주어진 [로그 원문]에서만 데이터를 추출하는 정보 추출 봇이다. "
-            "절대로 예시를 베껴 쓰지 마라. 오직 [로그 원문]에 존재하는 실제 값만 출력해라.\n\n"
-            "[추출 예시 (형식만 참고할 것)]\n"
-            "질문: 망 이탈 로그에서 voice_reg와 rat 값을 알려줘\n"
-            "답변:\n"
-            "- Voice Reg: 1\n"
-            "- RAT: LTE\n\n"
-            "[규칙]\n"
-            "1. 사용자가 특정 값을 요구하면 [로그 원문]을 뒤져서 '- Key: Value' 형태로만 출력해라.\n"
-            "2. [로그 원문]에 해당 값이 없으면 무조건 '찾을 수 없음'이라고만 적어라."
+            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 엔지니어다. "
+            "주어진 지문은 [현재 분석 대상 로그]와 [과거 유사 발생 사례]로 명확히 나뉘어 있다.\n\n"
+            "[답변 규칙]\n"
+            "1. 사용자의 질문(현상 분석, 원인 파악)에 대한 메인 대답은 반드시 [현재 분석 대상 로그]를 바탕으로 작성해라.\n"
+            "2. [과거 유사 발생 사례]에 엔지니어의 코멘트나 해결책(known_solution)이 적혀 있다면, "
+            "답변 마지막에 '💡 [과거 유사 사례 참고]: 과거 비슷한 로그에서는 ~게 조치한 이력이 있습니다.' 라고 덧붙여서 안내해라.\n"
+            "3. 현재 로그에 답이 없으면 지어내지 말고 모른다고 할 것."
         )
 
-        prompt = f"{system_prompt}\n\n[로그 원문]\n{context}\n\n질문: {user_query}\n답변:\n"
+        prompt = f"{system_prompt}\n\n[현재 분석 대상 로그]\n{current_context}\n\n[과거 유사 발생 사례]\n{past_context}\n\n질문: {user_query}\n답변:\n"
 
-        # 6. LLM 추론
+        # 6. Ollama API 호출
         import requests
-        
-        url = "http://localhost:11434/api/generate"
+        url = "http://localhost:11434/api/chat"
         payload = {
             "model": "gemma:2b",
-            "prompt": prompt,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
             "stream": False,
-            "options": {
-                "temerature": 0.1,
-                "num_predict": 256
-            }
+            "options": {"temperature": 0.1, "num_predict": 256}
         }
 
         try:
             response = requests.post(url, json=payload)
-            response.raise_for_status() # HTTP 에러 발생 시 예외 처리
-            result_data = response.json()
-            answer = result_data.get("response", "응답을 파싱할 수 없습니다.")
-        except requests.exceptions.ConnectionError:
-            answer = "❌ [오류] Ollama 서버에 연결할 수 없습니다. 터미널에서 'ollama serve'가 실행 중인지 확인해주세요."
+            response.raise_for_status()
+            answer = response.json().get("message", {}).get("content", "응답 파싱 실패")
         except Exception as e:
-            answer = f"❌ [오류] Ollama 추론 중 문제가 발생했습니다: {e}" 
+            answer = f"❌ [오류] Ollama 통신 실패: {e}"
 
         return answer, retrieved_ids, retrieved_metas
 

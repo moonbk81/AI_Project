@@ -349,7 +349,6 @@ class TelephonyLogSummarizer:
                         ret = self.patterns['END_EV'].search(clean_line)
                     # 2. 종료 체크 (로그가 담긴 직후 판정)
                     if self.patterns['END_EV'].search(clean_line):
-                        print(f"end_time:{ts}")
                         current_session["end_time"] = ts
                         current_session["logs"].append(f"==> [END_{target_phone_id}]: {clean_line}")
                         all_sessions.append(current_session)
@@ -536,9 +535,4 @@ def main():
     print(f"-- 모든 작업이 완료되었습니다. 결과는 '{output_dir}/' 폴더에 있습니다.")
 
 if __name__ == "__main__":
-    # p = argparse.ArgumentParser()
-    # p.add_argument("file")
-    # p.add_argument("--mode", choices=['call', 'anr', 'crash', 'all'], default='all')
-    # args = p.parse_args()
-    # TelephonyDiagnosticSuite(args.file).run(args.mode)
     main()
