@@ -90,7 +90,7 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None):
+    def ask(self, user_query, current_file=None, chat_history=None):
         # 1. 질문 임베딩 생성 및 기본 필터
         query_embedding = self.embed_model.encode(user_query).tolist()
         user_query_lower = user_query.lower()
@@ -99,14 +99,14 @@ class RilRagChat:
         if "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
             base_filter = {"log_type": "Call_Session"}
         elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower or "out of service" in user_query_lower \
-             or "no service" in user_query_lower or "signal lost" in user_query_lower:
+                or "no service" in user_query_lower or "signal lost" in user_query_lower:
             base_filter = {"log_type": "OOS_Event"}
         elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
             base_filter = {"log_type": "Radio_Power_Event"}
         elif "crash" in user_query_lower or "fatal" in user_query_lower:
-            base_filter = {"log_type": "Crash_Log"}
+            base_filter = {"log_type": "App_Crash"}
         elif "anr" in user_query_lower or "not responding" in user_query_lower:
-            base_filter = {"log_type": "ANR_Log"}
+            base_filter = {"log_type": "App_ANR"}
 
         # 2. 투트랙 필터 구성
         where_current = None
@@ -124,7 +124,7 @@ class RilRagChat:
             print(f"\n🔍 [일반 검색] 특정 대상 파일 없음. DB 전체 검색 실행")
             where_current = base_filter
 
-        # 3. DB 쿼리 실행 (현재 로그 5개, 과거 사례 5개 각각 추출)
+        # 3. DB 쿼리 실행
         results_current = self.collection.query(
             query_embeddings=[query_embedding], n_results=5, where=where_current
         ) if where_current else None
@@ -133,7 +133,7 @@ class RilRagChat:
             query_embeddings=[query_embedding], n_results=5, where=where_past
         ) if where_past else None
 
-        # 4. 결과물 조립 및 LLM 지시문 분리
+        # 4. 결과물 조립
         current_context = ""
         past_context = ""
         retrieved_ids = []
@@ -163,17 +163,27 @@ class RilRagChat:
             "3. 현재 로그에 답이 없으면 지어내지 말고 모른다고 할 것."
         )
 
-        prompt = f"{system_prompt}\n\n[현재 분석 대상 로그]\n{current_context}\n\n[과거 유사 발생 사례]\n{past_context}\n\n질문: {user_query}\n답변:\n"
+        prompt = f"[현재 분석 대상 로그]\n{current_context}\n\n[과거 유사 발생 사례]\n{past_context}\n\n질문: {user_query}"
 
-        # 6. Ollama API 호출
+        # 6. Ollama API 호출 (Memory 구조 적용)
         import requests
         url = "http://localhost:11434/api/chat"
+        
+        # 시스템 메시지를 가장 먼저 배치
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # 웹 앱에서 넘겨준 과거 대화 기록(chat_history)이 있다면 중간에 끼워 넣기
+        if chat_history:
+            for msg in chat_history:
+                # Ollama가 헷갈려할 수 있는 Streamlit 전용 키(references)는 빼고 순수 대화만 전달
+                messages.append({"role": msg["role"], "content": msg["content"]})
+                
+        # 마지막으로 이번 턴의 프롬프트(지문 + 질문) 추가
+        messages.append({"role": "user", "content": prompt})
+
         payload = {
             "model": "gemma:2b",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "stream": False,
             "options": {"temperature": 0.1, "num_predict": 256}
         }
