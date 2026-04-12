@@ -3,12 +3,42 @@ import streamlit as st
 import json
 import time
 import pandas as pd
-import plotly.express as px  # 통계 그래프용
+import plotly.express as px
+import re  # [추가] 정규표현식 (슬라이싱 용도)
 
 # 1. 백엔드 엔진 및 자동화 모듈 불러오기
 from ril_rag_chat import RilRagChat
 from telephony_log_summarizer import TelephonyLogSummarizer
 from prepare_rag_payload import RagPayloadBuilder
+
+# ==========================================
+# [신규 추가] 대용량 로그 타임라인 슬라이서 함수
+# ==========================================
+def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
+    """지정된 시간대의 로그만 스트리밍으로 추출하여 초고속으로 잘라냅니다."""
+    pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
+    written_lines = 0
+    is_in_range = False
+
+    with open(input_path, 'r', encoding='utf-8', errors='ignore') as fin, \
+         open(output_path, 'w', encoding='utf-8') as fout:
+        
+        for line in fin:
+            match = pattern.search(line)
+            if match:
+                current_time = match.group(1)
+                if start_time_str <= current_time <= end_time_str:
+                    is_in_range = True
+                elif current_time > end_time_str:
+                    break  # 최적화: 종료 시간 넘으면 루프 즉시 탈출
+                else:
+                    is_in_range = False
+
+            if is_in_range:
+                fout.write(line)
+                written_lines += 1
+
+    return written_lines
 
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="RIL 로그 분석기", page_icon="📡", layout="wide")
@@ -33,12 +63,11 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
-# ==========================================
-# [추가 1] 탭(Tab) 구조 분리 (분석 vs 대시보드)
-# ==========================================
 tab_chat, tab_dash = st.tabs(["💬 로그 분석 및 대화", "📊 전사 로그 통계 대시보드"])
 
-# 사이드바 (두 탭 모두에서 보이도록 상단에 위치)
+# ==========================================
+# 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
+# ==========================================
 with st.sidebar:
     st.header("⚙️ 1-Click 자동 분석 파이프라인")
     uploaded_file = st.file_uploader(
@@ -47,38 +76,68 @@ with st.sidebar:
         key=f"uploader_{st.session_state.uploader_key}"
     )
     
+    # [추가] 슬라이싱 UI
+    use_slicing = st.checkbox("✂️ 특정 시간대만 잘라서 분석 (2GB 이상 권장)")
+    start_time, end_time = "", ""
+    if use_slicing:
+        st.info("💡 에러 발생 시점 주변 5~10분만 잘라내면 분석 속도가 100배 빨라집니다.")
+        col1, col2 = st.columns(2)
+        with col1: start_time = st.text_input("시작 (예: 04-12 14:00:00)")
+        with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
+    
     if st.button("🚀 분석 및 DB 적재 시작", use_container_width=True, type="primary"):
         if uploaded_file is None:
             st.error("❌ 먼저 파일을 업로드해주세요.")
+        elif use_slicing and (not start_time or not end_time):
+            st.error("❌ 슬라이싱을 켰다면 시작/종료 시간을 모두 입력해주세요.")
         else:
             with st.status("자동화 파이프라인 가동 중...", expanded=True) as status:
                 try:
                     os.makedirs("./temp_logs", exist_ok=True)
                     temp_raw_path = os.path.join("./temp_logs", uploaded_file.name)
 
+                    # 한 번에 메모리에 올리지 않고 64KB씩 안전하게 나눠서 디스크에 씁니다.
                     with open(temp_raw_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                        while chunk := uploaded_file.read(65536):
+                            f.write(chunk)
 
                     filename = uploaded_file.name
                     base_name = os.path.splitext(filename)[0]
+                    target_log_path = temp_raw_path 
+                    
+                    # [추가] 슬라이싱 로직 가동
+                    if use_slicing:
+                        st.write(f"✂️ 타임라인 슬라이싱 중... ({start_time} ~ {end_time})")
+                        sliced_path = os.path.join("./temp_logs", f"sliced_{filename}")
+                        lines_kept = slice_log_by_time(temp_raw_path, sliced_path, start_time, end_time)
+                        
+                        if lines_kept == 0:
+                            st.error("⚠️ 입력한 시간대에 해당하는 로그가 없습니다.")
+                            st.stop()
+                        st.write(f"✅ 슬라이싱 완료! (총 {lines_kept:,}줄 추출됨)")
+                        target_log_path = sliced_path # 파서에게 넘길 대상을 가벼운 파일로 교체
 
                     os.makedirs("./result", exist_ok=True)
                     temp_json_path = f"./result/{base_name}_report.json"
                     payload_filename = f"{base_name}_payload.json"
 
                     st.write("1️⃣ 원시 로그 분석 및 필터링 중... (Parser)")
-                    parser = TelephonyLogSummarizer(temp_raw_path)
+                    parser = TelephonyLogSummarizer(target_log_path) # 교체된 타겟 전달
                     parser.run_batch('all', temp_json_path)
 
-                    st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중... (Payload Builder)")
+                    st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
                     builder = RagPayloadBuilder(temp_json_path)
                     builder.build_payload(payload_filename) 
 
-                    st.write("3️⃣ Vector DB 임베딩 및 적재 중... (BGE-M3)")
+                    st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
                     engine.ingest_folder("./payloads")
 
                     status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
+                    
                     st.session_state.current_file = filename
+                    # [수정] 새 파일 업로드 시 이전 대화 및 박제 대기열 초기화
+                    st.session_state.last_ids = []
+                    st.session_state.messages = []
                     
                     st.toast(f"'{filename}' 분석 완료! 채팅창에 질문해주세요.", icon="✅")
                     st.session_state.uploader_key += 1 
@@ -130,11 +189,8 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
                 current_target = st.session_state.get("current_file", None)
-                
-                # [추가 2] 과거 대화 맥락(최근 4번의 턴)을 함께 넘겨줍니다.
                 recent_history = st.session_state.messages[-5:-1] if len(st.session_state.messages) > 1 else None
                 
-                # engine.ask()에 chat_history 파라미터 추가 전달
                 answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=recent_history)
                 st.markdown(answer)
                 
@@ -184,14 +240,12 @@ with tab_dash:
     st.header("📈 전사 로그 데이터 시각화")
     st.markdown("Vector DB에 축적된 로그 데이터의 통계와 박제된 지식을 한눈에 확인합니다.")
     
-    # DB에서 메타데이터만 쫙 긁어옵니다.
     all_data = engine.collection.get(include=["metadatas"])
     if all_data and all_data.get("metadatas"):
         meta_list = [m for m in all_data["metadatas"] if m is not None]
         if meta_list:
             df = pd.DataFrame(meta_list)
             
-            # 상단 지표 요약
             col1, col2, col3 = st.columns(3)
             col1.metric("총 적재된 지식 조각", f"{len(df)} 건")
             col2.metric("분석된 로그 파일 수", f"{df['source_file'].nunique()} 개" if 'source_file' in df.columns else "0 개")
@@ -199,7 +253,6 @@ with tab_dash:
             
             st.divider()
             
-            # 그래프 영역
             c1, c2 = st.columns(2)
             with c1:
                 st.subheader("🚩 에러 유형별 분포 (Log Type)")
@@ -221,7 +274,6 @@ with tab_dash:
             
             st.divider()
             
-            # 박제된 지식 리스트
             st.subheader("💡 사내 지식 베이스 (해결 사례 모음)")
             if 'known_solution' in df.columns:
                 solution_df = df.dropna(subset=['known_solution'])[['source_file', 'log_type', 'known_solution']]

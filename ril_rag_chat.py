@@ -66,27 +66,47 @@ class RilRagChat:
                 continue
 
             base_id = os.path.splitext(filename)[0]
-            documents = [item["document"] for item in data]
-            metadatas = [item["metadata"] for item in data]
+            raw_documents = [item["document"] for item in data]
+            raw_metadatas = [item["metadata"] for item in data]
 
-            # 메타데이터에 파일명 기록 (중복 방지용)
-            for m in metadatas:
-                m['source_file'] = filename
+            safe_documents = []
+            safe_metadatas = []
+
+            # ==========================================
+            # 🚨 [최종 방어막] MPS 메모리 폭발 & DB 용량 초과 완벽 차단
+            # ==========================================
+            MAX_DOC_CHARS = 4000  # 약 1000 토큰 (BGE-M3 최적 효율 및 MPS 메모리 안전선)
+            MAX_META_CHARS = 5000 # 메타데이터(원본 로그) 길이 제한 (ChromaDB SQLite 보호)
+            
+            for doc, meta in zip(raw_documents, raw_metadatas):
+                # 1. 문서 길이 자르기 (O(N^2) 어텐션 메모리 폭발 완벽 차단)
+                safe_documents.append(str(doc)[:MAX_DOC_CHARS])
+                
+                # 2. 메타데이터 안전 처리
+                safe_meta = meta.copy() if meta else {}
+                safe_meta['source_file'] = filename
+                
+                # 메타데이터 안의 텍스트(예: cross_context_logs)가 너무 길면 무조건 자름
+                for k, v in safe_meta.items():
+                    if isinstance(v, str) and len(v) > MAX_META_CHARS:
+                        safe_meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
+                        
+                safe_metadatas.append(safe_meta)
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
 
-            print(f"🔄 '{filename}' 임베딩 중... ({len(documents)}개 지식 추출)")
-            embeddings = self.embed_model.encode(documents).tolist()
-
-            BATCH_SIZE = 500
-            for i in range(0, len(documents), BATCH_SIZE):
+            print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식, 강력한 길이 제한 적용됨)")
+            # embeddings = self.embed_model.encode(documents).tolist()
+            embeddings = self.embed_model.encode(safe_documents, batch_size=2).tolist()
+            BATCH_SIZE = 100
+            for i in range(0, len(safe_documents), BATCH_SIZE):
                 self.collection.add(
                     embeddings=embeddings[i:i+BATCH_SIZE],
-                    documents=documents[i:i+BATCH_SIZE],
-                    metadatas=metadatas[i:i+BATCH_SIZE],
+                    documents=safe_documents[i:i+BATCH_SIZE],
+                    metadatas=safe_metadatas[i:i+BATCH_SIZE],
                     ids=ids[i:i+BATCH_SIZE]
                 )
-            total_docs += len(documents)
+            total_docs += len(safe_documents)
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
@@ -153,14 +173,15 @@ class RilRagChat:
             return "검색된 관련 로그가 없습니다.", [], []
 
         # 5. 투트랙 맞춤형 LLM 프롬프트
+
         system_prompt = (
-            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 엔지니어다. "
-            "주어진 지문은 [현재 분석 대상 로그]와 [과거 유사 발생 사례]로 명확히 나뉘어 있다.\n\n"
-            "[답변 규칙]\n"
-            "1. 사용자의 질문(현상 분석, 원인 파악)에 대한 메인 대답은 반드시 [현재 분석 대상 로그]를 바탕으로 작성해라.\n"
-            "2. [과거 유사 발생 사례]에 엔지니어의 코멘트나 해결책(known_solution)이 적혀 있다면, "
-            "답변 마지막에 '💡 [과거 유사 사례 참고]: 과거 비슷한 로그에서는 ~게 조치한 이력이 있습니다.' 라고 덧붙여서 안내해라.\n"
-            "3. 현재 로그에 답이 없으면 지어내지 말고 모른다고 할 것."
+            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 수석 엔지니어다. "
+            "주어진 지문은 [현재 분석 대상 로그]와 [과거 유사 발생 사례]로 나뉘어 있다.\n\n"
+            "[답변 작성 규칙 - 반드시 지킬 것]\n"
+            "1. 뼈대(Main Session) 먼저 요약: 질문에 해당하는 핵심 이벤트(Call Fail, OOS 등)의 발생 시간, 발생 슬롯(PHONE0/1), 통화 실패 원인(Fail Cause)을 가장 먼저 명확히 제시해라.\n"
+            "2. 교차 분석 (Cross-Context): 그 다음, 지문에 동시간대 타 버퍼(main, system 등) 로그가 있다면, 그 시간대에 AP 단이나 시스템 프로세스에 어떤 이상(예: 메모리 부족, 특정 앱 에러)이 있었는지 연결해서 설명해라.\n"
+            "3. [과거 유사 사례 참고]에 known_solution이 있다면 답변 마지막에 '💡 [과거 유사 사례 참고]: ~' 형식으로 덧붙여라.\n"
+            "4. 무의미한 에러 코드만 나열하지 말고, 사람이 읽기 쉬운 엔지니어 리포트 형식으로 작성해라."
         )
 
         prompt = f"[현재 분석 대상 로그]\n{current_context}\n\n[과거 유사 발생 사례]\n{past_context}\n\n질문: {user_query}"
