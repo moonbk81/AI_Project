@@ -163,46 +163,41 @@ class RilRagChat:
         if results and results['documents'] and len(results['documents'][0]) > 0:
             for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
                 
-                # 메타데이터에서 'raw_' 로 시작하는 거대한 원본은 제외
-                clean_meta = {
-                    k: v for k, v in meta.items() 
-                    if not k.startswith("raw_") and k != "source_file"
-                }
+                clean_meta = {k: v for k, v in meta.items() if not k.startswith("raw_") and k != "source_file"}
                 
-                # 🚨 [추가] 사용자가 로그를 직접 보여달라고 할 때를 대비해, 
-                # 수백 줄의 원본 로그 중 **마지막 3줄**만 뽑아서 AI에게 쥐여줍니다.
+                # 🚨 [개선] OOS는 raw_context에, Call은 raw_logs에 있으므로 둘 다 확인합니다!
                 snippet = "(DB에 원본 로그가 없습니다)"
-                if "raw_context" in meta:
-                    try:
-                        raw_logs = json.loads(meta["raw_context"])
-                        if isinstance(raw_logs, list) and raw_logs:
-                            # OOS 진입 직전의 가장 중요한 3줄만 추출
-                            snippet = "\n".join(raw_logs[-3:])
-                    except:
-                        pass
+                raw_data = meta.get("raw_logs", meta.get("raw_context", "[]"))
+                try:
+                    raw_list = json.loads(raw_data)
+                    if isinstance(raw_list, list) and len(raw_list) > 0:
+                        # '중략됨' 같은 안내 문구를 제외하고 진짜 로그 5줄만 제공
+                        real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
+                        if real_logs:
+                            snippet = "\n".join(real_logs[-5:]) 
+                except:
+                    pass
 
-                # LLM에게 요약본 + 다이어트 메타 + 딱 3줄의 진짜 로그를 먹입니다.
                 context_blocks.append(
                     f"[요약 본문]\n{doc}\n"
                     f"[핵심 메타정보]\n{clean_meta}\n"
-                    f"[원인 지점 실제 로그 3줄]\n{snippet}"
+                    f"[원인 지점 실제 로그 스니펫]\n{snippet}"
                 )
         else:
             context_blocks.append("관련된 로그를 DB에서 찾지 못했습니다.")
 
         final_context = "\n\n---\n\n".join(context_blocks)
 
-        # 5. 시스템 프롬프트 구성 (🚨 통신 용어 사전 강력 주입)
+        # 5. 시스템 프롬프트 구성 (🚨 로그 타입별 역할 완벽 분리 가이드)
         system_prompt = (
             "너는 안드로이드 무선 통신(RIL/Telephony) 로그를 분석하는 최고 수준의 수석 엔지니어다.\n\n"
             "[답변 작성 규칙]\n"
-            "1. 기본적으로 제공된 [현재 분석 대상 로그]를 바탕으로 답변해라.\n"
-            "2. 🚨 용어 해석 주의 (절대 '외출'이나 '내려오는' 같은 일상 용어로 번역하지 마라!)\n"
-            "   - voice_reg/data_reg 값이 0 이면 'IN_SERVICE (정상 서비스 중)'을 의미한다.\n"
-            "   - voice_reg/data_reg 값이 1 이상이면 'OUT_OF_SERVICE (망 이탈, 음영 지역 등)'을 의미한다.\n"
-            "3. 사용자가 '로그를 찍어달라/보여달라'고 요청하면 [원인 지점 실제 로그 3줄]에 있는 텍스트를 그대로 출력하고, 그 의미를 엔지니어 관점에서 해석해줘라.\n"
-            "4. 배터리 소모 분석 시: 측정 기간, 화면 켜짐/꺼짐 시간, 신호 세기를 브리핑해라.\n"
-            "5. 통화/망 에러 분석 시: 핵심 이벤트 발생 시간, 슬롯, 실패 원인(root_cause)을 명확히 제시해라."
+            "1. 절대 지어내지 말고, 제공된 [현재 분석 대상 로그]와 메타정보 안에서만 팩트로 답변해라.\n"
+            "2. 🚨 로그 타입(log_type)별로 분석 기준을 철저히 분리해라:\n"
+            "   - [Call_Session (통화)]: status 값이 'FAIL' 또는 'CALL DROP'인 세션을 찾고, 'fail_reason' 값을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 voice_reg 이야기는 절대 하지 마라!)\n"
+            "   - [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'이다.\n"
+            "   - [Battery_Drain_Report (배터리)]: stats_period와 신호 세기 분포를 브리핑해라.\n"
+            "3. 사용자가 '로그를 보여달라'고 하면 [원인 지점 실제 로그 스니펫]에 있는 텍스트를 단 한 글자도 바꾸지 말고 그대로 출력해라."
         )
 
         import requests
