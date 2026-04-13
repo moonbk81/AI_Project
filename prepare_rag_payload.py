@@ -34,61 +34,48 @@ class RagPayloadBuilder:
         return "\n".join(lines)
 
     def _extract_metadata(self, data_dict, log_type):
-        """엔지니어가 눈으로 확인할 원본 로그(Metadata) 추출 (json.dumps 메모리 폭발 방지)"""
+        """엔지니어가 확인할 정보와 차트용 수치를 메타데이터에 포함 (에러 원천 차단)"""
         metadata = {"log_type": log_type}
         
-        cross_logs = []
-        if "cross_context_logs" in data_dict and data_dict["cross_context_logs"]:
-            cross_logs.append("\n" + "="*40)
-            cross_logs.append("🚨 [동시간대 교차 로그 (Main/System/Crash)] 🚨")
-            cross_logs.append("="*40)
-            # 교차 로그도 최대 150줄만 유지하여 렌더링 및 변환 부하 방지
-            cross_logs.extend(data_dict["cross_context_logs"][:150])
+        def add_safe_meta(key, val):
+            if "stack" in key: return
+            if val in [None, [], {}]: return
+            if not isinstance(val, (str, int, float, bool)):
+                metadata[key] = str(val)
+            else:
+                metadata[key] = val
 
-        # ==========================================
-        # 🚨 [핵심 방어막] 수십만 줄의 배열을 안전하게 자르는 함수
-        # ==========================================
-        MAX_LINES = 300 # 메타데이터 배열 하나당 허용할 최대 라인 수
+        for k, v in data_dict.items():
+            if k in ["logs", "context_snapshot", "context", "stack", "call_stack", "raw_logs", "cross_context_logs"]:
+                continue
+            if isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    add_safe_meta(f"{k}_{sub_k}", sub_v)
+            else:
+                add_safe_meta(k, v)
 
+        MAX_LINES = 300
         def get_safe_list(log_list):
             if not isinstance(log_list, list): return log_list
             if len(log_list) > MAX_LINES:
-                # 에러 파악에 필수적인 앞부분 150줄과 뒷부분 150줄만 보존하고 중간은 생략
                 return log_list[:150] + ["\n... [초대용량 로그 중략됨] ...\n"] + log_list[-150:]
             return log_list.copy()
 
-        # 원본 로그 배열에 다이어트 함수 적용 후 교차 로그 결합
-        if "logs" in data_dict: 
-            combined = get_safe_list(data_dict["logs"]) + cross_logs
-            metadata["raw_logs"] = json.dumps(combined, ensure_ascii=False)
-            
-        if "context_snapshot" in data_dict: 
-            combined = get_safe_list(data_dict["context_snapshot"]) + cross_logs
-            metadata["raw_context"] = json.dumps(combined, ensure_ascii=False)
-            
-        if "context" in data_dict: 
-            combined = get_safe_list(data_dict["context"]) + cross_logs
-            metadata["raw_context"] = json.dumps(combined, ensure_ascii=False)
-            
-        if "stack" in data_dict: 
-            metadata["raw_stack"] = json.dumps(get_safe_list(data_dict["stack"]), ensure_ascii=False)
-            
-        if "call_stack" in data_dict: 
-            combined = get_safe_list(data_dict["call_stack"]) + cross_logs
-            metadata["raw_stack"] = json.dumps(combined, ensure_ascii=False)
+        # 🚨 100% 안전한 키 접근 (.get 방식)
+        if data_dict.get("logs"): 
+            metadata["raw_logs"] = json.dumps(get_safe_list(data_dict.get("logs")), ensure_ascii=False)
+        if data_dict.get("context_snapshot"): 
+            metadata["raw_context"] = json.dumps(get_safe_list(data_dict.get("context_snapshot")), ensure_ascii=False)
+        if data_dict.get("context"): 
+            metadata["raw_context"] = json.dumps(get_safe_list(data_dict.get("context")), ensure_ascii=False)
 
-        # 기존 RADIO_POWER 등 파싱 데이터 유지
-        if "request_raw" in data_dict: metadata["raw_request"] = data_dict["request_raw"]
-        if "response_raw" in data_dict: metadata["raw_response"] = data_dict["response_raw"]
+        if data_dict.get("request_time"): metadata["time"] = data_dict.get("request_time")
+        elif data_dict.get("start_time"): metadata["time"] = data_dict.get("start_time")
+        elif data_dict.get("time"): metadata["time"] = data_dict.get("time")
+        elif data_dict.get("stats_period"): metadata["time"] = data_dict.get("stats_period")
         
-        # 시간 정보 매핑 (배터리 통계 포함)
-        if "request_time" in data_dict: metadata["time"] = data_dict["request_time"]
-        if "start_time" in data_dict: metadata["time"] = data_dict["start_time"]
-        elif "time" in data_dict: metadata["time"] = data_dict["time"]
-        elif "stats_period" in data_dict: metadata["time"] = data_dict["stats_period"]
-        
-        if "slot" in data_dict: metadata["slot"] = data_dict["slot"]
-        elif "slotId" in data_dict: metadata["slot"] = data_dict["slotId"]
+        if data_dict.get("slot"): metadata["slot"] = data_dict.get("slot")
+        elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
 
         return metadata
 

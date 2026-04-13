@@ -184,36 +184,33 @@ with tab_chat:
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-
-            # 📊 [추가] 메타데이터가 있다면 배터리 차트를 렌더링!
+            
+            # 📊 [차트 렌더링]
             if "metas" in msg and msg["metas"]:
                 for i, meta in enumerate(msg["metas"]):
                     if meta.get('log_type') == 'Battery_Drain_Report':
                         signal_data = {
-                            "None (신호없음)": float(meta.get("signal_strength_distribution_none", 0.0)),
-                            "Poor (미약)": float(meta.get("signal_strength_distribution_poor", 0.0)),
-                            "Moderate (보통)": float(meta.get("signal_strength_distribution_moderate", 0.0)),
-                            "Good (양호)": float(meta.get("signal_strength_distribution_good", 0.0)),
-                            "Great (우수)": float(meta.get("signal_strength_distribution_great", 0.0))
+                            "None": float(meta.get("signal_strength_distribution_none", 0.0)),
+                            "Poor": float(meta.get("signal_strength_distribution_poor", 0.0)),
+                            "Moderate": float(meta.get("signal_strength_distribution_moderate", 0.0)),
+                            "Good": float(meta.get("signal_strength_distribution_good", 0.0)),
+                            "Great": float(meta.get("signal_strength_distribution_great", 0.0))
                         }
-                        
                         filtered_data = {k: v for k, v in signal_data.items() if v > 0}
                         
                         if filtered_data:
-                            import pandas as pd # (상단에 import 되어있다면 생략 가능)
-                            df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Signal Level', 'Percentage'])
-                            fig = px.pie(
-                                df_signal, names='Signal Level', values='Percentage', 
-                                title=f"📊 [분석 자료 {i+1}] 신호 세기 분포", hole=0.4
-                            )
-                            # 고유 키를 부여하여 렌더링 충돌 방지
-                            st.plotly_chart(fig, use_container_width=True, key=f"pie_{msg_idx}_{i}")
+                            df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Level', 'Value'])
+                            fig = px.pie(df_signal, names='Level', values='Value', 
+                                         title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
+                            st.plotly_chart(fig, use_container_width=True, key=f"chart_{msg_idx}_{i}")
 
+            # 🔎 [참고 로그 렌더링]
             if "references" in msg and msg["references"]:
                 with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
                     st.markdown(msg["references"])
 
-    if prompt := st.chat_input("에러 증상이나 궁금한 점을 입력하세요 (예: Call fail 원인 찾아줘)"):
+    # 💬 질문 입력 및 AI 분석 구역
+    if prompt := st.chat_input("에러 증상이나 궁금한 점을 입력하세요"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -221,22 +218,23 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
                 current_target = st.session_state.get("current_file", None)
-                recent_history = st.session_state.messages[-5:-1] if len(st.session_state.messages) > 1 else None
-
-                answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=recent_history)
-                st.markdown(answer)
-
+                answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:])
+                
+                # [복구 완료] 원본 로그 텍스트 조립 구역 (안전한 get 방식)
                 ref_text = ""
                 for i, meta in enumerate(metas):
                     known_solution = meta.get('known_solution')
                     solution_badge = " **[💡과거 해결사례 존재]**" if known_solution else ""
                     ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
 
-                    if known_solution: ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
+                    if known_solution: 
+                        ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
 
                     raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                    try: raw_logs = json.loads(raw_data) if isinstance(raw_data, str) else []
-                    except: raw_logs = []
+                    try: 
+                        raw_logs = json.loads(raw_data) if isinstance(raw_data, str) else []
+                    except: 
+                        raw_logs = []
 
                     if raw_logs:
                         ref_text += "```text\n"
@@ -244,25 +242,24 @@ with tab_chat:
                         if len(raw_logs) > 5: ref_text += "... (중략) ...\n"
                         ref_text += "```\n"
 
-                    raw_req, raw_resp = meta.get('raw_request'), meta.get('raw_response')
+                    raw_req = meta.get('raw_request')
+                    raw_resp = meta.get('raw_response')
                     if raw_req or raw_resp:
                         ref_text += "```text\n"
                         if raw_req: ref_text += f"[REQ]  {raw_req}\n"
                         if raw_resp: ref_text += f"[RESP] {raw_resp}\n"
                         ref_text += "```\n"
                     ref_text += "---\n"
-
-                if ref_text:
-                    with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
-                        st.markdown(ref_text)
-
+                
+                st.markdown(answer)
                 st.session_state.last_ids = ids
 
+        # 🚨 차트 유지를 위해 metas 저장
         st.session_state.messages.append({
             "role": "assistant", 
             "content": answer,
             "references": ref_text,
-            "metas": metas
+            "metas": metas 
         })
         st.rerun()
 
