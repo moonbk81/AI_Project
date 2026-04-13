@@ -115,85 +115,94 @@ class RilRagChat:
         query_embedding = self.embed_model.encode(user_query).tolist()
         user_query_lower = user_query.lower()
         
-        # 2. 검색 필터 구성 (현재 활성 파일 기준)
-        where_filter = {}
+        # ==========================================
+        # 2. 스마트 검색 필터 구성 (조건 자동 조립기)
+        # ==========================================
+        conditions = []
+        
+        # (1) 현재 활성 파일 고정
         if current_file:
-            where_filter["source_file"] = current_file
+            conditions.append({"source_file": current_file})
             
-        # 질문 내용에 따른 로그 타입 필터 (배터리, 통화 등)
+        # (2) 사용자 의도(질문)에 따른 로그 타입 필터링
         if "battery" in user_query_lower or "배터리" in user_query_lower or "전력" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Battery_Drain_Report"}]}
-            else:
-                where_filter["log_type"] = "Battery_Drain_Report"
+            conditions.append({"log_type": "Battery_Drain_Report"})
         elif "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Call_Session"}]}
-            else:
-                where_filter["log_type"] = "Call_Session"
+            conditions.append({"log_type": "Call_Session"})
         elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Radio_Power_Event"}]}
-            else:
-                where_filter["log_type"] = "Radio_Power_Event"
+            conditions.append({"log_type": "Radio_Power_Event"})
         elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower or "out of service" in user_query_lower \
                 or "no service" in user_query_lower or "signal lost" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "OOS_Event"}]}
-            else:
-                where_filter["log_type"] = "OOS_Event"
+            conditions.append({"log_type": "OOS_Event"})
         elif "crash" in user_query_lower or "fatal" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "App_Crash"}]}
-            else:
-                where_filter["log_type"] = "App_Crash"
+            conditions.append({"log_type": "App_Crash"})
         elif "anr" in user_query_lower or "not responding" in user_query_lower:
-            if current_file:
-                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "App_ANR"}]}
-            else:
-                where_filter["log_type"] = "App_ANR"
+            conditions.append({"log_type": "App_ANR"})
+
+        # (3) ChromaDB 문법에 맞게 최종 필터 조립 ($and 자동 적용)
+        where_filter = None
+        if len(conditions) == 1:
+            where_filter = conditions[0]
+        elif len(conditions) > 1:
+            where_filter = {"$and": conditions}
 
         # 3. Vector DB 검색 실행
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=5,
-            where=where_filter if where_filter else None
+            where=where_filter
         )
         
+        # [디버깅 출력] 터미널에서 제대로 가져오는지 숫자를 꼭 확인하세요!
         found_count = len(results['documents'][0]) if results and results.get('documents') else 0
         print(f"\n[DEBUG] 현재 필터: {where_filter}")
         print(f"[DEBUG] DB가 가져온 문서 개수: {found_count} 개\n")
 
-        # 4. 🚀 [핵심] LLM 토큰 폭발 방지: 원본 로그 제거하고 컨텍스트 조립
+        # 4. 🚀 [핵심] LLM 토큰 폭발 방지 & 원본 스니펫 제한적 제공
         context_blocks = []
         if results and results['documents'] and len(results['documents'][0]) > 0:
             for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
                 
-                # 메타데이터에서 'raw_' 로 시작하는 거대한 원본 로그를 싹 쳐냅니다.
+                # 메타데이터에서 'raw_' 로 시작하는 거대한 원본은 제외
                 clean_meta = {
                     k: v for k, v in meta.items() 
                     if not k.startswith("raw_") and k != "source_file"
                 }
                 
-                # LLM에게는 다이어트된 텍스트만 먹입니다.
+                # 🚨 [추가] 사용자가 로그를 직접 보여달라고 할 때를 대비해, 
+                # 수백 줄의 원본 로그 중 **마지막 3줄**만 뽑아서 AI에게 쥐여줍니다.
+                snippet = "(DB에 원본 로그가 없습니다)"
+                if "raw_context" in meta:
+                    try:
+                        raw_logs = json.loads(meta["raw_context"])
+                        if isinstance(raw_logs, list) and raw_logs:
+                            # OOS 진입 직전의 가장 중요한 3줄만 추출
+                            snippet = "\n".join(raw_logs[-3:])
+                    except:
+                        pass
+
+                # LLM에게 요약본 + 다이어트 메타 + 딱 3줄의 진짜 로그를 먹입니다.
                 context_blocks.append(
                     f"[요약 본문]\n{doc}\n"
-                    f"[핵심 메타정보]\n{clean_meta}"
+                    f"[핵심 메타정보]\n{clean_meta}\n"
+                    f"[원인 지점 실제 로그 3줄]\n{snippet}"
                 )
         else:
             context_blocks.append("관련된 로그를 DB에서 찾지 못했습니다.")
 
         final_context = "\n\n---\n\n".join(context_blocks)
 
-        # 5. 시스템 프롬프트 구성 (과거 대화 기억 허용 + 배터리/통화 맞춤 가이드)
+        # 5. 시스템 프롬프트 구성 (🚨 통신 용어 사전 강력 주입)
         system_prompt = (
-            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 수석 엔지니어다.\n\n"
+            "너는 안드로이드 무선 통신(RIL/Telephony) 로그를 분석하는 최고 수준의 수석 엔지니어다.\n\n"
             "[답변 작성 규칙]\n"
             "1. 기본적으로 제공된 [현재 분석 대상 로그]를 바탕으로 답변해라.\n"
-            "2. 만약 제공된 로그에 당장 관련된 정보가 부족하더라도, 사용자의 질문이 이전 대화의 연장선이라면 [과거 대화 내역]을 적극적으로 참고하여 흐름에 맞게 답변해라.\n"
-            "3. 절대 '정보가 없다'고 성급하게 말하지 말고, 문맥을 추론해서 아는 선까지 최대한 설명해라.\n"
-            "4. 배터리 소모 분석 시: 측정 기간, 화면 켜짐/꺼짐 시간, 신호 세기 분포를 정리하고 'telephony_drain_evaluation'을 바탕으로 광탈 여부를 브리핑해라.\n"
-            "5. 통화/망 에러 분석 시: 핵심 이벤트 발생 시간, 슬롯, 실패 원인을 명확히 제시하고 동시간대 교차 로그를 연결해라."
+            "2. 🚨 용어 해석 주의 (절대 '외출'이나 '내려오는' 같은 일상 용어로 번역하지 마라!)\n"
+            "   - voice_reg/data_reg 값이 0 이면 'IN_SERVICE (정상 서비스 중)'을 의미한다.\n"
+            "   - voice_reg/data_reg 값이 1 이상이면 'OUT_OF_SERVICE (망 이탈, 음영 지역 등)'을 의미한다.\n"
+            "3. 사용자가 '로그를 찍어달라/보여달라'고 요청하면 [원인 지점 실제 로그 3줄]에 있는 텍스트를 그대로 출력하고, 그 의미를 엔지니어 관점에서 해석해줘라.\n"
+            "4. 배터리 소모 분석 시: 측정 기간, 화면 켜짐/꺼짐 시간, 신호 세기를 브리핑해라.\n"
+            "5. 통화/망 에러 분석 시: 핵심 이벤트 발생 시간, 슬롯, 실패 원인(root_cause)을 명확히 제시해라."
         )
 
         import requests

@@ -25,11 +25,11 @@ class RagPayloadBuilder:
         # ==========================================
         # [핵심 추가 1] LLM이 읽을 본문에 교차 로그 삽입
         # ==========================================
-        if "cross_context_logs" in data_dict and data_dict["cross_context_logs"]:
-            lines.append("\n[동시간대 타 버퍼(Main/System) 교차 로그]")
-            # 토큰 절약을 위해 교차 로그 중 최대 50줄만 LLM에게 제공 (핵심 에러 파악용)
-            cross_summary = data_dict["cross_context_logs"][:50]
-            lines.extend(cross_summary)
+        # if "cross_context_logs" in data_dict and data_dict["cross_context_logs"]:
+        #     lines.append("\n[동시간대 타 버퍼(Main/System) 교차 로그]")
+        #     # 토큰 절약을 위해 교차 로그 중 최대 50줄만 LLM에게 제공 (핵심 에러 파악용)
+        #     cross_summary = data_dict["cross_context_logs"][:50]
+        #     lines.extend(cross_summary)
 
         return "\n".join(lines)
 

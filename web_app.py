@@ -141,7 +141,7 @@ with st.sidebar:
 
                     status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
                     
-                    st.session_state.current_file = filename
+                    st.session_state.current_file = payload_filename
                     # [수정] 새 파일 업로드 시 이전 대화 및 박제 대기열 초기화
                     st.session_state.last_ids = []
                     st.session_state.messages = []
@@ -181,9 +181,34 @@ with st.sidebar:
 # [Tab 1] 대화 및 분석 창
 # ==========================================
 with tab_chat:
-    for msg in st.session_state.messages:
+    for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+            # 📊 [추가] 메타데이터가 있다면 배터리 차트를 렌더링!
+            if "metas" in msg and msg["metas"]:
+                for i, meta in enumerate(msg["metas"]):
+                    if meta.get('log_type') == 'Battery_Drain_Report':
+                        signal_data = {
+                            "None (신호없음)": float(meta.get("signal_strength_distribution_none", 0.0)),
+                            "Poor (미약)": float(meta.get("signal_strength_distribution_poor", 0.0)),
+                            "Moderate (보통)": float(meta.get("signal_strength_distribution_moderate", 0.0)),
+                            "Good (양호)": float(meta.get("signal_strength_distribution_good", 0.0)),
+                            "Great (우수)": float(meta.get("signal_strength_distribution_great", 0.0))
+                        }
+                        
+                        filtered_data = {k: v for k, v in signal_data.items() if v > 0}
+                        
+                        if filtered_data:
+                            import pandas as pd # (상단에 import 되어있다면 생략 가능)
+                            df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Signal Level', 'Percentage'])
+                            fig = px.pie(
+                                df_signal, names='Signal Level', values='Percentage', 
+                                title=f"📊 [분석 자료 {i+1}] 신호 세기 분포", hole=0.4
+                            )
+                            # 고유 키를 부여하여 렌더링 충돌 방지
+                            st.plotly_chart(fig, use_container_width=True, key=f"pie_{msg_idx}_{i}")
+
             if "references" in msg and msg["references"]:
                 with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
                     st.markdown(msg["references"])
@@ -236,7 +261,8 @@ with tab_chat:
         st.session_state.messages.append({
             "role": "assistant", 
             "content": answer,
-            "references": ref_text
+            "references": ref_text,
+            "metas": metas
         })
         st.rerun()
 
