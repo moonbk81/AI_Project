@@ -9,10 +9,10 @@ class RagPayloadBuilder:
     def _build_markdown_doc(self, data_dict, log_type):
         """임베딩 및 LLM이 읽을 아주 가벼운 본문(Document) 생성"""
         lines = [f"### [Type: {log_type}]"]
-        
+
         # 제외할 키워드에 cross_context_logs 추가 (수동으로 예쁘게 붙이기 위함)
         exclude_keys = ["logs", "context_snapshot", "context", "stack", "call_stack", "raw_logs", "cross_context_logs"]
-        
+
         for key, value in data_dict.items():
             if key in exclude_keys:
                 continue
@@ -21,7 +21,7 @@ class RagPayloadBuilder:
                     lines.append(f"- {key}_{sub_k}: {sub_v}")
             else:
                 lines.append(f"- {key}: {value}")
-                
+
         # ==========================================
         # [핵심 추가 1] LLM이 읽을 본문에 교차 로그 삽입
         # ==========================================
@@ -34,47 +34,58 @@ class RagPayloadBuilder:
         return "\n".join(lines)
 
     def _extract_metadata(self, data_dict, log_type):
-        """엔지니어가 눈으로 확인할 원본 로그(Metadata) 추출"""
+        """엔지니어가 눈으로 확인할 원본 로그(Metadata) 추출 (json.dumps 메모리 폭발 방지)"""
         metadata = {"log_type": log_type}
         
-        # ==========================================
-        # [핵심 추가 2] 웹 UI 화면 출력을 위해 메인 로그와 교차 로그를 하나로 병합
-        # (웹 앱 코드를 수정하지 않아도 자동으로 화면에 뜨게 만드는 트릭!)
-        # ==========================================
         cross_logs = []
         if "cross_context_logs" in data_dict and data_dict["cross_context_logs"]:
             cross_logs.append("\n" + "="*40)
             cross_logs.append("🚨 [동시간대 교차 로그 (Main/System/Crash)] 🚨")
             cross_logs.append("="*40)
-            cross_logs.extend(data_dict["cross_context_logs"])
+            # 교차 로그도 최대 150줄만 유지하여 렌더링 및 변환 부하 방지
+            cross_logs.extend(data_dict["cross_context_logs"][:150])
 
-        # 원본 로그 (Radio 등) 합치기
+        # ==========================================
+        # 🚨 [핵심 방어막] 수십만 줄의 배열을 안전하게 자르는 함수
+        # ==========================================
+        MAX_LINES = 300 # 메타데이터 배열 하나당 허용할 최대 라인 수
+
+        def get_safe_list(log_list):
+            if not isinstance(log_list, list): return log_list
+            if len(log_list) > MAX_LINES:
+                # 에러 파악에 필수적인 앞부분 150줄과 뒷부분 150줄만 보존하고 중간은 생략
+                return log_list[:150] + ["\n... [초대용량 로그 중략됨] ...\n"] + log_list[-150:]
+            return log_list.copy()
+
+        # 원본 로그 배열에 다이어트 함수 적용 후 교차 로그 결합
         if "logs" in data_dict: 
-            combined = data_dict["logs"].copy() + cross_logs
+            combined = get_safe_list(data_dict["logs"]) + cross_logs
             metadata["raw_logs"] = json.dumps(combined, ensure_ascii=False)
             
         if "context_snapshot" in data_dict: 
-            combined = data_dict["context_snapshot"].copy() + cross_logs
+            combined = get_safe_list(data_dict["context_snapshot"]) + cross_logs
             metadata["raw_context"] = json.dumps(combined, ensure_ascii=False)
             
         if "context" in data_dict: 
-            combined = data_dict["context"].copy() + cross_logs
+            combined = get_safe_list(data_dict["context"]) + cross_logs
             metadata["raw_context"] = json.dumps(combined, ensure_ascii=False)
             
         if "stack" in data_dict: 
-            metadata["raw_stack"] = json.dumps(data_dict["stack"], ensure_ascii=False)
+            metadata["raw_stack"] = json.dumps(get_safe_list(data_dict["stack"]), ensure_ascii=False)
             
         if "call_stack" in data_dict: 
-            combined = data_dict["call_stack"].copy() + cross_logs
+            combined = get_safe_list(data_dict["call_stack"]) + cross_logs
             metadata["raw_stack"] = json.dumps(combined, ensure_ascii=False)
 
-        # 기존 RADIO_POWER 파싱 데이터 등
+        # 기존 RADIO_POWER 등 파싱 데이터 유지
         if "request_raw" in data_dict: metadata["raw_request"] = data_dict["request_raw"]
         if "response_raw" in data_dict: metadata["raw_response"] = data_dict["response_raw"]
         
+        # 시간 정보 매핑 (배터리 통계 포함)
         if "request_time" in data_dict: metadata["time"] = data_dict["request_time"]
         if "start_time" in data_dict: metadata["time"] = data_dict["start_time"]
         elif "time" in data_dict: metadata["time"] = data_dict["time"]
+        elif "stats_period" in data_dict: metadata["time"] = data_dict["stats_period"]
         
         if "slot" in data_dict: metadata["slot"] = data_dict["slot"]
         elif "slotId" in data_dict: metadata["slot"] = data_dict["slotId"]
@@ -117,6 +128,9 @@ class RagPayloadBuilder:
         if "crash_context" in report_data:
             for crash in report_data["crash_context"]:
                 add_to_payload(crash, "Crash_Event")
+
+        if "battery_stats" in report_data:
+            add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")

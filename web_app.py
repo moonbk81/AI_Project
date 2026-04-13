@@ -76,6 +76,13 @@ with st.sidebar:
         key=f"uploader_{st.session_state.uploader_key}"
     )
     
+    st.divider()
+    st.subheader(" 현재 분석 세션 정보")
+    if "current_file" in st.session_state and st.session_state.current_file:
+        st.success(f"활성 파일: '{st.session_state.current_file}'")
+    else:
+        st.warning("활성된 로그 파일이 없습니다.")
+    
     # [추가] 슬라이싱 UI
     use_slicing = st.checkbox("✂️ 특정 시간대만 잘라서 분석 (2GB 이상 권장)")
     start_time, end_time = "", ""
@@ -190,16 +197,16 @@ with tab_chat:
             with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
                 current_target = st.session_state.get("current_file", None)
                 recent_history = st.session_state.messages[-5:-1] if len(st.session_state.messages) > 1 else None
-                
+
                 answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=recent_history)
                 st.markdown(answer)
-                
+
                 ref_text = ""
                 for i, meta in enumerate(metas):
                     known_solution = meta.get('known_solution')
                     solution_badge = " **[💡과거 해결사례 존재]**" if known_solution else ""
                     ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
-                    
+
                     if known_solution: ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
 
                     raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
@@ -211,7 +218,7 @@ with tab_chat:
                         for log in raw_logs[:5]: ref_text += f"{log}\n"
                         if len(raw_logs) > 5: ref_text += "... (중략) ...\n"
                         ref_text += "```\n"
-                    
+
                     raw_req, raw_resp = meta.get('raw_request'), meta.get('raw_response')
                     if raw_req or raw_resp:
                         ref_text += "```text\n"
@@ -219,11 +226,11 @@ with tab_chat:
                         if raw_resp: ref_text += f"[RESP] {raw_resp}\n"
                         ref_text += "```\n"
                     ref_text += "---\n"
-                
+
                 if ref_text:
                     with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
                         st.markdown(ref_text)
-                
+
                 st.session_state.last_ids = ids
 
         st.session_state.messages.append({

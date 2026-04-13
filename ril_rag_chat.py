@@ -111,113 +111,126 @@ class RilRagChat:
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
     def ask(self, user_query, current_file=None, chat_history=None):
-        # 1. 질문 임베딩 생성 및 기본 필터
+        # 1. 질문 임베딩 생성
         query_embedding = self.embed_model.encode(user_query).tolist()
         user_query_lower = user_query.lower()
-        base_filter = None
         
-        if "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
-            base_filter = {"log_type": "Call_Session"}
+        # 2. 검색 필터 구성 (현재 활성 파일 기준)
+        where_filter = {}
+        if current_file:
+            where_filter["source_file"] = current_file
+            
+        # 질문 내용에 따른 로그 타입 필터 (배터리, 통화 등)
+        if "battery" in user_query_lower or "배터리" in user_query_lower or "전력" in user_query_lower:
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Battery_Drain_Report"}]}
+            else:
+                where_filter["log_type"] = "Battery_Drain_Report"
+        elif "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Call_Session"}]}
+            else:
+                where_filter["log_type"] = "Call_Session"
+        elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "Radio_Power_Event"}]}
+            else:
+                where_filter["log_type"] = "Radio_Power_Event"
         elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower or "out of service" in user_query_lower \
                 or "no service" in user_query_lower or "signal lost" in user_query_lower:
-            base_filter = {"log_type": "OOS_Event"}
-        elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
-            base_filter = {"log_type": "Radio_Power_Event"}
-        elif "crash" in user_query_lower or "fatal" in user_query_lower:
-            base_filter = {"log_type": "App_Crash"}
-        elif "anr" in user_query_lower or "not responding" in user_query_lower:
-            base_filter = {"log_type": "App_ANR"}
-
-        # 2. 투트랙 필터 구성
-        where_current = None
-        where_past = None
-
-        if current_file:
-            print(f"\n🎯 [투트랙 검색] 1. 현재 대상 파일 집중 분석: {current_file}")
-            if base_filter:
-                where_current = {"$and": [base_filter, {"source_file": current_file}]}
-                where_past = {"$and": [base_filter, {"source_file": {"$ne": current_file}}]}
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "OOS_Event"}]}
             else:
-                where_current = {"source_file": current_file}
-                where_past = {"source_file": {"$ne": current_file}}
+                where_filter["log_type"] = "OOS_Event"
+        elif "crash" in user_query_lower or "fatal" in user_query_lower:
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "App_Crash"}]}
+            else:
+                where_filter["log_type"] = "App_Crash"
+        elif "anr" in user_query_lower or "not responding" in user_query_lower:
+            if current_file:
+                where_filter = {"$and": [{"source_file": current_file}, {"log_type": "App_ANR"}]}
+            else:
+                where_filter["log_type"] = "App_ANR"
+
+        # 3. Vector DB 검색 실행
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=5,
+            where=where_filter if where_filter else None
+        )
+        
+        found_count = len(results['documents'][0]) if results and results.get('documents') else 0
+        print(f"\n[DEBUG] 현재 필터: {where_filter}")
+        print(f"[DEBUG] DB가 가져온 문서 개수: {found_count} 개\n")
+
+        # 4. 🚀 [핵심] LLM 토큰 폭발 방지: 원본 로그 제거하고 컨텍스트 조립
+        context_blocks = []
+        if results and results['documents'] and len(results['documents'][0]) > 0:
+            for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
+                
+                # 메타데이터에서 'raw_' 로 시작하는 거대한 원본 로그를 싹 쳐냅니다.
+                clean_meta = {
+                    k: v for k, v in meta.items() 
+                    if not k.startswith("raw_") and k != "source_file"
+                }
+                
+                # LLM에게는 다이어트된 텍스트만 먹입니다.
+                context_blocks.append(
+                    f"[요약 본문]\n{doc}\n"
+                    f"[핵심 메타정보]\n{clean_meta}"
+                )
         else:
-            print(f"\n🔍 [일반 검색] 특정 대상 파일 없음. DB 전체 검색 실행")
-            where_current = base_filter
+            context_blocks.append("관련된 로그를 DB에서 찾지 못했습니다.")
 
-        # 3. DB 쿼리 실행
-        results_current = self.collection.query(
-            query_embeddings=[query_embedding], n_results=5, where=where_current
-        ) if where_current else None
+        final_context = "\n\n---\n\n".join(context_blocks)
 
-        results_past = self.collection.query(
-            query_embeddings=[query_embedding], n_results=5, where=where_past
-        ) if where_past else None
-
-        # 4. 결과물 조립
-        current_context = ""
-        past_context = ""
-        retrieved_ids = []
-        retrieved_metas = []
-
-        if results_current and results_current['documents'] and results_current['documents'][0]:
-            current_context = "\n\n".join(results_current['documents'][0])
-            retrieved_ids.extend(results_current['ids'][0])
-            retrieved_metas.extend(results_current['metadatas'][0])
-
-        if results_past and results_past['documents'] and results_past['documents'][0]:
-            past_context = "\n\n".join(results_past['documents'][0])
-            retrieved_ids.extend(results_past['ids'][0])
-            retrieved_metas.extend(results_past['metadatas'][0])
-
-        if not current_context and not past_context:
-            return "검색된 관련 로그가 없습니다.", [], []
-
-        # 5. 투트랙 맞춤형 LLM 프롬프트
-
+        # 5. 시스템 프롬프트 구성 (과거 대화 기억 허용 + 배터리/통화 맞춤 가이드)
         system_prompt = (
-            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 수석 엔지니어다. "
-            "주어진 지문은 [현재 분석 대상 로그]와 [과거 유사 발생 사례]로 나뉘어 있다.\n\n"
-            "[답변 작성 규칙 - 반드시 지킬 것]\n"
-            "1. 뼈대(Main Session) 먼저 요약: 질문에 해당하는 핵심 이벤트(Call Fail, OOS 등)의 발생 시간, 발생 슬롯(PHONE0/1), 통화 실패 원인(Fail Cause)을 가장 먼저 명확히 제시해라.\n"
-            "2. 교차 분석 (Cross-Context): 그 다음, 지문에 동시간대 타 버퍼(main, system 등) 로그가 있다면, 그 시간대에 AP 단이나 시스템 프로세스에 어떤 이상(예: 메모리 부족, 특정 앱 에러)이 있었는지 연결해서 설명해라.\n"
-            "3. [과거 유사 사례 참고]에 known_solution이 있다면 답변 마지막에 '💡 [과거 유사 사례 참고]: ~' 형식으로 덧붙여라.\n"
-            "4. 무의미한 에러 코드만 나열하지 말고, 사람이 읽기 쉬운 엔지니어 리포트 형식으로 작성해라."
+            "너는 안드로이드 무선 통신(RIL) 로그를 분석하는 최고 수준의 수석 엔지니어다.\n\n"
+            "[답변 작성 규칙]\n"
+            "1. 기본적으로 제공된 [현재 분석 대상 로그]를 바탕으로 답변해라.\n"
+            "2. 만약 제공된 로그에 당장 관련된 정보가 부족하더라도, 사용자의 질문이 이전 대화의 연장선이라면 [과거 대화 내역]을 적극적으로 참고하여 흐름에 맞게 답변해라.\n"
+            "3. 절대 '정보가 없다'고 성급하게 말하지 말고, 문맥을 추론해서 아는 선까지 최대한 설명해라.\n"
+            "4. 배터리 소모 분석 시: 측정 기간, 화면 켜짐/꺼짐 시간, 신호 세기 분포를 정리하고 'telephony_drain_evaluation'을 바탕으로 광탈 여부를 브리핑해라.\n"
+            "5. 통화/망 에러 분석 시: 핵심 이벤트 발생 시간, 슬롯, 실패 원인을 명확히 제시하고 동시간대 교차 로그를 연결해라."
         )
 
-        prompt = f"[현재 분석 대상 로그]\n{current_context}\n\n[과거 유사 발생 사례]\n{past_context}\n\n질문: {user_query}"
-
-        # 6. Ollama API 호출 (Memory 구조 적용)
         import requests
         url = "http://localhost:11434/api/chat"
-        
-        # 시스템 메시지를 가장 먼저 배치
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        # 웹 앱에서 넘겨준 과거 대화 기록(chat_history)이 있다면 중간에 끼워 넣기
+
+        # 6. 이전 대화 내역(Chat History) 조립
+        history_text = ""
         if chat_history:
-            for msg in chat_history:
-                # Ollama가 헷갈려할 수 있는 Streamlit 전용 키(references)는 빼고 순수 대화만 전달
-                messages.append({"role": msg["role"], "content": msg["content"]})
-                
-        # 마지막으로 이번 턴의 프롬프트(지문 + 질문) 추가
-        messages.append({"role": "user", "content": prompt})
+            # 최근 3번의 대화만 가져와서 문맥 유지 (토큰 절약)
+            recent_history = chat_history[-3:]
+            history_lines = []
+            for msg in recent_history:
+                role = "User" if msg["role"] == "user" else "AI"
+                history_lines.append(f"{role}: {msg['content']}")
+            history_text = "\n".join(history_lines)
 
-        payload = {
-            "model": "gemma:2b",
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 256}
-        }
+        # 7. 최종 LLM 프롬프트 생성 (현재 로그 + 과거 대화 + 질문)
+        prompt = (
+            f"{system_prompt}\n\n"
+            f"[과거 대화 내역]\n{history_text if history_text else '없음'}\n\n"
+            f"[현재 분석 대상 로그]\n{final_context}\n\n"
+            f"질문: {user_query}"
+        )
 
+        # 8. LLM 호출 (Gemma 또는 사용 중인 모델의 API 호출부에 맞게 조정하세요)
+        # (※ 이 부분은 Mr. 문님의 기존 모델 호출 방식과 동일하게 유지하시면 됩니다.)
         try:
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
-            answer = response.json().get("message", {}).get("content", "응답 파싱 실패")
+            import ollama
+            res = ollama.chat(model='gemma:2b', messages=[{'role': 'user', 'content':prompt}])
+            answer = res['message']['content']
         except Exception as e:
-            answer = f"❌ [오류] Ollama 통신 실패: {e}"
+            answer = f"LLM 답변 생성 중 에러가 발생했습니다: {str(e)}"
 
-        return answer, retrieved_ids, retrieved_metas
+        doc_ids = results['ids'][0] if results and results.get('ids') else []
+        meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
 
+        return answer, doc_ids, meta_list
 
     def save_knowledge(self, ids, analysis_result):
         """엔지니어가 컨펌한 분석 결과를 해당 로그들의 메타데이터에 업데이트합니다."""

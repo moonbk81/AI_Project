@@ -34,7 +34,7 @@ class TelephonyLogSummarizer:
             'is_emergency': re.compile(r'm?IsEmergencyOnly\s*=\s*([^,\s]+)', re.I),
             'rej_cause': re.compile(r'm?RejectCause\s*=\s*([^,\s]+)', re.I)
         }
-        
+
         self.radio_power_error_keywords = [
             'GENERIC_FAILURE', 'RADIO_NOT_AVAILABLE',
             'REQUEST_NOT_SUPPORTED', 'INVALID_ARGUMENTS', 'INTERNAL_ERR',
@@ -103,57 +103,47 @@ class TelephonyLogSummarizer:
         self.re_stack_line = re.compile(r'^\s*(at\s+|Caused\s+by:)', re.I)
 
     # =========================================================================
-    # [핵심 추가] 동시간대 교차 로그 추출 (메모리 스캔 방식 최적화)
+    # 🚀 [해시맵 인덱싱] 수십억 번의 연산을 O(1) 딕셔너리 검색으로 최적화
     # =========================================================================
-    def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=2, max_lines=150):
-        """메모리에 로드된 lines 배열에서 문제 발생 시점 전후의 로그를 모두 긁어옵니다."""
-        if not target_time_str or target_time_str == "00-00 00:00:00.000":
-            return []
+    def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
+        # 1. 파이프라인 가동 후 단 1번만 실행되는 '찾아보기(인덱스)' 생성 로직 (약 0.3초 소요)
+        if not hasattr(self, '_time_index'):
+            self._time_index = {}
+            for line in lines:
+                if len(line) > 15:
+                    # 앞 14글자 추출 (예: "04-12 14:10:05")
+                    t_str = line[:14]
+                    # 무의미한 텍스트 제외하고 날짜 포맷 형태일 때만 사전에 등록
+                    if t_str[2] == '-' and t_str[5] == ' ': 
+                        if t_str not in self._time_index:
+                            self._time_index[t_str] = []
+                        self._time_index[t_str].append(line.strip())
 
-        current_year = datetime.now().year
-        time_format = "%Y-%m-%d %H:%M:%S"
-        
-        # 밀리초(.123) 제거하고 기준 시간 맞추기
+        # 2. 타겟 시간 변환
+        if not target_time_str or target_time_str == "00-00 00:00:00.000": 
+            return []
+            
         base_time_str = target_time_str.split('.')[0] if '.' in target_time_str else target_time_str
+        current_year = datetime.now().year
         
         try:
-            target_dt = datetime.strptime(f"{current_year}-{base_time_str}", time_format)
+            target_dt = datetime.strptime(f"{current_year}-{base_time_str}", "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return []
-
-        start_dt = target_dt - timedelta(seconds=window_seconds)
-        end_dt = target_dt + timedelta(seconds=window_seconds)
-        
-        pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
+            
         cross_context_logs = []
         
-        for line in lines:
-            match = pattern.search(line)
-            if match:
-                log_time_str = match.group(1)
-                try:
-                    log_dt = datetime.strptime(f"{current_year}-{log_time_str}", time_format)
-                    
-                    if start_dt <= log_dt <= end_dt:
-                        # (선택 사항) 이미 Radio 파서가 radio 로그를 담고 있으므로 중복을 줄이려면
-                        # 아래 필터를 켤 수 있습니다. 지금은 전체 흐름 파악을 위해 모두 수집합니다.
-                        # if " radio " not in line.lower() and "rild" not in line.lower():
-                        cross_context_logs.append(line.strip())
-                        
-                    # 안드로이드 덤프 파일은 버퍼 단위(main, radio, system)로 덩어리져서 기록되므로
-                    # 특정 섹션이 끝났다고 해서 시간만 보고 break 하면 다른 버퍼 로그를 놓칠 수 있습니다.
-                    # 따라서 break 없이 전체를 순회합니다 (슬라이싱 되어있으므로 순회 속도는 매우 빠름).
-                except ValueError:
-                    continue
-
-        # ==========================================
-        # [수정 로직] 메모리 폭발 방지를 위한 다이어트
-        # ==========================================
+        # 3. 전체 파일을 뒤지지 않고, 딕셔너리에서 필요한 시간의 로그만 '즉시' 꺼내옴! (0.0001초 컷)
+        for offset in range(-window_seconds, window_seconds + 1):
+            win_str = (target_dt + timedelta(seconds=offset)).strftime("%m-%d %H:%M:%S")
+            if win_str in self._time_index:
+                cross_context_logs.extend(self._time_index[win_str])
+                
+        # 최대 라인 수 제한
         if len(cross_context_logs) > max_lines:
-            # 로그가 너무 많으면 가장 중요한 에러 시점 근처의 마지막 로그들만 유지
             return cross_context_logs[-max_lines:]
+            
         return cross_context_logs
-    # =========================================================================
 
     def _parse_sst(self, content, key):
         match = self.re_sst_fields[key].search(content)
@@ -162,12 +152,12 @@ class TelephonyLogSummarizer:
             if "(" in val and ")" not in val: val += ")"
             return val
         return "Unknown"
-    
+
     def analyze_radio_power(self, lines):
         requests = {}  
         responses = {}  
         results = []  
-        
+
         for line in lines:
             req_match = self.re_radio_power_req.search(line)
             if req_match:
@@ -182,7 +172,7 @@ class TelephonyLogSummarizer:
                     'raw_line': line.strip()
                 }
                 continue
-            
+
             resp_match = self.re_radio_power_resp.search(line)
             if resp_match:
                 seq = resp_match.group('seq')
@@ -190,13 +180,13 @@ class TelephonyLogSummarizer:
                 is_error = any(kw.upper() in content.upper() for kw in self.radio_power_error_keywords)
                 phone_match = re.search(r'\[(PHONE\d+)\]', content)
                 phone = phone_match.group(1) if phone_match else ''
-                
+
                 error_msg = ''
                 if is_error:
                     for kw in self.radio_power_error_keywords:
                         if kw.upper() in content.upper():
                             error_msg = kw; break
-                
+
                 responses[seq] = {
                     'timestamp': resp_match.group('timestamp'),
                     'seq': seq,
@@ -205,7 +195,7 @@ class TelephonyLogSummarizer:
                     'success': not is_error,  
                     'raw_line': line.strip()
                 }
-        
+
         for seq, req in requests.items():
             resp = responses.get(seq)
             success = resp['success'] if resp else False
@@ -222,14 +212,14 @@ class TelephonyLogSummarizer:
                 'request_raw': req['raw_line'],
                 'response_raw': resp['raw_line'] if resp else None
             }
-            
+
             # [기능 통합 1] Radio Power가 실패(에러)한 경우 동시간대 교차 로그 수집
             if not success:
                 err_time = result['response_time'] or result['request_time']
                 result['cross_context_logs'] = self._get_surrounding_context_logs(lines, err_time)
 
             results.append(result)
-        
+
         return results
 
     def analyze_telephony(self, lines):
@@ -263,21 +253,21 @@ class TelephonyLogSummarizer:
                     if (v_reg[0] != prev["v"] or d_reg[0] != prev["d"]):
                         recent_logs = [l for l in list(pre_context) if not (any(t in l for t in self.network_exclude_tags))]
                         context_summary = " ".join(recent_logs[-20:]).lower()
-                        
+
                         prev_in_service = (prev["v"] == "0" and prev["d"] == "0")
                         now_in_service = (v_reg[0] == "0" and d_reg[0] == "0")
-                        
+
                         if not prev_in_service and now_in_service: event_type = "OOS_RECOVER"
                         elif prev_in_service and not now_in_service: event_type = "OOS_ENTER"
                         else: event_type = "OOS_STATE_CHANGE"
-                        
+
                         reason = "Unknown"
                         rej = self._parse_sst(ss_data, 'rej_cause')
                         if rej != "0" and rej != "Unknown": reason = f"NW_REJECT_CAUSE_{rej}"
                         elif "rrc connection release" in context_summary: reason = "RRC_RELEASE_BY_NW"
                         elif "out_of_service" in context_summary or "no_service" in context_summary: reason = "SIGNAL_LOSS_OR_SHADOW_AREA"
                         if v_reg[0] == "0" or d_reg[0] =="0": reason = "None"
-                        
+
                         oos_event = {
                             "time": ts,
                             "slotId": slot_id,
@@ -291,11 +281,11 @@ class TelephonyLogSummarizer:
                             "emergency": self._parse_sst(ss_data, 'is_emergency'),
                             "context_snapshot": recent_logs[-15:]
                         }
-                        
+
                         # [기능 통합 2] OOS 발생(단절 진입) 시 동시간대 AP/Kernel 로그 추가
                         if event_type == "OOS_ENTER":
                             oos_event["cross_context_logs"] = self._get_surrounding_context_logs(lines, ts)
-                            
+
                         oos_history.append(oos_event)
                         last_slot_states[slot_id] = {"v": v_reg[0], "d": d_reg[0]}
 
@@ -347,15 +337,15 @@ class TelephonyLogSummarizer:
                     if self.patterns['FAIL_EV'].search(clean_line):
                         if ims_m:
                             current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
-                    
+
                     normal_clear = False
                     if ims_m: normal_clear = True if ims_m.group(1) in ["501", "510"] else False
-                    
+
                     if normal_clear:
-                        current_session["status"], current_session["fail_reason"] = "SUCESS", f"{ims_m.group(1)}: {ims_m.group(2)}"
+                        current_session["status"], current_session["fail_reason"] = "SUCCESS", f"{ims_m.group(1)}: {ims_m.group(2)}"
                     elif ims_m and not normal_clear:
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
-                        
+
                     cs_m = self.patterns['CS_REASON'].search(clean_line)
                     cs_fail_cause = ['34','41', '42', '44', '49', '58', '65535']
                     if cs_m:
@@ -368,11 +358,11 @@ class TelephonyLogSummarizer:
                     if self.patterns['END_EV'].search(clean_line):
                         current_session["end_time"] = ts
                         current_session["logs"].append(f"==> [END_{target_phone_id}]: {clean_line}")
-                        
+
                         # [기능 통합 3] 콜 드랍이나 연결 실패 시 동시간대 교차 로그 수집
                         if current_session["status"] in ["FAIL", "CALL DROP"]:
                             current_session["cross_context_logs"] = self._get_surrounding_context_logs(lines, ts)
-                            
+
                         all_sessions.append(current_session)
                         current_session = None
                         target_phone_id = None
@@ -420,9 +410,9 @@ class TelephonyLogSummarizer:
                 out_m = self.re_outgoing.search(line)
                 if out_m and out_m.group(1) == phone_pid and out_m.group(2) == main_tid:
                     matched_tx.append({"to_pid": out_m.group(3), "to_tid": out_m.group(4), "code": out_m.group(5)})
-        
+
         main_stack = all_threads[main_tid]["stack"] if (main_tid and main_tid in all_threads) else []
-            
+
         report = {
             "process_info": {"name": "com.android.phone", "pid": phone_pid},
             "main": {"tid": main_tid, "stack": main_stack},
@@ -457,11 +447,11 @@ class TelephonyLogSummarizer:
                     # [기능 통합 4] 크래시는 언제나 치명적이므로, 무조건 주변 로그 추가
                     tmp["cross_context_logs"] = self._get_surrounding_context_logs(lines, tmp["time"])
                     crashes.append(tmp)
-                    
+
                 is_cap, step, fatal_info_count = True, (1 if is_fatal_app else 2), 0
                 tmp = {"time": ts, "trigger": clean_line, "process": ("system_server" if is_fatal_sys else "Unknown"), "exception_info": "", "call_stack": [], "context": list(pre_ctx)[-5:]}
                 continue
-            
+
             if is_cap:
                 if step == 1:
                     if self.re_proc_phone.search(clean_line): tmp["process"] = "com.android.phone"; step = 2; continue
@@ -479,6 +469,105 @@ class TelephonyLogSummarizer:
             pre_ctx.append(line.strip())
         return crashes
 
+    def analyze_battery(self, lines):
+        """
+        [전체 스캔 최적화판] 무한 트랩 방지 및 초고속 문자열 매칭 적용
+        """
+        battery_report = {
+            "stats_period": "Unknown",
+            "time_on_battery": "Unknown",
+            "screen_off_time": "Unknown",
+            "screen_on_battery_use": "Unknown",
+            "signal_strength_distribution": {},
+            "mobile_radio_active": "Unknown",
+            "telephony_drain_evaluation": "Unknown"
+        }
+
+        has_data = False
+        in_signal_levels = False
+        signal_line_count = 0  # 🚨 [핵심 방어막] 무한 트랩 방지용 카운터
+
+        re_stats = re.compile(r'Stats from\s+(.*?)\s+to\s+(.*)', re.I)
+        re_pct = re.compile(r'\(([\d.]+)%\)')
+        re_level = re.compile(r'^(none|poor|moderate|good|great)\s', re.I)
+
+        for line in lines:
+            clean_line = line.strip()
+            if not clean_line:
+                in_signal_levels = False
+                continue
+
+            # ==========================================
+            # 1. 멀티라인 신호 세기 파싱 (안전장치 포함)
+            # ==========================================
+            if clean_line.startswith("Phone signal levels:") or clean_line.startswith("Phone signal strength:"):
+                in_signal_levels = True
+                signal_line_count = 0  # 카운터 초기화
+                has_data = True
+                continue
+                
+            if in_signal_levels:
+                signal_line_count += 1
+                # 🚨 신호 레벨은 길어봐야 5~6줄. 10줄이 넘어가면 엉뚱한 로그에 갇힌 것이므로 강제 탈출!
+                if signal_line_count > 10 or ":" in clean_line:
+                    in_signal_levels = False
+                else:
+                    level_match = re_level.match(clean_line)
+                    if level_match:
+                        level_name = level_match.group(1).lower()
+                        pct_match = re_pct.search(clean_line)
+                        if pct_match:
+                            try:
+                                battery_report["signal_strength_distribution"][level_name] = float(pct_match.group(1))
+                            except ValueError:
+                                pass
+                # 신호 세기 파싱 중에는 밑에 있는 단일 라인 검사를 생략 (속도 향상)
+                continue 
+
+            # ==========================================
+            # 2. 단일 라인 데이터 파싱 (.lower() 제거 및 startswith 최적화)
+            # ==========================================
+            if clean_line.startswith("Time on battery:"):
+                battery_report["time_on_battery"] = clean_line.split(":", 1)[1].strip()
+                has_data = True
+            elif clean_line.startswith("Time on battery screen off:"):
+                battery_report["screen_off_time"] = clean_line.split(":", 1)[1].strip()
+                has_data = True
+            elif clean_line.startswith("Battery use(%) while screen on:"):
+                battery_report["screen_on_battery_use"] = clean_line.split(":", 1)[1].strip()
+                has_data = True
+            elif clean_line.startswith("Mobile radio active:"):
+                battery_report["mobile_radio_active"] = clean_line.split(":", 1)[1].strip()
+                has_data = True
+            # Stats from 파싱 (startswith로 1차 필터링 후 정규식)
+            elif clean_line.startswith("Stats from ") and " to " in clean_line:
+                m = re_stats.search(clean_line)
+                if m:
+                    battery_report["stats_period"] = f"{m.group(1).strip()} ~ {m.group(2).strip()}"
+                    has_data = True
+
+        # ==========================================
+        # 3. 휴리스틱 평가
+        # ==========================================
+        poor_pct = battery_report["signal_strength_distribution"].get("poor", 0.0)
+        none_pct = battery_report["signal_strength_distribution"].get("none", 0.0)
+        total_bad_signal = poor_pct + none_pct
+
+        if total_bad_signal > 30.0:
+            battery_report["telephony_drain_evaluation"] = f"CRITICAL: 단말이 신호 없음(none)/미약(poor) 상태에 {total_bad_signal}% 동안 머물렀습니다. 모뎀의 잦은 망 탐색(Hunting)으로 인한 심각한 배터리 광탈이 의심됩니다."
+        elif total_bad_signal > 15.0:
+            battery_report["telephony_drain_evaluation"] = f"WARNING: 신호 미약 상태 비중이 {total_bad_signal}%로 다소 높습니다. 음영 지역 체류로 인한 모뎀 전력 소모가 큽니다."
+        elif total_bad_signal > 0:
+            battery_report["telephony_drain_evaluation"] = f"NORMAL: 신호 불량 비중이 {total_bad_signal}%로 양호한 수준입니다."
+        else:
+            if not battery_report["signal_strength_distribution"]:
+                 battery_report["telephony_drain_evaluation"] = "신호 세기 분포 데이터가 덤프에 없습니다."
+
+        if not has_data:
+            return None
+
+        return battery_report
+
     def run_batch(self, mode, output_path):
         """파일을 한 번만 읽어 분석 수행 후 JSON 저장 (초고속 병렬 파싱)"""
         try:
@@ -490,6 +579,9 @@ class TelephonyLogSummarizer:
             if mode in ['call', 'all']: result['telephony'] = self.analyze_telephony(lines)
             if mode in ['anr', 'all']: result['anr_context'] = self.analyze_anr(lines)
             if mode in ['crash', 'all']: result['crash_context'] = self.analyze_crash(lines)
+            if mode in ['all']: 
+                battery_res = self.analyze_battery(lines)
+                if battery_res: result['battery_stats'] = battery_res
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)
