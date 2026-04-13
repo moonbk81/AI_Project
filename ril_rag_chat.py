@@ -255,6 +255,23 @@ class RilRagChat:
         )
         print("✅ 지식 저장 완료! 이제 이 로그들은 '해결된 사례'로 분류됩니다.")
 
+    def get_all_files(self):
+        """DB에 적재된 모든 유니크한 파일 목록을 반환합니다."""
+        results = self.collection.get(include=["metadatas"])
+        if not results or not results["metadatas"]:
+            return []
+        # 메타데이터에서 source_file 이름만 추출하여 중복 제거
+        files = set(m["source_file"] for m in results["metadatas"] if m and "source_file" in m)
+        return sorted(list(files))
+
+    def reset_db(self):
+        """현재 컬렉션의 모든 데이터를 삭제합니다."""
+        results = self.collection.get()
+        if results and results["ids"]:
+            self.collection.delete(ids=results["ids"])
+            return True
+        return False
+
 if __name__ == "__main__":
     chat_system = RilRagChat()
 

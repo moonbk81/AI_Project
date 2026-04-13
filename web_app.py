@@ -77,11 +77,42 @@ with st.sidebar:
     )
     
     st.divider()
-    st.subheader(" 현재 분석 세션 정보")
-    if "current_file" in st.session_state and st.session_state.current_file:
-        st.success(f"활성 파일: '{st.session_state.current_file}'")
+    st.subheader("🔍 분석 세션 및 DB 관리")
+    
+    # 1. 기존 DB에 있는 파일 목록 불러오기
+    existing_files = engine.get_all_files()
+    
+    if existing_files:
+        # 셀렉트 박스로 파일 선택 (현재 세션 파일이 있으면 기본값으로 설정)
+        default_idx = 0
+        if st.session_state.current_file in existing_files:
+            default_idx = existing_files.index(st.session_state.current_file) + 1
+            
+        selected_file = st.selectbox(
+            "📁 기존 적재 파일 선택",
+            options=["선택 안 함"] + existing_files,
+            index=default_idx
+        )
+        
+        if selected_file != "선택 안 함":
+            if st.session_state.current_file != selected_file:
+                st.session_state.current_file = selected_file
+                st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
+                st.rerun()
     else:
-        st.warning("활성된 로그 파일이 없습니다.")
+        st.info("DB가 비어 있습니다. 로그를 먼저 업로드하세요.")
+
+    if st.session_state.current_file:
+        st.success(f"활성 파일: `{st.session_state.current_file}`")
+    
+    # 2. DB 초기화 버튼 (매번 폴더 지울 필요 없음)
+    if st.button("🗑️ 전체 DB 초기화", use_container_width=True, help="Vector DB의 모든 지식을 삭제합니다."):
+        if engine.reset_db():
+            st.session_state.current_file = None
+            st.session_state.messages = []
+            st.success("DB가 성공적으로 비워졌습니다.")
+            time.sleep(1)
+            st.rerun()
     
     # [추가] 슬라이싱 UI
     use_slicing = st.checkbox("✂️ 특정 시간대만 잘라서 분석 (2GB 이상 권장)")
