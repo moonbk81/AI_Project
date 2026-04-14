@@ -8,18 +8,18 @@ from sentence_transformers import SentenceTransformer
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs"):
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
-        
+
         # 1. Vector DB 초기화
         self.chroma_client = chromadb.PersistentClient(path=db_path)
         self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
 
         # Mac(MPS) 또는 Ubuntu(CUDA) 환경에 맞게 디바이스 자동 설정
-        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"        
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         # 2. 임베딩 모델 로드 (오프라인 경로 또는 허깅페이스 repo)
         if device == "cuda" or device == "cpu":
             embed_model_path = "/home/bongki81/project/AI_Project/bge-m3-offline"
         else:
-            embed_model_path = "BAAI/bge-m3" 
+            embed_model_path = "BAAI/bge-m3"
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path)
 
@@ -77,20 +77,20 @@ class RilRagChat:
             # ==========================================
             MAX_DOC_CHARS = 4000  # 약 1000 토큰 (BGE-M3 최적 효율 및 MPS 메모리 안전선)
             MAX_META_CHARS = 5000 # 메타데이터(원본 로그) 길이 제한 (ChromaDB SQLite 보호)
-            
+
             for doc, meta in zip(raw_documents, raw_metadatas):
                 # 1. 문서 길이 자르기 (O(N^2) 어텐션 메모리 폭발 완벽 차단)
                 safe_documents.append(str(doc)[:MAX_DOC_CHARS])
-                
+
                 # 2. 메타데이터 안전 처리
                 safe_meta = meta.copy() if meta else {}
                 safe_meta['source_file'] = filename
-                
+
                 # 메타데이터 안의 텍스트(예: cross_context_logs)가 너무 길면 무조건 자름
                 for k, v in safe_meta.items():
                     if isinstance(v, str) and len(v) > MAX_META_CHARS:
                         safe_meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
-                        
+
                 safe_metadatas.append(safe_meta)
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
@@ -114,16 +114,16 @@ class RilRagChat:
         # 1. 질문 임베딩 생성
         query_embedding = self.embed_model.encode(user_query).tolist()
         user_query_lower = user_query.lower()
-        
+
         # ==========================================
         # 2. 스마트 검색 필터 구성 (조건 자동 조립기)
         # ==========================================
         conditions = []
-        
+
         # (1) 현재 활성 파일 고정
         if current_file:
             conditions.append({"source_file": current_file})
-            
+
         # (2) 사용자 의도(질문)에 따른 로그 타입 필터링
         if "battery" in user_query_lower or "배터리" in user_query_lower or "전력" in user_query_lower:
             conditions.append({"log_type": "Battery_Drain_Report"})
@@ -152,7 +152,7 @@ class RilRagChat:
             n_results=5,
             where=where_filter
         )
-        
+
         # [디버깅 출력] 터미널에서 제대로 가져오는지 숫자를 꼭 확인하세요!
         found_count = len(results['documents'][0]) if results and results.get('documents') else 0
         print(f"\n[DEBUG] 현재 필터: {where_filter}")
@@ -162,9 +162,9 @@ class RilRagChat:
         context_blocks = []
         if results and results['documents'] and len(results['documents'][0]) > 0:
             for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
-                
+
                 clean_meta = {k: v for k, v in meta.items() if not k.startswith("raw_") and k != "source_file"}
-                
+
                 # 🚨 [개선] OOS는 raw_context에, Call은 raw_logs에 있으므로 둘 다 확인합니다!
                 snippet = "(DB에 원본 로그가 없습니다)"
                 raw_data = meta.get("raw_logs", meta.get("raw_context", "[]"))
@@ -174,7 +174,7 @@ class RilRagChat:
                         # '중략됨' 같은 안내 문구를 제외하고 진짜 로그 5줄만 제공
                         real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
                         if real_logs:
-                            snippet = "\n".join(real_logs[-5:]) 
+                            snippet = "\n".join(real_logs[-5:])
                 except:
                     pass
 
@@ -265,7 +265,7 @@ class RilRagChat:
         return sorted(list(files))
 
     def reset_db(self):
-        """현재 컬렉션의 모든 데이터를 삭제합니다."""
+        # """현재 컬렉션의 모든 데이터를 삭제합니다."""
         results = self.collection.get()
         if results and results["ids"]:
             self.collection.delete(ids=results["ids"])
@@ -320,9 +320,9 @@ if __name__ == "__main__":
                     raw_logs = []
 
                 if raw_logs:
-                    for log in raw_logs[:5]: 
+                    for log in raw_logs[:5]:
                         print(f"  {log}")
-                    if len(raw_logs) > 5: 
+                    if len(raw_logs) > 5:
                         print("  ... (중략) ...")
 
                 # RADIO_POWER 원본 로그 출력 로직
@@ -343,10 +343,10 @@ if __name__ == "__main__":
                 print("📝 [사내 지식 베이스(트랙 B) 업데이트]")
                 print("이 에러에 대한 '원인'이나 '해결책'을 엔지니어의 시각으로 기록해두면,")
                 print("추후 유사한 에러 발생 시 후배들이나 AI가 이 해결책을 참고할 수 있습니다.")
-                
+
                 # y/n이 아니라, 사용자의 주관적인 텍스트를 직접 입력받습니다.
                 feedback = input("❓ 엔지니어 코멘트 입력 (저장하지 않으려면 그냥 Enter 입력): ").strip()
-                
+
                 if feedback:
                     # AI의 추출 결과(answer)가 아닌, 엔지니어의 코멘트(feedback)를 DB에 박제!
                     chat_system.save_knowledge(ids, feedback)

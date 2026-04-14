@@ -36,7 +36,7 @@ class RagPayloadBuilder:
     def _extract_metadata(self, data_dict, log_type):
         """엔지니어가 확인할 정보와 차트용 수치를 메타데이터에 포함 (에러 원천 차단)"""
         metadata = {"log_type": log_type}
-        
+
         def add_safe_meta(key, val):
             if "stack" in key: return
             if val in [None, [], {}]: return
@@ -62,18 +62,18 @@ class RagPayloadBuilder:
             return log_list.copy()
 
         # 🚨 100% 안전한 키 접근 (.get 방식)
-        if data_dict.get("logs"): 
+        if data_dict.get("logs"):
             metadata["raw_logs"] = json.dumps(get_safe_list(data_dict.get("logs")), ensure_ascii=False)
-        if data_dict.get("context_snapshot"): 
+        if data_dict.get("context_snapshot"):
             metadata["raw_context"] = json.dumps(get_safe_list(data_dict.get("context_snapshot")), ensure_ascii=False)
-        if data_dict.get("context"): 
+        if data_dict.get("context"):
             metadata["raw_context"] = json.dumps(get_safe_list(data_dict.get("context")), ensure_ascii=False)
 
         if data_dict.get("request_time"): metadata["time"] = data_dict.get("request_time")
         elif data_dict.get("start_time"): metadata["time"] = data_dict.get("start_time")
         elif data_dict.get("time"): metadata["time"] = data_dict.get("time")
         elif data_dict.get("stats_period"): metadata["time"] = data_dict.get("stats_period")
-        
+
         if data_dict.get("slot"): metadata["slot"] = data_dict.get("slot")
         elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
 
@@ -118,6 +118,35 @@ class RagPayloadBuilder:
 
         if "battery_stats" in report_data:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
+
+        if "network_timeseries" in report_data:
+            net_data = report_data["network_timeseries"]
+            timeline = net_data.get("sorted_timeline", {})
+
+            # 1. 시계열 통계 데이터 평탄화 (그래프용)
+        for ts, details in timeline.items():
+            for stat in details.get("net_stats", []):
+                # 이 구조가 web_app.py의 px.line이 읽는 데이터 구조가 됩니다.
+                stat_item = {
+                    "time": ts,
+                    "log_type": "Network_Timeline_Stat", # 중요: log_type 명시
+                    "netId": stat.get("netId"),
+                    "transport": stat.get("transport"),
+                    "dns_avg": stat.get("dns_avg"),
+                    "dns_err_rate": stat.get("dns_err_rate"),
+                    "tcp_avg_loss": stat.get("tcp_avg_loss")
+                }
+                # 별도의 document 텍스트 생성
+                doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
+                rag_payload.append({"document": doc, "metadata": stat_item})
+            # DNS 이슈들을 개별 지식 조각으로 추가
+            for dns_issue in net_data.get("dns_issues", []):
+                add_to_payload(dns_issue, "Network_DNS_Issue")
+
+            # 시계열 통계 요약본 추가
+            if net_data.get("sorted_timeline"):
+                summary = {"timeline_count": len(net_data["sorted_timeline"]), "device_config": net_data.get("device_config")}
+                add_to_payload(summary, "Network_Timeline_Summary")
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")

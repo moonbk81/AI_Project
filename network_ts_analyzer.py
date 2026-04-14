@@ -67,13 +67,11 @@ class NetworkTimeSeriesAnalyzer:
                             })
 
                 if self.stats_start.search(clean_line):
-                    print('find networkstatics')
                     in_stats = True; continue
                 if in_stats:
                     # [B] NetId별 성능 통계 추출
                     perf_m = self.re_net_perf.search(clean_line)
                     if perf_m:
-                        print(f"perf_m={perf_m}")
                         groups = perf_m.groups()
                         ts, net_id = groups[0], groups[1]
                         timeline[ts]["net_stats"].append({
