@@ -344,6 +344,48 @@ with tab_dash:
                     st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
             else:
                 st.info("알려진 솔루션 데이터 필드가 없습니다.")
+            
+            # ==========================================
+            # 📞 [신규 추가] 전체 통화 세션(Call History) 분석 
+            # ==========================================
+            st.divider()
+            st.subheader("📞 전체 통화 세션 (Call History) 요약")
+            
+            if 'log_type' in df.columns:
+                # 1. 'Call_Session' 데이터만 필터링
+                call_df = df[df['log_type'] == 'Call_Session']
+                
+                if not call_df.empty:
+                    # 2. 화면에 보여줄 핵심 컬럼만 추출 (DB에 존재하는 컬럼만 안전하게 선택)
+                    display_cols = []
+                    for col in ['time', 'slot', 'status', 'fail_reason', 'call_id', 'source_file']:
+                        if col in call_df.columns:
+                            display_cols.append(col)
+                            
+                    # 3. 데이터 결측치(NaN)를 깔끔하게 "-"로 치환하고 최신 시간순 정렬
+                    clean_call_df = call_df[display_cols].fillna("-").sort_values(by='time', ascending=False)
+                    
+                    # 4. 차트와 표를 나란히 배치
+                    col_chart, col_table = st.columns([1, 2])
+                    
+                    with col_chart:
+                        st.markdown("**📊 통화 상태(Status) 비율**")
+                        if 'status' in call_df.columns:
+                            fig_call = px.pie(
+                                call_df, names='status', hole=0.4, 
+                                title="전체 Call 성공/실패 분포"
+                            )
+                            st.plotly_chart(fig_call, use_container_width=True)
+                        else:
+                            st.info("상태(status) 데이터가 없습니다.")
+                            
+                    with col_table:
+                        st.markdown(f"**📋 전체 통화 이력 (총 {len(clean_call_df)}건)**")
+                        # 엑셀처럼 정렬, 검색, 스크롤이 가능한 강력한 데이터프레임 UI 제공
+                        st.dataframe(clean_call_df, use_container_width=True, height=400)
+                else:
+                    st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
+
         else:
             st.warning("데이터 형식이 올바르지 않습니다.")
     else:
