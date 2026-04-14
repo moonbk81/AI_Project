@@ -304,9 +304,25 @@ with tab_dash:
     all_data = engine.collection.get(include=["metadatas"])
     if all_data and all_data.get("metadatas"):
         meta_list = [m for m in all_data["metadatas"] if m is not None]
+        df_all = pd.DataFrame(meta_list)
+        
+        # 🚨 [추가] 분석 범위 선택 스위치
+        st.divider()
+        view_mode = st.radio(
+            "📊 분석 범위 선택", 
+            ["현재 활성 파일만", "전체 DB 히스토리 모음"], 
+            horizontal=True
+        )
+
+        # 데이터 필터링 로직
+        if view_mode == "현재 활성 파일만" and st.session_state.current_file:
+            df = df_all[df_all['source_file'] == st.session_state.current_file]
+            st.info(f"📍 현재 분석 중인 파일: `{st.session_state.current_file}`")
+        else:
+            df = df_all
+            st.info(f"🌐 전체 DB 데이터 분석 중 (총 {df_all['source_file'].nunique()}개 파일)")
+
         if meta_list:
-            df = pd.DataFrame(meta_list)
-            
             col1, col2, col3 = st.columns(3)
             col1.metric("총 적재된 지식 조각", f"{len(df)} 건")
             col2.metric("분석된 로그 파일 수", f"{df['source_file'].nunique()} 개" if 'source_file' in df.columns else "0 개")
