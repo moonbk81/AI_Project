@@ -30,12 +30,11 @@ class RilRagChat:
         # 4. 동적 프롬프트 관리를 위한 템플릿 딕셔너리
         self.prompts = {
             "base_persona": (
-                "너는 안드로이드 무선 통신(RIL/Telephony) 및 Network Stack을 분석하는 최고 수준의 수석 엔지니어다.\n\n"
-                "[답변 작성 공통 규칙]\n"
-                "1. 절대 지어내지 말고, 제공된 [현재 분석 대상 로그]와 메타정보 안에서만 팩트로 답변해라.\n"
-                "2. 사용자가 '로그를 보여달라'고 하면 원본 로그 스니펫을 단 한 글자도 바꾸지 말고 그대로 출력해라.\n"
-                "3. 과거 해결 사례(known_solution)가 있다면 최우선적으로 참고하여 답변에 반영해라.\n"
-            ),
+                "너는 안드로이드 무선 통신(RIL/Telephony) 및 Network Stack을 분석하는 최고 수준의 수석 엔지니어다.\n"
+                "🚨 [데이터 분석 및 과거 대화 참조 규칙]\n"
+                "1. 원칙적으로 새롭게 검색된 [현재 분석 대상 로그]를 최우선으로 분석해라.\n"
+                "2. 단, 사용자가 '방금 찾은 데이터', '앞서 말한' 등 이전 대화의 후속 분석(이상징후 탐지 등)을 요구하는 경우, [참고용 과거 대화 내역]에 남아있는 이전 수치 데이터를 적극적으로 재분석하여 대답해도 좋다.\n"
+                "3. '궁금한 점이 있으신가요?' 같은 역질문은 절대 금지한다."),
             "log_guidelines": {
                 "Call_Session": "- [Call_Session (통화)]: status가 'FAIL/DROP'인 세션을 찾고, 'fail_reason'을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 OOS와 혼동 금지)",
                 "OOS_Event": "- [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.",
@@ -45,6 +44,8 @@ class RilRagChat:
                     "- 로그에 적힌 netId별 dns_avg(ms), dns_err_rate(%), tcp_avg_loss(%) 수치를 직접 나열해라.\n"
                     "- 예: '14:20:05 시점에 netId=117의 DNS 평균 지연은 3005ms였으며, 손실률은 1.5%입니다.'와 같이 "
                     "시간대별로 구체적인 팩트만 보고해라."
+                    "- 🚨 [이상징후 판단 기준]: 전체 데이터의 평균(보통 0~100ms)과 비교하여 혼자 수백~수천 ms로 비정상적으로 급증한(튀는) 지점이 있다면, 그것이 바로 이상징후다.\n"
+                    "- '09:50:00에 DNS 지연이 3049ms로 비정상적으로 급증했습니다.' 처럼 팩트를 짚어내라."
                 ),
                 "Network_DNS_Issue": (
                     "- [Network_DNS_Issue (긴급)]: 앱이 차단된 원인을 '이론'이 아닌 '팩트'로 말해라.\n"
@@ -145,33 +146,34 @@ class RilRagChat:
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         # 1. 질문 임베딩 생성
-        query_embedding = self.embed_model.encode(user_query).tolist()
-        user_query_lower = user_query.lower()
+        query_embedding = self.embed_model.encode(search_query).tolist()
+        # user_query_lower = user_query.lower()
+        search_text_lower = search_query.lower()
 
         # ==========================================
         # 2. 스마트 검색 필터 구성 (조건 자동 조립기)
         # ==========================================
         conditions = []
 
-        # (1) 현재 활성 파일 고정
+        # # (1) 현재 활성 파일 고정
         if current_file:
             conditions.append({"source_file": current_file})
 
         # (2) 사용자 의도(질문)에 따른 로그 타입 필터링
         target_log_types = []
-        if any(kw in user_query_lower for kw in ["battery", "배터리", "전력", "광탈"]):
+        if any(kw in search_text_lower for kw in ["battery", "배터리", "전력", "광탈"]):
             target_log_types.append("Battery_Drain_Report")
-        if any(kw in user_query_lower for kw in ["call", "콜", "통화", "전화", "끊김"]):
+        if any(kw in search_text_lower for kw in ["call", "콜", "통화", "전화", "끊김"]):
             target_log_types.append("Call_Session")
-        if any(kw in user_query_lower for kw in ["radio", "전원", "power"]):
+        if any(kw in search_text_lower for kw in ["radio", "전원", "power"]):
             target_log_types.append("Radio_Power_Event")
-        if any(kw in user_query_lower for kw in ["oos", "이탈", "망", "음영", "서비스"]):
+        if any(kw in search_text_lower for kw in ["oos", "이탈", "망", "음영", "서비스"]):
             target_log_types.append("OOS_Event")
-        if any(kw in user_query_lower for kw in ["crash", "fatal", "크래시", "죽었어"]):
+        if any(kw in search_text_lower for kw in ["crash", "fatal", "크래시", "죽었어"]):
             target_log_types.append("Crash_Event")
-        if any(kw in user_query_lower for kw in ["anr", "응답없음", "멈춤"]):
+        if any(kw in search_text_lower for kw in ["anr", "응답없음", "멈춤"]):
             target_log_types.append("ANR_Context")
-        if any(kw in user_query_lower for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연"]):
+        if any(kw in search_text_lower for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연", "이상", "징후", "튀는"]):
             target_log_types.extend(["Network_DNS_Issue", "Network_Timeline_Stat"])
 
         if target_log_types:
@@ -261,9 +263,11 @@ class RilRagChat:
 
         # 7. 프롬프트에 '주제 전환' 강제 인식 규칙 추가
         dynamic_prompt += (
-            "\n4. 🚨 [주제 전환 주의]: 과거 대화 내역은 이전 맥락을 파악하는 용도일 뿐이다. "
-            "사용자가 새로운 주제(예: 통화 -> 배터리)를 물어보면 과거 대화에 얽매이지 말고, "
-            "무조건 새롭게 제공된 [현재 분석 대상 로그]만을 바탕으로 독립적인 답변을 생성해라."
+            "\n4. 🚨 [데이터 분석 및 과거 대화 참조 규칙]:\n"
+            "원칙적으로 새롭게 검색된 [현재 분석 대상 로그]를 최우선으로 분석해라. "
+            "단, 사용자가 '방금 찾은 데이터', '앞서 말한' 등 이전 대화의 후속 분석(이상징후 탐지 등)을 요구하는 경우, "
+            "[참고용 과거 대화 내역]에 남아있는 이전 수치 데이터를 적극적으로 재분석하여 대답해라. "
+            "절대 '정보가 부족하다'고 회피하지 마라."
         )
 
         # 7. 최종 LLM 프롬프트 생성 (현재 로그 + 과거 대화 + 질문)
@@ -280,6 +284,8 @@ class RilRagChat:
             f"위의 [새로 검색된 로그]만을 바탕으로, 아래의 [사용자 질문]에 대해 새롭고 독립적인 답변을 작성해라.\n\n"
             f"사용자 질문: {user_query}"
         )
+
+        print(f"\n[DEBUG] 최종 LLM 프롬프트:\n{prompt}\n")
 
         # 8. LLM 호출 (Gemma 또는 사용 중인 모델의 API 호출부에 맞게 조정하세요)
         # (※ 이 부분은 Mr. 문님의 기존 모델 호출 방식과 동일하게 유지하시면 됩니다.)
@@ -324,12 +330,21 @@ class RilRagChat:
         return sorted(list(files))
 
     def reset_db(self):
-        # """현재 컬렉션의 모든 데이터를 삭제합니다."""
-        results = self.collection.get()
-        if results and results["ids"]:
-            self.collection.delete(ids=results["ids"])
+        try:
+            results = self.collection.get()
+
+            # 🚨 [수정] ids 리스트가 존재하고, 비어있지 않을 때만 삭제 실행
+            if results and results.get("ids"):
+                self.collection.delete(ids=results["ids"])
+                print("[DEBUG] DB 초기화 완료: 기존 데이터 삭제됨")
+            else:
+                print("[DEBUG] DB가 이미 비어있어 삭제를 건너뜁니다.")
+
             return True
-        return False
+
+        except Exception as e:
+            print(f"[ERROR] DB 초기화 중 오류 발생: {e}")
+            return False
 
 if __name__ == "__main__":
     chat_system = RilRagChat()
