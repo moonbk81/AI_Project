@@ -139,16 +139,17 @@ class RagPayloadBuilder:
                     # 별도의 document 텍스트 생성
                     doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
                     rag_payload.append({"document": doc, "metadata": stat_item})
-                # DNS 이슈들을 개별 지식 조각으로 추가
-                for dns_issue in net_data.get("dns_issues", []):
-                    dns_issue["log_type"] = "Network_DNS_Issue"
-                    # LLM에게 전달될 문장(Document) 강화
-                    doc = (
-                        f"DNS Blocked Event: Package {dns_issue['package']} (UID: {dns_issue['uid']}) "
-                        f"was blocked. Effective Policy: {dns_issue.get('effective_policy', 'Unknown')}. "
-                        f"Time: {dns_issue['time']}"
-                    )
-                    rag_payload.append({"document": doc, "metadata": dns_issue})
+
+            # DNS 이슈들을 개별 지식 조각으로 추가
+            for dns_issue in net_data.get("dns_issues", []):
+                dns_issue["log_type"] = "Network_DNS_Issue"
+                # LLM에게 전달될 문장(Document) 강화
+                doc = (
+                    f"DNS Blocked Event: Package {dns_issue['package']} (UID: {dns_issue['uid']}) "
+                    f"was blocked. Effective Policy: {dns_issue.get('effective_policy', 'Unknown')}. "
+                    f"Time: {dns_issue['time']}"
+                )
+                rag_payload.append({"document": doc, "metadata": dns_issue})
 
 
                 # 시계열 통계 요약본 추가

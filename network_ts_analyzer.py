@@ -16,7 +16,7 @@ class NetworkTimeSeriesAnalyzer:
         self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+\d+\((.*?)\),\s+(\d+)\((.*?)\),\s+isBlocked=(\w+)', re.I)
         # [신규] UID별 차단 상태 상세 패턴
         self.re_uid_state = re.compile(
-            r'UID=(?P<uid>\d+)\s+state=.*blocked_state=\{blocked=(?P<blocked>[^,]*),\s*allowed=.*effective=(?P<effective>[^}]*)\}',
+            r'UID=(?P<uid>\d+)\s+state=.*\s+blocked_state=\{blocked=(?P<blocked>[^|]*),\s*allowed=.*effective=(?P<effective>[^|]*)\}',
             re.I
         )
 
@@ -44,44 +44,41 @@ class NetworkTimeSeriesAnalyzer:
         # 시계열 분석을 위해 시간(Time)을 키로 사용하는 딕셔너리
         timeline = defaultdict(lambda: {"net_stats": []})
 
-        # 1차 스캔: UID별 blocked_state 정보를 먼저 수집
         with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
+            lines = f.readlines()
+
+            # 1단계: UID별 blocked_state 정보 사전 수집
+            for line in lines:
                 uid_m = self.re_uid_state.search(line)
                 if uid_m:
                     uid_block_map[uid_m.group('uid')] = uid_m.group('effective')
 
-        with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
+            # 2단계: 메인 분석 루프
+            for line in lines:
                 clean_line = line.strip()
-
-                # NetdEventListenerService tag
                 tag_m = self.re_tag.search(line)
                 tag = tag_m.group(1).strip() if tag_m else None
+
                 if tag == "NetdEventListenerService":
                     dns_m = self.re_dns_event.search(clean_line)
                     if dns_m:
                         uid, pkg, res_code, res_str, blocked = dns_m.groups()
-                        if blocked.lower() == 'true':
-                            # 캐싱된 UID 상태에서 상세 원인 추출
-                            detailed_reason = uid_block_map.get(uid, "Unknown Policy")
-                            # 예: "BATTERY_SAVER|APP_BACKGROUND" -> 분석하기 좋게 변환
-                            reason = f"Blocked by {detailed_reason}"
-
+                        if "FAIL" in res_str or "NODATA" in res_str or blocked.lower() == 'true':
+                            # 수집된 UID 상태 매핑
+                            effective_policy = uid_block_map.get(uid, "SYSTEM_POLICY")
                             dns_issues.append({
                                 "time": line[:18],
                                 "uid": uid,
                                 "package": pkg,
                                 "result": res_str,
-                                "is_blocked": True,
-                                "suspected_reason": reason,
-                                "effective_policy": detailed_reason # LLM 학습용 필드
+                                "is_blocked": blocked.lower() == 'true',
+                                "suspected_reason": f"Blocked by {effective_policy}" if blocked.lower() == 'true' else "Network Timeout/Fail",
+                                "effective_policy": effective_policy
                             })
 
                 if self.stats_start.search(clean_line):
                     in_stats = True; continue
                 if in_stats:
-                    # [B] NetId별 성능 통계 추출
                     perf_m = self.re_net_perf.search(clean_line)
                     if perf_m:
                         groups = perf_m.groups()
@@ -93,33 +90,14 @@ class NetworkTimeSeriesAnalyzer:
                             "dns_max": int(groups[4]),
                             "dns_err_rate": float(groups[5]),
                             "dns_tot": int(groups[6]),
-                            "dns_delayed rsp": int(groups[7]),
                             "dns_blocked_cnt": int(groups[8]),
-                            "conn_avg": int(groups[9]),
-                            "conn_err_rate": float(groups[11]),
-                            "conn_tot": int(groups[12]),
                             "tcp_avg_loss": float(groups[13])
                         })
                 if self.stats_end.search(clean_line):
                     in_stats = False
-        # 시간을 기준으로 정렬하여 최종 리포트 생성
-        sorted_timeline = dict(sorted(timeline.items()))
+
         return {
-            "sorted_timeline": sorted_timeline,
-            "dns_issues":dns_issues,
-            "device_config": device_config,
+            "sorted_timeline": dict(sorted(timeline.items())),
+            "dns_issues": dns_issues,
+            "device_config": device_config
         }
-
-if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("file")
-    args = p.parse_args()
-
-    analyzer = NetworkTimeSeriesAnalyzer(args.file)
-    result = analyzer.analyze()
-
-    # 분석 결과 저장
-    with open("network_timeseries_report.json", "w", encoding="utf-8") as j:
-        json.dump(result, j, indent=4, ensure_ascii=False)
-
-    print(f"✅ 시계열 분석 완료! 총 {len(result)}개의 타임라인 포인트 확보.")
