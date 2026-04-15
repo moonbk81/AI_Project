@@ -27,6 +27,24 @@ class RilRagChat:
         print(f" LLM 연결 준비 중...(Local Ollama - gemma:2b)")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
 
+        # 4. 동적 프롬프트 관리를 위한 템플릿 딕셔너리
+        self.prompts = {
+            "base_persona": (
+                "너는 안드로이드 무선 통신(RIL/Telephony) 및 Network Stack을 분석하는 최고 수준의 수석 엔지니어다.\n\n"
+                "[답변 작성 공통 규칙]\n"
+                "1. 절대 지어내지 말고, 제공된 [현재 분석 대상 로그]와 메타정보 안에서만 팩트로 답변해라.\n"
+                "2. 사용자가 '로그를 보여달라'고 하면 원본 로그 스니펫을 단 한 글자도 바꾸지 말고 그대로 출력해라.\n"
+                "3. 과거 해결 사례(known_solution)가 있다면 최우선적으로 참고하여 답변에 반영해라.\n"
+            ),
+            "log_guidelines": {
+                "Call_Session": "- [Call_Session (통화)]: status가 'FAIL/DROP'인 세션을 찾고, 'fail_reason'을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 OOS와 혼동 금지)",
+                "OOS_Event": "- [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.",
+                "Battery_Drain_Report": "- [Battery_Drain_Report (배터리)]: stats_period와 신호 세기 분포(none/poor 비중)를 바탕으로 배터리 광탈 원인을 진단해라.",
+                "Network_Timeline_Stat": "- [Network_Timeline_Stat (시계열)]: DNS 지연 시간(avg)이 평소보다 급증하거나 에러율이 높은 구간을 특정해라.",
+                "Network_DNS_Issue": "- [Network_DNS_Issue (DNS 차단)]: is_blocked가 true일 경우 effective_policy를 확인해라. 'BATTERY_SAVER'나 'APP_BACKGROUND'가 포함되어 있다면, 단말의 절전 모드나 백그라운드 데이터 제한 정책에 의해 강제 차단되었음을 명확히 설명해라."
+            }
+        }
+
     def ingest_folder(self, folder_path="./payloads"):
         """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
         if not os.path.exists(folder_path):
@@ -111,6 +129,13 @@ class RilRagChat:
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
     def ask(self, user_query, current_file=None, chat_history=None):
+         # 1. 🚨 질문 임베딩 생성 (짧은 후속 질문 대응력 강화)
+        search_query = user_query
+        if len(user_query) < 15 and chat_history:
+            # "그럼 배터리는?" 같은 짧은 질문에 이전 문맥을 붙여 벡터 검색 품질을 높입니다.
+            last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
+            search_query = f"{last_msg} 관련 후속 질문: {user_query}"
+
         # 1. 질문 임베딩 생성
         query_embedding = self.embed_model.encode(user_query).tolist()
         user_query_lower = user_query.lower()
@@ -125,21 +150,29 @@ class RilRagChat:
             conditions.append({"source_file": current_file})
 
         # (2) 사용자 의도(질문)에 따른 로그 타입 필터링
-        if "battery" in user_query_lower or "배터리" in user_query_lower or "전력" in user_query_lower:
-            conditions.append({"log_type": "Battery_Drain_Report"})
-        elif "call" in user_query_lower or "콜" in user_query_lower or "통화" in user_query_lower:
-            conditions.append({"log_type": "Call_Session"})
-        elif "radio" in user_query_lower or "전원" in user_query_lower or "power" in user_query_lower:
-            conditions.append({"log_type": "Radio_Power_Event"})
-        elif "oos" in user_query_lower or "이탈" in user_query_lower or "망" in user_query_lower or "out of service" in user_query_lower \
-                or "no service" in user_query_lower or "signal lost" in user_query_lower:
-            conditions.append({"log_type": "OOS_Event"})
-        elif "crash" in user_query_lower or "fatal" in user_query_lower:
-            conditions.append({"log_type": "App_Crash"})
-        elif "anr" in user_query_lower or "not responding" in user_query_lower:
-            conditions.append({"log_type": "App_ANR"})
+        target_log_types = []
+        if any(kw in user_query_lower for kw in ["battery", "배터리", "전력", "광탈"]):
+            target_log_types.append("Battery_Drain_Report")
+        if any(kw in user_query_lower for kw in ["call", "콜", "통화", "전화", "끊김"]):
+            target_log_types.append("Call_Session")
+        if any(kw in user_query_lower for kw in ["radio", "전원", "power"]):
+            target_log_types.append("Radio_Power_Event")
+        if any(kw in user_query_lower for kw in ["oos", "이탈", "망", "음영", "서비스"]):
+            target_log_types.append("OOS_Event")
+        if any(kw in user_query_lower for kw in ["crash", "fatal", "크래시", "죽었어"]):
+            target_log_types.append("Crash_Event")
+        if any(kw in user_query_lower for kw in ["anr", "응답없음", "멈춤"]):
+            target_log_types.append("ANR_Context")
+        if any(kw in user_query_lower for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연"]):
+            target_log_types.extend(["Network_DNS_Issue", "Network_Timeline_Stat"])
 
-        # (3) ChromaDB 문법에 맞게 최종 필터 조립 ($and 자동 적용)
+        if target_log_types:
+            if len(target_log_types) == 1:
+                conditions.append({"log_type": target_log_types[0]})
+            else:
+                # 💡 핵심: 여러 주제가 나오거나 전환될 때, $in 연산자를 통해 모두 DB에서 꺼내올 수 있게 열어둠
+                conditions.append({"log_type": {"$in": target_log_types}})
+
         where_filter = None
         if len(conditions) == 1:
             where_filter = conditions[0]
@@ -149,7 +182,7 @@ class RilRagChat:
         # 3. Vector DB 검색 실행
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=5,
+            n_results=20,
             where=where_filter
         )
 
@@ -188,41 +221,56 @@ class RilRagChat:
 
         final_context = "\n\n---\n\n".join(context_blocks)
 
-        # 5. 시스템 프롬프트 구성 (🚨 로그 타입별 역할 완벽 분리 가이드)
-        system_prompt = (
-            "너는 안드로이드 무선 통신(RIL/Telephony) 및 Network Stack을 분석하는 최고 수준의 수석 엔지니어다.\n\n"
-            "[공통 답변 규칙]"
-            "1. 절대 지어내지 말고, 제공된 [현재 분석 대상 로그]와 메타정보 안에서만 팩트로 답변해라.\n"
-            "2. 사용자가 '로그를 보여달라'고 하면 스니펫의 텍스트를 수정 없이 그대로 출력해라.\n"
-            "3. 과거 해결 사례(known_solution) 가 있다면 최우선적으로 참고하여 답변에 반영해라.\n\n"
-            "[로그 타입변 분석 가이드라인]\n"
-            "- [Call_Session]: status 가 'FAIL/CALL DROP'인 경우 fail_reason 을 분석해라. (통화 에러 시 OOS 와 혼동 금지)\n"
-            "- [OOS_Event]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'이다.\n"
-            "- [Network_Timeline_Stat]: DNS avg 가 급증하거나 dns_err_rate 가 높은 시계열 구간을 특정하여 보고해라.\n"
-            "- [Network_DNS_Issue]: is_blcoked 가 true 인 경우 device_config(battery_saver, app_background) 상태와 대조하여 차단 원인을 추론해라.\n"
-            "- [Battery_Drain_Report (배터리)]: 신호 세기 분포(none/poor 비중)를 통해 전력 소모 원인을 진단해라.\n\n"
-        )
+        # 5. 동적 프롬프트 조립 (Dynamic Prompt Routing)
+        retrieved_log_types = set()
+        if results and results.get('metadatas') and results['metadatas'][0]:
+            for meta in results['metadatas'][0]:
+                if meta and 'log_type' in meta:
+                    retrieved_log_types.add(meta['log_type'])
+
+        dynamic_prompt = self.prompts["base_persona"] + "\n[검색된 로그 기반 맞춤형 분석 가이드라인]\n"
+
+        if retrieved_log_types:
+            for l_type in retrieved_log_types:
+                if l_type in self.prompts["log_guidelines"]:
+                    dynamic_prompt += self.prompts["log_guidelines"][l_type] + "\n"
+        else:
+            dynamic_prompt += "- 현재 관련된 특정 로그 타입을 찾지 못했습니다. 주어진 문맥 내에서 최선을 다해 답변해라.\n"
 
         import requests
         url = "http://localhost:11434/api/chat"
 
-        # 6. 이전 대화 내역(Chat History) 조립
+        # 6. 이전 대화 내역(Chat History) 조립 최적화
         history_text = ""
         if chat_history:
-            # 최근 3번의 대화만 가져와서 문맥 유지 (토큰 절약)
-            recent_history = chat_history[-3:]
+            # 🚨 최신 문맥만 유지하기 위해 과거 3개가 아닌 '최근 2개'로 줄임
+            recent_history = chat_history[-2:]
             history_lines = []
             for msg in recent_history:
                 role = "User" if msg["role"] == "user" else "AI"
                 history_lines.append(f"{role}: {msg['content']}")
             history_text = "\n".join(history_lines)
 
+        # 7. 프롬프트에 '주제 전환' 강제 인식 규칙 추가
+        dynamic_prompt += (
+            "\n4. 🚨 [주제 전환 주의]: 과거 대화 내역은 이전 맥락을 파악하는 용도일 뿐이다. "
+            "사용자가 새로운 주제(예: 통화 -> 배터리)를 물어보면 과거 대화에 얽매이지 말고, "
+            "무조건 새롭게 제공된 [현재 분석 대상 로그]만을 바탕으로 독립적인 답변을 생성해라."
+        )
+
         # 7. 최종 LLM 프롬프트 생성 (현재 로그 + 과거 대화 + 질문)
+        system_prompt = dynamic_prompt
         prompt = (
             f"{system_prompt}\n\n"
-            f"[과거 대화 내역]\n{history_text if history_text else '없음'}\n\n"
-            f"[현재 분석 대상 로그]\n{final_context}\n\n"
-            f"질문: {user_query}"
+            f"=== [참고용 과거 대화 내역] ===\n"
+            f"{history_text if history_text else '없음'}\n\n"
+            f"========================================\n\n"
+            f"=== [새로 검색된 현재 분석 대상 로그] ===\n"
+            f"{final_context}\n"
+            f"========================================\n\n"
+            f"🚨 [최종 지시사항]: 과거 대화 내용은 문맥 파악용일 뿐이다. "
+            f"위의 [새로 검색된 로그]만을 바탕으로, 아래의 [사용자 질문]에 대해 새롭고 독립적인 답변을 작성해라.\n\n"
+            f"사용자 질문: {user_query}"
         )
 
         # 8. LLM 호출 (Gemma 또는 사용 중인 모델의 API 호출부에 맞게 조정하세요)

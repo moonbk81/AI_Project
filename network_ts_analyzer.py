@@ -13,10 +13,14 @@ class NetworkTimeSeriesAnalyzer:
         # 1. 상세 DNS 차단 로그 패턴 (isBlocked)
         self.re_time = re.compile(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}')
         self.re_tag = re.compile(r'[VDIWE]\s+([a-zA-Z0-9_\-]+)\s*(?=:)', re.I)
-        self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+\d+\((.*?)\),\s+(\d+)\((.*?)\),\s+isBlocked=(\w+)', re.I)
+        self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+(\d+)\((.*?)\),\s+(\d+)\((.*?)\),\s+isBlocked=(\w+)', re.I)
         # [신규] UID별 차단 상태 상세 패턴
+        # self.re_uid_state = re.compile(
+        #     r'UID=(?P<uid>\d+)\s+state=.*\s+blocked_state=\{blocked=(?P<blocked>[^|]*),\s*allowed=.*effective=(?P<effective>[^|]*)\}',
+        #     re.I
+        # )
         self.re_uid_state = re.compile(
-            r'UID=(?P<uid>\d+)\s+state=.*\s+blocked_state=\{blocked=(?P<blocked>[^|]*),\s*allowed=.*effective=(?P<effective>[^|]*)\}',
+            r'UID=(?P<uid>\d+).*?blocked_state=\{.*?effective=(?P<effective>[^}]+)\}',
             re.I
         )
 
@@ -62,12 +66,13 @@ class NetworkTimeSeriesAnalyzer:
                 if tag == "NetdEventListenerService":
                     dns_m = self.re_dns_event.search(clean_line)
                     if dns_m:
-                        uid, pkg, res_code, res_str, blocked = dns_m.groups()
+                        net_id, uid, pkg, res_code, res_str, blocked = dns_m.groups()
                         if "FAIL" in res_str or "NODATA" in res_str or blocked.lower() == 'true':
                             # 수집된 UID 상태 매핑
                             effective_policy = uid_block_map.get(uid, "SYSTEM_POLICY")
                             dns_issues.append({
                                 "time": line[:18],
+                                "net_id": net_id,
                                 "uid": uid,
                                 "package": pkg,
                                 "result": res_str,
