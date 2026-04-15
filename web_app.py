@@ -252,6 +252,27 @@ with st.sidebar:
 # [Tab 1] 대화 및 분석 창
 # ==========================================
 with tab_chat:
+    st.info("💡 **AI 분석가에게 이렇게 물어보세요!** (카테고리를 명시하면 더 정확해집니다)")
+
+    # 클릭하면 열리는 가이드북
+    with st.expander("🔍 효율적인 분석을 위한 질문 예시 보기"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **📞 통화 및 신호 분석**
+            * "방금 발생한 **Call Fail** 원인이 뭐야?"
+            * "통화 중 **IMS 에러** 기록 찾아줘"
+            * "현재 **망 이탈(OOS)** 발생 구간이 있어?"
+            """)
+        with col2:
+            st.markdown("""
+            **🔋 성능 및 네트워크 분석**
+            * "최근 1시간 동안 **배터리 광탈** 원인 분석해줘"
+            * "특정 **앱(DNS) 차단**된 이력이 있어?"
+            * "네트워크 **지연(Latency)** 통계 보여줘"
+            """)
+        st.caption("⚠️ '그거 찾아줘' 대신 '통화 에러 찾아줘'처럼 명칭을 포함하면 좋습니다.")
+
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])

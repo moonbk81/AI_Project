@@ -40,8 +40,16 @@ class RilRagChat:
                 "Call_Session": "- [Call_Session (통화)]: status가 'FAIL/DROP'인 세션을 찾고, 'fail_reason'을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 OOS와 혼동 금지)",
                 "OOS_Event": "- [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.",
                 "Battery_Drain_Report": "- [Battery_Drain_Report (배터리)]: stats_period와 신호 세기 분포(none/poor 비중)를 바탕으로 배터리 광탈 원인을 진단해라.",
-                "Network_Timeline_Stat": "- [Network_Timeline_Stat (시계열)]: DNS 지연 시간(avg)이 평소보다 급증하거나 에러율이 높은 구간을 특정해라.",
-                "Network_DNS_Issue": "- [Network_DNS_Issue (DNS 차단)]: is_blocked가 true일 경우 effective_policy를 확인해라. 'BATTERY_SAVER'나 'APP_BACKGROUND'가 포함되어 있다면, 단말의 절전 모드나 백그라운드 데이터 제한 정책에 의해 강제 차단되었음을 명확히 설명해라."
+                "Network_Timeline_Stat": (
+                    "- [Network_Timeline_Stat (긴급)]: 절대 '시간 기준/방식 기준' 같은 이론적인 설명을 하지 마라.\n"
+                    "- 로그에 적힌 netId별 dns_avg(ms), dns_err_rate(%), tcp_avg_loss(%) 수치를 직접 나열해라.\n"
+                    "- 예: '14:20:05 시점에 netId=117의 DNS 평균 지연은 3005ms였으며, 손실률은 1.5%입니다.'와 같이 "
+                    "시간대별로 구체적인 팩트만 보고해라."
+                ),
+                "Network_DNS_Issue": (
+                    "- [Network_DNS_Issue (긴급)]: 앱이 차단된 원인을 '이론'이 아닌 '팩트'로 말해라.\n"
+                    "- effective_policy가 BATTERY_SAVER라면 '절전 모드 때문'이라고 한 줄로 요약해라."
+                )
             }
         }
 
