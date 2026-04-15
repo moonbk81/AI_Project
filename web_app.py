@@ -273,6 +273,28 @@ with tab_chat:
             """)
         st.caption("⚠️ '그거 찾아줘' 대신 '통화 에러 찾아줘'처럼 명칭을 포함하면 좋습니다.")
 
+    # ==========================================
+    # 🚀 [추가] 원클릭 자동 분석 버튼
+    # ==========================================
+    st.caption("💡 직접 질문하거나, 아래의 원클릭 분석 버튼을 사용해 완벽한 프롬프트를 전송하세요.")
+    quick_prompt = None
+
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    with col_btn1:
+        if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
+            quick_prompt = "Call Session 로그를 바탕으로 통화 끊김(Drop) 및 Fail 원인을 분석하고, 당시 OOS 이력이나 망 이탈 징후가 있었는지 확인해 줘."
+    with col_btn2:
+        if st.button("🌐 네트워크 이상 분석", use_container_width=True):
+            quick_prompt = "Network Timeline Stat 및 DNS 로그를 분석해서, 지연(latency) 시간이 비정상적으로 튀는 이상 징후나 앱 차단 이력을 찾아내 줘."
+    with col_btn3:
+        if st.button("🔋 배터리/크래시 분석", use_container_width=True):
+            quick_prompt = "Battery Drain Report와 Crash/ANR 로그를 확인해서 전력 광탈 원인과 비정상 종료된 프로세스가 있는지 분석해 줘."
+
+    st.divider()
+
+    # ==========================================
+    # 💬 대화 히스토리 및 차트/참고로그 렌더링
+    # ==========================================
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -301,18 +323,27 @@ with tab_chat:
                 with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
                     st.markdown(msg["references"])
 
+    # ==========================================
     # 💬 질문 입력 및 AI 분석 구역
-    if prompt := st.chat_input("에러 증상이나 궁금한 점을 입력하세요"):
+    # ==========================================
+    user_input = st.chat_input("에러 증상이나 궁금한 점을 입력하세요")
+
+    # 버튼을 눌렀거나(quick_prompt), 직접 입력했거나(user_input) 둘 중 하나를 실행
+    prompt = quick_prompt if quick_prompt else user_input
+
+    if prompt:
+        # 1. UI에 질문 표시 및 히스토리 저장
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        # 2. AI 분석 진행
         with st.chat_message("assistant"):
             with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
                 current_target = st.session_state.get("current_file", None)
                 answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:])
 
-                # [복구 완료] 원본 로그 텍스트 조립 구역 (안전한 get 방식)
+                # [복구 완료] 원본 로그 텍스트 조립 구역
                 ref_text = ""
                 for i, meta in enumerate(metas):
                     known_solution = meta.get('known_solution')
@@ -347,7 +378,7 @@ with tab_chat:
                 st.session_state.last_ids = ids
                 st.session_state.last_metas = metas
 
-        # 🚨 차트 유지를 위해 metas 저장
+        # 🚨 차트/참고 로그 유지를 위해 metas/references 함께 저장
         st.session_state.messages.append({
             "role": "assistant",
             "content": answer,
