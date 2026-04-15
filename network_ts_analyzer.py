@@ -14,6 +14,11 @@ class NetworkTimeSeriesAnalyzer:
         self.re_time = re.compile(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}')
         self.re_tag = re.compile(r'[VDIWE]\s+([a-zA-Z0-9_\-]+)\s*(?=:)', re.I)
         self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+\d+\((.*?)\),\s+(\d+)\((.*?)\),\s+isBlocked=(\w+)', re.I)
+        # [신규] UID별 차단 상태 상세 패턴
+        self.re_uid_state = re.compile(
+            r'UID=(?P<uid>\d+)\s+state=.*blocked_state=\{blocked=(?P<blocked>[^,]*),\s*allowed=.*effective=(?P<effective>[^}]*)\}',
+            re.I
+        )
 
         # 2. NetId별 성능 통계 패턴 (NetStats)
         self.re_net_perf = re.compile(
@@ -34,9 +39,17 @@ class NetworkTimeSeriesAnalyzer:
     def analyze(self):
         in_stats = False
         dns_issues = []
+        uid_block_map = {} # UID별 상세 차단 원인 저장소
         device_config = {"private_dns": "off", "data_saver": "off", "vpn": "inactive"}
         # 시계열 분석을 위해 시간(Time)을 키로 사용하는 딕셔너리
         timeline = defaultdict(lambda: {"net_stats": []})
+
+        # 1차 스캔: UID별 blocked_state 정보를 먼저 수집
+        with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                uid_m = self.re_uid_state.search(line)
+                if uid_m:
+                    uid_block_map[uid_m.group('uid')] = uid_m.group('effective')
 
         with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
@@ -49,21 +62,20 @@ class NetworkTimeSeriesAnalyzer:
                     dns_m = self.re_dns_event.search(clean_line)
                     if dns_m:
                         uid, pkg, res_code, res_str, blocked = dns_m.groups()
-                        if "FAIL" or "NODATA" in res_str or blocked.lower() == 'true':
-                            # 차단 원인 추정
-                            reason = "Network Issue (Timeout/Fail)"
-                            if blocked.lower() == 'true':
-                                if device_config["private_dns"] != "off": reason = f"Blocked by Private DNS ({device_config['private_dns']})"
-                                elif device_config["data_saver"] == "on": reason = "Blocked by Data Saver"
-                                elif device_config["vpn"] == "active": reason = "Blocked by VPN/Firewall"
-                                else: reason = "Blocked by System Policy"
+                        if blocked.lower() == 'true':
+                            # 캐싱된 UID 상태에서 상세 원인 추출
+                            detailed_reason = uid_block_map.get(uid, "Unknown Policy")
+                            # 예: "BATTERY_SAVER|APP_BACKGROUND" -> 분석하기 좋게 변환
+                            reason = f"Blocked by {detailed_reason}"
 
                             dns_issues.append({
                                 "time": line[:18],
+                                "uid": uid,
                                 "package": pkg,
                                 "result": res_str,
-                                "is_blocked": blocked.lower() == 'true',
-                                "suspected_reason": reason
+                                "is_blocked": True,
+                                "suspected_reason": reason,
+                                "effective_policy": detailed_reason # LLM 학습용 필드
                             })
 
                 if self.stats_start.search(clean_line):

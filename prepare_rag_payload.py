@@ -124,29 +124,37 @@ class RagPayloadBuilder:
             timeline = net_data.get("sorted_timeline", {})
 
             # 1. 시계열 통계 데이터 평탄화 (그래프용)
-        for ts, details in timeline.items():
-            for stat in details.get("net_stats", []):
-                # 이 구조가 web_app.py의 px.line이 읽는 데이터 구조가 됩니다.
-                stat_item = {
-                    "time": ts,
-                    "log_type": "Network_Timeline_Stat", # 중요: log_type 명시
-                    "netId": stat.get("netId"),
-                    "transport": stat.get("transport"),
-                    "dns_avg": stat.get("dns_avg"),
-                    "dns_err_rate": stat.get("dns_err_rate"),
-                    "tcp_avg_loss": stat.get("tcp_avg_loss")
-                }
-                # 별도의 document 텍스트 생성
-                doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
-                rag_payload.append({"document": doc, "metadata": stat_item})
-            # DNS 이슈들을 개별 지식 조각으로 추가
-            for dns_issue in net_data.get("dns_issues", []):
-                add_to_payload(dns_issue, "Network_DNS_Issue")
+            for ts, details in timeline.items():
+                for stat in details.get("net_stats", []):
+                    # 이 구조가 web_app.py의 px.line이 읽는 데이터 구조가 됩니다.
+                    stat_item = {
+                        "time": ts,
+                        "log_type": "Network_Timeline_Stat", # 중요: log_type 명시
+                        "netId": stat.get("netId"),
+                        "transport": stat.get("transport"),
+                        "dns_avg": stat.get("dns_avg"),
+                        "dns_err_rate": stat.get("dns_err_rate"),
+                        "tcp_avg_loss": stat.get("tcp_avg_loss")
+                    }
+                    # 별도의 document 텍스트 생성
+                    doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
+                    rag_payload.append({"document": doc, "metadata": stat_item})
+                # DNS 이슈들을 개별 지식 조각으로 추가
+                for dns_issue in net_data.get("dns_issues", []):
+                    dns_issue["log_type"] = "Network_DNS_Issue"
+                    # LLM에게 전달될 문장(Document) 강화
+                    doc = (
+                        f"DNS Blocked Event: Package {dns_issue['package']} (UID: {dns_issue['uid']}) "
+                        f"was blocked. Effective Policy: {dns_issue.get('effective_policy', 'Unknown')}. "
+                        f"Time: {dns_issue['time']}"
+                    )
+                    rag_payload.append({"document": doc, "metadata": dns_issue})
 
-            # 시계열 통계 요약본 추가
-            if net_data.get("sorted_timeline"):
-                summary = {"timeline_count": len(net_data["sorted_timeline"]), "device_config": net_data.get("device_config")}
-                add_to_payload(summary, "Network_Timeline_Summary")
+
+                # 시계열 통계 요약본 추가
+                if net_data.get("sorted_timeline"):
+                    summary = {"timeline_count": len(net_data["sorted_timeline"]), "device_config": net_data.get("device_config")}
+                    add_to_payload(summary, "Network_Timeline_Summary")
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
