@@ -279,7 +279,9 @@ with tab_chat:
     st.caption("💡 직접 질문하거나, 아래의 원클릭 분석 버튼을 사용해 완벽한 프롬프트를 전송하세요.")
     quick_prompt = None
 
-    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    # 버튼을 2x2 그리드로 배치
+    col_btn1, col_btn2 = st.columns(2)
+    col_btn3, col_btn4 = st.columns(2)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
             quick_prompt = "Call Session 로그를 바탕으로 통화 끊김(Drop) 및 Fail 원인을 분석하고, 당시 OOS 이력이나 망 이탈 징후가 있었는지 확인해 줘."
@@ -289,6 +291,13 @@ with tab_chat:
     with col_btn3:
         if st.button("🔋 배터리/크래시 분석", use_container_width=True):
             quick_prompt = "Battery Drain Report와 Crash/ANR 로그를 확인해서 전력 광탈 원인과 비정상 종료된 프로세스가 있는지 분석해 줘."
+    with col_btn4:
+        if st.button("🚫 망 등록(Reg) 및 OOS 분석", use_container_width=True):
+            quick_prompt = (
+                "OOS_Event 로그에서 Slot ID별(Slot 0, Slot 1) voice_reg 및 data_reg 상태 변화를 분석해줘. "
+                "시간대별로 각 슬롯의 망 등록 상태가 어떻게 변했는지 비교하고, "
+                "특정 슬롯만 OOS 에 빠졌는지 아니면 전체 서비스가 이탈했는지 파악해라."
+            )
 
     st.divider()
 
@@ -301,6 +310,14 @@ with tab_chat:
 
             # 📊 [차트 렌더링]
             if "metas" in msg and msg["metas"]:
+                # OOS 데이터를 모아둘 리스트 준비
+                reg_history = []
+                reg_map = {
+                    "IN_SERVICE": 0,
+                    "OUT_OF_SERVICE": 1,
+                    "EMERGENCY_ONLY": 2,
+                    "POWER_OFF": 3
+                }
                 for i, meta in enumerate(msg["metas"]):
                     if meta.get('log_type') == 'Battery_Drain_Report':
                         signal_data = {
@@ -317,6 +334,55 @@ with tab_chat:
                             fig = px.pie(df_signal, names='Level', values='Value',
                                          title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
                             st.plotly_chart(fig, use_container_width=True, key=f"chart_{msg_idx}_{i}")
+
+                    if meta.get('log_type') == 'OOS_Event':
+                        v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
+                        d_reg = meta.get('data_reg', 'UNKNOWN').upper()
+                        slot = f"Slot{meta.get('slotId', '0')}"
+                        time = meta.get('time')
+
+                        if time:
+                            reg_history.append({
+                                "time": time,
+                                "Status": reg_map.get(v_reg, -1),
+                                "Type": "Voice", "Slot": slot,
+                                "Label": v_reg
+                            })
+
+                            reg_history.append({
+                                "time": time,
+                                "Status": reg_map.get(d_reg, -1),
+                                "Type": "Data", "Slot": slot,
+                                "Label": d_reg
+                            })
+
+                # 🚨 [신규 추가] 수집된 OOS 데이터가 있다면 그래프 그리기!
+                if reg_history:
+                    df_reg = pd.DataFrame(reg_history).sort_values(["Slot", "time"])
+
+                    # Voice와 Data 상태를 동시에 보여주는 라인 차트
+                    fig_reg = px.line(
+                        df_reg, x="time", y="Status",
+                        color="Type", facet_row="Slot",
+                        title="📶 Slot-specific Voice & Data Registration Timeline",
+                        line_shape="hv", # 계단식(Step) 그래프 설정
+                        markers=True,
+                        labels={"Status": "Status Level", "time": "시간"},
+                        height=600
+                    )
+
+                    # Y축 라벨을 숫자가 아닌 실제 상태명으로 표시하도록 설정
+                    fig_reg.update_layout(
+                        yaxis = dict(tickmode = 'array',
+                            tickvals = list(reg_map.values()),
+                            ticktext = list(reg_map.keys())),
+                        yaxis2 = dict(tickmode = 'array',
+                            tickvals = list(reg_map.values()),
+                            ticktext = list(reg_map.keys())
+                        )
+                    )
+                    fig_reg.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+                    st.plotly_chart(fig_reg, use_container_width=True, key=f"reg_chart_{msg_idx}")
 
             # 🔎 [참고 로그 렌더링]
             if "references" in msg and msg["references"]:
