@@ -12,6 +12,7 @@ from telephony_log_summarizer import TelephonyLogSummarizer
 from prepare_rag_payload import RagPayloadBuilder
 # web_app.py 내 "🚀 분석 및 DB 적재 시작" 버튼 로직 부분 수정
 from network_ts_analyzer import NetworkTimeSeriesAnalyzer
+from boot_stat import BootStatAnalyzer
 
 # ==========================================
 # [신규 추가] 대용량 로그 타임라인 슬라이서 함수
@@ -66,7 +67,7 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
-tab_chat, tab_dash = st.tabs(["💬 로그 분석 및 대화", "📊 전사 로그 통계 대시보드"])
+tab_chat, tab_dash, tab_boot = st.tabs(["💬 로그 분석 및 대화", "📊 전사 로그 통계 대시보드", "📈 부팅 성능"])
 
 # ==========================================
 # 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
@@ -619,3 +620,53 @@ with tab_dash:
                 st.warning("데이터 형식이 올바르지 않습니다.")
         else:
             st.info("DB가 비어있습니다. 첫 번째 로그 파일을 업로드해주세요!")
+
+# ==========================================
+# 4. 🚨 맨 아래에 새로운 부팅 분석 탭 추가
+# ==========================================
+with tab_boot:
+    st.subheader("🚀 Android 부팅 시퀀스 분석")
+
+    current_target = st.session_state.get("current_file", None)
+
+    if current_target:
+        st.info(f"현재 분석 대상: `{current_target}`")
+
+        if st.button("🏁 부팅 로그 추출 및 성능 시각화 실행"):
+            with st.spinner("부팅 로그를 수집하여 분석 중입니다..."):
+                # 1. RAG 엔진 호출 (필터망이 작동하도록 '부팅' 키워드 포함)
+                _, _, metas = engine.ask("부팅 시퀀스 로그 모두 추출해줘", current_file=current_target)
+
+                # 2. 낡은 파싱 로직 싹 제거! 엔진이 가져온 metas를 그대로 던져줍니다.
+                analyzer = BootStatAnalyzer(metas)
+
+                # 3. 데이터프레임이 정상적으로 채워졌는지 확인
+                if not analyzer.df.empty:
+                    summary = analyzer.get_summary()
+
+                    if summary:
+                        # KPI 지표 렌더링
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("부팅 완료 시간", f"{summary.get('boot_complete', 0):,} ms" if summary.get('boot_complete') else "N/A")
+                        c2.metric("Voice Ready (Total)", f"{summary.get('total_voice_ms', 0):,} ms" if summary.get('total_voice_ms') else "N/A")
+                        c3.metric("Data Ready (Total)", f"{summary.get('total_data_ms', 0):,} ms" if summary.get('total_data_ms') else "N/A")
+
+                        # 병목 지점 차트 렌더링 (Delta > 100ms)
+                        st.write("### 🚨 주요 병목 지점 (Delta > 100ms)")
+                        df_bot = analyzer.df[analyzer.df['Delta_ms'] > 100].sort_values("Delta_ms", ascending=False)
+                        if not df_bot.empty:
+                            fig = px.bar(df_bot, x='Delta_ms', y='Event', orientation='h',
+                                         color='Delta_ms', color_continuous_scale='Reds',
+                                         text='Delta_ms', title="부팅 지연 이벤트 분석")
+                            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+                            st.plotly_chart(fig, use_container_width=True)
+
+                        # 전체 시퀀스 데이터
+                        with st.expander("📋 전체 부팅 시퀀스 데이터 보기"):
+                            st.dataframe(analyzer.df, use_container_width=True)
+                    else:
+                        st.warning("데이터는 찾았으나 분석 가능한 부팅 이벤트 마일스톤이 없습니다.")
+                else:
+                    st.error("현재 파일에서 부팅 데이터를 찾을 수 없습니다. 덤프 파일을 다시 파싱하고 DB에 적재(초기화 후 재적재)했는지 확인해 주세요.")
+    else:
+        st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")

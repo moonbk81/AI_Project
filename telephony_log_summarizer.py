@@ -59,9 +59,11 @@ class TelephonyLogSummarizer:
             r'\[(?P<seq>\d+)\]\s*<\s*RADIO_POWER\s*'
             r'(?P<content>.*)'
         )
+        # 🚨 [신규 추가] Boot Stat 파싱용 정규식 (!@Boot로 시작하고 뒤에 숫자 3개가 띄어쓰기로 있는 패턴)
+        self.re_boot_event = re.compile(r'^(!@Boot.*?)\s+(\d+)\s+(\d+)\s+(\d+)$', re.I)
 
         self.valid_tags = {
-            'RILD', 'RILD2', 'RILJ', 'IPF', 'IMS', 'VoLTE', 'SST', 'ServiceState', 
+            'RILD', 'RILD2', 'RILJ', 'IPF', 'IMS', 'VoLTE', 'SST', 'ServiceState',
             'SignalStrength', 'ServiceStateTracker', 'ImsPhoneCallTracker',
             'ImsPhoneConnection', 'SST-1', 'SST-0'
         }
@@ -114,35 +116,35 @@ class TelephonyLogSummarizer:
                     # 앞 14글자 추출 (예: "04-12 14:10:05")
                     t_str = line[:14]
                     # 무의미한 텍스트 제외하고 날짜 포맷 형태일 때만 사전에 등록
-                    if t_str[2] == '-' and t_str[5] == ' ': 
+                    if t_str[2] == '-' and t_str[5] == ' ':
                         if t_str not in self._time_index:
                             self._time_index[t_str] = []
                         self._time_index[t_str].append(line.strip())
 
         # 2. 타겟 시간 변환
-        if not target_time_str or target_time_str == "00-00 00:00:00.000": 
+        if not target_time_str or target_time_str == "00-00 00:00:00.000":
             return []
-            
+
         base_time_str = target_time_str.split('.')[0] if '.' in target_time_str else target_time_str
         current_year = datetime.now().year
-        
+
         try:
             target_dt = datetime.strptime(f"{current_year}-{base_time_str}", "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return []
-            
+
         cross_context_logs = []
-        
+
         # 3. 전체 파일을 뒤지지 않고, 딕셔너리에서 필요한 시간의 로그만 '즉시' 꺼내옴! (0.0001초 컷)
         for offset in range(-window_seconds, window_seconds + 1):
             win_str = (target_dt + timedelta(seconds=offset)).strftime("%m-%d %H:%M:%S")
             if win_str in self._time_index:
                 cross_context_logs.extend(self._time_index[win_str])
-                
+
         # 최대 라인 수 제한
         if len(cross_context_logs) > max_lines:
             return cross_context_logs[-max_lines:]
-            
+
         return cross_context_logs
 
     def _parse_sst(self, content, key):
@@ -153,10 +155,27 @@ class TelephonyLogSummarizer:
             return val
         return "Unknown"
 
+    # 🚨 [신규 추가] Boot Stat 텍스트를 파싱하여 Dictionary List로 반환
+    def analyze_boot_stat(self, lines):
+        boot_events = []
+        for line in lines:
+            clean_line = line.strip()
+            # 빠르게 필터링하기 위해 startswith 사용
+            if clean_line.startswith("!@Boot"):
+                match = self.re_boot_event.search(clean_line)
+                if match:
+                    boot_events.append({
+                        "Event": match.group(1).strip(),
+                        "Time_ms": int(match.group(2)),
+                        "Ktime_ms": int(match.group(3)),
+                        "Delta_ms": int(match.group(4))
+                    })
+        return boot_events
+
     def analyze_radio_power(self, lines):
-        requests = {}  
-        responses = {}  
-        results = []  
+        requests = {}
+        responses = {}
+        results = []
 
         for line in lines:
             req_match = self.re_radio_power_req.search(line)
@@ -192,7 +211,7 @@ class TelephonyLogSummarizer:
                     'seq': seq,
                     'phone': phone,
                     'error_msg': error_msg,
-                    'success': not is_error,  
+                    'success': not is_error,
                     'raw_line': line.strip()
                 }
 
@@ -226,7 +245,7 @@ class TelephonyLogSummarizer:
         all_sessions, oos_history = [], []
         current_session, last_v, last_d = None, None, None
         last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
-        target_phone_id = None 
+        target_phone_id = None
         pre_context = deque(maxlen=50)
         in_radio = False
 
@@ -443,7 +462,7 @@ class TelephonyLogSummarizer:
             is_fatal_sys = self.re_fatal_sys.search(clean_line)
 
             if is_fatal_app or is_fatal_sys:
-                if is_cap and tmp: 
+                if is_cap and tmp:
                     # [기능 통합 4] 크래시는 언제나 치명적이므로, 무조건 주변 로그 추가
                     tmp["cross_context_logs"] = self._get_surrounding_context_logs(lines, tmp["time"])
                     crashes.append(tmp)
@@ -459,11 +478,11 @@ class TelephonyLogSummarizer:
                 elif step == 2:
                     if self.re_stack_line.search(clean_line) or clean_line.startswith("at "): tmp["call_stack"].append(clean_line)
                     else:
-                        if len(tmp["call_stack"]) > 0: 
+                        if len(tmp["call_stack"]) > 0:
                             tmp["cross_context_logs"] = self._get_surrounding_context_logs(lines, tmp["time"])
                             crashes.append(tmp); is_cap = False
                         elif fatal_info_count < 3: tmp["exception_info"] += clean_line + " "; fatal_info_count += 1
-                        else: 
+                        else:
                             tmp["cross_context_logs"] = self._get_surrounding_context_logs(lines, tmp["time"])
                             crashes.append(tmp); is_cap = False
             pre_ctx.append(line.strip())
@@ -505,7 +524,7 @@ class TelephonyLogSummarizer:
                 signal_line_count = 0  # 카운터 초기화
                 has_data = True
                 continue
-                
+
             if in_signal_levels:
                 signal_line_count += 1
                 # 🚨 신호 레벨은 길어봐야 5~6줄. 10줄이 넘어가면 엉뚱한 로그에 갇힌 것이므로 강제 탈출!
@@ -522,7 +541,7 @@ class TelephonyLogSummarizer:
                             except ValueError:
                                 pass
                 # 신호 세기 파싱 중에는 밑에 있는 단일 라인 검사를 생략 (속도 향상)
-                continue 
+                continue
 
             # ==========================================
             # 2. 단일 라인 데이터 파싱 (.lower() 제거 및 startswith 최적화)
@@ -579,9 +598,14 @@ class TelephonyLogSummarizer:
             if mode in ['call', 'all']: result['telephony'] = self.analyze_telephony(lines)
             if mode in ['anr', 'all']: result['anr_context'] = self.analyze_anr(lines)
             if mode in ['crash', 'all']: result['crash_context'] = self.analyze_crash(lines)
-            if mode in ['all']: 
+            if mode in ['all']:
                 battery_res = self.analyze_battery(lines)
                 if battery_res: result['battery_stats'] = battery_res
+
+            # 🚨 [신규 추가] Boot Stat 파싱 실행 및 JSON 저장
+            if mode in ['all']:
+                boot_res = self.analyze_boot_stat(lines)
+                if boot_res: result['boot_stats'] = boot_res
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)
@@ -602,7 +626,7 @@ def main():
 
     targets = []
     if os.path.isdir(args.input):
-        targets = [os.path.join(args.input, f) for f in os.listdir(args.input) 
+        targets = [os.path.join(args.input, f) for f in os.listdir(args.input)
                    if os.path.isfile(os.path.join(args.input, f))]
     else:
         targets = [args.input]

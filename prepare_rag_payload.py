@@ -73,6 +73,8 @@ class RagPayloadBuilder:
         elif data_dict.get("start_time"): metadata["time"] = data_dict.get("start_time")
         elif data_dict.get("time"): metadata["time"] = data_dict.get("time")
         elif data_dict.get("stats_period"): metadata["time"] = data_dict.get("stats_period")
+        # 🚨 [여기 한 줄 추가!] Boot_Stat의 Time_ms도 표준 time으로 인식하게 함
+        elif data_dict.get("Time_ms") is not None: metadata["time"] = data_dict.get("Time_ms")
 
         if data_dict.get("slot"): metadata["slot"] = data_dict.get("slot")
         elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
@@ -118,6 +120,13 @@ class RagPayloadBuilder:
 
         if "battery_stats" in report_data:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
+
+        # ==========================================
+        # 🚨 [신규 추가] Boot Stat 데이터 DB 적재
+        # ==========================================
+        if "boot_stats" in report_data:
+            for boot_stat in report_data["boot_stats"]:
+                add_to_payload(boot_stat, "Boot_Stat")
 
         if "network_timeseries" in report_data:
             net_data = report_data["network_timeseries"]
