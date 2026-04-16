@@ -175,6 +175,9 @@ class RilRagChat:
             target_log_types.append("ANR_Context")
         if any(kw in search_text_lower for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연", "이상", "징후", "튀는"]):
             target_log_types.extend(["Network_DNS_Issue", "Network_Timeline_Stat"])
+        # 🚨 [신규 추가] 안테나/수신 레벨 키워드
+        if any(kw in search_text_lower for kw in ["안테나", "시그널", "신호", "signal", "level", "수신"]):
+            target_log_types.append("Signal_Level")
 
         if target_log_types:
             if len(target_log_types) == 1:

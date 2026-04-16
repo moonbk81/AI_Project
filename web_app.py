@@ -281,8 +281,8 @@ with tab_chat:
     quick_prompt = None
 
     # 버튼을 2x2 그리드로 배치
-    col_btn1, col_btn2 = st.columns(2)
-    col_btn3, col_btn4 = st.columns(2)
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    col_btn4, col_btn5 = st.columns(2)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
             quick_prompt = "Call Session 로그를 바탕으로 통화 끊김(Drop) 및 Fail 원인을 분석하고, 당시 OOS 이력이나 망 이탈 징후가 있었는지 확인해 줘."
@@ -299,6 +299,12 @@ with tab_chat:
                 "시간대별로 각 슬롯의 망 등록 상태가 어떻게 변했는지 비교하고, "
                 "특정 슬롯만 OOS 에 빠졌는지 아니면 전체 서비스가 이탈했는지 파악해라."
             )
+    with col_btn5:
+        if st.button("📶 안테나(Signal) 레벨 분석", use_container_width=True):
+            quick_prompt = (
+                "Signal_Level 로그를 분석해서 Slot별(Slot 0, Slot 1) 안테나 수신 레벨(0~5)이 시간대별로 어떻게 변했는지 파악해 줘."
+                 "신호가 0이나 1로 뚝 떨어지는 수신 저하 구간이 있었는지 확인해라."
+            )
 
     st.divider()
 
@@ -310,7 +316,9 @@ with tab_chat:
             st.markdown(msg["content"])
 
             # 📊 [차트 렌더링]
+
             if "metas" in msg and msg["metas"]:
+                sig_history = []
                 # OOS 데이터를 모아둘 리스트 준비
                 reg_history = []
                 reg_map = {
@@ -356,6 +364,25 @@ with tab_chat:
                                 "Type": "Data", "Slot": slot,
                                 "Label": d_reg
                             })
+                    if meta.get('log_type') == 'Signal_Level':
+                        # meta에 값이 제대로 있는지 방어 로직 추가
+                        time_val = meta.get('time')
+                        slot_val = meta.get('slot', '0')
+                        level_val = meta.get('max_level')
+                        raw_info = meta.get('raw_info', '')
+
+                        if time_val and level_val is not None:
+                            try:
+                                # level 값이 문자열로 들어올 수 있으므로 정수 변환
+                                level_int = int(level_val)
+                                sig_history.append({
+                                    "time": time_val,
+                                    "Slot": f"Slot {slot_val}",
+                                    "Level": level_int,
+                                    "Info": raw_info
+                                })
+                            except ValueError:
+                                pass # level_val이 이상한 값이면 건너뜀
 
                 # 🚨 [신규 추가] 수집된 OOS 데이터가 있다면 그래프 그리기!
                 if reg_history:
@@ -384,6 +411,38 @@ with tab_chat:
                     )
                     fig_reg.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
                     st.plotly_chart(fig_reg, use_container_width=True, key=f"reg_chart_{msg_idx}")
+
+                if sig_history:
+                    # 시간순 및 슬롯별로 정렬
+                    df_sig = pd.DataFrame(sig_history).sort_values(by=["Slot", "time"])
+
+                    # 🚨 Facet_row를 사용하여 슬롯별로 그래프 층을 나눔
+                    fig_sig = px.line(
+                        df_sig,
+                        x="time",
+                        y="Level",
+                        color="Slot",
+                        facet_row="Slot",
+                        line_shape="hv",  # 계단식 그래프
+                        markers=True,     # 각 변화 시점에 점 찍기
+                        title="📶 시간대 및 슬롯별 안테나 수신 레벨 변화 (0~5)",
+                        labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯"},
+                        hover_data=["Info"], # 툴팁에 세부 정보 표시
+                        height=500
+                    )
+
+                    # 🚨 가장 중요한 부분: Y축을 0칸에서 5칸으로 딱 고정!
+                    # facet_row를 쓰면 Y축이 여러 개 생기므로 모두 고정해줘야 합니다.
+                    fig_sig.update_yaxes(
+                        range=[-0.5, 5.5],
+                        dtick=1,
+                        title_text="안테나 칸"
+                    )
+
+                    # Facet 라벨을 깔끔하게 'Slot 0', 'Slot 1' 로만 표시
+                    fig_sig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+
+                    st.plotly_chart(fig_sig, use_container_width=True, key=f"sig_chart_{msg_idx}")
 
             # 🔎 [참고 로그 렌더링]
             if "references" in msg and msg["references"]:

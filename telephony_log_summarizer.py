@@ -61,6 +61,8 @@ class TelephonyLogSummarizer:
         )
         # 🚨 [신규 추가] Boot Stat 파싱용 정규식 (!@Boot로 시작하고 뒤에 숫자 3개가 띄어쓰기로 있는 패턴)
         self.re_boot_event = re.compile(r'^(!@Boot.*?)\s+(\d+)\s+(\d+)\s+(\d+)$', re.I)
+        # [신규 추가] 안테나 레벨 파싱용 정규식
+        self.re_signal_level = re.compile(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\] EVENT_SIGNAL_LEVEL_INFO_CHANGED - SignalBarInfo\{\s*(.*?)\s*\}')
 
         self.valid_tags = {
             'RILD', 'RILD2', 'RILJ', 'IPF', 'IMS', 'VoLTE', 'SST', 'ServiceState',
@@ -171,6 +173,34 @@ class TelephonyLogSummarizer:
                         "Delta_ms": int(match.group(4))
                     })
         return boot_events
+
+    def analyze_signal_level(self, lines):
+        history = []
+        for line in lines:
+            if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
+                m = self.re_signal_level.search(line)
+                if m:
+                    time_str = m.group(1)
+                    slot = m.group(2)
+                    info = m.group(3).strip() # 예: "lteLevel=2 nrLevel=2"
+
+                    levels = {}
+                    for item in info.split():
+                        if '=' in item:
+                            k, v = item.split('=')
+                            try: levels[k] = int(v)
+                            except: pass
+
+                    if levels:
+                        # UI 표출용 대표 레벨 (가장 높은 값 기준)
+                        max_level = max(levels.values())
+                        history.append({
+                            "time": time_str,
+                            "slot": slot,
+                            "max_level": max_level,
+                            "raw_info": info
+                        })
+        return history
 
     def analyze_radio_power(self, lines):
         requests = {}
@@ -606,6 +636,11 @@ class TelephonyLogSummarizer:
             if mode in ['all']:
                 boot_res = self.analyze_boot_stat(lines)
                 if boot_res: result['boot_stats'] = boot_res
+
+            # 🚨 [신규 추가] 안테나 레벨 파싱 실행
+            if mode in ['all']:
+                sig_res = self.analyze_signal_level(lines)
+                if sig_res: result['signal_level_history'] = sig_res
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)

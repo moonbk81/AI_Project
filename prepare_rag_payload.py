@@ -22,15 +22,6 @@ class RagPayloadBuilder:
             else:
                 lines.append(f"- {key}: {value}")
 
-        # ==========================================
-        # [핵심 추가 1] LLM이 읽을 본문에 교차 로그 삽입
-        # ==========================================
-        # if "cross_context_logs" in data_dict and data_dict["cross_context_logs"]:
-        #     lines.append("\n[동시간대 타 버퍼(Main/System) 교차 로그]")
-        #     # 토큰 절약을 위해 교차 로그 중 최대 50줄만 LLM에게 제공 (핵심 에러 파악용)
-        #     cross_summary = data_dict["cross_context_logs"][:50]
-        #     lines.extend(cross_summary)
-
         return "\n".join(lines)
 
     def _extract_metadata(self, data_dict, log_type):
@@ -76,8 +67,15 @@ class RagPayloadBuilder:
         # 🚨 [여기 한 줄 추가!] Boot_Stat의 Time_ms도 표준 time으로 인식하게 함
         elif data_dict.get("Time_ms") is not None: metadata["time"] = data_dict.get("Time_ms")
 
+
         if data_dict.get("slot"): metadata["slot"] = data_dict.get("slot")
         elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
+
+        # 🚨 [여기 추가!] Signal_Level 전용 메타데이터 통과시키기
+        if data_dict.get("max_level") is not None:
+            metadata["max_level"] = data_dict.get("max_level")
+        if data_dict.get("raw_info"):
+            metadata["raw_info"] = data_dict.get("raw_info")
 
         return metadata
 
@@ -127,6 +125,11 @@ class RagPayloadBuilder:
         if "boot_stats" in report_data:
             for boot_stat in report_data["boot_stats"]:
                 add_to_payload(boot_stat, "Boot_Stat")
+
+        if "signal_level_history" in report_data:
+            for sig in report_data["signal_level_history"]:
+                # 만약 기존에 만들어둔 add_to_payload 함수가 있다면:
+                add_to_payload(sig, "Signal_Level")
 
         if "network_timeseries" in report_data:
             net_data = report_data["network_timeseries"]
