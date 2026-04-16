@@ -72,8 +72,10 @@ class RagPayloadBuilder:
         elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
 
         # 🚨 [여기 추가!] Signal_Level 전용 메타데이터 통과시키기
-        if data_dict.get("max_level") is not None:
-            metadata["max_level"] = data_dict.get("max_level")
+        if data_dict.get("rat") is not None:
+            metadata["rat"] = data_dict.get("rat")
+        if data_dict.get("level") is not None:
+            metadata["level"] = data_dict.get("level")
         if data_dict.get("raw_info"):
             metadata["raw_info"] = data_dict.get("raw_info")
 

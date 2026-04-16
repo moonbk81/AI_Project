@@ -50,6 +50,11 @@ class RilRagChat:
                 "Network_DNS_Issue": (
                     "- [Network_DNS_Issue (긴급)]: 앱이 차단된 원인을 '이론'이 아닌 '팩트'로 말해라.\n"
                     "- effective_policy가 BATTERY_SAVER라면 '절전 모드 때문'이라고 한 줄로 요약해라."
+                ),
+                "Signal_Level": (
+                    "- [Signal_Level]: Slot별 안테나 수신 레벨(0~5)의 시간대별 변화를 분석해라.\n"
+                    "- 수신 레벨이 0이나 1로 뚝 떨어지는 지점을 찾아내어 '음영/수신 저하 구간'으로 팩트만 보고해라.\n"
+                    "- 절대 OOS 로그와 헷갈리지 마라."
                 )
             }
         }

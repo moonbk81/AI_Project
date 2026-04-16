@@ -366,23 +366,19 @@ with tab_chat:
                             })
                     if meta.get('log_type') == 'Signal_Level':
                         # meta에 값이 제대로 있는지 방어 로직 추가
-                        time_val = meta.get('time')
-                        slot_val = meta.get('slot', '0')
-                        level_val = meta.get('max_level')
-                        raw_info = meta.get('raw_info', '')
+                        lvl = meta.get('level')
+                        rt = meta.get('rat', 'Unknown')
+                        sl = meta.get('slot', '0')
+                        tm = meta.get('time')
 
-                        if time_val and level_val is not None:
-                            try:
-                                # level 값이 문자열로 들어올 수 있으므로 정수 변환
-                                level_int = int(level_val)
-                                sig_history.append({
-                                    "time": time_val,
-                                    "Slot": f"Slot {slot_val}",
-                                    "Level": level_int,
-                                    "Info": raw_info
-                                })
-                            except ValueError:
-                                pass # level_val이 이상한 값이면 건너뜀
+                        if tm and lvl is not None:
+                            sig_history.append({
+                                "time": tm,
+                                "Slot": f"Slot {sl}",
+                                "RAT": str(rt),
+                                "Level": int(lvl),
+                                "Info": meta.get('raw_info', '')
+                            })
 
                 # 🚨 [신규 추가] 수집된 OOS 데이터가 있다면 그래프 그리기!
                 if reg_history:
@@ -413,36 +409,28 @@ with tab_chat:
                     st.plotly_chart(fig_reg, use_container_width=True, key=f"reg_chart_{msg_idx}")
 
                 if sig_history:
-                    # 시간순 및 슬롯별로 정렬
-                    df_sig = pd.DataFrame(sig_history).sort_values(by=["Slot", "time"])
+                    df_sig = pd.DataFrame(sig_history).sort_values(["Slot", "RAT", "time"])
 
-                    # 🚨 Facet_row를 사용하여 슬롯별로 그래프 층을 나눔
+                    # 채팅창 너비에 맞춰 최적화된 RAT 멀티 라인 차트
                     fig_sig = px.line(
-                        df_sig,
-                        x="time",
-                        y="Level",
-                        color="Slot",
+                        df_sig, x="time", y="Level", color="RAT",
                         facet_row="Slot",
-                        line_shape="hv",  # 계단식 그래프
-                        markers=True,     # 각 변화 시점에 점 찍기
-                        title="📶 시간대 및 슬롯별 안테나 수신 레벨 변화 (0~5)",
-                        labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯"},
-                        hover_data=["Info"], # 툴팁에 세부 정보 표시
-                        height=500
+                        line_shape="hv",
+                        markers=len(df_sig) < 30, # 채팅창은 30개 넘어가면 마커 숨김
+                        title="📶 실시간 안테나 수신 레벨 분석 (RAT별)",
+                        labels={"Level": "레벨", "time": "시간"},
+                        hover_data=["Info"],
+                        height=450
                     )
 
-                    # 🚨 가장 중요한 부분: Y축을 0칸에서 5칸으로 딱 고정!
-                    # facet_row를 쓰면 Y축이 여러 개 생기므로 모두 고정해줘야 합니다.
-                    fig_sig.update_yaxes(
-                        range=[-0.5, 5.5],
-                        dtick=1,
-                        title_text="안테나 칸"
-                    )
-
-                    # Facet 라벨을 깔끔하게 'Slot 0', 'Slot 1' 로만 표시
+                    # 채팅창용 디자인 적용
+                    fig_sig.update_traces(line=dict(width=2), opacity=0.85)
+                    fig_sig.update_layout(hovermode="x unified")
+                    fig_sig.update_xaxes(nticks=10, tickangle=-45) # 채팅창은 좁으니 눈금 10개만
+                    fig_sig.update_yaxes(range=[-0.5, 5.5], dtick=1)
                     fig_sig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
 
-                    st.plotly_chart(fig_sig, use_container_width=True, key=f"sig_chart_{msg_idx}")
+                    st.plotly_chart(fig_sig, use_container_width=True, key=f"chat_sig_{msg_idx}")
 
             # 🔎 [참고 로그 렌더링]
             if "references" in msg and msg["references"]:
@@ -674,6 +662,77 @@ with tab_dash:
                         st.plotly_chart(fig_ts, use_container_width=True)
                     else:
                         st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
+
+                # ==========================================
+                # 📶 [수정됨] 전체 RAT별 안테나(Signal) 레벨 타임라인 (에러 방어 로직 추가)
+                # ==========================================
+                st.divider()
+                st.subheader("📶 RAT별 안테나 수신 레벨 타임라인")
+
+                if 'log_type' in df.columns:
+                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
+
+                    if not sig_df.empty:
+                        # 🚨 [방어 로직] DB에 아직 옛날 데이터(max_level)가 남아있다면 level로 복사해줌
+                        if 'level' not in sig_df.columns and 'max_level' in sig_df.columns:
+                            sig_df['level'] = sig_df['max_level']
+                        # 🚨 [방어 로직] rat 컬럼이 아예 없다면 Unknown으로 채워줌
+                        if 'rat' not in sig_df.columns:
+                            sig_df['rat'] = 'Unknown'
+
+                        # level 컬럼이 확실히 존재하는지 확인 후 진행
+                        if 'level' in sig_df.columns:
+                            sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
+                            sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
+                            sig_df['RAT'] = sig_df['rat'].astype(str)
+
+                            # 정렬
+                            sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
+
+                            # 1. 차트 기본 렌더링 (데이터가 50개 이상이면 징그러운 마커 숨김)
+                            fig_sig_dash = px.line(
+                                sig_df,
+                                x='time',
+                                y='Level',
+                                color='RAT',
+                                facet_row='Slot',
+                                line_shape='hv',
+                                markers=len(sig_df) < 50, # 🚨 핵심: 데이터가 많으면 점(마커) 제거
+                                title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
+                                labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
+                                hover_data=['raw_info'],
+                                height=600
+                            )
+
+                            # 2. 선명도 및 겹침 완화 (선 굵기 얇게, 살짝 투명하게)
+                            fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
+
+                            # 3. 🚨 X축 최적화 (시간 텍스트 떡짐 방지)
+                            fig_sig_dash.update_xaxes(
+                                nticks=15,             # 시간 눈금을 최대 15개로 제한하여 시원하게 배치
+                                tickangle=-45,         # 글자를 45도 기울여서 가독성 확보
+                                showgrid=True,
+                                gridcolor='rgba(128,128,128,0.2)'
+                            )
+
+                            # 4. Y축 최적화
+                            fig_sig_dash.update_yaxes(
+                                range=[-0.5, 5.5],
+                                dtick=1,
+                                title_text="안테나 칸",
+                                showgrid=True,
+                                gridcolor='rgba(128,128,128,0.2)'
+                            )
+
+                            # 5. UI 편의성 (마우스 올리면 같은 시간대의 LTE, NR 값을 한 툴팁에 모아서 보여줌)
+                            fig_sig_dash.update_layout(hovermode="x unified")
+                            fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+
+                            st.plotly_chart(fig_sig_dash, use_container_width=True)
+                        else:
+                            st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
+                    else:
+                        st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
 
             else:
                 st.warning("데이터 형식이 올바르지 않습니다.")

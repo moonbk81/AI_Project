@@ -184,22 +184,31 @@ class TelephonyLogSummarizer:
                     slot = m.group(2)
                     info = m.group(3).strip() # 예: "lteLevel=2 nrLevel=2"
 
-                    levels = {}
-                    for item in info.split():
-                        if '=' in item:
-                            k, v = item.split('=')
-                            try: levels[k] = int(v)
-                            except: pass
-
-                    if levels:
-                        # UI 표출용 대표 레벨 (가장 높은 값 기준)
-                        max_level = max(levels.values())
+                    # 🚨 "no level" 인 경우 RAT를 'NO_SVC'로 지정하여 0칸 처리
+                    if "no level" in info.lower():
                         history.append({
                             "time": time_str,
                             "slot": slot,
-                            "max_level": max_level,
+                            "rat": "NO_SVC",
+                            "level": 0,
                             "raw_info": info
                         })
+                    else:
+                        # 🚨 띄어쓰기로 쪼갠 뒤, 각각의 RAT(lte, nr, wcdma 등)별로 기록
+                        for item in info.split():
+                            if '=' in item:
+                                k, v = item.split('=')
+                                # 'lteLevel' -> 'LTE', 'nrLevel' -> 'NR' 로 깔끔하게 변환
+                                rat_name = k.replace('Level', '').upper()
+                                try:
+                                    history.append({
+                                        "time": time_str,
+                                        "slot": slot,
+                                        "rat": rat_name,
+                                        "level": int(v),
+                                        "raw_info": info
+                                    })
+                                except: pass
         return history
 
     def analyze_radio_power(self, lines):
