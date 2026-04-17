@@ -752,9 +752,8 @@ with tab_boot:
 
         if st.button("🏁 부팅 로그 추출 및 성능 시각화 실행"):
             with st.spinner("부팅 로그를 수집하여 분석 중입니다..."):
-                # 1. RAG 엔진 호출 (필터망이 작동하도록 '부팅' 키워드 포함)
-                _, _, metas = engine.ask("부팅 시퀀스 로그 모두 추출해줘", current_file=current_target, top_k=25)
-
+                db_results = engine.collection.get(where={"source_file": current_target})
+                metas = db_results.get("metadatas", [])
                 # 2. 낡은 파싱 로직 싹 제거! 엔진이 가져온 metas를 그대로 던져줍니다.
                 analyzer = BootStatAnalyzer(metas)
 
