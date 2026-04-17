@@ -60,7 +60,7 @@ class TelephonyLogSummarizer:
             r'(?P<content>.*)'
         )
         # 🚨 [신규 추가] Boot Stat 파싱용 정규식 (!@Boot로 시작하고 뒤에 숫자 3개가 띄어쓰기로 있는 패턴)
-        self.re_boot_event = re.compile(r'^(!@Boot.*?)\s+(\d+)\s+(\d+)\s+(\d+)$', re.I)
+        self.re_boot_event = re.compile(r'^((!@Boot:|!@Boot_SVC|!@Boot_DEBUG).*?)\s+(\d+)\s+(\d+)\s+(\d+)', re.I)
         # [신규 추가] 안테나 레벨 파싱용 정규식
         self.re_signal_level = re.compile(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\] EVENT_SIGNAL_LEVEL_INFO_CHANGED - SignalBarInfo\{\s*(.*?)\s*\}')
 
@@ -168,9 +168,9 @@ class TelephonyLogSummarizer:
                 if match:
                     boot_events.append({
                         "Event": match.group(1).strip(),
-                        "Time_ms": int(match.group(2)),
-                        "Ktime_ms": int(match.group(3)),
-                        "Delta_ms": int(match.group(4))
+                        "Time_ms": int(match.group(3)),
+                        "Ktime_ms": int(match.group(4)),
+                        "Delta_ms": int(match.group(5))
                     })
         return boot_events
 

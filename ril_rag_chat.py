@@ -142,7 +142,7 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None, chat_history=None):
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=20):
          # 1. 🚨 질문 임베딩 생성 (짧은 후속 질문 대응력 강화)
         search_query = user_query
         if len(user_query) < 15 and chat_history:
@@ -200,7 +200,7 @@ class RilRagChat:
         # 3. Vector DB 검색 실행
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=20,
+            n_results=top_k,
             where=where_filter
         )
 

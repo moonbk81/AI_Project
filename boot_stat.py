@@ -23,7 +23,7 @@ class BootStatAnalyzer:
             row = self.df[self.df['Event'].str.contains(kw, case=False, na=False)]
             return int(row.iloc[0]['Time_ms']) if not row.empty else None
 
-        start_t = get_t('Bootloader start')
+        start_t = get_t('start init process')
         v_ready = get_t('Voice SVC is acquired')
         d_ready = get_t('Data SVC is acquired')
 
