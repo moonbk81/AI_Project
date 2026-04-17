@@ -560,179 +560,179 @@ with tab_dash:
                     else:
                         st.info("파일 이름 데이터가 없습니다.")
 
-                st.divider()
-
-                st.subheader("💡 사내 지식 베이스 (해결 사례 모음)")
-                if 'known_solution' in df.columns:
-                    solution_df = df.dropna(subset=['known_solution'])[['source_file', 'log_type', 'known_solution']]
-                    if not solution_df.empty:
-                        st.dataframe(solution_df, use_container_width=True)
-                    else:
-                        st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
-                else:
-                    st.info("알려진 솔루션 데이터 필드가 없습니다.")
-
-                # ==========================================
-                # 📞 [신규 추가] 전체 통화 세션(Call History) 분석
-                # ==========================================
-                st.divider()
-                st.subheader("📞 전체 통화 세션 (Call History) 요약")
-
-                if 'log_type' in df.columns:
-                    # 1. 'Call_Session' 데이터만 필터링
-                    call_df = df[df['log_type'] == 'Call_Session']
-
-                    if not call_df.empty:
-                        # 2. 화면에 보여줄 핵심 컬럼만 추출 (DB에 존재하는 컬럼만 안전하게 선택)
-                        display_cols = []
-                        for col in ['time', 'slot', 'status', 'fail_reason', 'call_id', 'source_file']:
-                            if col in call_df.columns:
-                                display_cols.append(col)
-
-                        # 3. 데이터 결측치(NaN)를 깔끔하게 "-"로 치환하고 최신 시간순 정렬
-                        clean_call_df = call_df[display_cols].fillna("-").sort_values(by='time', ascending=False)
-
-                        # 4. 차트와 표를 나란히 배치
-                        col_chart, col_table = st.columns([1, 2])
-
-                        with col_chart:
-                            st.markdown("**📊 통화 상태(Status) 비율**")
-                            if 'status' in call_df.columns:
-                                fig_call = px.pie(
-                                    call_df, names='status', hole=0.4,
-                                    title="전체 Call 성공/실패 분포"
-                                )
-                                st.plotly_chart(fig_call, use_container_width=True)
-                            else:
-                                st.info("상태(status) 데이터가 없습니다.")
-
-                        with col_table:
-                            st.markdown(f"**📋 전체 통화 이력 (총 {len(clean_call_df)}건)**")
-                            # 엑셀처럼 정렬, 검색, 스크롤이 가능한 강력한 데이터프레임 UI 제공
-                            st.dataframe(clean_call_df, use_container_width=True, height=400)
-                    else:
-                        st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
-
-                st.divider()
-                st.subheader("🌐 DNS 및 네트워크 시계열 분석")
-
-                if 'log_type' in df.columns:
-                    dns_df = df[df['log_type'] == 'Network_DNS_Issue']
-                    if not dns_df.empty:
-                        col_dns1, col_dns2 = st.columns(2)
-                        with col_dns1:
-                            st.markdown("**🚫 DNS 차단/실패 사유**")
-                            fig_dns = px.pie(dns_df, names='suspected_reason', hole=0.4)
-                            st.plotly_chart(fig_dns, use_container_width=True)
-                        with col_dns2:
-                            st.markdown("**📦 패키지별 DNS 이슈 발생 건수**")
-                            pkg_counts = dns_df['package'].value_counts().reset_index()
-                            fig_pkg = px.bar(pkg_counts, x='count', y='package', orientation='h')
-                            st.plotly_chart(fig_pkg, use_container_width=True)
-                    else:
-                        st.info("적재된 DNS 이슈 데이터가 없습니다.")
-
-                    # 1. 시계열 데이터 필터링
-                    ts_df = df[df['log_type'] == 'Network_Timeline_Stat']
-
-                    if not ts_df.empty:
-                        # 데이터 타입 변환 (차트 정렬을 위해)
-                        ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
-                        ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
-                        ts_df = ts_df.sort_values(by='time')
-
-                        # 2. 지표 선택 UI
-                        metric_choice = st.selectbox("확인할 지표 선택", ["DNS 평균 응답 시간(ms)", "DNS 에러율(%)"])
-
-                        target_col = 'dns_avg' if "응답 시간" in metric_choice else 'dns_err_rate'
-
-                        # 3. Plotly 시계열 그래프 생성
-                        fig_ts = px.line(
-                            ts_df,
-                            x='time',
-                            y=target_col,
-                            color='netId', # NetId별로 선 색상 구분 (Wi-Fi vs Cellular)
-                            hover_data=['transport'],
-                            markers=True,
-                            title=f"시간대별 {metric_choice} 변화"
-                        )
-
-                        # 차트 레이아웃 최적화
-                        fig_ts.update_layout(xaxis_title="발생 시간", yaxis_title="수치")
-                        st.plotly_chart(fig_ts, use_container_width=True)
-                    else:
-                        st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
-
-                # ==========================================
-                # 📶 [수정됨] 전체 RAT별 안테나(Signal) 레벨 타임라인 (에러 방어 로직 추가)
-                # ==========================================
-                st.divider()
-                st.subheader("📶 RAT별 안테나 수신 레벨 타임라인")
-
-                if 'log_type' in df.columns:
-                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-
-                    if not sig_df.empty:
-                        # 🚨 [방어 로직] DB에 아직 옛날 데이터(max_level)가 남아있다면 level로 복사해줌
-                        if 'level' not in sig_df.columns and 'max_level' in sig_df.columns:
-                            sig_df['level'] = sig_df['max_level']
-                        # 🚨 [방어 로직] rat 컬럼이 아예 없다면 Unknown으로 채워줌
-                        if 'rat' not in sig_df.columns:
-                            sig_df['rat'] = 'Unknown'
-
-                        # level 컬럼이 확실히 존재하는지 확인 후 진행
-                        if 'level' in sig_df.columns:
-                            sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
-                            sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
-                            sig_df['RAT'] = sig_df['rat'].astype(str)
-
-                            # 정렬
-                            sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
-
-                            # 1. 차트 기본 렌더링 (데이터가 50개 이상이면 징그러운 마커 숨김)
-                            fig_sig_dash = px.line(
-                                sig_df,
-                                x='time',
-                                y='Level',
-                                color='RAT',
-                                facet_row='Slot',
-                                line_shape='hv',
-                                markers=len(sig_df) < 50, # 🚨 핵심: 데이터가 많으면 점(마커) 제거
-                                title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
-                                labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
-                                hover_data=['raw_info'],
-                                height=600
-                            )
-
-                            # 2. 선명도 및 겹침 완화 (선 굵기 얇게, 살짝 투명하게)
-                            fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
-
-                            # 3. 🚨 X축 최적화 (시간 텍스트 떡짐 방지)
-                            fig_sig_dash.update_xaxes(
-                                nticks=15,             # 시간 눈금을 최대 15개로 제한하여 시원하게 배치
-                                tickangle=-45,         # 글자를 45도 기울여서 가독성 확보
-                                showgrid=True,
-                                gridcolor='rgba(128,128,128,0.2)'
-                            )
-
-                            # 4. Y축 최적화
-                            fig_sig_dash.update_yaxes(
-                                range=[-0.5, 5.5],
-                                dtick=1,
-                                title_text="안테나 칸",
-                                showgrid=True,
-                                gridcolor='rgba(128,128,128,0.2)'
-                            )
-
-                            # 5. UI 편의성 (마우스 올리면 같은 시간대의 LTE, NR 값을 한 툴팁에 모아서 보여줌)
-                            fig_sig_dash.update_layout(hovermode="x unified")
-                            fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-
-                            st.plotly_chart(fig_sig_dash, use_container_width=True)
+                if view_mode == "현재 활성 파일만":
+                    st.divider()
+                    st.subheader("💡 사내 지식 베이스 (해결 사례 모음)")
+                    if 'known_solution' in df.columns:
+                        solution_df = df.dropna(subset=['known_solution'])[['source_file', 'log_type', 'known_solution']]
+                        if not solution_df.empty:
+                            st.dataframe(solution_df, use_container_width=True)
                         else:
-                            st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
+                            st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
                     else:
-                        st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
+                        st.info("알려진 솔루션 데이터 필드가 없습니다.")
+
+                    # ==========================================
+                    # 📞 [신규 추가] 전체 통화 세션(Call History) 분석
+                    # ==========================================
+                    st.divider()
+                    st.subheader("📞 전체 통화 세션 (Call History) 요약")
+
+                    if 'log_type' in df.columns:
+                        # 1. 'Call_Session' 데이터만 필터링
+                        call_df = df[df['log_type'] == 'Call_Session']
+
+                        if not call_df.empty:
+                            # 2. 화면에 보여줄 핵심 컬럼만 추출 (DB에 존재하는 컬럼만 안전하게 선택)
+                            display_cols = []
+                            for col in ['time', 'slot', 'status', 'fail_reason', 'call_id', 'source_file']:
+                                if col in call_df.columns:
+                                    display_cols.append(col)
+
+                            # 3. 데이터 결측치(NaN)를 깔끔하게 "-"로 치환하고 최신 시간순 정렬
+                            clean_call_df = call_df[display_cols].fillna("-").sort_values(by='time', ascending=False)
+
+                            # 4. 차트와 표를 나란히 배치
+                            col_chart, col_table = st.columns([1, 2])
+
+                            with col_chart:
+                                st.markdown("**📊 통화 상태(Status) 비율**")
+                                if 'status' in call_df.columns:
+                                    fig_call = px.pie(
+                                        call_df, names='status', hole=0.4,
+                                        title="전체 Call 성공/실패 분포"
+                                    )
+                                    st.plotly_chart(fig_call, use_container_width=True)
+                                else:
+                                    st.info("상태(status) 데이터가 없습니다.")
+
+                            with col_table:
+                                st.markdown(f"**📋 전체 통화 이력 (총 {len(clean_call_df)}건)**")
+                                # 엑셀처럼 정렬, 검색, 스크롤이 가능한 강력한 데이터프레임 UI 제공
+                                st.dataframe(clean_call_df, use_container_width=True, height=400)
+                        else:
+                            st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
+
+                    st.divider()
+                    st.subheader("🌐 DNS 및 네트워크 시계열 분석")
+
+                    if 'log_type' in df.columns:
+                        dns_df = df[df['log_type'] == 'Network_DNS_Issue']
+                        if not dns_df.empty:
+                            col_dns1, col_dns2 = st.columns(2)
+                            with col_dns1:
+                                st.markdown("**🚫 DNS 차단/실패 사유**")
+                                fig_dns = px.pie(dns_df, names='suspected_reason', hole=0.4)
+                                st.plotly_chart(fig_dns, use_container_width=True)
+                            with col_dns2:
+                                st.markdown("**📦 패키지별 DNS 이슈 발생 건수**")
+                                pkg_counts = dns_df['package'].value_counts().reset_index()
+                                fig_pkg = px.bar(pkg_counts, x='count', y='package', orientation='h')
+                                st.plotly_chart(fig_pkg, use_container_width=True)
+                        else:
+                            st.info("적재된 DNS 이슈 데이터가 없습니다.")
+
+                        # 1. 시계열 데이터 필터링
+                        ts_df = df[df['log_type'] == 'Network_Timeline_Stat']
+
+                        if not ts_df.empty:
+                            # 데이터 타입 변환 (차트 정렬을 위해)
+                            ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
+                            ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
+                            ts_df = ts_df.sort_values(by='time')
+
+                            # 2. 지표 선택 UI
+                            metric_choice = st.selectbox("확인할 지표 선택", ["DNS 평균 응답 시간(ms)", "DNS 에러율(%)"])
+
+                            target_col = 'dns_avg' if "응답 시간" in metric_choice else 'dns_err_rate'
+
+                            # 3. Plotly 시계열 그래프 생성
+                            fig_ts = px.line(
+                                ts_df,
+                                x='time',
+                                y=target_col,
+                                color='netId', # NetId별로 선 색상 구분 (Wi-Fi vs Cellular)
+                                hover_data=['transport'],
+                                markers=True,
+                                title=f"시간대별 {metric_choice} 변화"
+                            )
+
+                            # 차트 레이아웃 최적화
+                            fig_ts.update_layout(xaxis_title="발생 시간", yaxis_title="수치")
+                            st.plotly_chart(fig_ts, use_container_width=True)
+                        else:
+                            st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
+
+                    # ==========================================
+                    # 📶 [수정됨] 전체 RAT별 안테나(Signal) 레벨 타임라인 (에러 방어 로직 추가)
+                    # ==========================================
+                    st.divider()
+                    st.subheader("📶 RAT별 안테나 수신 레벨 타임라인")
+
+                    if 'log_type' in df.columns:
+                        sig_df = df[df['log_type'] == 'Signal_Level'].copy()
+
+                        if not sig_df.empty:
+                            # 🚨 [방어 로직] DB에 아직 옛날 데이터(max_level)가 남아있다면 level로 복사해줌
+                            if 'level' not in sig_df.columns and 'max_level' in sig_df.columns:
+                                sig_df['level'] = sig_df['max_level']
+                            # 🚨 [방어 로직] rat 컬럼이 아예 없다면 Unknown으로 채워줌
+                            if 'rat' not in sig_df.columns:
+                                sig_df['rat'] = 'Unknown'
+
+                            # level 컬럼이 확실히 존재하는지 확인 후 진행
+                            if 'level' in sig_df.columns:
+                                sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
+                                sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
+                                sig_df['RAT'] = sig_df['rat'].astype(str)
+
+                                # 정렬
+                                sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
+
+                                # 1. 차트 기본 렌더링 (데이터가 50개 이상이면 징그러운 마커 숨김)
+                                fig_sig_dash = px.line(
+                                    sig_df,
+                                    x='time',
+                                    y='Level',
+                                    color='RAT',
+                                    facet_row='Slot',
+                                    line_shape='hv',
+                                    markers=len(sig_df) < 50, # 🚨 핵심: 데이터가 많으면 점(마커) 제거
+                                    title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
+                                    labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
+                                    hover_data=['raw_info'],
+                                    height=600
+                                )
+
+                                # 2. 선명도 및 겹침 완화 (선 굵기 얇게, 살짝 투명하게)
+                                fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
+
+                                # 3. 🚨 X축 최적화 (시간 텍스트 떡짐 방지)
+                                fig_sig_dash.update_xaxes(
+                                    nticks=15,             # 시간 눈금을 최대 15개로 제한하여 시원하게 배치
+                                    tickangle=-45,         # 글자를 45도 기울여서 가독성 확보
+                                    showgrid=True,
+                                    gridcolor='rgba(128,128,128,0.2)'
+                                )
+
+                                # 4. Y축 최적화
+                                fig_sig_dash.update_yaxes(
+                                    range=[-0.5, 5.5],
+                                    dtick=1,
+                                    title_text="안테나 칸",
+                                    showgrid=True,
+                                    gridcolor='rgba(128,128,128,0.2)'
+                                )
+
+                                # 5. UI 편의성 (마우스 올리면 같은 시간대의 LTE, NR 값을 한 툴팁에 모아서 보여줌)
+                                fig_sig_dash.update_layout(hovermode="x unified")
+                                fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+
+                                st.plotly_chart(fig_sig_dash, use_container_width=True)
+                            else:
+                                st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
+                        else:
+                            st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
 
             else:
                 st.warning("데이터 형식이 올바르지 않습니다.")
