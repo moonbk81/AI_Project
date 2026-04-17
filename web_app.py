@@ -733,6 +733,48 @@ with tab_dash:
                                 st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
                         else:
                             st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
+                    # ==========================================
+                    # 📊 앱 및 RAT별 데이터 사용량 분석
+                    # ==========================================
+                    st.divider()
+                    st.subheader("📊 셀룰러 데이터 사용량 프로파일링")
+
+                    if 'log_type' in df.columns:
+                        # Data_Usage 로그만 추출
+                        du_df = df[df['log_type'] == 'Data_Usage'].copy()
+
+                        if not du_df.empty:
+                            du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
+
+                            col_du1, col_du2 = st.columns(2)
+
+                            with col_du1:
+                                # 앱별 총합 계산
+                                app_df = du_df.groupby('app_name')['total_mb'].sum().reset_index()
+                                app_df = app_df.sort_values(by='total_mb', ascending=False).head(10) # Top 10만 표시
+
+                                fig_app = px.pie(
+                                    app_df, values='total_mb', names='app_name', hole=0.4,
+                                    title='📱 앱별 데이터 사용량 Top 10 (MB)',
+                                    hover_data=['total_mb'], labels={'total_mb':'사용량(MB)'}
+                                )
+                                fig_app.update_traces(textposition='inside', textinfo='percent+label')
+                                st.plotly_chart(fig_app, use_container_width=True)
+
+                            with col_du2:
+                                # 망(RAT)별 총합 계산
+                                rat_df = du_df.groupby('rat')['total_mb'].sum().reset_index()
+
+                                fig_rat = px.pie(
+                                    rat_df, values='total_mb', names='rat',
+                                    title='📶 통신망(RAT)별 데이터 처리 비중',
+                                    color='rat',
+                                    color_discrete_map={'LTE':'#1f77b4', '5G (NR)':'#ff7f0e', 'Unknown (망 통합 합산)':'#7f7f7f'}
+                                )
+                                fig_rat.update_traces(textposition='inside', textinfo='percent+label')
+                                st.plotly_chart(fig_rat, use_container_width=True)
+                        else:
+                            st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
 
             else:
                 st.warning("데이터 형식이 올바르지 않습니다.")

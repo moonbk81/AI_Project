@@ -171,6 +171,24 @@ class RagPayloadBuilder:
                     summary = {"timeline_count": len(net_data["sorted_timeline"]), "device_config": net_data.get("device_config")}
                     add_to_payload(summary, "Network_Timeline_Summary")
 
+        # 🚨 [신규] 데이터 사용량 통계 페이로드 변환
+        if "data_usage_stats" in report_data:
+            for usage in report_data["data_usage_stats"]:
+                # 0.1 MB 이하는 너무 자잘해서 DB 용량만 차지하므로 스킵 (선택사항)
+                if usage.get("total_mb", 0) < 0.1: continue
+
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Data_Usage",
+                    "app_name": usage.get("app_name", "Unknown"),
+                    "rat": usage.get("rat", "Unknown"),
+                    "total_mb": usage.get("total_mb", 0.0),
+                    "rx_mb": usage.get("rx_mb", 0.0),
+                    "tx_mb": usage.get("tx_mb", 0.0)
+                }
+                text_content = f"데이터 사용량 기록: {meta['app_name']} 앱이 {meta['rat']} 망에서 총 {meta['total_mb']} MB의 셀룰러 데이터를 사용했습니다. (다운로드: {meta['rx_mb']} MB, 업로드: {meta['tx_mb']} MB)"
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
         os.makedirs(payload_dir, exist_ok=True)

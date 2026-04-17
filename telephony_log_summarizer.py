@@ -64,6 +64,12 @@ class TelephonyLogSummarizer:
         # [신규 추가] 안테나 레벨 파싱용 정규식
         self.re_signal_level = re.compile(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\] EVENT_SIGNAL_LEVEL_INFO_CHANGED - SignalBarInfo\{\s*(.*?)\s*\}')
 
+        # [신규 추가] Netstats (데이터 사용량) 파싱용 정규식
+        # 셀룰러(transports={0})이고 과금(metered=true)되는 식별자에서 UID 추출
+        self.re_netstat_ident = re.compile(r'ident=\[\{.*?metered=true.*?transports=\{0\}\}\].*?uid=(-\d+|\d+)')
+        # 데이터 사용량 라인 (rb: Rx Bytes, tb: Tx Bytes) 추출
+        self.re_netstat_bytes = re.compile(r'rb=(\d+)\s+rp=\d+\s+tb=(\d+)')
+
         self.valid_tags = {
             'RILD', 'RILD2', 'RILJ', 'IPF', 'IMS', 'VoLTE', 'SST', 'ServiceState',
             'SignalStrength', 'ServiceStateTracker', 'ImsPhoneCallTracker',
@@ -156,6 +162,77 @@ class TelephonyLogSummarizer:
             if "(" in val and ")" not in val: val += ")"
             return val
         return "Unknown"
+
+    def analyze_data_usage(self, lines):
+        # 🚨 [수정됨] key를 (uid, rat) 튜플로 사용하여 통신망별로 분리해서 저장합니다.
+        usage_by_key = {}
+        current_key = None
+
+        uid_map = {}
+        re_dns_pkg = re.compile(r'DNS Requested by\s+\d+,\s*(\d+)\(([^)]+)\)')
+
+        for line in lines:
+            line_stripped = line.strip()
+
+            # 1. 패키지명 <-> UID 매핑 정보 수집 (Netd 로그 활용)
+            if "NetdEventListenerService" in line_stripped or "DNS Requested by" in line_stripped:
+                m_pkg = re_dns_pkg.search(line_stripped)
+                if m_pkg:
+                    uid_map[m_pkg.group(1)] = m_pkg.group(2)
+
+            # 2. 데이터 사용량 수집 (dumpsys netstats 구역)
+            # 조건: 과금되는(metered=true) 셀룰러(transports={0}) 트래픽
+            if "transports={0}" in line_stripped and "metered=true" in line_stripped:
+                m_uid = re.search(r'uid=(-\d+|\d+)', line_stripped)
+                m_rat = re.search(r'ratType=(-\d+|\d+)', line_stripped)
+
+                if m_uid and m_rat:
+                    uid_val = m_uid.group(1)
+                    rat_val = m_rat.group(1)
+
+                    # 🚨 안드로이드 상수를 친숙한 통신망 이름으로 변환
+                    if rat_val == "13": rat_name = "LTE"
+                    elif rat_val == "20": rat_name = "5G (NR)"
+                    elif rat_val == "-2": rat_name = "Unknown (망 통합 합산)"
+                    else: rat_name = f"RAT_{rat_val}"
+
+                    current_key = (uid_val, rat_name)
+                    if current_key not in usage_by_key:
+                        usage_by_key[current_key] = {"rx_bytes": 0, "tx_bytes": 0}
+                continue
+
+            if current_key and line_stripped.startswith("st="):
+                m_bytes = re.search(r'rb=(\d+)\s+rp=\d+\s+tb=(\d+)', line_stripped)
+                if m_bytes:
+                    usage_by_key[current_key]["rx_bytes"] += int(m_bytes.group(1))
+                    usage_by_key[current_key]["tx_bytes"] += int(m_bytes.group(2))
+
+        # 3. MB 단위 변환 및 리포트 생성
+        report_data = []
+        for (uid, rat), data in usage_by_key.items():
+            total_bytes = data["rx_bytes"] + data["tx_bytes"]
+            if total_bytes > 0:
+                total_mb = round(total_bytes / (1024 * 1024), 2)
+
+                if uid == "-5": app_name = "모바일 핫스팟 (Tethering)"
+                elif uid == "-4": app_name = "삭제된 앱 (Removed)"
+                elif uid == "1000": app_name = "Android System (OS)"
+                elif uid == "0": app_name = "OS Kernel (Root)"
+                elif uid in uid_map: app_name = uid_map[uid]
+                else: app_name = f"App_UID_{uid}"
+
+                report_data.append({
+                    "uid": uid,
+                    "app_name": app_name,
+                    "rat": rat,                 # 🚨 통신망 정보 추가!
+                    "total_mb": total_mb,
+                    "rx_mb": round(data["rx_bytes"] / (1024 * 1024), 2),
+                    "tx_mb": round(data["tx_bytes"] / (1024 * 1024), 2)
+                })
+
+        # 내림차순 정렬
+        report_data.sort(key=lambda x: x["total_mb"], reverse=True)
+        return report_data
 
     # 🚨 [신규 추가] Boot Stat 텍스트를 파싱하여 Dictionary List로 반환
     def analyze_boot_stat(self, lines):
@@ -650,6 +727,10 @@ class TelephonyLogSummarizer:
             if mode in ['all']:
                 sig_res = self.analyze_signal_level(lines)
                 if sig_res: result['signal_level_history'] = sig_res
+
+            if mode in ['all']:
+                net_usage = self.analyze_data_usage(lines)
+                if net_usage: result['data_usage_stats'] = net_usage
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)
