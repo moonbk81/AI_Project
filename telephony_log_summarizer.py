@@ -192,6 +192,8 @@ class TelephonyLogSummarizer:
 
                     # 🚨 안드로이드 상수를 친숙한 통신망 이름으로 변환
                     if rat_val == "13": rat_name = "LTE"
+                    elif rat_val == "16": rat_name = "GSM"
+                    elif rat_val == "3": rat_name = "UMTS"
                     elif rat_val == "20": rat_name = "5G (NR)"
                     elif rat_val == "-2": rat_name = "Unknown (망 통합 합산)"
                     else: rat_name = f"RAT_{rat_val}"
