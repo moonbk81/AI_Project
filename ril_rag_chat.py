@@ -24,7 +24,7 @@ class RilRagChat:
         self.embed_model = SentenceTransformer(embed_model_path)
 
         # 3. LLM 로드 (Gemma-2b)
-        print(f" LLM 연결 준비 중...(Local Ollama - gemma:2b)")
+        print(f" LLM 연결 준비 중...(Local Ollama - gemma:9b)")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
 
         # 4. 동적 프롬프트 관리를 위한 템플릿 딕셔너리
@@ -299,7 +299,8 @@ class RilRagChat:
         # (※ 이 부분은 Mr. 문님의 기존 모델 호출 방식과 동일하게 유지하시면 됩니다.)
         try:
             import ollama
-            res = ollama.chat(model='gemma:2b', messages=[{'role': 'user', 'content':prompt}])
+            llm_model = 'gemma2:9b'
+            res = ollama.chat(model=llm_model, messages=[{'role': 'user', 'content':prompt}])
             answer = res['message']['content']
         except Exception as e:
             answer = f"LLM 답변 생성 중 에러가 발생했습니다: {str(e)}"
