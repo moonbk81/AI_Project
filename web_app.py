@@ -776,6 +776,43 @@ with tab_dash:
                         else:
                             st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
 
+                    st.divider()
+                    st.header("🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)")
+
+                    if st.button("📝 전체 로그 종합 분석 리포트 생성"):
+                        with st.spinner("9B 엔진이 모든 로그의 상관관계를 분석하여 전문 리포트를 작성 중입니다..."):
+                            # 1. 현재 파일의 모든 핵심 로그(Signal, Data_Usage, Call)를 DB에서 긁어옴
+                            # (이미 대시보드용으로 뽑아둔 'df'를 활용하거나, engine.ask를 통해 종합 쿼리)
+
+                            combined_query = """
+                            이 단말의 전반적인 건강 상태를 점검해줘.
+                            1. 신호 세기(Signal Level)의 안정성과 NO_SVC 발생 여부
+                            2. 셀룰러 데이터 사용량이 가장 많은 앱과 그 시점의 망 상태(RAT)
+                            3. 통화 연결 상태 및 드랍(Drop) 이력
+                            위 3가지를 종합해서 배터리 소모나 통신 품질에 대한 엔지니어급 소견을 써줘.
+                            """
+
+                            # 🚨 [여기서부터 수정!] df에서 현재 파일명을 직접 안전하게 추출합니다.
+                            if not df.empty and 'source_file' in df.columns:
+                                actual_file_name = df['source_file'].iloc[0]
+                            else:
+                                actual_file_name = "Unknown" # 혹시 모를 빈 데이터 방어
+                            # 2. RAG 엔진 호출
+                            # report_answer = engine.ask(combined_query, current_file=actual_file_name)
+                            raw_result = engine.ask(combined_query, current_file=actual_file_name)
+
+                            if isinstance(raw_result, (tuple, list)):
+                                report_answer = raw_result[0]
+                            else:
+                                report_answer = raw_result
+
+                            # 3. 결과 출력
+                            st.success("✅ 분석이 완료되었습니다.")
+                            st.markdown(f"""
+                            <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b;">
+                                {report_answer}
+                            </div>
+                            """, unsafe_allow_html=True)
             else:
                 st.warning("데이터 형식이 올바르지 않습니다.")
         else:

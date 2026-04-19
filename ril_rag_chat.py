@@ -295,12 +295,25 @@ class RilRagChat:
 
         print(f"\n[DEBUG] 최종 LLM 프롬프트:\n{prompt}\n")
 
-        # 8. LLM 호출 (Gemma 또는 사용 중인 모델의 API 호출부에 맞게 조정하세요)
-        # (※ 이 부분은 Mr. 문님의 기존 모델 호출 방식과 동일하게 유지하시면 됩니다.)
         try:
             import ollama
             llm_model = 'gemma2:9b'
-            res = ollama.chat(model=llm_model, messages=[{'role': 'user', 'content':prompt}])
+            # 1. 🚨 시스템 롤(페르소나) 정의
+            system_role = """
+            너는 15년 차 안드로이드 통신 프로토콜 및 하드웨어 성능 분석 전문가야.
+            제공되는 로그 데이터를 바탕으로 문제의 '근본 원인(Root Cause)'을 분석하고 엔지니어링 소견을 작성해.
+            답변은 반드시 다음 형식을 지켜:
+            1. 📌 요약: 현재 단말 상태에 대한 한 줄 평
+            2. 🔍 주요 분석: 신호, 데이터, 배터리 등 항목별 분석
+            3. 💡 엔지니어 소견: 원인 추론
+            4. 🚩 권장 사항
+            """
+            # 2. 🚨 messages 배열의 첫 번째에 system 역할로 추가!
+            messages_payload = [
+                {'role': 'system', 'content': system_role},
+                {'role': 'user', 'content': prompt}
+            ]
+            res = ollama.chat(model=llm_model, messages=messages_payload)
             answer = res['message']['content']
         except Exception as e:
             answer = f"LLM 답변 생성 중 에러가 발생했습니다: {str(e)}"
