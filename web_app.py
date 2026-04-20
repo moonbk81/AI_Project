@@ -561,6 +561,80 @@ with tab_dash:
                         st.info("파일 이름 데이터가 없습니다.")
 
                 if view_mode == "현재 활성 파일만":
+                    # web_app.py 내 '현재 활성 파일만' 섹션에 추가 제안
+                    import plotly.graph_objects as go
+
+                    def draw_combined_timeline(df):
+                        fig = go.Figure()
+
+                        # 1. 신호 세기 라인 차트 (Secondary Y-axis)
+                        sig_df = df[df['log_type'] == 'Signal_Level']
+                        fig.add_trace(go.Scatter(x=sig_df['time'], y=sig_df['level'], name="Signal Level", mode='lines+markers'))
+
+                        # 2. 통화 드랍 이벤트 (Scatter - 큰 빨간 점)
+                        call_df = df[df['log_type'] == 'Call_History']
+                        fail_calls = call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False)]
+                        fig.add_trace(go.Scatter(x=fail_calls['time'], y=[4]*len(fail_calls),
+                                                mode='markers', marker=dict(size=15, color='red'),
+                                                name="Call Drop", text=fail_calls['fail_reason_desc']))
+
+                        # 3. 데이터 사용량 피크 (Bar)
+                        data_df = df[df['log_type'] == 'Data_Usage']
+                        fig.add_trace(go.Scatter(x=data_df['time'], y=data_df['total_mb'], name="Data Usage(MB)", fill='tozeroy'))
+
+                        fig.update_layout(title="통합 로그 타임라인 분석", xaxis_title="시간", yaxis_title="상태/값")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # ==========================================
+                    # 📊 1. 핵심 지표 카드 변수 계산 (df에서 데이터 추출)
+                    # ==========================================
+
+                    # (1) 최고 데이터 앱 및 용량
+                    du_df = df[df['log_type'] == 'Data_Usage'].copy()
+                    if not du_df.empty:
+                        du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
+                        top_1 = du_df.sort_values(by='total_mb', ascending=False).iloc[0]
+                        top_app_name = top_1.get('app_name', 'Unknown')
+                        top_app_mb = f"{top_1['total_mb']:,.2f}"
+                    else:
+                        top_app_name, top_app_mb = "기록 없음", "0"
+
+                    # (2) 통화 성공률 및 드랍 건수
+                    call_df = df[df['log_type'] == 'Call_History'].copy()
+                    if not call_df.empty:
+                        total_calls = len(call_df)
+                        # 'FAIL'이나 'DROP' 글자가 포함된 상태만 카운트
+                        drop_count = len(call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False, case=False)])
+                        success_rate = round(((total_calls - drop_count) / total_calls) * 100, 1) if total_calls > 0 else 100
+                    else:
+                        success_rate, drop_count = 100, 0 # 통화 기록이 없으면 기본값 100%
+
+                    # (3) OOS(망 이탈) 발생 횟수
+                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
+                    if not sig_df.empty:
+                        # raw_info에 'NO_SVC'나 'OOS'가 포함된 경우를 카운트
+                        oos_count = len(sig_df[sig_df['raw_info'].str.contains('NO_SVC|OOS', na=False, case=False)])
+                    else:
+                        oos_count = 0
+
+                    # (4) 평균 신호 세기 (기존 df 활용)
+                    avg_signal = sig_df['level'].mean() if not sig_df.empty else 0
+
+                    # ==========================================
+                    # 🖼️ 2. 핵심 지표 카드 UI 렌더링
+                    # ==========================================
+                    st.subheader("📊 단말 핵심 상태 지표")
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    col1.metric("🔥 데이터 사용 1위", f"{top_app_name}", f"{top_app_mb} MB")
+                    col2.metric("📡 평균 신호 세기", f"Level {avg_signal:.1f}")
+
+                    # 통화 드랍이 있으면 빨간색(inverse), 없으면 정상(normal)
+                    col3.metric("📞 통화 성공률", f"{success_rate}%", delta=f"-{drop_count} 건 실패", delta_color="inverse" if drop_count > 0 else "normal")
+
+                    # OOS가 1번이라도 있으면 경고
+                    col4.metric("🚨 OOS 발생 횟수", f"{oos_count} 회", delta="망 이탈 발생!" if oos_count > 0 else "안정적", delta_color="inverse" if oos_count > 0 else "normal")
+
                     st.divider()
                     st.subheader("💡 사내 지식 베이스 (해결 사례 모음)")
                     if 'known_solution' in df.columns:
@@ -571,6 +645,93 @@ with tab_dash:
                             st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
                     else:
                         st.info("알려진 솔루션 데이터 필드가 없습니다.")
+
+                    st.divider()
+
+                    # ==========================================
+                    # 📈 1. 통합 로그 타임라인 차트 (Event Correlation)
+                    # ==========================================
+                    st.subheader("📈 통합 로그 타임라인 분석")
+
+                    import plotly.graph_objects as go
+
+                    # 데이터 사용량은 시계열 데이터가 아니므로 1개의 Y축만 사용하도록 심플하게 원복
+                    fig = go.Figure()
+
+                    # [A] 신호 세기 (Line Chart)
+                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
+                    if not sig_df.empty:
+                        sig_df = sig_df.sort_values('time')
+                        fig.add_trace(
+                            go.Scatter(x=sig_df['time'], y=sig_df['level'], name="Signal Level", mode='lines+markers', line=dict(color='#1f77b4', width=2))
+                        )
+
+                    # [B] 통화 드랍 (Scatter - Red ❌)
+                    call_df = df[df['log_type'] == 'Call_History'].copy()
+                    if not call_df.empty:
+                        fail_calls = call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False, case=False)]
+                        if not fail_calls.empty:
+                            fig.add_trace(
+                                go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls), # 눈에 띄게 Y축 3.5 위치에 배치
+                                        mode='markers', marker=dict(size=12, color='red', symbol='x'),
+                                        name="Call Drop", text=fail_calls['fail_reason_desc'], hoverinfo='text+x')
+                            )
+
+                    # 레이아웃 튜닝
+                    fig.update_layout(
+                        height=450,
+                        hovermode="x unified",
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+
+                    # 🚨 [핵심 픽스] X축 글자 떡짐 방지 적용!
+                    fig.update_xaxes(nticks=15, tickangle=-45)
+                    fig.update_yaxes(title_text="Signal Level (0~5)", range=[-0.5, 5.5], dtick=1)
+
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.divider()
+
+                    # ==========================================
+                    # 🔍 2. 딥다이브 필터 (특정 앱 통신 분석)
+                    # ==========================================
+                    st.subheader("🔍 특정 앱 딥다이브 분석")
+
+                    data_df = df[df['log_type'] == 'Data_Usage'].copy()
+                    if not data_df.empty:
+                        # 고유한 앱 이름 목록 추출 (NaN 제외)
+                        app_list = data_df['app_name'].dropna().unique().tolist()
+
+                        if app_list:
+                            # 1위 앱을 기본값으로 세팅하기 위한 로직
+                            top_app = data_df.groupby('app_name')['total_mb'].sum().idxmax()
+                            default_idx = app_list.index(top_app) if top_app in app_list else 0
+
+                            selected_app = st.selectbox("분석할 패키지(앱)를 선택하세요:", app_list, index=default_idx)
+
+                            # 선택한 앱의 데이터만 필터링
+                            target_app_df = data_df[data_df['app_name'] == selected_app]
+
+                            # 사용 망(RAT)별 데이터 총합 계산
+                            rat_summary = target_app_df.groupby('rat')['total_mb'].sum().reset_index()
+                            rat_summary['total_mb'] = rat_summary['total_mb'].apply(lambda x: f"{x:,.2f} MB")
+
+                            c1, c2 = st.columns([1, 2.5])
+                            with c1:
+                                st.markdown(f"**📡 [{selected_app}] 망별 요약**")
+                                st.dataframe(rat_summary, hide_index=True, use_container_width=True)
+
+                            with c2:
+                                st.markdown(f"**📑 상세 사용 로그**")
+                                display_cols = ['time', 'rat', 'total_mb', 'rx_bytes', 'tx_bytes']
+                                actual_cols = [c for c in display_cols if c in target_app_df.columns]
+                                st.dataframe(target_app_df[actual_cols], hide_index=True, use_container_width=True)
+                        else:
+                            st.info("데이터 사용량 기록이 없습니다.")
+                    else:
+                        st.info("데이터 사용량 로그를 찾을 수 없습니다.")
+
+                    st.divider()
 
                     # ==========================================
                     # 📞 [신규 추가] 전체 통화 세션(Call History) 분석
@@ -815,7 +976,7 @@ with tab_dash:
                             [🚨 엄격한 답변 규칙 🚨]
                             1. "추가 데이터가 필요하다", "확증하기 어렵다" 같은 방어적이거나 원론적인 변명은 절대 금지.
                             2. 주어진 데이터 안에서 가장 확률이 높은 '근본 원인(Root Cause)' 가설을 과감하게 제시할 것.
-                            3. App_UID_-1 처럼 비정상적으로 막대한 데이터(수십~수백 GB)를 쓴 항목이 있다면, 신호 세기와 무관하게 이것이 모뎀 부하 및 배터리 광탈의 주범임을 강력하게 지적할 것.
+                            3. 비정상적으로 막대한 데이터(수십~수백 GB)를 쓴 항목이 있다면, 신호 세기와 무관하게 이것이 모뎀 부하 및 배터리 광탈의 주범임을 강력하게 지적할 것.
                             4. 통화 기록이 없다면 "망과 기지국 상태가 매우 양호하여 단 한 건의 드랍도 발생하지 않음"으로 긍정 평가할 것.
                             """
 
