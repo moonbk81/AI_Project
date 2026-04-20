@@ -171,15 +171,35 @@ class TelephonyLogSummarizer:
 
         uid_map = {}
         re_dns_pkg = re.compile(r'DNS Requested by\s+\d+,\s*(\d+)\(([^)]+)\)')
+        re_app_id = re.compile(r'App ID:\s*(\d+)')
+        re_package = re.compile(r'Package:\s*([a-zA-Z0-9_.]+)')
+
+        current_app_id_in_log = None # 호적등본 파싱용 상태 변수
 
         for line in lines:
             line_stripped = line.strip()
 
-            # 1. 패키지명 <-> UID 매핑 정보 수집 (Netd 로그 활용)
+            # --------------------------------------------------
+            # 1. 패키지명 <-> UID 매핑 정보 수집
+            # --------------------------------------------------
+
+            # [A] 현장 검문 방식: DNS 로그 활용
             if "NetdEventListenerService" in line_stripped or "DNS Requested by" in line_stripped:
                 m_pkg = re_dns_pkg.search(line_stripped)
                 if m_pkg:
                     uid_map[m_pkg.group(1)] = m_pkg.group(2)
+
+            # [B] 공식 명부 방식: dumpsys package (App ID) 활용 🚨 [신규 추가]
+            m_app_id = re_app_id.search(line_stripped)
+            if m_app_id:
+                current_app_id_in_log = m_app_id.group(1)
+
+            m_package = re_package.search(line_stripped)
+            if m_package and current_app_id_in_log:
+                # App ID를 찾은 상태에서 Package가 나오면 매핑!
+                extracted_pkg = m_package.group(1)
+                uid_map[current_app_id_in_log] = extracted_pkg
+                current_app_id_in_log = None # 매핑 후 상태 초기화 (오탐 방지)
 
             # 2. 데이터 사용량 수집 (dumpsys netstats 구역)
             # 조건: 과금되는(metered=true) 셀룰러(transports={0}) 트래픽
@@ -190,6 +210,8 @@ class TelephonyLogSummarizer:
                 if m_uid and m_rat:
                     uid_val = m_uid.group(1)
                     rat_val = m_rat.group(1)
+
+                    if uid_val == "-1": continue  # 시스템 전체 트래픽은 제외
 
                     # 🚨 안드로이드 상수를 친숙한 통신망 이름으로 변환
                     rat_name = RAT_TYPE_MAP.get(rat_val, f"RAT_{rat_val}")
