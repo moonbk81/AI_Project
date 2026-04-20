@@ -189,6 +189,26 @@ class RagPayloadBuilder:
                 text_content = f"데이터 사용량 기록: {meta['app_name']} 앱이 {meta['rat']} 망에서 총 {meta['total_mb']} MB의 셀룰러 데이터를 사용했습니다. (다운로드: {meta['rx_mb']} MB, 업로드: {meta['tx_mb']} MB)"
                 rag_payload.append({"document": text_content, "metadata": meta})
 
+        # ==========================================
+        # 🚨 [여기부터 복사해서 추가!] DNS 쿼리 결과 페이로드 변환
+        # ==========================================
+        if "dns_queries" in report_data:
+            for dns in report_data["dns_queries"]:
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "DNS_Query",
+                    "time": dns.get("time", ""),
+                    "uid": dns.get("uid", ""),
+                    "app_name": dns.get("app_name", "Unknown"),
+                    "return_code": dns.get("return_code", "UNKNOWN"),
+                    "raw_info": dns.get("raw_info", "")
+                }
+
+                # LLM이 읽을 자연어 문장 (Document) 생성
+                text_content = f"DNS 요청 기록: {meta['time']}에 {meta['app_name']} 앱(UID: {meta['uid']})이 DNS 요청을 수행했습니다. 결과 코드(return_code)는 {meta['return_code']} 입니다. (상세정보: {meta['raw_info']})"
+
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
         os.makedirs(payload_dir, exist_ok=True)

@@ -70,6 +70,11 @@ class TelephonyLogSummarizer:
         self.re_netstat_ident = re.compile(r'ident=\[\{.*?metered=true.*?transports=\{0\}\}\].*?uid=(-\d+|\d+)')
         # 데이터 사용량 라인 (rb: Rx Bytes, tb: Tx Bytes) 추출
         self.re_netstat_bytes = re.compile(r'rb=(\d+)\s+rp=\d+\s+tb=(\d+)')
+        # [신규 추가] DNS 쿼리 상세 (시간, 패키지, 에러코드) 파싱용 정규식
+        self.re_dns_full = re.compile(
+            r'(?P<time>\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?'
+            r'DNS Requested by\s+\d+,\s*(?P<uid>\d+)\((?P<app_name>[^)]+)\)(?P<rest>.*)'
+        )
 
         self.valid_tags = {
             'RILD', 'RILD2', 'RILJ', 'IPF', 'IMS', 'VoLTE', 'SST', 'ServiceState',
@@ -252,6 +257,45 @@ class TelephonyLogSummarizer:
         # 내림차순 정렬
         report_data.sort(key=lambda x: x["total_mb"], reverse=True)
         return report_data
+
+    def analyze_dns(self, lines):
+        dns_events = []
+        for line in lines:
+            if "DNS Requested by" in line:
+                m = self.re_dns_full.search(line)
+                if m:
+                    time_str = m.group('time')
+                    uid = m.group('uid')
+                    app_name = m.group('app_name')
+                    rest = m.group('rest')
+
+                    rc_match = re.search(r',\s*(\d+)\(([^)]+)\)', rest)
+                    if rc_match:
+                        # 숫자 코드와 텍스트를 결합해서 대시보드에 예쁘게 나오도록 가공
+                        raw_code = rc_match.group(1)   # "4"
+                        status_text = rc_match.group(2) # "FAIL"
+
+                        # 만약 isBlocked=true 가 있다면, 이건 네트워크 에러가 아니라 단말 차단 정책임
+                        if "isBlocked=true" in rest:
+                            return_code = f"BLOCKED (Code:{raw_code})"
+                        else:
+                            return_code = f"{status_text} (Code:{raw_code})"
+
+                        # 단, "0(SUCCESS)" 같은 놈들은 순수한 "SUCCESS"로 치환해서 필터링되게 함
+                        if raw_code == "0" or "SUCCESS" in status_text:
+                            return_code = "SUCCESS"
+                    else:
+                        # 예비용 (포맷이 다를 경우를 대비)
+                        return_code = "UNKNOWN"
+
+                    dns_events.append({
+                        "time": time_str,
+                        "uid": uid,
+                        "app_name": app_name,
+                        "return_code": return_code,
+                        "raw_info": rest.strip()
+                    })
+        return dns_events
 
     # 🚨 [신규 추가] Boot Stat 텍스트를 파싱하여 Dictionary List로 반환
     def analyze_boot_stat(self, lines):
@@ -752,6 +796,10 @@ class TelephonyLogSummarizer:
             if mode in ['all']:
                 net_usage = self.analyze_data_usage(lines)
                 if net_usage: result['data_usage_stats'] = net_usage
+
+            if mode in ['all']:
+                dns_res = self.analyze_dns(lines)
+                if dns_res: result['dns_queries'] = dns_res
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)

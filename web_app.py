@@ -825,6 +825,63 @@ with tab_dash:
                             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
 
                     # ==========================================
+                    # 🎯 [신규] 앱(패키지) vs DNS 실패 사유 상관관계 분석
+                    # ==========================================
+                    st.divider()
+                    st.subheader("🎯 패키지별 DNS 차단/실패 상세 원인 분석")
+
+                    import plotly.express as px
+
+                    # 1. DNS 로그만 추출 (로그 타입 이름은 현재 파서에 맞게 조정 필요, 예: 'DNS_Query' 등)
+                    # 만약 df에 return_code나 error_reason 컬럼이 없다면 파서에서 추출되도록 확인해야 합니다.
+                    dns_df = df[df['log_type'] == 'DNS_Query'].copy() # 🚨 파서의 DNS log_type 이름 확인 필요
+
+                    if not dns_df.empty and 'return_code' in dns_df.columns and 'app_name' in dns_df.columns:
+
+                        # 성공(통상 return_code '0' 또는 'NO_ERROR')을 제외한 '에러/차단' 건만 필터링
+                        # (만약 에러 코드가 문자열이라면 그에 맞게 조건 변경)
+                        error_dns_df = dns_df[~dns_df['return_code'].isin(['0', 'NO_ERROR', 'SUCCESS'])]
+
+                        if not error_dns_df.empty:
+                            # 2. 패키지명과 에러코드별 발생 횟수 집계
+                            dns_corr = error_dns_df.groupby(['app_name', 'return_code']).size().reset_index(name='count')
+
+                            # 3. 누적 막대 차트 생성 (Stacked Bar)
+                            fig_dns_corr = px.bar(
+                                dns_corr,
+                                x='app_name',
+                                y='count',
+                                color='return_code',
+                                title="어떤 앱이 어떤 이유로 DNS 통신에 실패했는가?",
+                                labels={'app_name': '패키지명 (App)', 'count': '발생 횟수', 'return_code': '에러 코드 (원인)'},
+                                barmode='stack', # 누적 형태로 렌더링
+                                color_discrete_sequence=px.colors.qualitative.Pastel
+                            )
+
+                            fig_dns_corr.update_layout(xaxis_tickangle=-45, height=500)
+
+                            c1, c2 = st.columns([2, 1])
+                            with c1:
+                                # 시각화 차트 출력
+                                st.plotly_chart(fig_dns_corr, use_container_width=True)
+
+                            with c2:
+                                # 엔지니어를 위한 Raw 교차표 (Pivot Table) 출력
+                                st.markdown("**📊 상세 에러 매트릭스**")
+                                pivot_df = error_dns_df.pivot_table(
+                                    index='app_name',
+                                    columns='return_code',
+                                    aggfunc='size',
+                                    fill_value=0
+                                )
+                                st.dataframe(pivot_df, use_container_width=True)
+
+                        else:
+                            st.success("🎉 분석된 로그 내에 DNS 차단/실패 기록이 없습니다. (모두 정상)")
+                    else:
+                        st.warning("⚠️ DNS 로그 데이터가 없거나, 파서에서 'return_code', 'app_name' 컬럼을 추출하지 않았습니다.")
+
+                    # ==========================================
                     # 📶 [수정됨] 전체 RAT별 안테나(Signal) 레벨 타임라인 (에러 방어 로직 추가)
                     # ==========================================
                     st.divider()
