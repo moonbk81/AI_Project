@@ -4,6 +4,7 @@ import json
 import argparse
 from collections import deque
 from datetime import datetime, timedelta
+from telephony_constants import CALL_FAIL_REASON_MAP, RAT_TYPE_MAP, VENDER_FAIL_REASON_MAP
 
 class TelephonyLogSummarizer:
     def __init__(self, file_path):
@@ -191,13 +192,7 @@ class TelephonyLogSummarizer:
                     rat_val = m_rat.group(1)
 
                     # 🚨 안드로이드 상수를 친숙한 통신망 이름으로 변환
-                    if rat_val == "13": rat_name = "LTE"
-                    elif rat_val == "16": rat_name = "GSM"
-                    elif rat_val == "3": rat_name = "UMTS"
-                    elif rat_val == "20": rat_name = "5G (NR)"
-                    elif rat_val == "-2": rat_name = "Unknown (망 통합 합산)"
-                    else: rat_name = f"RAT_{rat_val}"
-
+                    rat_name = RAT_TYPE_MAP.get(rat_val, f"RAT_{rat_val}")
                     current_key = (uid_val, rat_name)
                     if current_key not in usage_by_key:
                         usage_by_key[current_key] = {"rx_bytes": 0, "tx_bytes": 0}
@@ -484,12 +479,14 @@ class TelephonyLogSummarizer:
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
 
                     cs_m = self.patterns['CS_REASON'].search(clean_line)
-                    cs_fail_cause = ['34','41', '42', '44', '49', '58', '65535']
+                    cs_fail_cause = ['34', '41', '42', '44', '49', '58', '65535'] # Base on GsmCdmaCallTracker.java
                     if cs_m:
-                        if cs_m.group(1) in cs_fail_cause:
-                            current_session["status"], current_session["fail_reason"] = "CALL DROP", f"{cs_m.group(1)}: {cs_m.group(2)}"
-                        else:
-                            current_session["status"], current_session["fail_reason"] = "SUCCESS", f"{cs_m.group(1)}: {cs_m.group(2)}"
+                        readerable_reason = CALL_FAIL_REASON_MAP.get(cs_m.group(1), f"미확인_에러_코드({cs_m.group(1)})")
+                        readerable_vendor_cause = VENDER_FAIL_REASON_MAP.get(cs_m.group(2), f"미확인_Vendor_Cause_코드({cs_m.group(2)})")
+                        current_session["status"] = "SUCCESS"
+                        if cs_m.group(1) in cs_fail_cause: current_session["status"] = "CALL DROP"
+
+                        current_session["fail_reason"] = f"{cs_m.group(1)}({readerable_reason}): {cs_m.group(2)}({readerable_vendor_cause})"
 
                     # 세션 종료 판정
                     if self.patterns['END_EV'].search(clean_line):
