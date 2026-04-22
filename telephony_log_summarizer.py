@@ -5,6 +5,7 @@ import argparse
 from collections import deque
 from datetime import datetime, timedelta
 from telephony_constants import CALL_FAIL_REASON_MAP, RAT_TYPE_MAP, VENDER_FAIL_REASON_MAP
+from battery_thermal_analyzer import BatteryThermalAnalyzer
 
 class TelephonyLogSummarizer:
     def __init__(self, file_path):
@@ -269,24 +270,28 @@ class TelephonyLogSummarizer:
                     app_name = m.group('app_name')
                     rest = m.group('rest')
 
-                    rc_match = re.search(r',\s*(\d+)\(([^)]+)\)', rest)
-                    if rc_match:
-                        # 숫자 코드와 텍스트를 결합해서 대시보드에 예쁘게 나오도록 가공
-                        raw_code = rc_match.group(1)   # "4"
-                        status_text = rc_match.group(2) # "FAIL"
-
-                        # 만약 isBlocked=true 가 있다면, 이건 네트워크 에러가 아니라 단말 차단 정책임
-                        if "isBlocked=true" in rest:
-                            return_code = f"BLOCKED (Code:{raw_code})"
-                        else:
-                            return_code = f"{status_text} (Code:{raw_code})"
-
-                        # 단, "0(SUCCESS)" 같은 놈들은 순수한 "SUCCESS"로 치환해서 필터링되게 함
-                        if raw_code == "0" or "SUCCESS" in status_text:
-                            return_code = "SUCCESS"
+                    if "SUCCESS" in rest.upper():
+                        return_code = "SUCCESS"
                     else:
-                        # 예비용 (포맷이 다를 경우를 대비)
-                        return_code = "UNKNOWN"
+                        rc_match = re.search(r',\s*(\d+)\(([^)]+)\)', rest)
+                        if rc_match:
+                            # 숫자 코드와 텍스트를 결합해서 대시보드에 예쁘게 나오도록 가공
+                            raw_code = rc_match.group(1)   # "4"
+                            status_text = rc_match.group(2) # "FAIL"
+
+                            if raw_code == "0":
+                                return_code = "SUCCESS"
+                            else:
+                                test_disp = f"{status_text} " if status_text else ""
+
+                            # 만약 isBlocked=true 가 있다면, 이건 네트워크 에러가 아니라 단말 차단 정책임
+                            if "isBlocked=true" in rest:
+                                return_code = f"BLOCKED (Code:{raw_code})"
+                            else:
+                                return_code = f"{test_disp} (Code:{raw_code})".strip()
+                        else:
+                            # 예비용 (포맷이 다를 경우를 대비)
+                            return_code = "UNKNOWN"
 
                     dns_events.append({
                         "time": time_str,
@@ -800,6 +805,15 @@ class TelephonyLogSummarizer:
             if mode in ['all']:
                 dns_res = self.analyze_dns(lines)
                 if dns_res: result['dns_queries'] = dns_res
+
+            if mode in ['all']:
+                battery_analyzer = BatteryThermalAnalyzer()
+
+                thermal_res = battery_analyzer.analyze_thermals(lines)
+                if thermal_res: result['thermal_stats'] = thermal_res
+
+                wl_res = battery_analyzer.analyze_wakelocks(lines)
+                if wl_res: result['wakelock_stats'] = wl_res
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)

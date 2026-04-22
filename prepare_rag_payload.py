@@ -209,6 +209,35 @@ class RagPayloadBuilder:
 
                 rag_payload.append({"document": text_content, "metadata": meta})
 
+        # ==========================================
+        # 🚨 [신규] 배터리 발열(Thermal) 기록 페이로드 변환
+        # ==========================================
+        if "thermal_stats" in report_data:
+            for thermal in report_data["thermal_stats"]:
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Thermal_Stat",
+                    "sensor": thermal.get("sensor", ""),
+                    "temperature": thermal.get("temperature", 0.0)
+                }
+                text_content = f"기기 온도 기록: {meta['sensor']} 센서의 온도가 {meta['temperature']}도로 측정되었습니다."
+                rag_payload.append({"document": text_content, "metadata": meta})
+
+        # ==========================================
+        # 🚨 [신규] Wakelock (배터리 광탈 주범) 기록 페이로드 변환
+        # ==========================================
+        if "wakelock_stats" in report_data:
+            for wl in report_data["wakelock_stats"]:
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Wakelock_Stat",
+                    "app_name": wl.get("app_name", "Unknown"),
+                    "duration": wl.get("duration", ""),
+                    "times": wl.get("times", 0)
+                }
+                text_content = f"Wakelock(배터리 점유) 기록: {meta['app_name']} 앱이 단말기가 잠들지 못하도록 {meta['times']}회 깨웠으며, 총 {meta['duration']} 동안 배터리를 강제 소모시켰습니다."
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
         os.makedirs(payload_dir, exist_ok=True)

@@ -734,6 +734,60 @@ with tab_dash:
                     st.divider()
 
                     # ==========================================
+                    # 🔥 3. 배터리 광탈(Wakelock) 및 발열(Thermal) 분석
+                    # ==========================================
+                    st.subheader("🔥 발열 및 배터리 드레인(Wakelock) 분석")
+
+                    thermal_df = df[df['log_type'] == 'Thermal_Stat'].copy()
+                    wl_df = df[df['log_type'] == 'Wakelock_Stat'].copy()
+
+                    c1, c2 = st.columns(2)
+
+                    import plotly.express as px
+
+                    with c1:
+                        st.markdown("**🔋 Wakelock (잠들지 못하는 앱) Top 10**")
+                        if not wl_df.empty:
+                            # 문자열인 duration 외에, '몇 번 깨웠는지(times)'를 차트의 Y축으로 사용
+                            wl_df['times'] = pd.to_numeric(wl_df['times'], errors='coerce')
+                            fig_wl = px.bar(
+                                wl_df, x='app_name', y='times',
+                                title="앱별 AP 기상(Wakeup) 강제 호출 횟수",
+                                hover_data=['duration'], # 마우스를 올리면 총 점유 시간 표시
+                                labels={'app_name': '패키지명', 'times': '깨운 횟수', 'duration': '총 점유 시간'},
+                                color='times', color_continuous_scale='Blues'
+                            )
+                            fig_wl.update_layout(xaxis_tickangle=-45, height=400)
+                            st.plotly_chart(fig_wl, use_container_width=True)
+                        else:
+                            st.info("Wakelock 기록이 없습니다.")
+
+                    with c2:
+                        st.markdown("**🌡️ 기기 내부 주요 센서 발열(Thermal) 상태**")
+                        if not thermal_df.empty:
+                            thermal_df['temperature'] = pd.to_numeric(thermal_df['temperature'], errors='coerce')
+                            # 온도가 높은 순으로 정렬
+                            thermal_df = thermal_df.dropna(subset=['temperature']).sort_values(by='temperature', ascending=False)
+
+                            # 온도가 높을수록 붉은색으로 변하는 히트맵 스타일 바 차트
+                            fig_th = px.bar(
+                                thermal_df, x='sensor', y='temperature',
+                                title="센서별 현재 온도 (°C)",
+                                color='temperature',
+                                color_continuous_scale=[(0, "green"), (0.5, "orange"), (1, "red")],
+                                range_color=[30, 50], # 30~50도 사이를 그라데이션 기준으로 삼음
+                                labels={'sensor': '센서명', 'temperature': '온도(°C)'}
+                            )
+                            # 40도 위험선 추가
+                            fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="발열 경계선 (40°C)")
+                            fig_th.update_layout(xaxis_tickangle=-45, height=400)
+                            st.plotly_chart(fig_th, use_container_width=True)
+                        else:
+                            st.info("발열(Thermal) 기록이 없습니다.")
+
+                    st.divider()
+
+                    # ==========================================
                     # 📞 [신규 추가] 전체 통화 세션(Call History) 분석
                     # ==========================================
                     st.divider()
