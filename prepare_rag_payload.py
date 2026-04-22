@@ -26,6 +26,7 @@ class RagPayloadBuilder:
 
     def _extract_metadata(self, data_dict, log_type):
         """엔지니어가 확인할 정보와 차트용 수치를 메타데이터에 포함 (에러 원천 차단)"""
+        base_name = os.path.basename(self.input_file).replace("_report.json", "")
         metadata = {"log_type": log_type}
 
         def add_safe_meta(key, val):

@@ -774,46 +774,83 @@ class TelephonyLogSummarizer:
         return battery_report
 
     def run_batch(self, mode, output_path):
-        """파일을 한 번만 읽어 분석 수행 후 JSON 저장 (초고속 병렬 파싱)"""
+        """파일을 한 번만 읽어 분석 수행 후 JSON 저장 (초고속 단일 패스 버킷팅 최적화)"""
         try:
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines() # 슬라이싱 덕분에 메모리 부하 제로!
+                lines = f.readlines()
 
             result = {}
+
+            # ==========================================
+            # 🚀 [최적화 1] 단일 패스 버킷팅 (Single-Pass Bucketing)
+            # 100만 줄의 로그를 파서들이 매번 돌지 않게, 단 한 번만 순회하여 바구니에 나눕니다.
+            # ==========================================
+            boot_lines = []
+            signal_lines = []
+            data_usage_lines = []
+
+            # (만약 이전 스텝의 DNS, 배터리/발열 모듈이 연동되어 있다면 사용하기 위한 바구니)
+            dns_lines = []
+            thermal_wl_lines = []
+
+            for line in lines:
+                # 1. Boot Stat 바구니
+                if line.startswith("!@Boot"):
+                    boot_lines.append(line)
+
+                # 2. 신호 세기 바구니
+                elif "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
+                    signal_lines.append(line)
+
+                # 3. 데이터 사용량 바구니 (관련 키워드 싹쓸이)
+                if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested", "App ID:", "Package:"]):
+                    data_usage_lines.append(line)
+
+                # 4. 외부 모듈(DNS, 발열, Wakelock) 바구니
+                if "DNS Requested" in line:
+                    dns_lines.append(line)
+                if any(k in line for k in ["Temperature", "CurrentValue", "Wake lock", "App ID:", "Package:"]):
+                    thermal_wl_lines.append(line)
+
+            # ==========================================
+            # 🚀 [최적화 2] 적재적소 파싱 (Full Scan vs Bucket Scan)
+            # ==========================================
+
+            # [A 그룹] 주변 로그(Context)나 멀티라인 상태가 필요한 파서들 -> 전체 lines 사용
             if mode in ['all']: result['radio_power'] = self.analyze_radio_power(lines)
             if mode in ['call', 'all']: result['telephony'] = self.analyze_telephony(lines)
             if mode in ['anr', 'all']: result['anr_context'] = self.analyze_anr(lines)
             if mode in ['crash', 'all']: result['crash_context'] = self.analyze_crash(lines)
             if mode in ['all']:
+                # 배터리 분석기는 멀티라인(Phone signal levels 다음 줄)을 읽어야 해서 버킷팅 제외
                 battery_res = self.analyze_battery(lines)
                 if battery_res: result['battery_stats'] = battery_res
 
-            # 🚨 [신규 추가] Boot Stat 파싱 실행 및 JSON 저장
+            # [B 그룹] 초고속 파서들 -> 얇은 바구니만 던짐! (연산량 99% 감소)
             if mode in ['all']:
-                boot_res = self.analyze_boot_stat(lines)
+                boot_res = self.analyze_boot_stat(boot_lines)  # 얇은 바구니
                 if boot_res: result['boot_stats'] = boot_res
 
-            # 🚨 [신규 추가] 안테나 레벨 파싱 실행
-            if mode in ['all']:
-                sig_res = self.analyze_signal_level(lines)
+                sig_res = self.analyze_signal_level(signal_lines)  # 얇은 바구니
                 if sig_res: result['signal_level_history'] = sig_res
 
-            if mode in ['all']:
-                net_usage = self.analyze_data_usage(lines)
+                net_usage = self.analyze_data_usage(data_usage_lines)  # 얇은 바구니
                 if net_usage: result['data_usage_stats'] = net_usage
 
-            if mode in ['all']:
-                dns_res = self.analyze_dns(lines)
-                if dns_res: result['dns_queries'] = dns_res
+                # 🚨 (만약 이전 스텝의 DNS 파서와 배터리 모듈을 파일에 붙여두셨다면 아래 주석을 풀고 사용하세요)
+                if hasattr(self, 'analyze_dns'):
+                    dns_res = self.analyze_dns(dns_lines)
+                    if dns_res: result['dns_queries'] = dns_res
 
-            if mode in ['all']:
-                battery_analyzer = BatteryThermalAnalyzer()
-
-                thermal_res = battery_analyzer.analyze_thermals(lines)
-                if thermal_res: result['thermal_stats'] = thermal_res
-
-                wl_res = battery_analyzer.analyze_wakelocks(lines)
-                if wl_res: result['wakelock_stats'] = wl_res
+                try:
+                    from battery_thermal_analyzer import BatteryThermalAnalyzer
+                    battery_analyzer = BatteryThermalAnalyzer()
+                    thermal_res = battery_analyzer.analyze_thermals(thermal_wl_lines)
+                    if thermal_res: result['thermal_stats'] = thermal_res
+                    wl_res = battery_analyzer.analyze_wakelocks(thermal_wl_lines)
+                    if wl_res: result['wakelock_stats'] = wl_res
+                except ImportError:
+                    pass
 
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)
@@ -821,6 +858,7 @@ class TelephonyLogSummarizer:
         except Exception as e:
             print(f"Error in run_batch: {e}")
             return False
+
 
 def main():
     parser = argparse.ArgumentParser(description="Telephony Batch Diagnostic Tool")

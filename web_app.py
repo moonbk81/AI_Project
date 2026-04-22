@@ -191,7 +191,7 @@ with st.sidebar:
 
                     status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
 
-                    st.session_state.current_file = payload_filename
+                    st.session_state.current_file = base_name
                     # [수정] 새 파일 업로드 시 이전 대화 및 박제 대기열 초기화
                     st.session_state.last_ids = []
                     st.session_state.messages = []
