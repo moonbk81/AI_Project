@@ -30,7 +30,7 @@ class NetworkTimeSeriesAnalyzer:
             r'(?:((?:\d{2}:){2}\d{2}\.\d{3}):\s*)?'  # 시간 (선택적)
             r'\{netId=(\d+),\s*transports=\{(.*?)\},\s*'
             r'dns\s+avg=(\d+)ms\s+max=(\d+)ms\s+err=(\d+(?:\.\d+)?)%\s+tot=(\d+),\s*'
-            r'delayed\s+rsp=(\d+),\s*blocked\s+rsp=(\d+),\s*'
+            r'delayed\s+rsp=(\d+),\s*(?:blocked\s+rsp=(\d+),\s*)?'
             r'connect\s+avg=(\d+)ms\s+max=(\d+)ms\s+err=(\d+(?:\.\d+)?)%\s+tot=(\d+),\s*'
             r'tcp\s+avg_loss=(\d+(?:\.\d+)?)%', re.I
         )
@@ -95,7 +95,7 @@ class NetworkTimeSeriesAnalyzer:
                             "dns_max": int(groups[4]),
                             "dns_err_rate": float(groups[5]),
                             "dns_tot": int(groups[6]),
-                            "dns_blocked_cnt": int(groups[8]),
+                            "dns_blocked_cnt": int(groups[8]) if groups[8] is not None else 0,
                             "tcp_avg_loss": float(groups[13])
                         })
                 if self.stats_end.search(clean_line):
