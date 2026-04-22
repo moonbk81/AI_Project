@@ -21,7 +21,7 @@ class RilRagChat:
         else:
             embed_model_path = "BAAI/bge-m3"
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
-        self.embed_model = SentenceTransformer(embed_model_path)
+        self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
         # 3. LLM 로드 (Gemma-2b)
         print(f" LLM 연결 준비 중...(Local Ollama - gemma:9b)")
@@ -129,7 +129,7 @@ class RilRagChat:
 
             print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식, 강력한 길이 제한 적용됨)")
             # embeddings = self.embed_model.encode(documents).tolist()
-            embeddings = self.embed_model.encode(safe_documents, batch_size=2).tolist()
+            embeddings = self.embed_model.encode(safe_documents, batch_size=32).tolist()
             BATCH_SIZE = 100
             for i in range(0, len(safe_documents), BATCH_SIZE):
                 self.collection.add(

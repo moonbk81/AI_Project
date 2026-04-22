@@ -131,6 +131,11 @@ with st.sidebar:
         with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
 
     if st.button("🚀 분석 및 DB 적재 시작", use_container_width=True, type="primary"):
+        start_total = time.time()
+        progress_bar = st.progress(0)
+        current_device = engine.embed_model.device
+        st.write(f"활성 장치: **{str(current_device).upper()}**")
+
         if uploaded_file is None:
             st.error("❌ 먼저 파일을 업로드해주세요.")
         elif use_slicing and (not start_time or not end_time):
@@ -167,11 +172,16 @@ with st.sidebar:
                     payload_filename = f"{base_name}_payload.json"
 
                     st.write("1️⃣ 원시 로그 분석 및 필터링 중... (Parser)")
+                    step1_start = time.time()
                     parser = TelephonyLogSummarizer(target_log_path) # 교체된 타겟 전달
                     parser.run_batch('all', temp_json_path)
+                    step1_end = time.time()
+                    st.write(f"✅ 원시 로그 분석 및 필터링 완료 ({step1_end - step1_start:.2f}초) ")
+                    progress_bar.progress(25)
 
-                    # [신규 추가] 1-1️⃣ 네트워크 시계열 분석 가동
-                    st.write("1-1️⃣ DNS 및 네트워크 시계열 분석 중...")
+                    # [신규 추가] 1️⃣-1️⃣ 네트워크 시계열 분석 가동
+                    st.write("1️⃣-1️⃣ DNS 및 네트워크 시계열 분석 중...")
+                    step2_start = time.time()
                     net_analyzer = NetworkTimeSeriesAnalyzer(target_log_path)
                     net_report = net_analyzer.analyze()
 
@@ -182,16 +192,34 @@ with st.sidebar:
                     with open(temp_json_path, 'w', encoding='utf-8') as f:
                         json.dump(combined_report, f, indent=4, ensure_ascii=False)
 
+                    step2_end = time.time()
+                    st.write(f"✅ DNS 및 네트워크 시계열 분석 완료 ({step2_end - step2_start:.2f}초) ")
+                    progress_bar.progress(50)
+
                     st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
+                    step3_start = time.time()
+
                     builder = RagPayloadBuilder(temp_json_path)
                     builder.build_payload(payload_filename)
 
+                    step3_end = time.time()
+                    st.write(f"✅ RAG 맞춤형 지식 조각으로 변환 완료 ({step3_end - step3_start:.2f}초) ")
+                    progress_bar.progress(75)
+
                     st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
+                    step4_start = time.time()
+
                     engine.ingest_folder("./payloads")
 
-                    status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
+                    step4_end = time.time()
+                    st.write(f"✅ Vector DB 임베딩 및 적재 완료 ({step4_end - step4_start:.2f}초) ")
+                    progress_bar.progress(100)
 
-                    st.session_state.current_file = base_name
+                    status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
+                    end_total = time.time()
+                    st.success(f"✅전체 프로세스 완료! 총 소요시간: {end_total - start_total:.2f}초")
+
+                    st.session_state.current_file = payload_filename
                     # [수정] 새 파일 업로드 시 이전 대화 및 박제 대기열 초기화
                     st.session_state.last_ids = []
                     st.session_state.messages = []
