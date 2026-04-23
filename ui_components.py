@@ -193,3 +193,68 @@ def render_network_timeseries_and_dns(df):
             st.plotly_chart(fig_ts, use_container_width=True)
         else:
             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
+
+def render_ntn_advanced_fw_analyzer(df):
+    """Starlink (Direct-to-Cell) 기반 위성 로밍 정책 및 상태 렌더러"""
+    st.subheader("🛰️ Starlink / NTN 로밍 정책 및 상태 분석")
+
+    if 'log_type' not in df.columns:
+        return
+
+    # 병합된 데이터에서 위성 전용 데이터만 필터링
+    ntn_df = df[df['log_type'] == 'NTN_Policy'].copy()
+
+    if ntn_df.empty:
+        st.info("현재 분석 대상 로그에 위성(NTN) 관련 로밍 정책 및 상태 데이터가 없습니다.")
+        return
+
+    ntn_df = ntn_df.sort_values('time')
+
+    # ---------------------------------------------------------
+    # 📊 1. 상단 핵심 지표 (KPI)
+    # ---------------------------------------------------------
+    # 최신 이벤트 기준으로 현재 상태 추출
+    plmn_match = ntn_df[ntn_df['event_type'] == 'PLMN_MATCH']
+    latest_plmn = plmn_match.iloc[-1]['ntn_plmn'] if not plmn_match.empty else "N/A"
+
+    policy_match = ntn_df[ntn_df['event_type'] == 'DATA_POLICY']
+    latest_policy = policy_match.iloc[-1]['data_policy'] if not policy_match.empty else "N/A"
+
+    hys_match = ntn_df[ntn_df['event_type'] == 'CARRIER_ROAMING_STATE']
+    is_hysteresis = hys_match.iloc[-1]['is_hysteresis'] == 'True' if not hys_match.empty else False
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("연결 대상 Satellite PLMN", latest_plmn)
+    col2.metric("활성 데이터 정책", latest_policy)
+    col3.metric("Hysteresis 대기 상태", "진행 중 ⏳" if is_hysteresis else "안정됨 (Stable) ✅")
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 📈 2. 타임라인: 정책 적용 및 Hysteresis 상태 변화
+    # ---------------------------------------------------------
+    st.markdown("**🧭 위성망 진입 시퀀스 및 상태 타임라인**")
+
+    # 산점도(Scatter)를 이용해 특정 시간에 어떤 이벤트가 터졌는지 직관적으로 표시
+    fig = px.scatter(
+        ntn_df, x='time', y='event_type', color='event_type',
+        hover_data=['ntn_plmn', 'data_policy', 'is_hysteresis', 'raw_info'],
+        title="시간대별 NTN 로밍 이벤트 (PLMN 매칭 → Hysteresis 진입 → 정책 확인)",
+        labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
+    )
+
+    # 마커 크기 및 모양 조정
+    fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
+    fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': ['PLMN_MATCH', 'CARRIER_ROAMING_STATE', 'DATA_POLICY']})
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 📋 3. 상세 로그 추적 테이블
+    # ---------------------------------------------------------
+    st.markdown("**📋 NTN 정책 및 상태 상세 이력**")
+    display_cols = [col for col in ['time', 'event_type', 'ntn_plmn', 'is_hysteresis', 'data_policy', 'raw_info'] if col in ntn_df.columns]
+
+    # 보기 편하게 빈 값은 '-'로 채워서 출력
+    clean_df = ntn_df[display_cols].fillna("-")
+    st.dataframe(clean_df, use_container_width=True)

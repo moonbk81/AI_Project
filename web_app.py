@@ -15,6 +15,7 @@ from prepare_rag_payload import RagPayloadBuilder
 # web_app.py 내 "🚀 분석 및 DB 적재 시작" 버튼 로직 부분 수정
 from network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from boot_stat import BootStatAnalyzer
+from ntn_processor import NtnProcessor
 
 # ==========================================
 # [신규 추가] 대용량 로그 타임라인 슬라이서 함수
@@ -258,6 +259,29 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
             builder = RagPayloadBuilder(temp_json_path)
             builder.build_payload(payload_filename)
+            progress_bar.progress(65)
+
+            st.write("2️⃣-1️⃣ 위성(NTN) 특화 지식 추출 및 DB 중...")
+            ntn_proc = NtnProcessor(target_log_path)
+            ntn_parsed_data = ntn_proc.run_parser()
+
+            # 🚨 UI 대시보드(차트) 렌더링을 위해 메인 report.json에 위성 데이터 병합
+            if ntn_parsed_data:
+                with open(temp_json_path, 'r', encoding='utf-8') as f:
+                    main_report = json.load(f)
+
+                # main_report가 리스트 구조일 경우 그대로 연장(extend)
+                if isinstance(main_report, list):
+                    main_report.extend(ntn_parsed_data)
+                # 만약 딕셔너리 구조라면 (안전장치)
+                elif isinstance(main_report, dict):
+                    main_report['ntn_logs'] = ntn_parsed_data
+
+                with open(temp_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(main_report, f, indent=4, ensure_ascii=False)
+
+            # AI 코파일럿을 위한 Vector DB용 페이로드 생성
+            ntn_proc.build_and_save_payloads("./payloads")
             progress_bar.progress(75)
 
             st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
@@ -800,6 +824,9 @@ with tab_dash:
 
                     st.divider()
                     ui.render_data_usage_profiling(df)
+
+                    st.divider()
+                    ui.render_ntn_advanced_fw_analyzer(df)
 
                     # ==========================================
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
