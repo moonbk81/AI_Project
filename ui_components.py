@@ -194,41 +194,46 @@ def render_network_timeseries_and_dns(df):
         else:
             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
 
-def render_ntn_advanced_fw_analyzer(df):
-    """Starlink (Direct-to-Cell) 위성 로밍 및 UI 아이콘 상태 분석"""
+def render_ntn_advanced_fw_analyzer(df=None):
+    """Starlink (Direct-to-Cell) 위성 로밍 및 UI 아이콘 상태 분석 (독립 모듈형)"""
+    import os, json
+    import pandas as pd
+    import plotly.express as px
+    import streamlit as st
+
     st.subheader("🛰️ Starlink / NTN 로밍 정책 및 UI 상태 분석")
 
-    if 'log_type' not in df.columns:
+    file_path = "./result/ntn_parsed_logs.json"
+    if not os.path.exists(file_path):
+        st.info("💡 위성(NTN) 로그 분석 결과 파일이 없습니다. 사이드바에서 [분석 버튼]을 다시 눌러주세요.")
         return
 
-    ntn_df = df[df['log_type'] == 'NTN_Policy'].copy()
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
 
-    if ntn_df.empty:
-        st.info("현재 분석 대상 로그에 위성(NTN) 관련 데이터가 없습니다.")
+    if not data:
+        st.error("🚨 추출 결과 0건: 로그 파일 내에 위성(NTN) 데이터가 없습니다.")
         return
 
-    # ==============================================================
-    # 🚨 [핵심 픽스] KeyError 방어: 로그에 없는 컬럼이라도 빈 값으로 강제 생성
-    # ==============================================================
+    ntn_df = pd.DataFrame(data)
+
+    # 🚨 KeyError 완벽 방어: 필요한 모든 컬럼을 강제로 만들어 둠
     expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'last_ntn_mode', 'last_phone_mode', 'is_hysteresis', 'raw_info']
     for col in expected_cols:
         if col not in ntn_df.columns:
-            ntn_df[col] = None  # 값이 없으면 None으로 채워넣어 KeyError 원천 차단
+            ntn_df[col] = None
 
     ntn_df = ntn_df.sort_values('time')
 
     # ---------------------------------------------------------
     # 📊 1. 상단 핵심 지표 (KPI)
     # ---------------------------------------------------------
-    latest_plmn = ntn_df[ntn_df['event_type'] == 'PLMN_MATCH'].iloc[-1]['ntn_plmn'] if not ntn_df[ntn_df['event_type'] == 'PLMN_MATCH'].empty else "N/A"
+    plmn_logs = ntn_df[ntn_df['event_type'] == 'PLMN_MATCH']
+    latest_plmn = plmn_logs.iloc[-1]['ntn_plmn'] if not plmn_logs.empty else "N/A"
 
-    # UI 아이콘 상태 판단 로직
     ui_icon_status = "OFF ⚪"
-
-    # 마지막 이벤트들을 역순으로 확인하여 상태 결정
     for _, row in ntn_df.iloc[::-1].iterrows():
         if row['event_type'] == 'NTN_MODE_NOTIFY':
-            # ntn_mode가 None일 수도 있으므로 안전하게 처리
             ui_icon_status = "ON (Real) 🟢" if str(row['ntn_mode']).upper() == 'ON' else "OFF ⚪"
             break
         elif row['event_type'] == 'HYSTERESIS_ICON_ON':
@@ -243,19 +248,27 @@ def render_ntn_advanced_fw_analyzer(df):
     st.divider()
 
     # ---------------------------------------------------------
-    # 📈 2. 타임라인: 정책 적용 및 UI 상태 변화
+    # 📈 2. 타임라인 차트
     # ---------------------------------------------------------
-    st.markdown("**🧭 위성망 진입 시퀀스 및 UI 아이콘 유지(Hysteresis) 타임라인**")
+    st.markdown("**🧭 위성망 진입 시퀀스 및 상태 전이(State Transition) 타임라인**")
 
     fig = px.scatter(
         ntn_df, x='time', y='event_type', color='event_type',
-        hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'], # 이제 컬럼이 무조건 존재하므로 에러 안 남!
-        title="시간대별 주요 이벤트 추적 (특히 Hysteresis 구간의 UI 가짜 유지 확인)",
+        hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'],
+        title="시간대별 주요 이벤트 추적 (마우스 오버 시 이전 상태 확인 가능)",
         labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
     )
 
     fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
-    order = ['RADIO_POWER', 'PLMN_MATCH', 'DATA_POLICY', 'NTN_MODE_NOTIFY', 'HYSTERESIS_ICON_ON']
+    order = ['RADIO_POWER', 'PLMN_MATCH', 'DATA_POLICY', 'HYSTERESIS_ICON_ON', 'NTN_MODE_NOTIFY']
     fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
-
     st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 📋 3. 상세 로그 테이블
+    # ---------------------------------------------------------
+    st.markdown("**📋 NTN 상태 전이 상세 이력**")
+    display_cols = [col for col in ['time', 'event_type', 'power_state', 'ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis'] if col in ntn_df.columns]
+
+    clean_df = ntn_df[display_cols].fillna("-")
+    st.dataframe(clean_df, use_container_width=True)
