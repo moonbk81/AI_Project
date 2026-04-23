@@ -75,6 +75,133 @@ def reset_analysis_context():
     st.session_state.last_ids = []
     st.session_state.last_metas = []
 
+def render_chat_interface(key_suffix="main"):
+    """메인 탭과 사이드바에서 공용으로 사용할 지능형 채팅 인터페이스"""
+
+    # 1. 기존 메시지 렌더링 (차트 및 참고 로그 포함)
+    for msg_idx, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+            # [차트 렌더링 로직] - 기존 tab_chat에 있던 코드와 동일
+            if "metas" in msg and msg["metas"]:
+                sig_history = []
+                # OOS 데이터를 모아둘 리스트 준비
+                reg_history = []
+                reg_map = {
+                    "IN_SERVICE": 0,
+                    "OUT_OF_SERVICE": 1,
+                    "EMERGENCY_ONLY": 2,
+                    "POWER_OFF": 3
+                }
+                for i, meta in enumerate(msg["metas"]):
+                    if meta.get('log_type') == 'Battery_Drain_Report':
+                        signal_data = {
+                            "None": float(meta.get("signal_strength_distribution_none", 0.0)),
+                            "Poor": float(meta.get("signal_strength_distribution_poor", 0.0)),
+                            "Moderate": float(meta.get("signal_strength_distribution_moderate", 0.0)),
+                            "Good": float(meta.get("signal_strength_distribution_good", 0.0)),
+                            "Great": float(meta.get("signal_strength_distribution_great", 0.0))
+                        }
+                        filtered_data = {k: v for k, v in signal_data.items() if v > 0}
+
+                        if filtered_data:
+                            df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Level', 'Value'])
+                            fig = px.pie(df_signal, names='Level', values='Value',
+                                         title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
+                            st.plotly_chart(fig, use_container_width=True, key=f"chart_{msg_idx}_{i}")
+
+                    if meta.get('log_type') == 'OOS_Event':
+                        v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
+                        d_reg = meta.get('data_reg', 'UNKNOWN').upper()
+                        slot = f"Slot{meta.get('slotId', '0')}"
+                        time = meta.get('time')
+
+                        if time:
+                            reg_history.append({
+                                "time": time,
+                                "Status": reg_map.get(v_reg, -1),
+                                "Type": "Voice", "Slot": slot,
+                                "Label": v_reg
+                            })
+
+                            reg_history.append({
+                                "time": time,
+                                "Status": reg_map.get(d_reg, -1),
+                                "Type": "Data", "Slot": slot,
+                                "Label": d_reg
+                            })
+                    if meta.get('log_type') == 'Signal_Level':
+                        # meta에 값이 제대로 있는지 방어 로직 추가
+                        lvl = meta.get('level')
+                        rt = meta.get('rat', 'Unknown')
+                        sl = meta.get('slot', '0')
+                        tm = meta.get('time')
+
+                        if tm and lvl is not None:
+                            sig_history.append({
+                                "time": tm,
+                                "Slot": f"Slot {sl}",
+                                "RAT": str(rt),
+                                "Level": int(lvl),
+                                "Info": meta.get('raw_info', '')
+                            })
+
+            # [참고 로그 렌더링]
+            if "references" in msg and msg["references"]:
+                with st.expander(f"🔎 참고 로그 ({key_suffix})"):
+                    st.markdown(msg["references"])
+
+    # 2. 채팅 입력창 (Key 충돌 방지를 위해 suffix 사용)
+    if prompt := st.chat_input("질문하세요", key=f"chat_input_{key_suffix}"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant"):
+            with st.spinner("분석 중..."):
+                current_target = st.session_state.get("current_file", None)
+                # 이전 대화 맥락 5개 유지하여 질문
+                answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:])
+
+                # (여기에 ref_text 조립 로직 추가 - 기존 코드와 동일)
+                ref_text = ""
+                for i, meta in enumerate(metas):
+                    known_solution = meta.get('known_solution')
+                    solution_badge = " **[💡과거 해결사례 존재]**" if known_solution else ""
+                    ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
+
+                    if known_solution:
+                        ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
+
+                    raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
+                    try:
+                        raw_logs = json.loads(raw_data) if isinstance(raw_data, str) else []
+                    except:
+                        raw_logs = []
+
+                    if raw_logs:
+                        ref_text += "```text\n"
+                        for log in raw_logs[:5]: ref_text += f"{log}\n"
+                        if len(raw_logs) > 5: ref_text += "... (중략) ...\n"
+                        ref_text += "```\n"
+
+                    raw_req = meta.get('raw_request')
+                    raw_resp = meta.get('raw_response')
+                    if raw_req or raw_resp:
+                        ref_text += "```text\n"
+                        if raw_req: ref_text += f"[REQ]  {raw_req}\n"
+                        if raw_resp: ref_text += f"[RESP] {raw_resp}\n"
+                        ref_text += "```\n"
+                    ref_text += "---\n"
+
+                st.markdown(answer)
+                st.session_state.messages.append({
+                    "role": "assistant", "content": answer,
+                    "references": ref_text, "metas": metas
+                })
+                st.session_state.last_ids = ids
+                st.session_state.last_metas = metas
+                st.rerun()
+
 # ==========================================
 # ⚙️ [리팩토링] 파이프라인 비즈니스 로직 추상화
 # ==========================================
@@ -284,6 +411,10 @@ with st.sidebar:
     else:
         st.info("먼저 채팅창에서 로그 분석을 진행해주세요.")
 
+    st.divider()
+    st.subheader("사이드바 코파일럿")
+    render_chat_interface(key_suffix="sidebar")
+
 
 # ==========================================
 # [Tab 1] 대화 및 분석 창
@@ -347,131 +478,7 @@ with tab_chat:
     # ==========================================
     # 💬 대화 히스토리 및 차트/참고로그 렌더링
     # ==========================================
-    for msg_idx, msg in enumerate(st.session_state.messages):
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-            # 📊 [차트 렌더링]
-
-            if "metas" in msg and msg["metas"]:
-                sig_history = []
-                # OOS 데이터를 모아둘 리스트 준비
-                reg_history = []
-                reg_map = {
-                    "IN_SERVICE": 0,
-                    "OUT_OF_SERVICE": 1,
-                    "EMERGENCY_ONLY": 2,
-                    "POWER_OFF": 3
-                }
-                for i, meta in enumerate(msg["metas"]):
-                    if meta.get('log_type') == 'Battery_Drain_Report':
-                        signal_data = {
-                            "None": float(meta.get("signal_strength_distribution_none", 0.0)),
-                            "Poor": float(meta.get("signal_strength_distribution_poor", 0.0)),
-                            "Moderate": float(meta.get("signal_strength_distribution_moderate", 0.0)),
-                            "Good": float(meta.get("signal_strength_distribution_good", 0.0)),
-                            "Great": float(meta.get("signal_strength_distribution_great", 0.0))
-                        }
-                        filtered_data = {k: v for k, v in signal_data.items() if v > 0}
-
-                        if filtered_data:
-                            df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Level', 'Value'])
-                            fig = px.pie(df_signal, names='Level', values='Value',
-                                         title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
-                            st.plotly_chart(fig, use_container_width=True, key=f"chart_{msg_idx}_{i}")
-
-                    if meta.get('log_type') == 'OOS_Event':
-                        v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
-                        d_reg = meta.get('data_reg', 'UNKNOWN').upper()
-                        slot = f"Slot{meta.get('slotId', '0')}"
-                        time = meta.get('time')
-
-                        if time:
-                            reg_history.append({
-                                "time": time,
-                                "Status": reg_map.get(v_reg, -1),
-                                "Type": "Voice", "Slot": slot,
-                                "Label": v_reg
-                            })
-
-                            reg_history.append({
-                                "time": time,
-                                "Status": reg_map.get(d_reg, -1),
-                                "Type": "Data", "Slot": slot,
-                                "Label": d_reg
-                            })
-                    if meta.get('log_type') == 'Signal_Level':
-                        # meta에 값이 제대로 있는지 방어 로직 추가
-                        lvl = meta.get('level')
-                        rt = meta.get('rat', 'Unknown')
-                        sl = meta.get('slot', '0')
-                        tm = meta.get('time')
-
-                        if tm and lvl is not None:
-                            sig_history.append({
-                                "time": tm,
-                                "Slot": f"Slot {sl}",
-                                "RAT": str(rt),
-                                "Level": int(lvl),
-                                "Info": meta.get('raw_info', '')
-                            })
-
-                # 🚨 [신규 추가] 수집된 OOS 데이터가 있다면 그래프 그리기!
-                if reg_history:
-                    df_reg = pd.DataFrame(reg_history).sort_values(["Slot", "time"])
-
-                    # Voice와 Data 상태를 동시에 보여주는 라인 차트
-                    fig_reg = px.line(
-                        df_reg, x="time", y="Status",
-                        color="Type", facet_row="Slot",
-                        title="📶 Slot-specific Voice & Data Registration Timeline",
-                        line_shape="hv", # 계단식(Step) 그래프 설정
-                        markers=True,
-                        labels={"Status": "Status Level", "time": "시간"},
-                        height=600
-                    )
-
-                    # Y축 라벨을 숫자가 아닌 실제 상태명으로 표시하도록 설정
-                    fig_reg.update_layout(
-                        yaxis = dict(tickmode = 'array',
-                            tickvals = list(reg_map.values()),
-                            ticktext = list(reg_map.keys())),
-                        yaxis2 = dict(tickmode = 'array',
-                            tickvals = list(reg_map.values()),
-                            ticktext = list(reg_map.keys())
-                        )
-                    )
-                    fig_reg.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                    st.plotly_chart(fig_reg, use_container_width=True, key=f"reg_chart_{msg_idx}")
-
-                if sig_history:
-                    df_sig = pd.DataFrame(sig_history).sort_values(["Slot", "RAT", "time"])
-
-                    # 채팅창 너비에 맞춰 최적화된 RAT 멀티 라인 차트
-                    fig_sig = px.line(
-                        df_sig, x="time", y="Level", color="RAT",
-                        facet_row="Slot",
-                        line_shape="hv",
-                        markers=len(df_sig) < 30, # 채팅창은 30개 넘어가면 마커 숨김
-                        title="📶 실시간 안테나 수신 레벨 분석 (RAT별)",
-                        labels={"Level": "레벨", "time": "시간"},
-                        hover_data=["Info"],
-                        height=450
-                    )
-
-                    # 채팅창용 디자인 적용
-                    fig_sig.update_traces(line=dict(width=2), opacity=0.85)
-                    fig_sig.update_layout(hovermode="x unified")
-                    fig_sig.update_xaxes(nticks=10, tickangle=-45) # 채팅창은 좁으니 눈금 10개만
-                    fig_sig.update_yaxes(range=[-0.5, 5.5], dtick=1)
-                    fig_sig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-
-                    st.plotly_chart(fig_sig, use_container_width=True, key=f"chat_sig_{msg_idx}")
-
-            # 🔎 [참고 로그 렌더링]
-            if "references" in msg and msg["references"]:
-                with st.expander("🔎 참고 원본 로그 및 과거 사례 보기"):
-                    st.markdown(msg["references"])
+    render_chat_interface(key_suffix="main")
 
     # ==========================================
     # 💬 질문 입력 및 AI 분석 구역
