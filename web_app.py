@@ -4,7 +4,9 @@ import json
 import time
 import pandas as pd
 import plotly.express as px
-import re  # [추가] 정규표현식 (슬라이싱 용도)
+import re
+
+import ui_components as ui
 
 # 1. 백엔드 엔진 및 자동화 모듈 불러오기
 from ril_rag_chat import RilRagChat
@@ -46,14 +48,115 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wide")
 
-def load_engine():
+@st.cache_resource(show_spinner=False)
+def get_ai_engine():
+    """[핵심] 엔진을 매번 새로 만들지 않고 딱 한 번만 로드하여 메모리에 상주 (속도 극대화)"""
     return RilRagChat()
 
 try:
-    engine = load_engine()
+    engine = get_ai_engine()
 except Exception as e:
     st.error(f"엔진 초기화 실패. 터미널에서 ollama가 실행 중인지 확인하세요.\n에러: {e}")
     st.stop()
+
+def init_session_states():
+    """앱 전체에서 사용하는 상태 변수들을 한 곳에서 안전하게 초기화"""
+    defaults = {
+        "messages": [], "last_ids": [], "last_metas": [],
+        "uploader_key": 0, "feedback_key": 0, "current_file": None
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+def reset_analysis_context():
+    """파일이 바뀌거나 DB 초기화 시, 이전 대화 및 박제 대기열을 깔끔하게 포맷"""
+    st.session_state.messages = []
+    st.session_state.last_ids = []
+    st.session_state.last_metas = []
+
+# ==========================================
+# ⚙️ [리팩토링] 파이프라인 비즈니스 로직 추상화
+# ==========================================
+def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
+    """UI와 분리된 순수 백엔드 데이터 처리 파이프라인"""
+    start_total = time.time()
+    progress_bar = st.progress(0)
+
+    with st.status("🚀 자동화 파이프라인 가동 중...", expanded=True) as status:
+        try:
+            # 1. 파일 안전 저장
+            os.makedirs("./temp_logs", exist_ok=True)
+            temp_raw_path = os.path.join("./temp_logs", file.name)
+            with open(temp_raw_path, "wb") as f:
+                while chunk := file.read(65536):
+                    f.write(chunk)
+
+            filename = file.name
+            base_name = os.path.splitext(filename)[0]
+            target_log_path = temp_raw_path
+
+            # 2. 타임라인 슬라이싱
+            if use_slice:
+                st.write(f"✂️ 타임라인 슬라이싱 중... ({start_t} ~ {end_t})")
+                sliced_path = os.path.join("./temp_logs", f"sliced_{filename}")
+                lines_kept = slice_log_by_time(temp_raw_path, sliced_path, start_t, end_t)
+                if lines_kept == 0:
+                    st.error("⚠️ 입력한 시간대에 해당하는 로그가 없습니다.")
+                    st.stop()
+                st.write(f"✅ 슬라이싱 완료! (총 {lines_kept:,}줄 추출됨)")
+                target_log_path = sliced_path
+
+            # 3. 파서 가동 및 JSON 병합
+            os.makedirs("./result", exist_ok=True)
+            temp_json_path = f"./result/{base_name}_report.json"
+            payload_filename = f"{base_name}_payload.json"
+
+            st.write("1️⃣ 원시 로그 분석 및 필터링 중... (Parser)")
+            parser = TelephonyLogSummarizer(target_log_path)
+            parser.run_batch('all', temp_json_path)
+            progress_bar.progress(25)
+
+            st.write("1️⃣-1️⃣ DNS 및 네트워크 시계열 분석 중...")
+            net_analyzer = NetworkTimeSeriesAnalyzer(target_log_path)
+            net_report = net_analyzer.analyze()
+            with open(temp_json_path, 'r', encoding='utf-8') as f:
+                combined_report = json.load(f)
+            combined_report['network_timeseries'] = net_report
+            with open(temp_json_path, 'w', encoding='utf-8') as f:
+                json.dump(combined_report, f, indent=4, ensure_ascii=False)
+            progress_bar.progress(50)
+
+            # 4. RAG 페이로드 변환 및 Vector DB 적재
+            st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
+            builder = RagPayloadBuilder(temp_json_path)
+            builder.build_payload(payload_filename)
+            progress_bar.progress(75)
+
+            st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
+            ai_engine.ingest_folder("./payloads")
+            progress_bar.progress(100)
+
+            # 5. 마무리 및 상태 초기화
+            status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
+            end_total = time.time()
+            st.sidebar.metric(label="최근 파싱 소요시간", value=f"{end_total - start_total:.2f}초")
+
+            st.session_state.current_file = payload_filename
+            st.session_state.uploader_key += 1
+            reset_analysis_context() # 이전 맥락 초기화
+
+            st.toast(f"'{filename}' 분석 완료! 채팅창에 질문해주세요.", icon="✅")
+            time.sleep(1)
+            st.rerun()
+
+        except Exception as e:
+            status.update(label="❌ 파이프라인 실패", state="error")
+            st.error(f"오류가 발생했습니다: {e}")
+
+init_session_states() # 상태 초기화 실행
+
+# ================================================
 
 st.title("📡 안드로이드 RIL RAG 분석기")
 st.markdown("단말 통신 로그를 원클릭으로 적재하고 AI와 분석을 시작하세요.")
@@ -113,9 +216,7 @@ with st.sidebar:
     if st.button("🗑️ 전체 DB 초기화", use_container_width=True, help="Vector DB의 모든 지식을 삭제합니다."):
         if engine.reset_db():
             st.session_state.current_file = None
-            st.session_state.messages = []
-            st.session_state.last_ids = []
-            st.session_state.last_metas = []
+            reset_analysis_context()
             st.success("DB가 성공적으로 비워졌습니다.")
             time.sleep(1)
             st.rerun()
@@ -130,8 +231,6 @@ with st.sidebar:
         with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
 
     if st.button("🚀 분석 및 DB 적재 시작", use_container_width=True, type="primary"):
-        start_total = time.time()
-        progress_bar = st.progress(0)
         current_device = engine.embed_model.device
         st.write(f"활성 장치: **{str(current_device).upper()}**")
 
@@ -140,81 +239,7 @@ with st.sidebar:
         elif use_slicing and (not start_time or not end_time):
             st.error("❌ 슬라이싱을 켰다면 시작/종료 시간을 모두 입력해주세요.")
         else:
-            with st.status("자동화 파이프라인 가동 중...", expanded=True) as status:
-                try:
-                    os.makedirs("./temp_logs", exist_ok=True)
-                    temp_raw_path = os.path.join("./temp_logs", uploaded_file.name)
-
-                    # 한 번에 메모리에 올리지 않고 64KB씩 안전하게 나눠서 디스크에 씁니다.
-                    with open(temp_raw_path, "wb") as f:
-                        while chunk := uploaded_file.read(65536):
-                            f.write(chunk)
-
-                    filename = uploaded_file.name
-                    base_name = os.path.splitext(filename)[0]
-                    target_log_path = temp_raw_path
-
-                    # [추가] 슬라이싱 로직 가동
-                    if use_slicing:
-                        st.write(f"✂️ 타임라인 슬라이싱 중... ({start_time} ~ {end_time})")
-                        sliced_path = os.path.join("./temp_logs", f"sliced_{filename}")
-                        lines_kept = slice_log_by_time(temp_raw_path, sliced_path, start_time, end_time)
-
-                        if lines_kept == 0:
-                            st.error("⚠️ 입력한 시간대에 해당하는 로그가 없습니다.")
-                            st.stop()
-                        st.write(f"✅ 슬라이싱 완료! (총 {lines_kept:,}줄 추출됨)")
-                        target_log_path = sliced_path # 파서에게 넘길 대상을 가벼운 파일로 교체
-
-                    os.makedirs("./result", exist_ok=True)
-                    temp_json_path = f"./result/{base_name}_report.json"
-                    payload_filename = f"{base_name}_payload.json"
-
-                    st.write("1️⃣ 원시 로그 분석 및 필터링 중... (Parser)")
-                    parser = TelephonyLogSummarizer(target_log_path) # 교체된 타겟 전달
-                    parser.run_batch('all', temp_json_path)
-                    progress_bar.progress(25)
-
-                    # [신규 추가] 1️⃣-1️⃣ 네트워크 시계열 분석 가동
-                    st.write("1️⃣-1️⃣ DNS 및 네트워크 시계열 분석 중...")
-                    net_analyzer = NetworkTimeSeriesAnalyzer(target_log_path)
-                    net_report = net_analyzer.analyze()
-
-                    # 결과를 기존 report JSON에 병합하거나 별도 저장
-                    with open(temp_json_path, 'r', encoding='utf-8') as f:
-                        combined_report = json.load(f)
-                    combined_report['network_timeseries'] = net_report
-                    with open(temp_json_path, 'w', encoding='utf-8') as f:
-                        json.dump(combined_report, f, indent=4, ensure_ascii=False)
-                    progress_bar.progress(50)
-
-                    st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
-                    builder = RagPayloadBuilder(temp_json_path)
-                    builder.build_payload(payload_filename)
-                    progress_bar.progress(75)
-
-                    st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
-                    engine.ingest_folder("./payloads")
-                    progress_bar.progress(100)
-
-                    status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
-                    end_total = time.time()
-                    st.sidebar.metric(label="최근 파싱 소요시간", value=f"{end_total - start_total:.2f}초")
-                    st.success(f"✅전체 프로세스 완료!")
-
-                    st.session_state.current_file = payload_filename
-                    # [수정] 새 파일 업로드 시 이전 대화 및 박제 대기열 초기화
-                    st.session_state.last_ids = []
-                    st.session_state.messages = []
-
-                    st.toast(f"'{filename}' 분석 완료! 채팅창에 질문해주세요.", icon="✅")
-                    st.session_state.uploader_key += 1
-                    time.sleep(1)
-                    st.rerun()
-
-                except Exception as e:
-                    status.update(label="❌ 파이프라인 실패", state="error")
-                    st.error(f"오류가 발생했습니다: {e}")
+            run_analysis_pipeline(uploaded_file, use_slicing, start_time, end_time, engine)
 
     st.divider()
 
@@ -583,11 +608,15 @@ with tab_dash:
                         fig.add_trace(go.Scatter(x=sig_df['time'], y=sig_df['level'], name="Signal Level", mode='lines+markers'))
 
                         # 2. 통화 드랍 이벤트 (Scatter - 큰 빨간 점)
-                        call_df = df[df['log_type'] == 'Call_History']
-                        fail_calls = call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False)]
-                        fig.add_trace(go.Scatter(x=fail_calls['time'], y=[4]*len(fail_calls),
-                                                mode='markers', marker=dict(size=15, color='red'),
-                                                name="Call Drop", text=fail_calls['fail_reason_desc']))
+                        call_df = df[df['log_type'] == 'Call_Session'].copy()
+                        if not call_df.empty and 'status' in call_df.columns:
+                            fail_calls = call_df[call_df['status'].str.contains('FAIL|DROP', na=False, case=False)]
+                            if not fail_calls.empty:
+                                hover_text = fail_calls['fail_reason'] if 'fail_reason' in fail_calls.columns else "Unknown Reason"
+                                fig.add_trace(
+                                    go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls),
+                                            mode='markers', marker=dict(size=12, color='red', symbol='x'),
+                                            name="Call Drop", text=hover_text, hoverinfo='text+x'))
 
                         # 3. 데이터 사용량 피크 (Bar)
                         data_df = df[df['log_type'] == 'Data_Usage']
@@ -611,24 +640,28 @@ with tab_dash:
                         top_app_name, top_app_mb = "기록 없음", "0"
 
                     # (2) 통화 성공률 및 드랍 건수
-                    call_df = df[df['log_type'] == 'Call_History'].copy()
+                    call_df = df[df['log_type'] == 'Call_Session'].copy()
                     if not call_df.empty:
                         total_calls = len(call_df)
-                        # 'FAIL'이나 'DROP' 글자가 포함된 상태만 카운트
-                        drop_count = len(call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False, case=False)])
+                        if 'status' in call_df.columns:
+                            drop_count = len(call_df[call_df['status'].str.contains('FAIL|DROP', na=False, case=False)])
+                        else: drop_count = 0
                         success_rate = round(((total_calls - drop_count) / total_calls) * 100, 1) if total_calls > 0 else 100
                     else:
                         success_rate, drop_count = 100, 0 # 통화 기록이 없으면 기본값 100%
 
                     # (3) OOS(망 이탈) 발생 횟수
-                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-                    if not sig_df.empty:
-                        # raw_info에 'NO_SVC'나 'OOS'가 포함된 경우를 카운트
-                        oos_count = len(sig_df[sig_df['raw_info'].str.contains('NO_SVC|OOS', na=False, case=False)])
+                    oos_df = df[df['log_type'] == 'OOS_Event'].copy()
+                    if not oos_df.empty:
+                        is_v_oos = oos_df['voice_reg'].astype(str).str.contains('OUT_OF_SERVICE|OOS', na=False, case=False) if 'voice_reg' in oos_df.columns else False
+                        is_d_oos = oos_df['data_reg'].astype(str).str.contains('OUT_OF_SERVICE|OOS', na=False, case=False) if 'data_reg' in oos_df.columns else False
+
+                        oos_count = len(oos_df[is_v_oos | is_d_oos])
                     else:
                         oos_count = 0
 
                     # (4) 평균 신호 세기 (기존 df 활용)
+                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
                     avg_signal = sig_df['level'].mean() if not sig_df.empty else 0
 
                     # ==========================================
@@ -678,15 +711,16 @@ with tab_dash:
                         )
 
                     # [B] 통화 드랍 (Scatter - Red ❌)
-                    call_df = df[df['log_type'] == 'Call_History'].copy()
-                    if not call_df.empty:
-                        fail_calls = call_df[call_df['call_state'].str.contains('FAIL|DROP', na=False, case=False)]
+                    call_df = df[df['log_type'] == 'Call_Session'].copy()
+                    if not call_df.empty and 'status' in call_df.columns:
+                        fail_calls = call_df[call_df['status'].str.contains('FAIL|DROP', na=False, case=False)]
                         if not fail_calls.empty:
+                            hover_text = fail_calls['fail_reason'] if 'fail_reason' in fail_calls.columns else "Unknown Reason"
                             fig.add_trace(
-                                go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls), # 눈에 띄게 Y축 3.5 위치에 배치
+                                go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls),
                                         mode='markers', marker=dict(size=12, color='red', symbol='x'),
-                                        name="Call Drop", text=fail_calls['fail_reason_desc'], hoverinfo='text+x')
-                            )
+                                        name="Call Drop", text=hover_text, hoverinfo='text+x'))
+
 
                     # 레이아웃 튜닝
                     fig.update_layout(
@@ -743,324 +777,22 @@ with tab_dash:
                         st.info("데이터 사용량 로그를 찾을 수 없습니다.")
 
                     st.divider()
-
-                    # ==========================================
-                    # 🔥 3. 배터리 광탈(Wakelock) 및 발열(Thermal) 분석
-                    # ==========================================
-                    st.subheader("🔥 발열 및 배터리 드레인(Wakelock) 분석")
-
-                    thermal_df = df[df['log_type'] == 'Thermal_Stat'].copy()
-                    wl_df = df[df['log_type'] == 'Wakelock_Stat'].copy()
-
-                    c1, c2 = st.columns(2)
-
-                    import plotly.express as px
-
-                    with c1:
-                        st.markdown("**🔋 Wakelock (잠들지 못하는 앱) Top 10**")
-                        if not wl_df.empty:
-                            # 문자열인 duration 외에, '몇 번 깨웠는지(times)'를 차트의 Y축으로 사용
-                            wl_df['times'] = pd.to_numeric(wl_df['times'], errors='coerce')
-                            fig_wl = px.bar(
-                                wl_df, x='app_name', y='times',
-                                title="앱별 AP 기상(Wakeup) 강제 호출 횟수",
-                                hover_data=['duration'], # 마우스를 올리면 총 점유 시간 표시
-                                labels={'app_name': '패키지명', 'times': '깨운 횟수', 'duration': '총 점유 시간'},
-                                color='times', color_continuous_scale='Blues'
-                            )
-                            fig_wl.update_layout(xaxis_tickangle=-45, height=400)
-                            st.plotly_chart(fig_wl, use_container_width=True)
-                        else:
-                            st.info("Wakelock 기록이 없습니다.")
-
-                    with c2:
-                        st.markdown("**🌡️ 기기 내부 주요 센서 발열(Thermal) 상태**")
-                        if not thermal_df.empty:
-                            thermal_df['temperature'] = pd.to_numeric(thermal_df['temperature'], errors='coerce')
-                            # 온도가 높은 순으로 정렬
-                            thermal_df = thermal_df.dropna(subset=['temperature']).sort_values(by='temperature', ascending=False)
-
-                            # 온도가 높을수록 붉은색으로 변하는 히트맵 스타일 바 차트
-                            fig_th = px.bar(
-                                thermal_df, x='sensor', y='temperature',
-                                title="센서별 현재 온도 (°C)",
-                                color='temperature',
-                                color_continuous_scale=[(0, "green"), (0.5, "orange"), (1, "red")],
-                                range_color=[30, 50], # 30~50도 사이를 그라데이션 기준으로 삼음
-                                labels={'sensor': '센서명', 'temperature': '온도(°C)'}
-                            )
-                            # 40도 위험선 추가
-                            fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="발열 경계선 (40°C)")
-                            fig_th.update_layout(xaxis_tickangle=-45, height=400)
-                            st.plotly_chart(fig_th, use_container_width=True)
-                        else:
-                            st.info("발열(Thermal) 기록이 없습니다.")
+                    ui.render_battery_thermal_chart(df)
 
                     st.divider()
-
-                    # ==========================================
-                    # 📞 [신규 추가] 전체 통화 세션(Call History) 분석
-                    # ==========================================
-                    st.divider()
-                    st.subheader("📞 전체 통화 세션 (Call History) 요약")
-
-                    if 'log_type' in df.columns:
-                        # 1. 'Call_Session' 데이터만 필터링
-                        call_df = df[df['log_type'] == 'Call_Session']
-
-                        if not call_df.empty:
-                            # 2. 화면에 보여줄 핵심 컬럼만 추출 (DB에 존재하는 컬럼만 안전하게 선택)
-                            display_cols = []
-                            for col in ['time', 'slot', 'status', 'fail_reason', 'call_id', 'source_file']:
-                                if col in call_df.columns:
-                                    display_cols.append(col)
-
-                            # 3. 데이터 결측치(NaN)를 깔끔하게 "-"로 치환하고 최신 시간순 정렬
-                            clean_call_df = call_df[display_cols].fillna("-").sort_values(by='time', ascending=False)
-
-                            # 4. 차트와 표를 나란히 배치
-                            col_chart, col_table = st.columns([1, 2])
-
-                            with col_chart:
-                                st.markdown("**📊 통화 상태(Status) 비율**")
-                                if 'status' in call_df.columns:
-                                    fig_call = px.pie(
-                                        call_df, names='status', hole=0.4,
-                                        title="전체 Call 성공/실패 분포"
-                                    )
-                                    st.plotly_chart(fig_call, use_container_width=True)
-                                else:
-                                    st.info("상태(status) 데이터가 없습니다.")
-
-                            with col_table:
-                                st.markdown(f"**📋 전체 통화 이력 (총 {len(clean_call_df)}건)**")
-                                # 엑셀처럼 정렬, 검색, 스크롤이 가능한 강력한 데이터프레임 UI 제공
-                                st.dataframe(clean_call_df, use_container_width=True, height=400)
-                        else:
-                            st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
+                    ui.render_network_timeseries_and_dns(df)
 
                     st.divider()
-                    st.subheader("🌐 DNS 및 네트워크 시계열 분석")
-
-                    if 'log_type' in df.columns:
-                        dns_df = df[df['log_type'] == 'Network_DNS_Issue']
-                        if not dns_df.empty:
-                            col_dns1, col_dns2 = st.columns(2)
-                            with col_dns1:
-                                st.markdown("**🚫 DNS 차단/실패 사유**")
-                                fig_dns = px.pie(dns_df, names='suspected_reason', hole=0.4)
-                                st.plotly_chart(fig_dns, use_container_width=True)
-                            with col_dns2:
-                                st.markdown("**📦 패키지별 DNS 이슈 발생 건수**")
-                                pkg_counts = dns_df['package'].value_counts().reset_index()
-                                fig_pkg = px.bar(pkg_counts, x='count', y='package', orientation='h')
-                                st.plotly_chart(fig_pkg, use_container_width=True)
-                        else:
-                            st.info("적재된 DNS 이슈 데이터가 없습니다.")
-
-                        # 1. 시계열 데이터 필터링
-                        ts_df = df[df['log_type'] == 'Network_Timeline_Stat']
-
-                        if not ts_df.empty:
-                            # 데이터 타입 변환 (차트 정렬을 위해)
-                            ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
-                            ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
-                            ts_df = ts_df.sort_values(by='time')
-
-                            # 2. 지표 선택 UI
-                            metric_choice = st.selectbox("확인할 지표 선택", ["DNS 평균 응답 시간(ms)", "DNS 에러율(%)"])
-
-                            target_col = 'dns_avg' if "응답 시간" in metric_choice else 'dns_err_rate'
-
-                            # 3. Plotly 시계열 그래프 생성
-                            fig_ts = px.line(
-                                ts_df,
-                                x='time',
-                                y=target_col,
-                                color='netId', # NetId별로 선 색상 구분 (Wi-Fi vs Cellular)
-                                hover_data=['transport'],
-                                markers=True,
-                                title=f"시간대별 {metric_choice} 변화"
-                            )
-
-                            # 차트 레이아웃 최적화
-                            fig_ts.update_layout(xaxis_title="발생 시간", yaxis_title="수치")
-                            st.plotly_chart(fig_ts, use_container_width=True)
-                        else:
-                            st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
-
-                    # ==========================================
-                    # 🎯 [신규] 앱(패키지) vs DNS 실패 사유 상관관계 분석
-                    # ==========================================
-                    st.divider()
-                    st.subheader("🎯 패키지별 DNS 차단/실패 상세 원인 분석")
-
-                    import plotly.express as px
-
-                    # 1. DNS 로그만 추출 (로그 타입 이름은 현재 파서에 맞게 조정 필요, 예: 'DNS_Query' 등)
-                    # 만약 df에 return_code나 error_reason 컬럼이 없다면 파서에서 추출되도록 확인해야 합니다.
-                    dns_df = df[df['log_type'] == 'DNS_Query'].copy() # 🚨 파서의 DNS log_type 이름 확인 필요
-
-                    if not dns_df.empty and 'return_code' in dns_df.columns and 'app_name' in dns_df.columns:
-
-                        # 성공(통상 return_code '0' 또는 'NO_ERROR')을 제외한 '에러/차단' 건만 필터링
-                        # (만약 에러 코드가 문자열이라면 그에 맞게 조건 변경)
-                        error_dns_df = dns_df[~dns_df['return_code'].isin(['0', 'NO_ERROR', 'SUCCESS'])]
-
-                        if not error_dns_df.empty:
-                            # 2. 패키지명과 에러코드별 발생 횟수 집계
-                            dns_corr = error_dns_df.groupby(['app_name', 'return_code']).size().reset_index(name='count')
-
-                            # 3. 누적 막대 차트 생성 (Stacked Bar)
-                            fig_dns_corr = px.bar(
-                                dns_corr,
-                                x='app_name',
-                                y='count',
-                                color='return_code',
-                                title="어떤 앱이 어떤 이유로 DNS 통신에 실패했는가?",
-                                labels={'app_name': '패키지명 (App)', 'count': '발생 횟수', 'return_code': '에러 코드 (원인)'},
-                                barmode='stack', # 누적 형태로 렌더링
-                                color_discrete_sequence=px.colors.qualitative.Pastel
-                            )
-
-                            fig_dns_corr.update_layout(xaxis_tickangle=-45, height=500)
-
-                            c1, c2 = st.columns([2, 1])
-                            with c1:
-                                # 시각화 차트 출력
-                                st.plotly_chart(fig_dns_corr, use_container_width=True)
-
-                            with c2:
-                                # 엔지니어를 위한 Raw 교차표 (Pivot Table) 출력
-                                st.markdown("**📊 상세 에러 매트릭스**")
-                                pivot_df = error_dns_df.pivot_table(
-                                    index='app_name',
-                                    columns='return_code',
-                                    aggfunc='size',
-                                    fill_value=0
-                                )
-                                st.dataframe(pivot_df, use_container_width=True)
-
-                        else:
-                            st.success("🎉 분석된 로그 내에 DNS 차단/실패 기록이 없습니다. (모두 정상)")
-                    else:
-                        st.warning("⚠️ DNS 로그 데이터가 없거나, 파서에서 'return_code', 'app_name' 컬럼을 추출하지 않았습니다.")
-
-                    # ==========================================
-                    # 📶 [수정됨] 전체 RAT별 안테나(Signal) 레벨 타임라인 (에러 방어 로직 추가)
-                    # ==========================================
-                    st.divider()
-                    st.subheader("📶 RAT별 안테나 수신 레벨 타임라인")
-
-                    if 'log_type' in df.columns:
-                        sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-
-                        if not sig_df.empty:
-                            # 🚨 [방어 로직] DB에 아직 옛날 데이터(max_level)가 남아있다면 level로 복사해줌
-                            if 'level' not in sig_df.columns and 'max_level' in sig_df.columns:
-                                sig_df['level'] = sig_df['max_level']
-                            # 🚨 [방어 로직] rat 컬럼이 아예 없다면 Unknown으로 채워줌
-                            if 'rat' not in sig_df.columns:
-                                sig_df['rat'] = 'Unknown'
-
-                            # level 컬럼이 확실히 존재하는지 확인 후 진행
-                            if 'level' in sig_df.columns:
-                                sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
-                                sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
-                                sig_df['RAT'] = sig_df['rat'].astype(str)
-
-                                # 정렬
-                                sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
-
-                                # 1. 차트 기본 렌더링 (데이터가 50개 이상이면 징그러운 마커 숨김)
-                                fig_sig_dash = px.line(
-                                    sig_df,
-                                    x='time',
-                                    y='Level',
-                                    color='RAT',
-                                    facet_row='Slot',
-                                    line_shape='hv',
-                                    markers=len(sig_df) < 50, # 🚨 핵심: 데이터가 많으면 점(마커) 제거
-                                    title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
-                                    labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
-                                    hover_data=['raw_info'],
-                                    height=600
-                                )
-
-                                # 2. 선명도 및 겹침 완화 (선 굵기 얇게, 살짝 투명하게)
-                                fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
-
-                                # 3. 🚨 X축 최적화 (시간 텍스트 떡짐 방지)
-                                fig_sig_dash.update_xaxes(
-                                    nticks=15,             # 시간 눈금을 최대 15개로 제한하여 시원하게 배치
-                                    tickangle=-45,         # 글자를 45도 기울여서 가독성 확보
-                                    showgrid=True,
-                                    gridcolor='rgba(128,128,128,0.2)'
-                                )
-
-                                # 4. Y축 최적화
-                                fig_sig_dash.update_yaxes(
-                                    range=[-0.5, 5.5],
-                                    dtick=1,
-                                    title_text="안테나 칸",
-                                    showgrid=True,
-                                    gridcolor='rgba(128,128,128,0.2)'
-                                )
-
-                                # 5. UI 편의성 (마우스 올리면 같은 시간대의 LTE, NR 값을 한 툴팁에 모아서 보여줌)
-                                fig_sig_dash.update_layout(hovermode="x unified")
-                                fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-
-                                st.plotly_chart(fig_sig_dash, use_container_width=True)
-                            else:
-                                st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
-                        else:
-                            st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
-                    # ==========================================
-                    # 📊 앱 및 RAT별 데이터 사용량 분석
-                    # ==========================================
-                    st.divider()
-                    st.subheader("📊 셀룰러 데이터 사용량 프로파일링")
-
-                    if 'log_type' in df.columns:
-                        # Data_Usage 로그만 추출
-                        du_df = df[df['log_type'] == 'Data_Usage'].copy()
-
-                        if not du_df.empty:
-                            du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
-
-                            col_du1, col_du2 = st.columns(2)
-
-                            with col_du1:
-                                # 앱별 총합 계산
-                                app_df = du_df.groupby('app_name')['total_mb'].sum().reset_index()
-                                app_df = app_df.sort_values(by='total_mb', ascending=False).head(10) # Top 10만 표시
-
-                                fig_app = px.pie(
-                                    app_df, values='total_mb', names='app_name', hole=0.4,
-                                    title='📱 앱별 데이터 사용량 Top 10 (MB)',
-                                    hover_data=['total_mb'], labels={'total_mb':'사용량(MB)'}
-                                )
-                                fig_app.update_traces(textposition='inside', textinfo='percent+label')
-                                st.plotly_chart(fig_app, use_container_width=True)
-
-                            with col_du2:
-                                # 망(RAT)별 총합 계산
-                                rat_df = du_df.groupby('rat')['total_mb'].sum().reset_index()
-
-                                fig_rat = px.pie(
-                                    rat_df, values='total_mb', names='rat',
-                                    title='📶 통신망(RAT)별 데이터 처리 비중',
-                                    color='rat',
-                                    color_discrete_map={'LTE':'#1f77b4', '5G (NR)':'#ff7f0e', 'Unknown (망 통합 합산)':'#7f7f7f'}
-                                )
-                                fig_rat.update_traces(textposition='inside', textinfo='percent+label')
-                                st.plotly_chart(fig_rat, use_container_width=True)
-                        else:
-                            st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
+                    ui.render_dns_analysis_chart(df)
 
                     st.divider()
-                    st.header("🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)")
+                    ui.render_call_history_summary(df)
+
+                    st.divider()
+                    ui.render_signal_level_timeline(df)
+
+                    st.divider()
+                    ui.render_data_usage_profiling(df)
 
                     # ==========================================
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
@@ -1084,9 +816,13 @@ with tab_dash:
                                     fact_data = ", ".join([f"{r['app_name']} ({r.get('rat','Unknown')}망 {r['total_mb']}MB)" for _, r in top_du.iterrows()])
 
                                 # 2. 통화 드랍/실패 이력 텍스트화
-                                call_df = df[df['log_type'] == 'Call_History'].copy()
+                                call_df = df[df['log_type'] == 'Call_Session'].copy()
                                 if not call_df.empty:
-                                    fact_call = ", ".join([f"{r.get('call_state','Unknown')} (원인: {r.get('fail_reason_desc', r.get('fail_reason', 'N/A'))})" for _, r in call_df.iterrows()])
+                                    fail_calls = call_df[call_df['status'].astype(str).str.contains('FAIL|DROP', na=False, case=False)]
+                                    if not fail_calls.empty:
+                                        fact_call = ", ".join([f"{r.get('status', 'Unknown')} (원인: {r.get('fail_reason', 'N/A')})" for _, r in fail_calls.iterrows()])
+                                    else:
+                                        fact_call = "모든 통화 100% 정상 성공 (드랍 없음)"
 
                             combined_query = f"""
                             [절대 팩트 데이터 강제 주입]
