@@ -270,12 +270,26 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
                 with open(temp_json_path, 'r', encoding='utf-8') as f:
                     main_report = json.load(f)
 
-                # main_report가 리스트 구조일 경우 그대로 연장(extend)
+                # 1. 리스트 구조일 경우 (가장 단순함)
                 if isinstance(main_report, list):
                     main_report.extend(ntn_parsed_data)
-                # 만약 딕셔너리 구조라면 (안전장치)
+
+                # 2. 딕셔너리 구조일 경우 (메인 로그 리스트를 추적하여 병합)
                 elif isinstance(main_report, dict):
-                    main_report['ntn_logs'] = ntn_parsed_data
+                    merged = False
+                    for key, value in main_report.items():
+                        # 값이 리스트이고, 내부에 'log_type'이라는 키를 가진 딕셔너리가 있다면 거기가 메인 방!
+                        if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict) and 'log_type' in value[0]:
+                            main_report[key].extend(ntn_parsed_data)
+                            merged = True
+                            break
+
+                    # 만약 메인 방을 못 찾았다면 최후의 수단으로 그냥 최상단에 리스트로 덮어씌움
+                    if not merged:
+                        if 'parsed_data' in main_report:
+                            main_report['parsed_data'].extend(ntn_parsed_data)
+                        else:
+                            main_report['ntn_logs'] = ntn_parsed_data
 
                 with open(temp_json_path, 'w', encoding='utf-8') as f:
                     json.dump(main_report, f, indent=4, ensure_ascii=False)

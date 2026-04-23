@@ -56,7 +56,8 @@ class NtnProcessor:
                     continue
 
                 # 4. NTN Mode 상태 알림 (실제 상태 및 UI 아이콘 트리거)
-                match_ntn_mode = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*update.*?lastNotifiedNtnModeAndNotify.*?currNtnMode=(true|false)', line, re.IGNORECASE)
+                # 정규식 패턴 수정: updateLastNotifiedNtnModeAndNotify 정확히 매칭
+                match_ntn_mode = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*updateLastNotifiedNtnModeAndNotify.*currNtnMode=(true|false)', line, re.IGNORECASE)
                 if match_ntn_mode:
                     self.parsed_data.append({
                         'time': match_ntn_mode.group(1),

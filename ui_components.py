@@ -207,6 +207,14 @@ def render_ntn_advanced_fw_analyzer(df):
         st.info("현재 분석 대상 로그에 위성(NTN) 관련 데이터가 없습니다.")
         return
 
+    # ==============================================================
+    # 🚨 [핵심 픽스] KeyError 방어: 로그에 없는 컬럼이라도 빈 값으로 강제 생성
+    # ==============================================================
+    expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'is_hysteresis', 'raw_info']
+    for col in expected_cols:
+        if col not in ntn_df.columns:
+            ntn_df[col] = None  # 값이 없으면 None으로 채워넣어 KeyError 원천 차단
+
     ntn_df = ntn_df.sort_values('time')
 
     # ---------------------------------------------------------
@@ -214,13 +222,14 @@ def render_ntn_advanced_fw_analyzer(df):
     # ---------------------------------------------------------
     latest_plmn = ntn_df[ntn_df['event_type'] == 'PLMN_MATCH'].iloc[-1]['ntn_plmn'] if not ntn_df[ntn_df['event_type'] == 'PLMN_MATCH'].empty else "N/A"
 
-    # UI 아이콘 상태 판단 로직: NTN_MODE가 ON이거나, Hysteresis 구간이면 아이콘 켜짐
+    # UI 아이콘 상태 판단 로직
     ui_icon_status = "OFF ⚪"
 
     # 마지막 이벤트들을 역순으로 확인하여 상태 결정
     for _, row in ntn_df.iloc[::-1].iterrows():
         if row['event_type'] == 'NTN_MODE_NOTIFY':
-            ui_icon_status = "ON (Real) 🟢" if row['ntn_mode'] == 'ON' else "OFF ⚪"
+            # ntn_mode가 None일 수도 있으므로 안전하게 처리
+            ui_icon_status = "ON (Real) 🟢" if str(row['ntn_mode']).upper() == 'ON' else "OFF ⚪"
             break
         elif row['event_type'] == 'HYSTERESIS_ICON_ON':
             ui_icon_status = "ON (Hysteresis 유지) 🟡"
@@ -240,13 +249,12 @@ def render_ntn_advanced_fw_analyzer(df):
 
     fig = px.scatter(
         ntn_df, x='time', y='event_type', color='event_type',
-        hover_data=['ntn_plmn', 'ntn_mode', 'is_hysteresis', 'power_state'],
+        hover_data=['ntn_plmn', 'ntn_mode', 'is_hysteresis', 'power_state'], # 이제 컬럼이 무조건 존재하므로 에러 안 남!
         title="시간대별 주요 이벤트 추적 (특히 Hysteresis 구간의 UI 가짜 유지 확인)",
         labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
     )
 
     fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
-    # Y축 정렬 순서를 논리적 흐름에 맞게 배치
     order = ['RADIO_POWER', 'PLMN_MATCH', 'DATA_POLICY', 'NTN_MODE_NOTIFY', 'HYSTERESIS_ICON_ON']
     fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
 
