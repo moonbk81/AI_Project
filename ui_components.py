@@ -210,7 +210,7 @@ def render_ntn_advanced_fw_analyzer(df):
     # ==============================================================
     # 🚨 [핵심 픽스] KeyError 방어: 로그에 없는 컬럼이라도 빈 값으로 강제 생성
     # ==============================================================
-    expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'is_hysteresis', 'raw_info']
+    expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'last_ntn_mode', 'last_phone_mode', 'is_hysteresis', 'raw_info']
     for col in expected_cols:
         if col not in ntn_df.columns:
             ntn_df[col] = None  # 값이 없으면 None으로 채워넣어 KeyError 원천 차단
@@ -249,7 +249,7 @@ def render_ntn_advanced_fw_analyzer(df):
 
     fig = px.scatter(
         ntn_df, x='time', y='event_type', color='event_type',
-        hover_data=['ntn_plmn', 'ntn_mode', 'is_hysteresis', 'power_state'], # 이제 컬럼이 무조건 존재하므로 에러 안 남!
+        hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'], # 이제 컬럼이 무조건 존재하므로 에러 안 남!
         title="시간대별 주요 이벤트 추적 (특히 Hysteresis 구간의 UI 가짜 유지 확인)",
         labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
     )

@@ -57,13 +57,17 @@ class NtnProcessor:
 
                 # 4. NTN Mode 상태 알림 (실제 상태 및 UI 아이콘 트리거)
                 # 정규식 패턴 수정: updateLastNotifiedNtnModeAndNotify 정확히 매칭
-                match_ntn_mode = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*updateLastNotifiedNtnModeAndNotify.*currNtnMode=(true|false)', line, re.IGNORECASE)
+                match_ntn_mode = re.search(
+                    r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?updateLastNotifiedNtnModeAndNotify.*?lastNotifiedNtnMode=(true|false).*?lastNotifiedNtnModePhone=(true|false).*?currNtnMode=(true|false)',
+                    line, re.IGNORECASE)
                 if match_ntn_mode:
                     self.parsed_data.append({
                         'time': match_ntn_mode.group(1),
                         'log_type': 'NTN_Policy',
                         'event_type': 'NTN_MODE_NOTIFY',
-                        'ntn_mode': 'ON' if match_ntn_mode.group(2).lower() == 'true' else 'OFF'
+                        'last_ntn_mode': 'ON' if match_ntn_mode.group(2).lower() == 'true' else 'OFF',
+                        'last_phone_mode': 'ON' if match_ntn_mode.group(3).lower() == 'true' else 'OFF',
+                        'ntn_mode': 'ON' if match_ntn_mode.group(4).lower() == 'true' else 'OFF'
                     })
                     continue
 
@@ -97,7 +101,7 @@ class NtnProcessor:
             elif event == 'RADIO_POWER':
                 text_content = f"[{time_str}] Modem State: Radio power was turned {item.get('power_state')}."
             elif event == 'NTN_MODE_NOTIFY':
-                text_content = f"[{time_str}] NTN Mode: SatelliteController updated notified NTN mode. Current NTN Mode is {item.get('ntn_mode')}."
+                text_content = f"[{time_str}] NTN Mode Transition: SatelliteController updated NTN mode. Previous notified mode was {item.get('last_ntn_mode')}, and CURRENT mode is now {item.get('ntn_mode')}."
             elif event == 'HYSTERESIS_ICON_ON':
                 text_content = f"[{time_str}] NTN UI State: Device is physically evaluating/handover, but is within hysteresis time. The Satellite UI Icon remains ON to prevent flickering."
             elif event == 'DATA_POLICY':
@@ -116,7 +120,9 @@ class NtnProcessor:
                     "ntn_plmn": item.get('ntn_plmn', ''),
                     "power_state": item.get('power_state', ''),
                     "data_policy": item.get('data_policy', ''),
-                    "raw_info": item.get('raw_info', '')
+                    "ntn_mode": item.get('ntn_mode', ''),
+                    "last_ntn_mode": item.get('last_ntn_mode', ''),
+                    "is_hysteresis": item.get('is_hysteresis', '')
                 }
             }
             self.payloads.append(payload)
