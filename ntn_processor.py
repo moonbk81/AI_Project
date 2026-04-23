@@ -29,16 +29,17 @@ class NtnProcessor:
                     })
                     continue
 
-                # 2. Hysteresis 상태 및 Carrier Roaming NTN 진입 (SatelliteController)
-                match_ntn_hys = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*SatelliteController:\s(isInSatelliteModeForCarrierRoaming.*hysteresis|.*is in satellite mode for carrier roaming)', line)
-                if match_ntn_hys:
-                    is_hys = 'True' if 'hysteresis' in match_ntn_hys.group(2) else 'False'
+                # 2. (신규) Radio Power 상태 추적 (모뎀 ON/OFF)
+                # AOSP 표준인 setRadioPower 또는 RadioStateChanged 로그를 캐치합니다.
+                match_radio_power = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*(?:setRadioPower.*?=?(true|false)|RadioStateChanged.*RADIO_(ON|OFF))', line, re.IGNORECASE)
+                if match_radio_power:
+                    val = match_radio_power.group(2) or match_radio_power.group(3)
+                    power_state = 'ON' if val.upper() in ['TRUE', 'ON'] else 'OFF'
                     self.parsed_data.append({
-                        'time': match_ntn_hys.group(1),
+                        'time': match_radio_power.group(1),
                         'log_type': 'NTN_Policy',
-                        'event_type': 'CARRIER_ROAMING_STATE',
-                        'is_hysteresis': is_hys,
-                        'raw_info': match_ntn_hys.group(2).strip()
+                        'event_type': 'RADIO_POWER',
+                        'power_state': power_state
                     })
                     continue
 
@@ -51,6 +52,28 @@ class NtnProcessor:
                         'log_type': 'NTN_Policy',
                         'event_type': 'DATA_POLICY',
                         'data_policy': mode_map.get(match_ntn_policy.group(2), f"Mode {match_ntn_policy.group(2)}")
+                    })
+                    continue
+
+                # 4. NTN Mode 상태 알림 (실제 상태 및 UI 아이콘 트리거)
+                match_ntn_mode = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*update.*?lastNotifiedNtnModeAndNotify.*?currNtnMode=(true|false)', line, re.IGNORECASE)
+                if match_ntn_mode:
+                    self.parsed_data.append({
+                        'time': match_ntn_mode.group(1),
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'NTN_MODE_NOTIFY',
+                        'ntn_mode': 'ON' if match_ntn_mode.group(2).lower() == 'true' else 'OFF'
+                    })
+                    continue
+
+                # 5. Hysteresis 구간 (물리적 단절이나 UI 위성 아이콘 유지 구간)
+                match_hys_icon = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*isInSatelliteModeForCarrierRoaming.*?connected to satellite within hysteresis time', line, re.IGNORECASE)
+                if match_hys_icon:
+                    self.parsed_data.append({
+                        'time': match_hys_icon.group(1),
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'HYSTERESIS_ICON_ON',
+                        'is_hysteresis': 'True'
                     })
                     continue
 
@@ -70,9 +93,12 @@ class NtnProcessor:
             # AI가 문맥을 정확히 이해하도록 자연어로 변환
             if event == 'PLMN_MATCH':
                 text_content = f"[{time_str}] NTN Policy: NtnCapabilityResolver verified and registered to Satellite PLMN {item.get('ntn_plmn')}. The device recognizes this PLMN as a Non-Terrestrial Network (Starlink/T-Mobile roaming)."
-            elif event == 'CARRIER_ROAMING_STATE':
-                hys_status = "Device is currently in HYSTERESIS time (waiting for stability to prevent ping-pong)." if item.get('is_hysteresis') == 'True' else "Device confirmed in satellite mode for carrier roaming."
-                text_content = f"[{time_str}] NTN State: SatelliteController reported carrier roaming state. {hys_status} Raw status: {item.get('raw_info')}."
+            elif event == 'RADIO_POWER':
+                text_content = f"[{time_str}] Modem State: Radio power was turned {item.get('power_state')}."
+            elif event == 'NTN_MODE_NOTIFY':
+                text_content = f"[{time_str}] NTN Mode: SatelliteController updated notified NTN mode. Current NTN Mode is {item.get('ntn_mode')}."
+            elif event == 'HYSTERESIS_ICON_ON':
+                text_content = f"[{time_str}] NTN UI State: Device is physically evaluating/handover, but is within hysteresis time. The Satellite UI Icon remains ON to prevent flickering."
             elif event == 'DATA_POLICY':
                 text_content = f"[{time_str}] NTN Policy: SatelliteDataServicePolicy updated. Allowed data support mode is set to {item.get('data_policy')}."
             else:
@@ -87,7 +113,7 @@ class NtnProcessor:
                     "time": time_str,
                     "event_type": event,
                     "ntn_plmn": item.get('ntn_plmn', ''),
-                    "is_hysteresis": item.get('is_hysteresis', ''),
+                    "power_state": item.get('power_state', ''),
                     "data_policy": item.get('data_policy', ''),
                     "raw_info": item.get('raw_info', '')
                 }
