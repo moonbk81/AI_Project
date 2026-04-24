@@ -305,34 +305,31 @@ def render_ntn_advanced_fw_analyzer(df=None):
     final_table_df = clean_df[display_cols].fillna("-")
     st.dataframe(final_table_df, use_container_width=True)
 
-def render_data_call_analyzer():
+def render_data_call_analyzer(data):
     """RIL SETUP_DATA_CALL (데이터 호) 분석 렌더러"""
-    import os, json
     import pandas as pd
     import plotly.express as px
     import streamlit as st
 
     st.subheader("🌐 RIL 데이터 호 (SETUP_DATA_CALL) 분석")
 
-    file_path = "./result/datacall_parsed_logs.json"
-    if not os.path.exists(file_path):
+    # 1. 전달받은 data가 비어있는지 먼저 체크 (유령 데이터 방지)
+    if not data or len(data) == 0:
+        st.info("현재 분석 대상 로그에 데이터 호(SETUP_DATA_CALL) 연결 시도 내역이 없습니다.")
         return
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    if not data:
-        st.info("데이터 호(SETUP_DATA_CALL) 연결 시도 로그가 없습니다.")
-        return
-
+    # 2. 데이터가 있을 경우에만 DataFrame 생성 및 렌더링 진행
     df = pd.DataFrame(data)
 
-    # 1. 상단 KPI 카드 계산
+    # 상단 KPI 카드 계산
     total_calls = len(df)
     success_calls = len(df[df['status'] == 'SUCCESS'])
     fail_calls = total_calls - success_calls
     success_rate = (success_calls / total_calls) * 100 if total_calls > 0 else 0
-    avg_latency = df['latency_ms'].mean()
+
+    # 레이턴시가 있는 정상 연결만 평균 계산 (에러 방지)
+    valid_latency = df[df['latency_ms'] > 0]['latency_ms']
+    avg_latency = valid_latency.mean() if not valid_latency.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("총 데이터 연결 시도", f"{total_calls} 회")
@@ -342,34 +339,35 @@ def render_data_call_analyzer():
 
     st.divider()
 
-    # 2. 타임라인 산점도 (생애주기 및 상태 시각화)
+    # 타임라인 산점도 (생애주기 및 상태 시각화)
     st.markdown("**📈 데이터 호 트랜잭션 및 상태 전이(Lifecycle)**")
 
     chart_df = df[~((df['event_type'] == 'UNSOL_UPDATE') & (df.get('is_changed') == False))].copy()
 
-    # 상태별 색상 및 마커 지정
+    # 상태별 색상
     color_map = {
-        "SUCCESS": "#2ecc71",   # 초록색 (연결성공)
-        "FAIL": "#e74c3c",      # 빨간색 (연결실패)
-        "DORMANT": "#f1c40f",   # 노란색 (유휴상태 진입)
-        "ACTIVE": "#3498db",    # 파란색 (다시 활성화)
-        "DROP 💥": "#8e44ad"    # 보라색 (비정상 망단절)
+        "SUCCESS": "#2ecc71",   # 초록
+        "FAIL": "#e74c3c",      # 빨강
+        "DORMANT": "#f1c40f",   # 노랑
+        "ACTIVE": "#3498db",    # 파랑
+        "DROP 💥": "#8e44ad"    # 보라
     }
 
     if not chart_df.empty:
         fig = px.scatter(
-            df, x='req_time', y='apn', color='status',
+            chart_df, x='req_time', y='apn', color='status',
             color_discrete_map=color_map,
-            symbol='event_type', # 이벤트 종류별로 모양을 다르게! (네모, 동그라미 등)
-            size=[15]*len(df),
+            symbol='event_type',
+            size=[15]*len(chart_df),
             hover_data=['event_type', 'network', 'protocol', 'cause', 'latency_ms', 'cid'],
             title="시간대별 APN 데이터 호 상태 변화 (마우스 오버 시 상세 원인 확인)",
             labels={'req_time': '시간', 'apn': '대상 APN'}
         )
-        st.plotly_chart(fig, use_container_width=True)
+        # key 에러 방지를 위해 난수 대신 명시적 이름 부여
+        st.plotly_chart(fig, use_container_width=True, key="datacall_scatter_chart")
     else:
         st.info("차트에 표시할 이벤트가 없습니다.")
 
-    # 3. 상세 로그 추적 테이블
+    # 상세 로그 추적 테이블
     st.markdown("**📋 데이터 호 트랜잭션 상세 내역**")
     st.dataframe(df, use_container_width=True)

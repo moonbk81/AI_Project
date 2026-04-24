@@ -279,7 +279,8 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             st.write("2️⃣-2️⃣ RIL 데이터 호 트랜잭션 분석 중...")
             from data_call_processor import DataCallProcessor
             dc_proc = DataCallProcessor(target_log_path)
-            dc_proc.run_parser()
+            st.session_state['current_datacall_data'] = dc_proc.run_parser()
+
             dc_proc.save_ui_report("./result")
             progress_bar.progress(75)
 
@@ -828,7 +829,8 @@ with tab_dash:
                     ui.render_ntn_advanced_fw_analyzer(df)
 
                     st.divider()
-                    ui.render_data_call_analyzer()
+                    current_dc_data = st.session_state.get('current_datacall_data', [])
+                    ui.render_data_call_analyzer(current_dc_data)
 
                     # ==========================================
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
