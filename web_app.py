@@ -264,9 +264,17 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             st.write("2️⃣-1️⃣ 위성(NTN) 특화 지식 추출 및 DB 중...")
             ntn_proc = NtnProcessor(target_log_path)
             ntn_parsed_data = ntn_proc.run_parser()
-
             ntn_proc.save_ui_report("./result")
             ntn_proc.build_and_save_payloads("./payloads")
+            progress_bar.progress(70)
+            # ==========================================
+            # 🌐 [플러그인] Data Call (데이터 호) 분석 처리
+            # ==========================================
+            st.write("2️⃣-2️⃣ RIL 데이터 호 트랜잭션 분석 중...")
+            from data_call_processor import DataCallProcessor
+            dc_proc = DataCallProcessor(target_log_path)
+            dc_proc.run_parser()
+            dc_proc.save_ui_report("./result")
             progress_bar.progress(75)
 
             st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
@@ -812,6 +820,9 @@ with tab_dash:
 
                     st.divider()
                     ui.render_ntn_advanced_fw_analyzer(df)
+
+                    st.divider()
+                    ui.render_data_call_analyzer()
 
                     # ==========================================
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
