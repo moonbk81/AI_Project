@@ -135,89 +135,55 @@ class DataCallProcessor:
                 # ==========================================
                 # 3. UNSOL_DATA_CALL_LIST_CHANGED (모뎀 상태 통보)
                 # ==========================================
-                unsol_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?UNSOL_DATA_CALL_LIST_CHANGED\s+\[(.*?)\]', line)
+                unsol_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?UNSOL_DATA_CALL_LIST_CHANGED\s+(.*)', line)
                 if unsol_match:
                     time_str = unsol_match.group(1)
                     unsol_payload = unsol_match.group(2)
-
                     current_unsol_cids = set()
 
-                    # 1. DNN(APN) 정보 미리 매칭 (SetupDataCallResult 단위로 쪼개서 분석)
-                    # 박사님 로그 형식: ... cid: 1, ... trafficDescriptors: [TrafficDescriptor{dnn: IMS, ...
-                    dnn_map = {}
-                    # 각 개별 Call 정보 블록을 찾기 위해 SetupDataCallResult를 기준으로 split
+                    # 1. SetupDataCallResult 단위로 분할
                     call_blocks = re.split(r'SetupDataCallResult', unsol_payload)
+
                     for block in call_blocks:
-                        cid_m = re.search(r'cid:\s*(\d+)', block)
-                        dnn_m = re.search(r'dnn:\s*([^,}\s\]]+)', block)
-                        if cid_m and dnn_m:
-                            dnn_map[cid_m.group(1)] = dnn_m.group(1)
+                        if not block.strip(): continue
 
-                    # 2. 개별 Call 상태 및 리스트 갱신
-                    # 정규식에서 콤마(,)와 공백 대응 강화
-                    for call_match in re.finditer(r'cid:\s*(\d+),\s*active:\s*(\d+)', unsol_payload):
-                        cid = call_match.group(1)
-                        active_state = call_match.group(2)
-                        current_unsol_cids.add(cid)
+                        # 블록 내에서 정보 추출
+                        cid_m = re.search(r'cid[:=]\s*(\d+)', block, re.I)
+                        dnn_m = re.search(r'(?:dnn|apn)[:=]\s*["\']?([a-zA-Z0-9_\-]+)["\']?', block, re.I)
+                        active_m = re.search(r'active[:=]\s*(\d+)', block, re.I)
 
-                        # DNN 정보 업데이트
-                        real_dnn = dnn_map.get(cid, "UNKNOWN")
+                        if cid_m:
+                            cid = cid_m.group(1)
+                            current_unsol_cids.add(cid)
 
-                        if cid not in active_sessions:
-                            active_sessions[cid] = {
-                                'apn': real_dnn,
-                                'active_state': 'UNKNOWN',
-                                'network': 'UNKNOWN',
-                                'protocol': 'UNKNOWN'
-                            }
-                        elif active_sessions[cid]['apn'] in ["UNKNOWN (Mid-log)", "UNKNOWN"]:
-                            active_sessions[cid]['apn'] = real_dnn
+                            found_dnn = dnn_m.group(1).strip() if dnn_m else None
+                            current_active = active_m.group(1) if active_m else "0"
 
-                        sess = active_sessions[cid]
-                        prev_state = sess.get('active_state', 'UNKNOWN')
+                            # 2. 세션 관리 및 APN 복구
+                            if cid not in active_sessions:
+                                active_sessions[cid] = {
+                                    'apn': found_dnn if found_dnn else "UNKNOWN (Early-log)",
+                                    'active_state': 'UNKNOWN',
+                                    'setup_res_time': time_str
+                                }
+                            else:
+                                # UNKNOWN 상태인 세션을 실제 DNN 값으로 업데이트
+                                if found_dnn and active_sessions[cid]['apn'] in ["UNKNOWN", "UNKNOWN (Early-log)"]:
+                                    active_sessions[cid]['apn'] = found_dnn
 
-                        # 상태가 변했거나 처음 보는 로그면 is_changed = True
-                        is_changed = (prev_state != active_state)
+                            sess = active_sessions[cid]
+                            state_str = "ACTIVE" if current_active == "1" else "DORMANT" if current_active == "2" else f"STATE_{current_active}"
 
-                        state_str = "ACTIVE" if active_state == "1" else "DORMANT" if active_state == "2" else f"STATE_{active_state}"
-
-                        # 🚨 여기가 핵심: parsed_data에 제대로 삽입되는지 확인
-                        self.parsed_data.append({
-                            'event_type': 'UNSOL_UPDATE',
-                            'req_time': time_str,
-                            'res_time': time_str,
-                            'token': 'UNSL',
-                            'cid': cid,
-                            'apn': sess['apn'],
-                            'network': sess.get('network', 'UNKNOWN'),
-                            'protocol': sess.get('protocol', 'UNKNOWN'),
-                            'status': state_str,
-                            'cause': f"ActiveState: {active_state}",
-                            'is_changed': is_changed,
-                            'latency_ms': 0
-                        })
-                        sess['active_state'] = active_state
-
-                    # 🚨 [망 단절 (Silent Drop) 탐지]
-                    for active_cid in list(active_sessions.keys()):
-                        if active_cid not in current_unsol_cids:
-                            sess = active_sessions[active_cid]
                             self.parsed_data.append({
-                                'event_type': 'NETWORK_DROP',
+                                'event_type': 'UNSOL_UPDATE',
                                 'req_time': time_str,
                                 'res_time': time_str,
-                                'token': '-',
-                                'cid': active_cid,
-                                'apn': sess.get('apn', 'UNKNOWN'),
-                                'network': sess.get('network', 'UNKNOWN'),
-                                'protocol': sess.get('protocol', 'UNKNOWN'),
-                                'status': "DROP 💥",
-                                'cause': "Silent Drop by Network",
-                                'is_changed': True,
-                                'latency_ms': -1
+                                'cid': cid,
+                                'apn': sess['apn'],
+                                'status': state_str
+                                # (나머지 필요한 필드들 추가)
                             })
-                            del active_sessions[active_cid]
-                    continue
+                            sess['active_state'] = current_active
 
         return self.parsed_data
 
