@@ -270,6 +270,9 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             st.write("2️⃣-1️⃣ 위성(NTN) 특화 지식 추출 및 DB 중...")
             ntn_proc = NtnProcessor(target_log_path)
             ntn_parsed_data = ntn_proc.run_parser()
+
+            with open(f"./result/{base_name}_ntn.json", "w", encoding="utf-8") as f:
+                json.dump(ntn_parsed_data, f, indent=4, ensure_ascii=False)
             ntn_proc.save_ui_report("./result")
             ntn_proc.build_and_save_payloads("./payloads")
             progress_bar.progress(70)
@@ -279,7 +282,11 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             st.write("2️⃣-2️⃣ RIL 데이터 호 트랜잭션 분석 중...")
             from data_call_processor import DataCallProcessor
             dc_proc = DataCallProcessor(target_log_path)
-            st.session_state['current_datacall_data'] = dc_proc.run_parser()
+            datacall_data = dc_proc.run_parser()
+            st.session_state['current_datacall_data'] = datacall_data
+
+            with open(f"./result/{base_name}_datacall.json", "w", encoding="utf-8") as f:
+                json.dump(datacall_data, f, indent=4, ensure_ascii=False)
 
             dc_proc.save_ui_report("./result")
             progress_bar.progress(75)
@@ -826,10 +833,20 @@ with tab_dash:
                     ui.render_data_usage_profiling(df)
 
                     st.divider()
-                    ui.render_ntn_advanced_fw_analyzer(df)
+                    # 1. 현재 선택된 파일의 기본 이름(base_name) 추출 (예: log_A_payload.json -> log_A)
+                    current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
+                    # 2. 위성(NTN) 모듈에 동적 파라미터 전달
+                    ui.render_ntn_advanced_fw_analyzer(current_base)
 
                     st.divider()
-                    current_dc_data = st.session_state.get('current_datacall_data', [])
+                    # 3. 데이터 호 파일 스위칭 완벽 대응
+                    current_dc_data = []
+                    if current_base:
+                        dc_json_path = f"./result/{current_base}_datacall.json"
+                        if os.path.exists(dc_json_path):
+                            with open(dc_json_path, 'r', encoding='utf-8') as f:
+                                current_dc_data = json.load(f)
+
                     ui.render_data_call_analyzer(current_dc_data)
 
                     # ==========================================

@@ -195,13 +195,17 @@ def render_network_timeseries_and_dns(df):
         else:
             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
 
-def render_ntn_advanced_fw_analyzer(df=None):
+def render_ntn_advanced_fw_analyzer(current_base):
     """Starlink (Direct-to-Cell) 위성 로밍 및 UI 아이콘 상태 분석 (독립 모듈형)"""
     st.subheader("🛰️ Starlink / NTN 로밍 정책 및 UI 상태 분석")
 
-    file_path = "./result/ntn_parsed_logs.json"
+    if not current_base:
+        st.info("💡 분석 대상 파일이 선택되지 않았습니다.")
+        return
+
+    file_path = f"./result/{current_base}_ntn.json"
     if not os.path.exists(file_path):
-        st.info("💡 위성(NTN) 로그 분석 결과 파일이 없습니다. 사이드바에서 [분석 버튼]을 다시 눌러주세요.")
+        st.info("💡 현재 파일에 대한 위성(NTN)로그 분석 결과가 없습니다.")
         return
 
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -321,14 +325,21 @@ def render_data_call_analyzer(data):
     # 2. 데이터가 있을 경우에만 DataFrame 생성 및 렌더링 진행
     df = pd.DataFrame(data)
 
+    expected_columns = ['status', 'latency_ms', 'event_type', 'req_time', 'apn',
+                        'network', 'protocol', 'cause', 'cid']
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = 0 if col == 'latency_ms' else 'UNKNOWN'
+
+    setup_df = df[df['event_type'] == 'DATA_SETUP']
     # 상단 KPI 카드 계산
-    total_calls = len(df)
-    success_calls = len(df[df['status'] == 'SUCCESS'])
+    total_calls = len(setup_df)
+    success_calls = len(setup_df[setup_df['status'] == 'SUCCESS'])
     fail_calls = total_calls - success_calls
     success_rate = (success_calls / total_calls) * 100 if total_calls > 0 else 0
 
     # 레이턴시가 있는 정상 연결만 평균 계산 (에러 방지)
-    valid_latency = df[df['latency_ms'] > 0]['latency_ms']
+    valid_latency = setup_df[setup_df['latency_ms'] > 0]['latency_ms']
     avg_latency = valid_latency.mean() if not valid_latency.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
