@@ -147,10 +147,14 @@ class DataCallProcessor:
                     for block in call_blocks:
                         if not block.strip(): continue
 
-                        # 블록 내에서 정보 추출
+                        # [기존 추출]
                         cid_m = re.search(r'cid[:=]\s*(\d+)', block, re.I)
                         dnn_m = re.search(r'(?:dnn|apn)[:=]\s*["\']?([a-zA-Z0-9_\-]+)["\']?', block, re.I)
                         active_m = re.search(r'active[:=]\s*(\d+)', block, re.I)
+
+                        # [신규 추출] protocol(type) 및 cause
+                        type_m = re.search(r'type[:=]\s*([^,}\s]+)', block, re.I)
+                        cause_m = re.search(r'cause[:=]\s*([^,}\s]+)', block, re.I)
 
                         if cid_m:
                             cid = cid_m.group(1)
@@ -159,39 +163,59 @@ class DataCallProcessor:
                             found_dnn = dnn_m.group(1).strip() if dnn_m else None
                             current_active = active_m.group(1) if active_m else "0"
 
-                            # 2. 세션 관리 및 APN 복구
+                            # 신규 추출된 값 할당 (없으면 UNKNOWN)
+                            current_protocol = type_m.group(1).strip() if type_m else "UNKNOWN"
+                            current_cause = cause_m.group(1).strip() if cause_m else "UNKNOWN"
+
+                            # 2. 세션 관리 및 데이터 갱신
                             if cid not in active_sessions:
                                 active_sessions[cid] = {
                                     'apn': found_dnn if found_dnn else "UNKNOWN (Early-log)",
+                                    'protocol': current_protocol, # 세션에 프로토콜 저장
                                     'active_state': 'UNKNOWN',
                                     'setup_res_time': time_str
                                 }
                             else:
-                                # UNKNOWN 상태인 세션을 실제 DNN 값으로 업데이트
+                                # APN 복구
                                 if found_dnn and active_sessions[cid]['apn'] in ["UNKNOWN", "UNKNOWN (Early-log)"]:
                                     active_sessions[cid]['apn'] = found_dnn
+                                # 프로토콜 정보가 없었다면 업데이트 (SETUP에서 못 잡았을 경우 대비)
+                                if current_protocol != "UNKNOWN":
+                                    active_sessions[cid]['protocol'] = current_protocol
 
                             sess = active_sessions[cid]
                             state_str = "ACTIVE" if current_active == "1" else "DORMANT" if current_active == "2" else f"STATE_{current_active}"
 
+                            # 상태 원인 문자열 조합 (예: "NONE (Active: 1)")
+                            cause_str = f"{current_cause} (Active:{current_active})"
+
+                            # 3. 데이터 적재
                             self.parsed_data.append({
                                 'event_type': 'UNSOL_UPDATE',
                                 'req_time': time_str,
                                 'res_time': time_str,
+                                'token': 'UNSL',
                                 'cid': cid,
                                 'apn': sess['apn'],
-                                'status': state_str
-                                # (나머지 필요한 필드들 추가)
+                                'protocol': sess.get('protocol', 'UNKNOWN'), # 새로 추출한 프로토콜 반영
+                                'network': sess.get('network', 'UNKNOWN'),
+                                'status': state_str,
+                                'cause': cause_str, # 새로 추출한 cause 반영
+                                'latency_ms': 0
                             })
                             sess['active_state'] = current_active
+
 
         return self.parsed_data
 
     def save_ui_report(self, output_dir="./result"):
-        if not self.parsed_data:
-            return
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, "datacall_parsed_logs.json")
+        if not self.parsed_data:
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump([], f)
+            return
+
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(self.parsed_data, f, indent=4, ensure_ascii=False)
 

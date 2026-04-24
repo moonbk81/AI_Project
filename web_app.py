@@ -5,6 +5,7 @@ import time
 import pandas as pd
 import plotly.express as px
 import re
+import hashlib
 
 import ui_components as ui
 
@@ -45,6 +46,10 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
                 written_lines += 1
 
     return written_lines
+
+def generate_unique_key(prefix, data_string):
+    hash_obj = hashlib.md5(data_string.encode('utf-8')).hexdigest()[:8]
+    return f"{prefix}_{hash_obj}"
 
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wide")
@@ -110,7 +115,8 @@ def render_chat_interface(key_suffix="main"):
                             df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Level', 'Value'])
                             fig = px.pie(df_signal, names='Level', values='Value',
                                          title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
-                            st.plotly_chart(fig, use_container_width=True, key=f"chart_{msg_idx}_{i}")
+                            unique_key = generate_unique_key(f"chart_{msg_idx}_{i}", str(fig.to_json()[:100]))
+                            st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
                     if meta.get('log_type') == 'OOS_Event':
                         v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
