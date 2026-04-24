@@ -217,19 +217,49 @@ def render_ntn_advanced_fw_analyzer(df=None):
 
     ntn_df = pd.DataFrame(data)
 
-    # 🚨 KeyError 완벽 방어: 필요한 모든 컬럼을 강제로 만들어 둠
+    real_ntn_events = ntn_df[ntn_df['event_type'] != 'RADIO_POWER']
+    if real_ntn_events.empty:
+        st.info("현재 부석 대상 로그에 위성 관련 데이터가 없습니다.")
+        return
+
+    # 🚨 KeyError 방어
     expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'last_ntn_mode', 'last_phone_mode', 'is_hysteresis', 'raw_info']
     for col in expected_cols:
         if col not in ntn_df.columns:
             ntn_df[col] = None
 
-    ntn_df = ntn_df.sort_values('time')
+    ntn_df = ntn_df.sort_values('time').reset_index(drop=True)
+
+    # =========================================================
+    # 🧹 [핵심] 상태 전이(State Transition) 기반 중복 로그 필터링
+    # =========================================================
+    # 1. PLMN_MATCH: 이전 로그와 PLMN 값이 다를 때만 남김
+    m_plmn = ntn_df['event_type'] == 'PLMN_MATCH'
+    ntn_df.loc[m_plmn, 'keep'] = ntn_df[m_plmn]['ntn_plmn'] != ntn_df[m_plmn]['ntn_plmn'].shift(1)
+
+    # 2. NTN_MODE_NOTIFY: 한 로그 내의 last_ntn_mode 와 ntn_mode 가 다를 때만 '진짜 변화'로 간주
+    m_mode = ntn_df['event_type'] == 'NTN_MODE_NOTIFY'
+    cond_internal_diff = ntn_df[m_mode]['last_ntn_mode'] != ntn_df[m_mode]['ntn_mode']
+    cond_temporal_diff = ntn_df[m_mode]['ntn_mode'] != ntn_df[m_mode]['ntn_mode'].shift(1)
+    ntn_df.loc[m_mode, 'keep'] = cond_internal_diff & cond_temporal_diff
+    # 3. RADIO_POWER: 모뎀 ON/OFF 상태가 바뀔 때만 남김
+    m_radio = ntn_df['event_type'] == 'RADIO_POWER'
+    ntn_df.loc[m_radio, 'keep'] = ntn_df[m_radio]['power_state'] != ntn_df[m_radio]['power_state'].shift(1)
+
+    # 4. 나머지 이벤트(HYSTERESIS 등)는 일단 유지
+    ntn_df.loc[~(m_plmn | m_mode | m_radio), 'keep'] = True
+
+    # 필터링 완료된 깔끔한 데이터프레임
+    clean_df = ntn_df[ntn_df['keep'] == True].copy()
 
     # ---------------------------------------------------------
-    # 📊 1. 상단 핵심 지표 (KPI)
+    # 📊 1. 상단 핵심 지표 (KPI) - 여기는 필터링 전 원본 데이터의 최신값 사용
     # ---------------------------------------------------------
     plmn_logs = ntn_df[ntn_df['event_type'] == 'PLMN_MATCH']
     latest_plmn = plmn_logs.iloc[-1]['ntn_plmn'] if not plmn_logs.empty else "N/A"
+
+    policy_logs = ntn_df[ntn_df['event_type'] == 'DATA_POLICY']
+    latest_policy = policy_logs.iloc[-1]['data_policy'] if not policy_logs.empty else "N/A"
 
     ui_icon_status = "OFF ⚪"
     for _, row in ntn_df.iloc[::-1].iterrows():
@@ -242,33 +272,39 @@ def render_ntn_advanced_fw_analyzer(df=None):
 
     col1, col2, col3 = st.columns(3)
     col1.metric("연결 대상 Satellite PLMN", latest_plmn)
-    col2.metric("단말 상태표시줄 위성 아이콘", ui_icon_status)
-    col3.metric("최근 Hysteresis 발생여부", "발생 이력 있음 ⏳" if 'HYSTERESIS_ICON_ON' in ntn_df['event_type'].values else "없음")
+    col2.metric("활성 데이터 정책 (Policy)", latest_policy)
+    col3.metric("단말 상태표시줄 위성 아이콘", ui_icon_status)
 
     st.divider()
 
     # ---------------------------------------------------------
-    # 📈 2. 타임라인 차트
+    # 📈 2. 타임라인 차트 (DATA_POLICY 제외 & 중복 제거 완료)
     # ---------------------------------------------------------
     st.markdown("**🧭 위성망 진입 시퀀스 및 상태 전이(State Transition) 타임라인**")
 
-    fig = px.scatter(
-        ntn_df, x='time', y='event_type', color='event_type',
-        hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'],
-        title="시간대별 주요 이벤트 추적 (마우스 오버 시 이전 상태 확인 가능)",
-        labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
-    )
+    # 차트 그릴 때 DATA_POLICY는 제외함
+    chart_df = clean_df[clean_df['event_type'] != 'DATA_POLICY'].copy()
 
-    fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
-    order = ['RADIO_POWER', 'PLMN_MATCH', 'DATA_POLICY', 'HYSTERESIS_ICON_ON', 'NTN_MODE_NOTIFY']
-    fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
-    st.plotly_chart(fig, use_container_width=True)
+    if not chart_df.empty:
+        fig = px.scatter(
+            chart_df, x='time', y='event_type', color='event_type',
+            hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'],
+            title="시간대별 주요 이벤트 추적 (값 변경 시점에만 점 표시)",
+            labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
+        )
+
+        fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
+        order = ['RADIO_POWER', 'PLMN_MATCH', 'HYSTERESIS_ICON_ON', 'NTN_MODE_NOTIFY']
+        fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("표시할 타임라인 이벤트가 없습니다.")
 
     # ---------------------------------------------------------
-    # 📋 3. 상세 로그 테이블
+    # 📋 3. 상세 로그 테이블 (중복이 제거된 깔끔한 이력)
     # ---------------------------------------------------------
-    st.markdown("**📋 NTN 상태 전이 상세 이력**")
-    display_cols = [col for col in ['time', 'event_type', 'power_state', 'ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis'] if col in ntn_df.columns]
+    st.markdown("**📋 NTN 상태 전이 상세 이력 (변화 시점만 기록)**")
+    display_cols = [col for col in ['time', 'event_type', 'power_state', 'ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'data_policy'] if col in clean_df.columns]
 
-    clean_df = ntn_df[display_cols].fillna("-")
-    st.dataframe(clean_df, use_container_width=True)
+    final_table_df = clean_df[display_cols].fillna("-")
+    st.dataframe(final_table_df, use_container_width=True)

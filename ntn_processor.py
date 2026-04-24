@@ -34,17 +34,25 @@ class NtnProcessor:
                     continue
 
                 # 2. Radio Power 상태 (모뎀 ON/OFF)
-                match_radio_power = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?(?:setRadioPower.*?=?(true|false)|RadioStateChanged.*RADIO_(ON|OFF))', line, re.IGNORECASE)
+                match_radio_power = re.search(r'^((?:\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})|(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+)).*?RADIO_POWER\s+on\s*=\s*(true|false)', line, re.IGNORECASE)
                 if match_radio_power:
-                    val = match_radio_power.group(2) or match_radio_power.group(3)
-                    power_state = 'ON' if val.upper() in ['TRUE', 'ON'] else 'OFF'
+                    raw_time = match_radio_power.group(1)
+
+                    # 덤프 포맷(2026-03-24T15:29:32.135673)을 일반 포맷(03-24 15:29:32.135)으로 강제 정규화하여 타임라인 정렬 꼬임 방지
+                    if 'T' in raw_time:
+                        time_str = raw_time[5:10] + ' ' + raw_time[11:23]
+                    else:
+                        time_str = raw_time
+
+                    power_state = 'ON' if match_radio_power.group(2).lower() == 'true' else 'OFF'
                     self.parsed_data.append({
-                        'time': match_radio_power.group(1),
+                        'time': time_str,
                         'log_type': 'NTN_Policy',
                         'event_type': 'RADIO_POWER',
                         'power_state': power_state
                     })
                     continue
+
 
                 # 3. 데이터 서비스 정책 (DataPolicy)
                 match_ntn_policy = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?SatelliteController:\s*getSatelliteDataServicePolicyForPlmn:\s*return data support mode.*?:\s*(\d+)', line, re.IGNORECASE)
