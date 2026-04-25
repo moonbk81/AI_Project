@@ -384,3 +384,121 @@ def render_data_call_analyzer(data):
     # 상세 로그 추적 테이블
     st.markdown("**📋 데이터 호 트랜잭션 상세 내역**")
     st.dataframe(df, use_container_width=True)
+
+def render_ims_sip_flow(df=None):
+    """VoLTE/IMS SIP Call Flow (사다리 차트) 시각화"""
+    import os, json
+    import pandas as pd
+    import streamlit as st
+    import plotly.graph_objects as go
+
+    st.subheader("💬 VoLTE / IMS SIP Call Flow (Sequence Diagram)")
+
+    file_path = "./result/ims_sip_parsed_logs.json"
+    if not os.path.exists(file_path):
+        st.info("💡 IMS SIP 로그 분석 결과가 없습니다.")
+        return
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    if not data:
+        st.info("현재 분석 대상 로그에 SIP 메시지가 없습니다.")
+        return
+
+    sip_df = pd.DataFrame(data)
+
+    # 상단 에러 통계 KPI
+    total_msgs = len(sip_df)
+    error_msgs = len(sip_df[sip_df['is_error'] == True])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("총 SIP 트랜잭션", f"{total_msgs} 건")
+    col2.metric("SIP 에러 (4xx~6xx)", f"{error_msgs} 건", delta="비정상" if error_msgs > 0 else "정상", delta_color="inverse" if error_msgs > 0 else "normal")
+
+    # 지연 시간(Call Setup Latency) 추정: 첫 INVITE부터 200 OK까지
+    try:
+        sip_df['time_dt'] = pd.to_datetime(sip_df['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
+        invite_time = sip_df[sip_df['method_code'].str.contains('INVITE', na=False)]['time_dt'].min()
+        ok_time = sip_df[sip_df['method_code'].str.contains('200 OK', na=False)]['time_dt'].max()
+        if pd.notna(invite_time) and pd.notna(ok_time) and ok_time >= invite_time:
+            latency_ms = int((ok_time - invite_time).total_seconds() * 1000)
+            col3.metric("최대 트랜잭션 지연(Latency)", f"{latency_ms} ms")
+        else:
+            col3.metric("최대 트랜잭션 지연", "N/A")
+    except:
+        col3.metric("최대 트랜잭션 지연", "N/A")
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 📈 사다리 차트 (Sequence Diagram) 렌더링
+    # ---------------------------------------------------------
+    sip_df = sip_df.sort_values('time')
+    sip_df['y_pos'] = range(len(sip_df), 0, -1) # Y축은 시간이 흐를수록 아래로(내림차순)
+
+    fig = go.Figure()
+
+    # 단말(0)과 망(1)을 나타내는 두 개의 세로 기둥(점선) 추가
+    fig.add_shape(type="line", x0=0, y0=0, x1=0, y1=len(sip_df)+1, line=dict(color="lightgray", width=2, dash="dash"))
+    fig.add_shape(type="line", x0=1, y0=0, x1=1, y1=len(sip_df)+1, line=dict(color="lightgray", width=2, dash="dash"))
+
+    for idx, row in sip_df.iterrows():
+        y = row['y_pos']
+        method = row['method_code']
+        cseq = row['cseq']
+        is_error = row['is_error']
+        time_str = row['time'].split(' ')[1] # 시간만 표시 (예: 10:50:14.706)
+
+        # 에러는 빨간색, 정상 응답(2xx)은 초록색, 요청은 파란색
+        if is_error:
+            color = "#e74c3c"
+        elif "200 OK" in method or "202" in method:
+            color = "#2ecc71"
+        else:
+            color = "#3498db"
+
+        # Tx (단말 -> 망) / Rx (망 -> 단말) 좌표 설정
+        if "Tx" in row['direction']:
+            x0, x1 = 0.05, 0.95
+        else:
+            x0, x1 = 0.95, 0.05
+
+        # 메시지 화살표 그리기
+        fig.add_annotation(
+            x=x1, y=y, ax=x0, ay=y,
+            xref="x", yref="y", axref="x", ayref="y",
+            text=f"<b>{method}</b><br><span style='font-size:10px'>{cseq}</span>",
+            showarrow=True, arrowhead=2, arrowsize=1.5, arrowwidth=2, arrowcolor=color,
+            font=dict(color=color, size=13), align="center", yshift=8
+        )
+
+        # 왼쪽 타임스탬프 텍스트
+        fig.add_annotation(
+            x=-0.05, y=y, xref="x", yref="y",
+            text=time_str, showarrow=False,
+            font=dict(size=11, color="gray"), xanchor="right"
+        )
+
+    # 레이아웃 정리
+    fig.update_layout(
+        xaxis=dict(
+            tickmode='array', tickvals=[0, 1],
+            ticktext=['📱 단말 (UE)', '🌐 IMS 망 (Network)'],
+            tickfont=dict(size=15, weight='bold'),
+            range=[-0.2, 1.2], side="top", showgrid=False, zeroline=False
+        ),
+        yaxis=dict(showticklabels=False, range=[0, len(sip_df)+1], showgrid=False, zeroline=False),
+        height=max(400, len(sip_df) * 45), # 메시지가 많아지면 차트 길이를 자동으로 늘림
+        margin=dict(l=120, r=50, t=80, b=20),
+        plot_bgcolor='white', hovermode=False
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 📋 상세 로그 테이블
+    # ---------------------------------------------------------
+    st.markdown("**📋 SIP 메시지 트랜잭션 상세**")
+    display_cols = ['time', 'direction', 'msg_type', 'method_code', 'tid', 'cseq', 'raw_log']
+    st.dataframe(sip_df[display_cols], use_container_width=True)

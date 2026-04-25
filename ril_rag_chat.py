@@ -59,6 +59,12 @@ class RilRagChat:
                 )
             }
         }
+        # 1. prompts["log_guidelines"]에 SIP 분석 규칙 추가
+        self.prompts["log_guidelines"]["IMS_SIP_Message"] = (
+            "- [IMS_SIP_Message (VoLTE)]: SipReq(요청)와 SipResp(응답)의 흐름을 분석해라.\n"
+            "- 🚨 [에러 판단]: 4xx(Client Error), 5xx(Server Error) 응답이 있다면 즉시 지적하고 원인을 추론해라.\n"
+            "- INVITE 후 200 OK까지의 지연이 크다면 '호 설정 지연'으로 판단해라."
+        )
 
     def ingest_folder(self, folder_path="./payloads"):
         """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
@@ -184,6 +190,8 @@ class RilRagChat:
         # 🚨 [신규 추가] 안테나/수신 레벨 키워드
         if any(kw in search_text_lower for kw in ["안테나", "시그널", "신호", "signal", "level", "수신"]):
             target_log_types.append("Signal_Level")
+        if any(kw in search_text_lower for kw in ["sip", "ims", "volte", "invite", "register", "응답", "메시지"]):
+            target_log_types.append("IMS_SIP_Message")
 
         if target_log_types:
             if len(target_log_types) == 1:
@@ -308,6 +316,10 @@ class RilRagChat:
             2. 🔍 주요 분석: 신호, 데이터, 배터리 등 항목별 분석
             3. 💡 엔지니어 소견: 원인 추론
             4. 🚩 권장 사항
+            [🚨 통신 스택 상관관계 절대 규칙 🚨]
+            1. PS Call(데이터 호) 중 APN이 'ims'인 경우, 이는 VoLTE/IMS SIP 세션의 기반(Bearer)이다.
+            2. 따라서 RIL 로그에서 'IMS PS Call Drop'이나 'Deactivate'가 발생한 시간대(±2초 이내)에 SIP 로그에서 '4xx/5xx 에러', 'TIMEOUT' 또는 'UNKNOWN_CODE'가 발생했다면, 이는 우연이 아니다.
+            3. 두 사건이 인접해 있다면 반드시 "RIL 레이어의 IMS PDN 끊김(또는 불안정)으로 인해 상위 스택인 SIP 세션이 연쇄적으로 드랍되었다"고 인과관계를 묶어서 결론을 내릴 것.
             """
             # 2. 🚨 messages 배열의 첫 번째에 system 역할로 추가!
             messages_payload = [

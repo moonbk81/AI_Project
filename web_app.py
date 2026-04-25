@@ -292,6 +292,14 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             dc_proc.save_ui_report("./result")
             progress_bar.progress(75)
 
+            # 🚨 [신규 추가] SIP 파서 가동
+            st.write("2️⃣-3️⃣ VoLTE/IMS SIP 트랜잭션 추출 중...")
+            from ims_sip_processor import ImsSipProcessor
+            sip_proc = ImsSipProcessor(target_log_path)
+            sip_proc.run_parser()
+            sip_proc.save_ui_report("./result")
+            progress_bar.progress(80)
+
             st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
             ai_engine.ingest_folder("./payloads")
             progress_bar.progress(100)
@@ -497,10 +505,10 @@ with tab_chat:
 
     # 버튼을 2x2 그리드로 배치
     col_btn1, col_btn2, col_btn3 = st.columns(3)
-    col_btn4, col_btn5 = st.columns(2)
+    col_btn4, col_btn5, col_btn6 = st.columns(3)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
-            quick_prompt = "Call Session 로그를 바탕으로 통화 끊김(Drop) 및 Fail 원인을 분석하고, 당시 OOS 이력이나 망 이탈 징후가 있었는지 확인해 줘."
+            quick_prompt = "Call Session 로그와 IMS SIP 메시지(INVITE, 4xx/5xx 응답 등)를 함께 분석해서 통화 끊김의 근본 원인을 찾아줘. 특히 SIP 에러가 발생했는지 중점적으로 확인해."
     with col_btn2:
         if st.button("🌐 네트워크 이상 분석", use_container_width=True):
             quick_prompt = "Network Timeline Stat 및 DNS 로그를 분석해서, 지연(latency) 시간이 비정상적으로 튀는 이상 징후나 앱 차단 이력을 찾아내 줘."
@@ -520,6 +528,9 @@ with tab_chat:
                 "Signal_Level 로그를 분석해서 Slot별(Slot 0, Slot 1) 안테나 수신 레벨(0~5)이 시간대별로 어떻게 변했는지 파악해 줘."
                  "신호가 0이나 1로 뚝 떨어지는 수신 저하 구간이 있었는지 확인해라."
             )
+    with col_btn6: # 신규 SIP 전용 버튼
+        if st.button("💬 VoLTE/SIP 상세 분석", use_container_width=True):
+            quick_prompt = "현재 파일의 모든 IMS SIP 트랜잭션 정보를 분석해줘. REGISTER 등록 상태는 정상인지, INVITE 과정에서 지연이나 실패 응답이 있었는지 15년 차 엔지니어 관점에서 리포트해 줘."
 
     st.divider()
 
@@ -849,6 +860,10 @@ with tab_dash:
                     st.divider()
                     ui.render_data_usage_profiling(df)
 
+                    # 🚨 [신규 추가] 대시보드에 SIP 사다리 차트 노출
+                    st.divider()
+                    ui.render_ims_sip_flow()
+
                     st.divider()
                     # 1. 현재 선택된 파일의 기본 이름(base_name) 추출 (예: log_A_payload.json -> log_A)
                     current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
@@ -869,7 +884,7 @@ with tab_dash:
                     # ==========================================
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
                     # ==========================================
-                    st.subheader("🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)")
+                    st.subheader("🤖 AI 종합 기술 진단 리포트")
                     if st.button("📝 전체 로그 종합 분석 리포트 생성", use_container_width=True):
                         with st.spinner("모든 로그의 상관관계를 분석하여 전문 리포트를 작성 중입니다..."):
 
@@ -930,6 +945,36 @@ with tab_dash:
                             fact_dns = f"DNS 차단/실패 {len(dns_df)}건 발생 (차단 패키지: {', '.join(dns_df['package'].dropna().unique())})" if not dns_df.empty and 'package' in dns_df.columns else "DNS 차단 이력 없음 (정상)"
 
                             # ---------------------------------------------------------
+                            # 🚨 [팩트 추출 6] IMS SIP 메시지 분석 결과 추가
+                            # ---------------------------------------------------------
+                            fact_sip = "SIP 트랜잭션 기록 없음"
+                            sip_json_path = "./result/ims_sip_parsed_logs.json"
+                            if os.path.exists(sip_json_path):
+                                try:
+                                    with open(sip_json_path, 'r', encoding='utf-8') as f:
+                                        sip_data = json.load(f)
+                                        if sip_data:
+                                            total_sip = len(sip_data)
+                                            sip_errors = [s for s in sip_data if s.get('is_error') == True]
+                                            error_list = ", ".join(list(set([s.get('method_code') for s in sip_errors])))
+                                            fact_sip = f"총 {total_sip}건의 SIP 메시지 중 {len(sip_errors)}건의 에러 발생 (발견된 에러: {error_list if error_list else '없음'})"
+                                except: pass
+                            # ---------------------------------------------------------
+                            # 🚨 [신규 추가: 팩트 추출 7] RIL-SIP 시간 기반 상관관계 (Time-Window Glue)
+                            # ---------------------------------------------------------
+                            fact_correlation = "RIL-SIP 간 직접적인 시간대 상관관계 특이사항 없음"
+                            # 'fail_calls'는 팩트 추출 1번에서 정의된 RIL 통화 실패 DataFrame입니다.
+                            if 'fail_calls' in locals() and not fail_calls.empty and sip_errors:
+                                for _, call in fail_calls.iterrows():
+                                    call_time = pd.to_datetime(call['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
+
+                                    for sip in sip_errors:
+                                        sip_time = pd.to_datetime(sip['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
+
+                                        # 시간 차이가 2초 이내(<= 2.0)라면 완벽한 연쇄 드랍으로 판정!
+                                        if pd.notna(call_time) and pd.notna(sip_time) and abs((call_time - sip_time).total_seconds()) <= 2.0:
+                                            fact_correlation = f"🔥 [핵심 상관관계 발견]: {call['time']}경 RIL 통화 드랍(원인:{call.get('fail_reason','Unknown')}) 발생과 동시간대(±2초)에 SIP 망에서 '{sip['method_code']}' 에러가 발생함. RIL 레이어 통신 단절과 상위 SIP 세션 붕괴가 연쇄적으로 일어났음을 확인."
+                            # ---------------------------------------------------------
                             # 🧠 [강력한 프롬프트 조립]
                             # ---------------------------------------------------------
                             combined_query = f"""
@@ -943,6 +988,8 @@ with tab_dash:
                             5. 🔋 발열(Thermal) 및 배터리 점유: {fact_battery}
                             6. 🛰️ 위성(NTN) 통신 전환 이력: {fact_ntn}
                             7. 🚫 DNS 및 네트워크 지연/차단: {fact_dns}
+                            8. 💬 IMS SIP 트랜잭션 상태: {fact_sip}
+                            9. 🔗 [RIL-SIP 융합 진단]: {fact_correlation}
 
                             위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 단말 상태를 종합 진단해.
 
@@ -951,6 +998,8 @@ with tab_dash:
                             2. 주어진 데이터 안에서 가장 확률이 높은 '근본 원인(Root Cause)' 가설을 과감하게 제시할 것.
                             3. [상관관계 분석 필수]: 발열이 심할 때 OOS가 발생했는지, 특정 앱의 데이터 폭주가 데이터 호 지연이나 배터리 광탈을 유발했는지 등 각 지표 간의 연관성을 반드시 짚어낼 것.
                             4. 분석 결과를 바탕으로 📌 단말 상태 요약, 🔍 항목별 상세 진단(상관관계 포함), 💡 엔지니어 소견(원인 추론), 🚩 최종 권장 사항 포맷으로 작성할 것.
+                            5. [SIP-RIL 상관관계]: IMS 데이터 호(SETUP_DATA_CALL) 성공 여부와 SIP REGISTER/INVITE 성공 여부를 연결하여 '통화 서비스 불가'의 정확한 지점을 짚어낼 것.
+                            6. 9번 팩트 [RIL-SIP 융합 진단]에 연쇄 붕괴가 확인되었다면, 이것이 이번 통화 끊김의 '가장 명백하고 치명적인 근본 원인(Root Cause)'임을 리포트 최상단에 강력하게 하이라이트할 것.
                             """
 
                             raw_result = engine.ask(combined_query, current_file=actual_file_name)
