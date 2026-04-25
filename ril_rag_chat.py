@@ -24,7 +24,8 @@ class RilRagChat:
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
         # 3. LLM 로드 (Gemma-2b)
-        print(f" LLM 연결 준비 중...(Local Ollama - gemma:9b)")
+        self.llm_model_name = 'gemma2:9b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+        print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
 
         # 4. 동적 프롬프트 관리를 위한 템플릿 딕셔너리
@@ -297,7 +298,7 @@ class RilRagChat:
 
         try:
             import ollama
-            llm_model = 'gemma2:9b'
+
             # 1. 🚨 시스템 롤(페르소나) 정의
             system_role = """
             너는 15년 차 안드로이드 통신 프로토콜 및 하드웨어 성능 분석 전문가야.
@@ -313,7 +314,7 @@ class RilRagChat:
                 {'role': 'system', 'content': system_role},
                 {'role': 'user', 'content': prompt}
             ]
-            res = ollama.chat(model=llm_model, messages=messages_payload)
+            res = ollama.chat(model=self.llm_model_name, messages=messages_payload)
             answer = res['message']['content']
         except Exception as e:
             answer = f"LLM 답변 생성 중 에러가 발생했습니다: {str(e)}"
@@ -323,24 +324,21 @@ class RilRagChat:
 
         return answer, doc_ids, meta_list
 
-    def save_knowledge(self, ids, analysis_result):
-        """엔지니어가 컨펌한 분석 결과를 해당 로그들의 메타데이터에 업데이트합니다."""
-        print(f"\n💾 총 {len(ids)}개의 로그 조각에 분석 결과를 박제하는 중...")
-
+    def save_knowledge(self, ids, analysis_result, severity="Info"):
+        """분석 결과와 심각도를 메타데이터에 함께 저장합니다."""
         existing = self.collection.get(ids=ids, include=["metadatas"])
         updated_metas = []
 
         for meta in existing["metadatas"]:
-            # NoneType 방지 및 새 지식 추가
             current_meta = meta if meta is not None else {}
             current_meta["known_solution"] = analysis_result
+            current_meta["severity"] = severity  # 심각도 태그 추가
             updated_metas.append(current_meta)
 
         self.collection.update(
             ids=ids,
             metadatas=updated_metas
         )
-        print("✅ 지식 저장 완료! 이제 이 로그들은 '해결된 사례'로 분류됩니다.")
 
     def get_all_files(self):
         """DB에 적재된 모든 유니크한 파일 목록을 반환합니다."""
