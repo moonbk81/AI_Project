@@ -961,28 +961,23 @@ with tab_dash:
                                 report_answer = raw_result
 
                             st.success("✅ 심층 진단 분석이 완료되었습니다.")
-                            # 1. 자바스크립트 문자열 충돌 방지를 위한 이스케이프 처리
-                            # (줄바꿈과 따옴표를 JS가 인식할 수 있는 형태로 변환)
-                            safe_report = report_answer.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                            # 1. 자바스크립트 충돌 방지 (백틱 및 줄바꿈 안전 처리)
+                            safe_report = report_answer.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("\n", "\\n")
 
-                            # 2. HTML/JS 기반의 커스텀 리포트 박스 (복사 버튼 포함)
+                            # 2. 🚨 모든 HTML 태그를 무조건 맨 왼쪽 끝(들여쓰기 없음)에 붙여야 합니다!
                             st.markdown(f"""
 <div style="position: relative; background-color: #f0f2f6; padding: 25px; border-radius: 10px; border-left: 5px solid #1f77b4; margin-bottom: 20px;">
-    <button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #1f77b4; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.3s;">
-        복사하기 📋
-    </button>
+<button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #1f77b4; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.3s;">복사하기 📋</button>
+<div id="full-report-text" style="white-space: pre-wrap; font-size: 15px; color: #333; line-height: 1.6;">
 
-    <div id="full-report-text" style="white-space: pre-wrap; font-size: 15px; color: #333; line-height: 1.6;">
 {report_answer}
-    </div>
+
+</div>
 </div>
 
 <script>
 function copyReport() {{
-    // 본문 내용 가져오기
     const reportText = `{safe_report}`;
-
-    // 클립보드 복사 실행
     navigator.clipboard.writeText(reportText.replace(/\\n/g, '\\n')).then(() => {{
         alert('✅ 리포트가 클립보드에 복사되었습니다!\\n원하는 곳에 붙여넣기(Ctrl+V) 하세요.');
     }}).catch(err => {{
