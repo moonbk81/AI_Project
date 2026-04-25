@@ -108,6 +108,8 @@ def render_signal_level_timeline(df):
                 sig_df['rat'] = 'Unknown'
             if 'level' in sig_df.columns:
                 sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
+                sig_df = sig_df[(sig_df['Level'] >= 0) & (sig_df['Level'] <= 5)]
+
                 sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
                 sig_df['RAT'] = sig_df['rat'].astype(str)
                 sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
