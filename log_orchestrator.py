@@ -1,0 +1,106 @@
+import os
+import json
+import argparse
+from datetime import datetime, timedelta
+from parsers.telephony_parser import TelephonyParser
+from parsers.diagnostic_parser import (
+    BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser, BatteryParser, RadioPowerParser
+)
+from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
+from parsers.ntn_processor import NtnProcessor
+from parsers.data_call_processor import DataCallProcessor
+from parsers.ims_sip_processor import ImsSipProcessor
+
+class LogOrchestrator:
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.base_name = os.path.splitext(os.path.basename(file_path))[0]
+
+        self.tel_parser = TelephonyParser(self._get_surrounding_context_logs)
+        self.boot_parser = BootParser()
+        self.signal_parser = SignalParser()
+        self.data_usage_parser = DataUsageParser()
+        self.dns_parser = DnsParser()
+        self.crash_parser = CrashParser(self._get_surrounding_context_logs)
+        self.battery_parser = BatteryParser()
+        self.radio_power_parser = RadioPowerParser(self._get_surrounding_context_logs)
+        self.net_ts_analyzer = NetworkTimeSeriesAnalyzer()
+        self.ntn_processor = NtnProcessor(filename=self.base_name)
+        self.datacall_parser = DataCallProcessor(context_getter=self._get_surrounding_context_logs)
+        self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
+        self._time_index = None
+
+    def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
+        """O(1) 인덱싱 기반 초고속 주변 로그 스캐너 (Time-Window Glue)"""
+        if self._time_index is None:
+            self._time_index = {}
+            for line in lines:
+                if len(line) > 15:
+                    t_str = line[:14]
+                    if t_str[2] == '-' and t_str[5] == ' ':
+                        if t_str not in self._time_index: self._time_index[t_str] = []
+                        self._time_index[t_str].append(line.strip())
+
+        if not target_time_str or target_time_str == "00-00 00:00:00.000": return []
+        base_time_str = target_time_str.split('.')[0] if '.' in target_time_str else target_time_str
+        current_year = datetime.now().year
+
+        try: target_dt = datetime.strptime(f"{current_year}-{base_time_str}", "%Y-%m-%d %H:%M:%S")
+        except ValueError: return []
+
+        cross_context_logs = []
+        for offset in range(-window_seconds, window_seconds + 1):
+            win_str = (target_dt + timedelta(seconds=offset)).strftime("%m-%d %H:%M:%S")
+            if win_str in self._time_index:
+                cross_context_logs.extend(self._time_index[win_str])
+
+        return cross_context_logs[-max_lines:] if len(cross_context_logs) > max_lines else cross_context_logs
+
+    def run_batch(self, output_path):
+        """모든 파서를 무조건 가동하는 메인 파이프라인"""
+        try:
+            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+
+            # 1. 버킷팅 (성능 최적화용)
+            buckets = {'boot': [], 'signal': [], 'dns': [], 'usage': [], 'net_ts': []}
+            for line in lines:
+                if line.startswith("!@Boot"): buckets['boot'].append(line)
+                elif "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line: buckets['signal'].append(line)
+                if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested"]): buckets['usage'].append(line)
+                if "DNS Requested" in line: buckets['dns'].append(line)
+                if any(k in line for k in ["NetId", "DnsEvent", "TcpStats"]): buckets['net_ts'].append(line)
+
+            result = {}
+
+            result['telephony'] = self.tel_parser.analyze(lines)
+            result['crash_context'] = self.crash_parser.analyze(lines)
+            result['radio_power'] = self.radio_power_parser.analyze(lines)
+
+            result['network_timeseries'] = self.net_ts_analyzer.analyze(lines) # 또는 buckets['net_ts']
+            result['ntn_data'] = self.ntn_processor.analyze(lines)
+            result['datacall_data'] = self.datacall_parser.analyze(lines)
+            result['ims_sip_data'] = self.ims_sip_parser.analyze(lines)
+
+            # 지표성 데이터 추가
+            if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
+            if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
+            if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
+            if net_usage := self.data_usage_parser.analyze(buckets['usage']): result['data_usage_stats'] = net_usage
+            if dns_res := self.dns_parser.analyze(buckets['dns']): result['dns_queries'] = dns_res
+
+            # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
+            self.ntn_processor.save_ui_report("./result", self.base_name)
+            self.ims_sip_parser.save_ui_report("./result", self.base_name)
+            self.datacall_parser.save_ui_report("./result", self.base_name)
+
+            self.ntn_processor.build_and_save_payloads("./payloads")
+
+            # 4. JSON 저장
+            with open(output_path, "w", encoding="utf-8") as j:
+                json.dump(result, j, indent=4, ensure_ascii=False)
+            return True
+
+        except Exception as e:
+            print(f"Error in LogOrchestrator run_batch: {e}")
+            return False

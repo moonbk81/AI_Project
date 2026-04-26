@@ -3,6 +3,7 @@ import os, json
 import streamlit as st
 import plotly.express as px
 import pandas as pd
+import plotly.graph_objects as go
 
 def render_dns_analysis_chart(df):
     """패키지별 DNS 차단/실패 상세 원인 분석 차트 렌더링"""
@@ -313,10 +314,6 @@ def render_ntn_advanced_fw_analyzer(current_base):
 
 def render_data_call_analyzer(data):
     """RIL SETUP_DATA_CALL (데이터 호) 분석 렌더러"""
-    import pandas as pd
-    import plotly.express as px
-    import streamlit as st
-
     st.subheader("🌐 RIL 데이터 호 (SETUP_DATA_CALL) 분석")
 
     # 1. 전달받은 data가 비어있는지 먼저 체크 (유령 데이터 방지)
@@ -385,16 +382,12 @@ def render_data_call_analyzer(data):
     st.markdown("**📋 데이터 호 트랜잭션 상세 내역**")
     st.dataframe(df, use_container_width=True)
 
-def render_ims_sip_flow(df=None):
+def render_ims_sip_flow(current_base=None):
     """VoLTE/IMS SIP Call Flow (사다리 차트) 시각화"""
-    import os, json
-    import pandas as pd
-    import streamlit as st
-    import plotly.graph_objects as go
-
     st.subheader("💬 VoLTE / IMS SIP Call Flow (Sequence Diagram)")
 
-    file_path = "./result/ims_sip_parsed_logs.json"
+    if not current_base: return
+    file_path = f"./result/{current_base}_ims_sip.json"
     if not os.path.exists(file_path):
         st.info("💡 IMS SIP 로그 분석 결과가 없습니다.")
         return

@@ -11,12 +11,8 @@ import ui_components as ui
 
 # 1. 백엔드 엔진 및 자동화 모듈 불러오기
 from ril_rag_chat import RilRagChat
-from telephony_log_summarizer import TelephonyLogSummarizer
+from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
-# web_app.py 내 "🚀 분석 및 DB 적재 시작" 버튼 로직 부분 수정
-from network_ts_analyzer import NetworkTimeSeriesAnalyzer
-from boot_stat import BootStatAnalyzer
-from ntn_processor import NtnProcessor
 
 # ==========================================
 # [신규 추가] 대용량 로그 타임라인 슬라이서 함수
@@ -218,103 +214,41 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
     start_total = time.time()
     progress_bar = st.progress(0)
 
-    with st.status("🚀 자동화 파이프라인 가동 중...", expanded=True) as status:
+    with st.status("🚀 통합 분석 파이프라인 가동 중...", expanded=True) as status:
         try:
-            # 1. 파일 안전 저장
+            # 1. 파일 준비 및 슬라이싱
             os.makedirs("./temp_logs", exist_ok=True)
-            temp_raw_path = os.path.join("./temp_logs", file.name)
-            with open(temp_raw_path, "wb") as f:
-                while chunk := file.read(65536):
-                    f.write(chunk)
+            target_log_path = os.path.join("./temp_logs", file.name)
+            with open(target_log_path, "wb") as f:
+                f.write(file.getbuffer())
 
             filename = file.name
             base_name = os.path.splitext(filename)[0]
-            target_log_path = temp_raw_path
 
-            # 2. 타임라인 슬라이싱
             if use_slice:
-                st.write(f"✂️ 타임라인 슬라이싱 중... ({start_t} ~ {end_t})")
+                st.write(f"✂️ 타임라인 슬라이싱 적용 중...")
                 sliced_path = os.path.join("./temp_logs", f"sliced_{filename}")
-                lines_kept = slice_log_by_time(temp_raw_path, sliced_path, start_t, end_t)
-                if lines_kept == 0:
-                    st.error("⚠️ 입력한 시간대에 해당하는 로그가 없습니다.")
-                    st.stop()
-                st.write(f"✅ 슬라이싱 완료! (총 {lines_kept:,}줄 추출됨)")
+                slice_log_by_time(target_log_path, sliced_path, start_t, end_t)
                 target_log_path = sliced_path
 
-            # 3. 파서 가동 및 JSON 병합
-            os.makedirs("./result", exist_ok=True)
-            temp_json_path = f"./result/{base_name}_report.json"
-            payload_filename = f"{base_name}_payload.json"
+            # 2. 통합 오케스트레이터 호출 (단 한 줄!)
+            st.write("1️⃣ 모든 통신 스택 로그 교차 분석 중...")
+            orchestrator = LogOrchestrator(target_log_path)
 
-            st.write("1️⃣ 원시 로그 분석 및 필터링 중... (Parser)")
-            parser = TelephonyLogSummarizer(target_log_path)
-            parser.run_batch('all', temp_json_path)
-            progress_bar.progress(25)
-
-            st.write("1️⃣-1️⃣ DNS 및 네트워크 시계열 분석 중...")
-            net_analyzer = NetworkTimeSeriesAnalyzer(target_log_path)
-            net_report = net_analyzer.analyze()
-            with open(temp_json_path, 'r', encoding='utf-8') as f:
-                combined_report = json.load(f)
-            combined_report['network_timeseries'] = net_report
-            with open(temp_json_path, 'w', encoding='utf-8') as f:
-                json.dump(combined_report, f, indent=4, ensure_ascii=False)
+            report_path = f"./result/{base_name}_report.json"
+            orchestrator.run_batch(report_path)
             progress_bar.progress(50)
 
-            # 4. RAG 페이로드 변환 및 Vector DB 적재
-            st.write("2️⃣ RAG 맞춤형 지식 조각으로 변환 중...")
-            builder = RagPayloadBuilder(temp_json_path)
-            builder.build_payload(payload_filename)
-            progress_bar.progress(65)
+            # 3. RAG 페이로드 생성 및 적재
+            st.write("2️⃣ RAG 지식 조각 생성 및 DB 임베딩 중...")
+            builder = RagPayloadBuilder(report_path)
+            builder.build_payload(f"{base_name}_payload.json")
 
-            st.write("2️⃣-1️⃣ 위성(NTN) 특화 지식 추출 및 DB 중...")
-            ntn_proc = NtnProcessor(target_log_path)
-            ntn_parsed_data = ntn_proc.run_parser()
-
-            with open(f"./result/{base_name}_ntn.json", "w", encoding="utf-8") as f:
-                json.dump(ntn_parsed_data, f, indent=4, ensure_ascii=False)
-            ntn_proc.save_ui_report("./result")
-            ntn_proc.build_and_save_payloads("./payloads")
-            progress_bar.progress(70)
-            # ==========================================
-            # 🌐 [플러그인] Data Call (데이터 호) 분석 처리
-            # ==========================================
-            st.write("2️⃣-2️⃣ RIL 데이터 호 트랜잭션 분석 중...")
-            from data_call_processor import DataCallProcessor
-            dc_proc = DataCallProcessor(target_log_path)
-            datacall_data = dc_proc.run_parser()
-            st.session_state['current_datacall_data'] = datacall_data
-
-            with open(f"./result/{base_name}_datacall.json", "w", encoding="utf-8") as f:
-                json.dump(datacall_data, f, indent=4, ensure_ascii=False)
-
-            dc_proc.save_ui_report("./result")
-            progress_bar.progress(75)
-
-            # 🚨 [신규 추가] SIP 파서 가동
-            st.write("2️⃣-3️⃣ VoLTE/IMS SIP 트랜잭션 추출 중...")
-            from ims_sip_processor import ImsSipProcessor
-            sip_proc = ImsSipProcessor(target_log_path)
-            sip_proc.run_parser()
-            sip_proc.save_ui_report("./result")
-            progress_bar.progress(80)
-
-            st.write("3️⃣ Vector DB 임베딩 및 적재 중...")
             ai_engine.ingest_folder("./payloads")
             progress_bar.progress(100)
 
-            # 5. 마무리 및 상태 초기화
-            status.update(label="✅ 파이프라인 완료! 채팅창에 질문을 입력하세요.", state="complete", expanded=False)
-            end_total = time.time()
-            st.sidebar.metric(label="최근 파싱 소요시간", value=f"{end_total - start_total:.2f}초")
-
-            st.session_state.current_file = payload_filename
-            st.session_state.uploader_key += 1
-            reset_analysis_context() # 이전 맥락 초기화
-
-            st.toast(f"'{filename}' 분석 완료! 채팅창에 질문해주세요.", icon="✅")
-            time.sleep(1)
+            status.update(label="✅ 분석 완료! 이제 대화와 대시보드를 확인하세요.", state="complete", expanded=False)
+            st.session_state.current_file = f"{base_name}_payload.json"
             st.rerun()
 
         except Exception as e:
@@ -862,11 +796,12 @@ with tab_dash:
 
                     # 🚨 [신규 추가] 대시보드에 SIP 사다리 차트 노출
                     st.divider()
-                    ui.render_ims_sip_flow()
-
-                    st.divider()
                     # 1. 현재 선택된 파일의 기본 이름(base_name) 추출 (예: log_A_payload.json -> log_A)
                     current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
+                    ui.render_ims_sip_flow(current_base)
+
+                    st.divider()
+
                     # 2. 위성(NTN) 모듈에 동적 파라미터 전달
                     ui.render_ntn_advanced_fw_analyzer(current_base)
 
@@ -1056,42 +991,75 @@ with tab_boot:
     current_target = st.session_state.get("current_file", None)
 
     if current_target:
-        st.info(f"현재 분석 대상: `{current_target}`")
+        base_name = current_target.replace("_payload.json", "")
+        report_path = f"./result/{base_name}_report.json"
 
-        if st.button("🏁 부팅 로그 추출 및 성능 시각화 실행"):
-            with st.spinner("부팅 로그를 수집하여 분석 중입니다..."):
-                db_results = engine.collection.get(where={"source_file": current_target})
-                metas = db_results.get("metadatas", [])
-                # 2. 낡은 파싱 로직 싹 제거! 엔진이 가져온 metas를 그대로 던져줍니다.
-                analyzer = BootStatAnalyzer(metas)
+        if os.path.exists(report_path):
+            with open(report_path, 'r', encoding='utf-8') as f:
+                report_data = json.load(f)
 
-                # 3. 데이터프레임이 정상적으로 채워졌는지 확인
-                if not analyzer.df.empty:
-                    summary = analyzer.get_summary()
+            # BootParser는 List를 반환하므로 동적 타입 대응
+            boot_raw = report_data.get('boot_stats', [])
 
-                    if summary:
-                        # KPI 지표 렌더링
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("부팅 완료 시간", f"{summary.get('boot_complete', 0):,} ms" if summary.get('boot_complete') else "N/A")
-                        c2.metric("Voice Ready (Total)", f"{summary.get('total_voice_ms', 0):,} ms" if summary.get('total_voice_ms') else "N/A")
-                        c3.metric("Data Ready (Total)", f"{summary.get('total_data_ms', 0):,} ms" if summary.get('total_data_ms') else "N/A")
+            # 하위 호환성 및 안정성 보장
+            if isinstance(boot_raw, dict):
+                events = boot_raw.get('events', [])
+            else:
+                events = boot_raw # 순수 List일 경우 그대로 사용
 
-                        # 병목 지점 차트 렌더링
-                        st.write("### 🚨 주요 병목 지점")
-                        df_bot = analyzer.df[analyzer.df['Delta_ms'] > 0].sort_values("Delta_ms", ascending=False)
-                        if not df_bot.empty:
-                            fig = px.bar(df_bot, x='Delta_ms', y='Event', orientation='h',
-                                         color='Delta_ms', color_continuous_scale='Reds',
-                                         text='Delta_ms', title="부팅 지연 이벤트 분석")
-                            fig.update_layout(yaxis={'categoryorder':'total ascending'})
-                            st.plotly_chart(fig, use_container_width=True)
+            if events:
+                df_boot = pd.DataFrame(events)
 
-                        # 전체 시퀀스 데이터
-                        with st.expander("📋 전체 부팅 시퀀스 데이터 보기"):
-                            st.dataframe(analyzer.df, use_container_width=True)
-                    else:
-                        st.warning("데이터는 찾았으나 분석 가능한 부팅 이벤트 마일스톤이 없습니다.")
+                # 1. 런타임 동적 KPI 지표 계산 (List에서 자체 추출)
+                st.markdown("#### 📊 핵심 부팅 마일스톤")
+                c1, c2, c3 = st.columns(3)
+
+                # Time_ms의 최대값을 전체 부팅 소요 시간으로 간주
+                boot_complete = df_boot['Time_ms'].max() if 'Time_ms' in df_boot.columns else 0
+
+                # 특정 키워드가 포함된 이벤트 시간 탐색 (없으면 0)
+                voice_events = df_boot[df_boot['Event'].str.contains('Voice|RIL|Telephony', case=False, na=False)]
+                voice_ready = voice_events['Time_ms'].max() if not voice_events.empty else "분석 불가"
+
+                data_events = df_boot[df_boot['Event'].str.contains('Data|Network|Setup', case=False, na=False)]
+                data_ready = data_events['Time_ms'].max() if not data_events.empty else "분석 불가"
+
+                c1.metric("최종 부팅 시점 추정", f"{boot_complete:,} ms" if boot_complete else "N/A")
+                c2.metric("Voice(RIL) Ready 시점", f"{voice_ready:,} ms" if isinstance(voice_ready, int) else voice_ready)
+                c3.metric("Data(NW) Ready 시점", f"{data_ready:,} ms" if isinstance(data_ready, int) else data_ready)
+
+                st.divider()
+
+                # 2. 병목 지점 차트 렌더링
+                st.write("#### 🚨 주요 병목 구간 분석 (Top 10)")
+
+                # Delta_ms(구간 지연)가 큰 순서대로 정렬
+                if 'Delta_ms' in df_boot.columns:
+                    df_slow = df_boot[df_boot['Delta_ms'] > 0].sort_values("Delta_ms", ascending=False).head(10)
+
+                    if not df_slow.empty:
+                        fig_boot = px.bar(
+                            df_slow, x='Delta_ms', y='Event', orientation='h',
+                            color='Delta_ms', color_continuous_scale='Reds',
+                            text='Delta_ms', title="부팅 지연 이벤트 (ms)",
+                            labels={'Delta_ms': '지연 시간(ms)', 'Event': '이벤트 명'}
+                        )
+                        fig_boot.update_layout(yaxis={'categoryorder':'total ascending'}, height=450)
+                        st.plotly_chart(fig_boot, use_container_width=True)
                 else:
-                    st.error("현재 파일에서 부팅 데이터를 찾을 수 없습니다. 덤프 파일을 다시 파싱하고 DB에 적재(초기화 후 재적재)했는지 확인해 주세요.")
+                    st.info("Delta_ms (구간 지연) 데이터가 존재하지 않아 병목 차트를 그릴 수 없습니다.")
+
+                # 3. 전체 시퀀스 데이터 테이블
+                with st.expander("📋 전체 부팅 시퀀스 타임라인 보기"):
+                    if 'Time_ms' in df_boot.columns:
+                        df_full = df_boot.sort_values("Time_ms")
+                    else:
+                        df_full = df_boot
+
+                    st.dataframe(df_full, use_container_width=True)
+            else:
+                st.warning("분석 리포트 내에 부팅 이벤트 데이터가 없습니다. 로그가 `!@Boot` 포맷을 포함하고 있는지 확인하세요.")
+        else:
+            st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
     else:
         st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
