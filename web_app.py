@@ -14,6 +14,8 @@ from ril_rag_chat import RilRagChat
 from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
 
+from agent_tools import get_device_health_kpi
+
 # ==========================================
 # [신규 추가] 대용량 로그 타임라인 슬라이서 함수
 # ==========================================
@@ -824,117 +826,21 @@ with tab_dash:
                         with st.spinner("모든 로그의 상관관계를 분석하여 전문 리포트를 작성 중입니다..."):
 
                             actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 1] 데이터 사용량 & 통화 이력
-                            # ---------------------------------------------------------
-                            fact_data, fact_call = "데이터 사용량 기록 없음", "통화 기록 없음"
-                            if not df.empty and 'log_type' in df.columns:
-                                du_df = df[df['log_type'] == 'Data_Usage'].copy()
-                                if not du_df.empty:
-                                    du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
-                                    top_du = du_df.sort_values(by='total_mb', ascending=False).head(3)
-                                    fact_data = ", ".join([f"{r['app_name']} ({r.get('rat','Unknown')}망 {r['total_mb']}MB)" for _, r in top_du.iterrows()])
-
-                                call_df = df[df['log_type'] == 'Call_Session'].copy()
-                                if not call_df.empty:
-                                    fail_calls = call_df[call_df['status'].astype(str).str.contains('FAIL|DROP', na=False, case=False)]
-                                    if not fail_calls.empty:
-                                        fact_call = ", ".join([f"{r.get('status', 'Unknown')} (원인: {r.get('fail_reason', 'N/A')})" for _, r in fail_calls.iterrows()])
-                                    else:
-                                        fact_call = "모든 통화 100% 정상 성공 (드랍 없음)"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 2] 데이터 호 (SETUP_DATA_CALL)
-                            # ---------------------------------------------------------
-                            fact_datacall = "데이터 호 연결 시도 기록 없음"
-                            if current_dc_data:
-                                setup_events = [d for d in current_dc_data if d.get('event_type') == 'DATA_SETUP']
-                                if setup_events:
-                                    total_dc = len(setup_events)
-                                    fail_dc = len([d for d in setup_events if d.get('status') != 'SUCCESS'])
-                                    fact_datacall = f"총 {total_dc}회 연결 시도 중 {fail_dc}회 실패 (실패율: {(fail_dc/total_dc)*100:.1f}%)"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 3] OOS 및 신호 세기
-                            # ---------------------------------------------------------
-                            oos_count = len(df[df['log_type'] == 'OOS_Event']) if not df.empty else 0
-                            sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-                            avg_sig = sig_df['level'].astype(float).mean() if not sig_df.empty and 'level' in sig_df.columns else "N/A"
-                            fact_oos_signal = f"망 이탈(OOS) 총 {oos_count}회 발생, 평균 안테나 수신 레벨: {avg_sig:.1f} (0~5 기준)" if isinstance(avg_sig, float) else f"망 이탈 {oos_count}회"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 4] 발열 및 Wakelock (배터리)
-                            # ---------------------------------------------------------
-                            therm_df = df[df['log_type'] == 'Thermal_Stat'].copy()
-                            max_temp = therm_df['temperature'].astype(float).max() if not therm_df.empty and 'temperature' in therm_df.columns else "기록 없음"
-                            wl_df = df[df['log_type'] == 'Wakelock_Stat'].copy()
-                            top_wl = wl_df.sort_values(by='times', ascending=False).iloc[0]['app_name'] if not wl_df.empty and 'times' in wl_df.columns else "없음"
-                            fact_battery = f"단말 최고 발열 온도: {max_temp}도, 최다 배터리 점유(Wakelock) 앱: {top_wl}"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 5] 위성(NTN) & DNS 이슈
-                            # ---------------------------------------------------------
-                            fact_ntn = f"위성 로밍 관련 정책 변경 {len(df[df['log_type'] == 'NTN_Policy'])}건 확인됨" if not df.empty and len(df[df['log_type'] == 'NTN_Policy']) > 0 else "위성(Starlink) 연결 이력 없음"
-                            dns_df = df[df['log_type'] == 'Network_DNS_Issue'].copy()
-                            fact_dns = f"DNS 차단/실패 {len(dns_df)}건 발생 (차단 패키지: {', '.join(dns_df['package'].dropna().unique())})" if not dns_df.empty and 'package' in dns_df.columns else "DNS 차단 이력 없음 (정상)"
-
-                            # ---------------------------------------------------------
-                            # 🚨 [팩트 추출 6] IMS SIP 메시지 분석 결과 추가
-                            # ---------------------------------------------------------
-                            fact_sip = "SIP 트랜잭션 기록 없음"
-                            sip_json_path = "./result/ims_sip_parsed_logs.json"
-                            if os.path.exists(sip_json_path):
-                                try:
-                                    with open(sip_json_path, 'r', encoding='utf-8') as f:
-                                        sip_data = json.load(f)
-                                        if sip_data:
-                                            total_sip = len(sip_data)
-                                            sip_errors = [s for s in sip_data if s.get('is_error') == True]
-                                            error_list = ", ".join(list(set([s.get('method_code') for s in sip_errors])))
-                                            fact_sip = f"총 {total_sip}건의 SIP 메시지 중 {len(sip_errors)}건의 에러 발생 (발견된 에러: {error_list if error_list else '없음'})"
-                                except: pass
-                            # ---------------------------------------------------------
-                            # 🚨 [신규 추가: 팩트 추출 7] RIL-SIP 시간 기반 상관관계 (Time-Window Glue)
-                            # ---------------------------------------------------------
-                            fact_correlation = "RIL-SIP 간 직접적인 시간대 상관관계 특이사항 없음"
-                            # 'fail_calls'는 팩트 추출 1번에서 정의된 RIL 통화 실패 DataFrame입니다.
-                            if 'fail_calls' in locals() and not fail_calls.empty and sip_errors:
-                                for _, call in fail_calls.iterrows():
-                                    call_time = pd.to_datetime(call['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
-
-                                    for sip in sip_errors:
-                                        sip_time = pd.to_datetime(sip['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
-
-                                        # 시간 차이가 2초 이내(<= 2.0)라면 완벽한 연쇄 드랍으로 판정!
-                                        if pd.notna(call_time) and pd.notna(sip_time) and abs((call_time - sip_time).total_seconds()) <= 2.0:
-                                            fact_correlation = f"🔥 [핵심 상관관계 발견]: {call['time']}경 RIL 통화 드랍(원인:{call.get('fail_reason','Unknown')}) 발생과 동시간대(±2초)에 SIP 망에서 '{sip['method_code']}' 에러가 발생함. RIL 레이어 통신 단절과 상위 SIP 세션 붕괴가 연쇄적으로 일어났음을 확인."
+                            current_base = st.session_state.current_file.replace("_payload.json", "")
+                            health_kpi_json = get_device_health_kpi(current_base)
                             # ---------------------------------------------------------
                             # 🧠 [강력한 프롬프트 조립]
                             # ---------------------------------------------------------
                             combined_query = f"""
                             [절대 팩트 데이터 강제 주입]
-                            단말의 현재 상태를 나타내는 아래 지표들은 로그 파서를 통해 추출된 100% 정확한 팩트입니다.
+                            단말의 현재 상태를 나타내는 아래 JSON 지표들은 로그 파서를 통해 추출된 100% 정확한 팩트입니다.
 
-                            1. 📱 데이터 사용량 Top 3: {fact_data}
-                            2. 📞 통화 이력 및 상태: {fact_call}
-                            3. 🌐 데이터 호(SETUP_DATA_CALL) 연결: {fact_datacall}
-                            4. 🚨 망 이탈(OOS) 및 신호(Signal): {fact_oos_signal}
-                            5. 🔋 발열(Thermal) 및 배터리 점유: {fact_battery}
-                            6. 🛰️ 위성(NTN) 통신 전환 이력: {fact_ntn}
-                            7. 🚫 DNS 및 네트워크 지연/차단: {fact_dns}
-                            8. 💬 IMS SIP 트랜잭션 상태: {fact_sip}
-                            9. 🔗 [RIL-SIP 융합 진단]: {fact_correlation}
-
+                            {health_kpi_json}
                             위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 단말 상태를 종합 진단해.
 
                             [🚨 엄격한 답변 규칙 🚨]
-                            1. "추가 데이터가 필요하다", "확증하기 어렵다" 같은 방어적이거나 원론적인 변명은 절대 금지.
-                            2. 주어진 데이터 안에서 가장 확률이 높은 '근본 원인(Root Cause)' 가설을 과감하게 제시할 것.
-                            3. [상관관계 분석 필수]: 발열이 심할 때 OOS가 발생했는지, 특정 앱의 데이터 폭주가 데이터 호 지연이나 배터리 광탈을 유발했는지 등 각 지표 간의 연관성을 반드시 짚어낼 것.
-                            4. 분석 결과를 바탕으로 📌 단말 상태 요약, 🔍 항목별 상세 진단(상관관계 포함), 💡 엔지니어 소견(원인 추론), 🚩 최종 권장 사항 포맷으로 작성할 것.
-                            5. [SIP-RIL 상관관계]: IMS 데이터 호(SETUP_DATA_CALL) 성공 여부와 SIP REGISTER/INVITE 성공 여부를 연결하여 '통화 서비스 불가'의 정확한 지점을 짚어낼 것.
-                            6. 9번 팩트 [RIL-SIP 융합 진단]에 연쇄 붕괴가 확인되었다면, 이것이 이번 통화 끊김의 '가장 명백하고 치명적인 근본 원인(Root Cause)'임을 리포트 최상단에 강력하게 하이라이트할 것.
+                            1. JSON 데이터의 9가지 부문을 반드시 기반으로 원인(Root Cause)을 과감히 추론할 것.
+                            2. '9_ril_sip_correlation' 항목에 연쇄 붕괴가 확인되었다면, 이를 리포트 최상단에 가장 강력한 원인으로 하이라이트할 것.
                             """
 
                             raw_result = engine.ask(combined_query, current_file=actual_file_name)
