@@ -123,7 +123,7 @@ class RagPayloadBuilder:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
 
         # ==========================================
-        # 🚨 [신규 추가] Boot Stat 데이터 DB 적재
+        # 🚨 Boot Stat 데이터 DB 적재
         # ==========================================
         if "boot_stats" in report_data:
             for boot_stat in report_data["boot_stats"]:
@@ -166,13 +166,12 @@ class RagPayloadBuilder:
                 )
                 rag_payload.append({"document": doc, "metadata": dns_issue})
 
-
                 # 시계열 통계 요약본 추가
                 if net_data.get("sorted_timeline"):
                     summary = {"timeline_count": len(net_data["sorted_timeline"])}
                     add_to_payload(summary, "Network_Timeline_Summary")
 
-        # 🚨 [신규] 데이터 사용량 통계 페이로드 변환
+        # 🚨 데이터 사용량 통계 페이로드 변환
         if "data_usage_stats" in report_data:
             for usage in report_data["data_usage_stats"]:
                 # 0.1 MB 이하는 너무 자잘해서 DB 용량만 차지하므로 스킵 (선택사항)
@@ -191,7 +190,7 @@ class RagPayloadBuilder:
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 [여기부터 복사해서 추가!] DNS 쿼리 결과 페이로드 변환
+        # 🚨 DNS 쿼리 결과 페이로드 변환
         # ==========================================
         if "dns_queries" in report_data:
             for dns in report_data["dns_queries"]:
@@ -211,7 +210,7 @@ class RagPayloadBuilder:
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 [신규] 배터리 발열(Thermal) 기록 페이로드 변환
+        # 🚨 배터리 발열(Thermal) 기록 페이로드 변환
         # ==========================================
         if "thermal_stats" in report_data:
             for thermal in report_data["thermal_stats"]:
@@ -225,7 +224,7 @@ class RagPayloadBuilder:
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 [신규] Wakelock (배터리 광탈 주범) 기록 페이로드 변환
+        # 🚨 Wakelock (배터리 광탈 주범) 기록 페이로드 변환
         # ==========================================
         if "wakelock_stats" in report_data:
             for wl in report_data["wakelock_stats"]:
