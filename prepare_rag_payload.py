@@ -169,7 +169,7 @@ class RagPayloadBuilder:
 
                 # 시계열 통계 요약본 추가
                 if net_data.get("sorted_timeline"):
-                    summary = {"timeline_count": len(net_data["sorted_timeline"]), "device_config": net_data.get("device_config")}
+                    summary = {"timeline_count": len(net_data["sorted_timeline"])}
                     add_to_payload(summary, "Network_Timeline_Summary")
 
         # 🚨 [신규] 데이터 사용량 통계 페이로드 변환

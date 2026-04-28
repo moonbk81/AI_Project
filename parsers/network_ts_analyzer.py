@@ -33,17 +33,16 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         )
 
         # 3. 차단 원인 추적 설정값
-        self.private_dns_mode = re.compile(r'private_dns_mode\s*=\s*([^\s,]+)', re.I)
-        self.data_saver = re.compile(r'mRestrictBackground\d+\s*:\s*(\w+)', re.I)
-        self.vpn_active = re.compile(r'NetworkAgentInfo.*\[.*VPN.*\]\s+connected', re.I)
 
     def analyze(self, lines):
         in_stats = False
         dns_issues = []
         uid_block_map = {} # UID별 상세 차단 원인 저장소
-        device_config = {"private_dns": "off", "data_saver": "off", "vpn": "inactive"}
         # 시계열 분석을 위해 시간(Time)을 키로 사용하는 딕셔너리
         timeline = defaultdict(lambda: {"net_stats": []})
+
+        current_netid = None
+        private_dns_status = {}
 
         # 1단계: UID별 blocked_state 정보 사전 수집
         for line in lines:
@@ -55,6 +54,31 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         # 2단계: 메인 분석 루프
         for line in lines:
             clean_line = self.clean_line(line)
+            if "NetId:" in clean_line:
+                netid_m = re.search(r'NetId:\s*(\d+)', clean_line)
+                if netid_m:
+                    current_netid = netid_m.group(1)
+                    if current_netid not in private_dns_status:
+                        private_dns_status[current_netid] = {
+                            "mode": "UNKNOWN",
+                            "fail_count": 0,
+                            "failed_ips": []
+                        }
+
+            if current_netid:
+                if "Private DNS mode:" in clean_line:
+                    mode_m = re.search(r'Private DNS mode:\s*([a-zA-Z]+)', clean_line, re.I)
+                    if mode_m:
+                        private_dns_status[current_netid]["mode"] = mode_m.group(1).upper()
+
+                # DoT configuration 세션 붕괴 감지
+                if "status{fail}" in clean_line:
+                    private_dns_status[current_netid]["fail_count"] += 1
+                    # IPv4 / IPv6 주소 추출
+                    ip_m = re.search(r'([a-fA-F0-9:]+|\d+\.\d+\.\d+\.\d+)\s+name', clean_line)
+                    if ip_m:
+                        private_dns_status[current_netid]["failed_ips"].append(ip_m.group(1))
+
             tag_m = self.re_tag.search(clean_line)
             tag = tag_m.group(1).strip() if tag_m else None
 
@@ -101,5 +125,4 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         return {
             "sorted_timeline": dict(sorted(timeline.items())),
             "dns_issues": dns_issues,
-            "device_config": device_config
         }

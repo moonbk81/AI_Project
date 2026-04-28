@@ -132,15 +132,22 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # ==========================================
     net_ts = report_data.get("network_timeseries", {})
     dns_issues = net_ts.get("dns_issues", [])
+    private_dns = net_ts.get("private_dns_status", {})
 
-    if dns_issues:
-        blocked_packages = list(set([d.get("package") for d in dns_issues if d.get("package")]))
-        kpi_report["7_dns_network_issues"] = {
-            "dns_issue_count": len(dns_issues),
-            "blocked_packages": blocked_packages
-        }
-    else:
-        kpi_report["7_dns_network_issues"] = "DNS 차단 이력 없음 (정상)"
+    # 1) 앱별 DNS 차단 이력
+    blocked_packages = list(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
+
+    # 2) Private DNS (DoT) 붕괴 상태 확인
+    dot_failures = []
+    for net_id, info in private_dns.items():
+        if info.get("fail_count", 0) > 0:
+            dot_failures.append(f"NetId {net_id}: {info['mode']} 모드에서 DoT 연결 실패 {info['fail_count']}건 (실패 IP: {', '.join(info['failed_ips'])})")
+
+    kpi_report["7_dns_network_issues"] = {
+        "dns_issue_count": len(dns_issues),
+        "blocked_packages": blocked_packages if blocked_packages else "없음",
+        "private_dns_failures": dot_failures if dot_failures else "DoT 세션 모두 정상 (또는 OFF 상태)"
+    }
 
     # ==========================================
     # 8. 💬 IMS SIP 트랜잭션 상태
