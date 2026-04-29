@@ -16,7 +16,8 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         "6_ntn_satellite": {},
         "7_dns_network_issues": {},
         "8_ims_sip_transactions": {},
-        "9_ril_sip_correlation": []
+        "9_ril_sip_correlation": [],
+        "10_system_crash_and_fatal_errors": {}
     }
 
     # ==========================================
@@ -193,5 +194,20 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
 
     if not kpi_report["9_ril_sip_correlation"]:
         kpi_report["9_ril_sip_correlation"] = "RIL-SIP 간 직접적인 시간대 상관관계 특이사항 없음"
+
+    # ==========================================
+    # 10. 💥 시스템 크래시 (FATAL EXCEPTION / ANR / Tombstone)
+    # ==========================================
+    crash_data = report_data.get("crash_context", [])
+    if crash_data:
+        kpi_report["10_system_crash_and_fatal_errors"] = {
+            "total_crashes": len(crash_data),
+            "crash_summaries": [
+                f"[{c.get('timestamp', 'Unknown Time')}] Process: {c.get('process', 'Unknown')} | Type: {c.get('crash_type', 'FATAL')}"
+                for c in crash_data
+            ]
+        }
+    else:
+        kpi_report["10_system_crash_and_fatal_errors"] = "시스템 크래시/FATAL 에러 발생 이력 없음 (안정적)"
 
     return json.dumps(kpi_report, indent=4, ensure_ascii=False)

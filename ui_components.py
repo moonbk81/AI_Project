@@ -495,3 +495,30 @@ def render_ims_sip_flow(current_base=None):
     st.markdown("**📋 SIP 메시지 트랜잭션 상세**")
     display_cols = ['time', 'direction', 'msg_type', 'method_code', 'tid', 'cseq', 'raw_log']
     st.dataframe(sip_df[display_cols], use_container_width=True)
+
+def render_crash_analyzer(report_data):
+    """시스템 크래시 및 FATAL 에러 분석 UI"""
+    st.subheader("💥 시스템 크래시 및 FATAL 에러 분석")
+
+    crash_data = report_data.get("crash_context", [])
+
+    if not crash_data:
+        st.success("💡 분석된 로그 내에 심각한 시스템 크래시나 FATAL 에러가 발견되지 않았습니다.")
+        return
+
+    st.error(f"🚨 총 {len(crash_data)}건의 크래시/FATAL 에러가 감지되었습니다!")
+
+    for i, crash in enumerate(crash_data):
+        # 타임스탬프와 프로세스명으로 아코디언(Expander) 제목 생성
+        ts = crash.get('timestamp', 'Time Unknown')
+        process = crash.get('process', 'Unknown Process')
+        crash_type = crash.get('crash_type', 'FATAL EXCEPTION')
+
+        with st.expander(f"[{ts}] {process} - {crash_type}"):
+            # 주변 로그(Time-Window Glue)가 수집되어 있다면 함께 출력
+            if 'cross_context_logs' in crash and crash['cross_context_logs']:
+                st.markdown("**주변 컨텍스트 로그 (크래시 전후):**")
+                st.code("\n".join(crash['cross_context_logs']), language='log')
+            elif 'raw_line' in crash:
+                st.markdown("**크래시 원문 로그:**")
+                st.code(crash['raw_line'], language='log')

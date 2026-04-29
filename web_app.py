@@ -965,6 +965,9 @@ with tab_boot:
                     st.dataframe(df_full, use_container_width=True)
             else:
                 st.warning("분석 리포트 내에 부팅 이벤트 데이터가 없습니다. 로그가 `!@Boot` 포맷을 포함하고 있는지 확인하세요.")
+
+            st.divider()
+            ui.render_crash_analyzer(report_data)
         else:
             st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
     else:
