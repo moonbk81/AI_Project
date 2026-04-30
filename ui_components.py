@@ -522,3 +522,106 @@ def render_crash_analyzer(report_data):
             elif 'raw_line' in crash:
                 st.markdown("**크래시 원문 로그:**")
                 st.code(crash['raw_line'], language='log')
+
+def render_sat_at_analyzer(current_base=None):
+    """독자 위성 모뎀(AT Command) 시퀀스 및 CREG 상태 렌더러"""
+    st.subheader("🛰️ 위성 모뎀 제어 시퀀스 & 상태 (AT Command)")
+
+    if not current_base: return
+    file_path = f"./result/{current_base}_sat_at.json"
+    if not os.path.exists(file_path): return
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    metrics = data.get("metrics", {})
+    flow = data.get("call_flow", [])
+    reg_history = data.get("registration_history", [])
+
+    # 1. 핵심 KPI 카드
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("위성 ARFCN", metrics.get("arfcn", "N/A"))
+    c2.metric("최종 망 등록 상태", metrics.get("current_reg_state", "Unknown"))
+    # 💡 통화 시도 대비 실패율
+    call_total = metrics.get('calls_total', 0)
+    call_fail = metrics.get('calls_dropped_or_failed', 0)
+    c3.metric("Voice Call (총/실패)", f"{call_total} 회 / {call_fail} 회",
+              delta=f"-{call_fail} Drop" if call_fail > 0 else "정상", delta_color="inverse")
+
+    # 💡 SMS 발신 성공/실패율
+    sms_rx = metrics.get('sms_rx', 0)
+    sms_tx_succ = metrics.get('sms_tx_success', 0)
+    sms_tx_fail = metrics.get('sms_tx_fail', 0)
+    c4.metric("SMS (수신/발신성공/실패)", f"{sms_rx} / {sms_tx_succ} / {sms_tx_fail}",
+              delta=f"-{sms_tx_fail} Fail" if sms_tx_fail > 0 else "정상", delta_color="inverse")
+    st.divider()
+
+    # ==========================================
+    # 🚨 [신규 추가] CREG Registration 상태 추이 그래프
+    # ==========================================
+    if reg_history:
+        st.write("#### 📡 위성망 등록 상태 전이 (Registration History)")
+        df_reg = pd.DataFrame(reg_history)
+
+        # 시간의 흐름에 따라 상태가 어떻게 변했는지 계단형(Step) 차트로 표현
+        fig_reg = px.line(
+            df_reg, x="time", y="status_str", markers=True,
+            hover_data=["raw"],
+            labels={"time": "시간", "status_str": "상태"}
+        )
+        fig_reg.update_traces(line_shape='hv', line_color='#E64A19', marker=dict(size=8))
+        fig_reg.update_yaxes(categoryorder='array', categoryarray=["Deregistered (0)", "Searching", "Registered (1)"])
+        fig_reg.update_layout(height=250, margin=dict(t=20, b=20))
+        st.plotly_chart(fig_reg, use_container_width=True)
+        st.divider()
+
+       # ==========================================
+    # 3. 3-Tier Call Flow 시퀀스 다이어그램 (AP ↔ RIL ↔ CP)
+    # ==========================================
+    if flow:
+        st.write("#### 💬 통화 제어 풀스택 시퀀스 (AP ↔ RIL ↔ Modem)")
+        fig = go.Figure()
+
+        for idx, msg in enumerate(flow):
+            time_str = msg['time']
+            src = msg['src']
+            dst = msg['dst']
+            desc = msg['desc']
+            is_highlight = msg.get('is_highlight', False)
+
+            # 축 기준 좌표 (0: AP, 1: RIL, 2: CP)
+            # 선이 노드에 살짝 닿지 않게 여백(offset) 부여
+            offset = 0.05
+            x0 = src + offset if src < dst else src - offset
+            x1 = dst - offset if src < dst else dst + offset
+
+            y = len(flow) - idx
+
+            # 색상 결정
+            if src == 0 or dst == 0: color = "#9c27b0" if is_highlight else "#ba68c8" # AP-RIL 구간 (보라색)
+            else: color = "#d32f2f" if is_highlight else "#1f77b4" # RIL-CP 구간 (빨강/파랑)
+            if "ERROR" in desc or "CEND" in desc: color = "red"
+
+            fig.add_annotation(
+                x=x1, y=y, ax=x0, ay=y, xref="x", yref="y", axref="x", ayref="y",
+                text=f"<b>{desc}</b>", showarrow=True, arrowhead=2, arrowsize=1.2, arrowwidth=1.5, arrowcolor=color,
+                font=dict(color=color, size=11), align="center", yshift=8
+            )
+            fig.add_annotation(
+                x=-0.2, y=y, xref="x", yref="y", text=time_str, showarrow=False,
+                font=dict(size=10, color="gray"), xanchor="right"
+            )
+
+        # 3축 레이아웃 적용
+        fig.update_layout(
+            xaxis=dict(
+                tickmode='array', tickvals=[0, 1, 2],
+                ticktext=['📱 Android<br>(Framework)', '⚙️ RIL<br>(Daemon)', '🛰️ Modem<br>(CP)'],
+                tickfont=dict(size=14, weight='bold'),
+                range=[-0.5, 2.5], side="top", showgrid=False, zeroline=False
+            ),
+            yaxis=dict(showticklabels=False, range=[0, len(flow)+1], showgrid=False, zeroline=False),
+            height=max(400, len(flow) * 35), margin=dict(l=150, r=50, t=60, b=20), plot_bgcolor="white"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+

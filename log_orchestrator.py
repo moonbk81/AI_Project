@@ -10,6 +10,7 @@ from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from parsers.ntn_processor import NtnProcessor
 from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
+from parsers.sat_at_parser import SatAtProcessor
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -28,6 +29,7 @@ class LogOrchestrator:
         self.ntn_processor = NtnProcessor(filename=self.base_name)
         self.datacall_parser = DataCallProcessor(context_getter=self._get_surrounding_context_logs)
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
+        self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -81,6 +83,7 @@ class LogOrchestrator:
             result['ntn_data'] = self.ntn_processor.analyze(lines)
             result['datacall_data'] = self.datacall_parser.analyze(lines)
             result['ims_sip_data'] = self.ims_sip_parser.analyze(lines)
+            result['sat_at_data'] = self.sat_at_parser.analyze(lines)
 
             # 지표성 데이터 추가
             if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
@@ -93,6 +96,7 @@ class LogOrchestrator:
             self.ntn_processor.save_ui_report("./result", self.base_name)
             self.ims_sip_parser.save_ui_report("./result", self.base_name)
             self.datacall_parser.save_ui_report("./result", self.base_name)
+            self.sat_at_parser.save_ui_report("./result", self.base_name)
 
             self.ntn_processor.build_and_save_payloads("./payloads")
 

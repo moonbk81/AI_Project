@@ -272,7 +272,11 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
-tab_chat, tab_dash, tab_boot = st.tabs(["💬 로그 분석 및 대화", "📊 전사 로그 통계 대시보드", "📈 부팅 성능"])
+tab_chat, tab_dash, tab_boot, tab_ntn = st.tabs([
+    "💬 로그 분석 및 대화",
+    "📊 전사 로그 통계 대시보드",
+    "📈 부팅 성능",
+    "🛰️ 위성 통신"])
 
 # ==========================================
 # 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
@@ -803,11 +807,6 @@ with tab_dash:
                     ui.render_ims_sip_flow(current_base)
 
                     st.divider()
-
-                    # 2. 위성(NTN) 모듈에 동적 파라미터 전달
-                    ui.render_ntn_advanced_fw_analyzer(current_base)
-
-                    st.divider()
                     # 3. 데이터 호 파일 스위칭 완벽 대응
                     current_dc_data = []
                     if current_base:
@@ -970,5 +969,28 @@ with tab_boot:
             ui.render_crash_analyzer(report_data)
         else:
             st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
+    else:
+        st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
+
+# ==========================================
+# 🛰️ 신규: 위성(NTN) 통신 분석 탭
+# ==========================================
+with tab_ntn:
+    st.subheader("🛰️ 이종 위성망(NTN) 로밍 및 정책 분석")
+    st.markdown("""
+    **SpaceX(Starlink), 중국 통신위성** 등 비지상망(Non-Terrestrial Network)으로의
+    핸드오버, PLMN 매칭, UI 상태(Hysteresis) 전이 이력을 독립적으로 분석합니다.
+    """)
+    st.divider()
+
+    current_target = st.session_state.get("current_file", None)
+
+    if current_target:
+        current_base = current_target.replace("_payload.json", "")
+        # 위성 분석 렌더러 호출!
+        ui.render_ntn_advanced_fw_analyzer(current_base)
+
+        st.divider()
+        ui.render_sat_at_analyzer(current_base)
     else:
         st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
