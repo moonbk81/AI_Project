@@ -260,6 +260,9 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
 init_session_states() # 상태 초기화 실행
 
 # ================================================
+# st.session_state 초기화 구역 (보통 파일 최상단에 위치)
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 st.title("📡 안드로이드 RIL RAG 분석기")
 st.markdown("단말 통신 로그를 원클릭으로 적재하고 AI와 분석을 시작하세요.")
@@ -976,21 +979,107 @@ with tab_boot:
 # 🛰️ 신규: 위성(NTN) 통신 분석 탭
 # ==========================================
 with tab_ntn:
-    st.subheader("🛰️ 이종 위성망(NTN) 로밍 및 정책 분석")
-    st.markdown("""
-    **SpaceX(Starlink), 중국 통신위성** 등 비지상망(Non-Terrestrial Network)으로의
-    핸드오버, PLMN 매칭, UI 상태(Hysteresis) 전이 이력을 독립적으로 분석합니다.
-    """)
-    st.divider()
+    current_target = st.session_state.get("current_file") or "Unknown"
+    try:
+      actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
+    except:
+        actual_file_name = current_target
+    current_base = current_target.replace("_payload.json", "") if current_target != "Unknown" else "Unknown"
 
-    current_target = st.session_state.get("current_file", None)
+    if current_base == "Unknown":
+        st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
+    else:
+        sat_at_path = f"./result/{current_base}_sat_at.json"  # Tiantong
+        ntn_fw_path = f"./result/{current_base}_ntn.json"     # SpaceX
 
-    if current_target:
-        current_base = current_target.replace("_payload.json", "")
-        # 위성 분석 렌더러 호출!
-        ui.render_ntn_advanced_fw_analyzer(current_base)
+        has_tiantong = False
+        has_spacex = False
+
+        # 🚨 1. Tiantong 진짜 데이터 유무 확인 (깡통 JSON 걸러내기)
+        if os.path.exists(sat_at_path):
+            try:
+                with open(sat_at_path, 'r', encoding='utf-8') as f:
+                    t_data = json.load(f)
+                    # call_flow(로그 시퀀스)가 1개 이상 존재할 때만 True
+                    if len(t_data.get("call_flow", [])) > 0:
+                        has_tiantong = True
+            except: pass
+
+        # 🚨 2. SpaceX 진짜 데이터 유무 확인
+        if os.path.exists(ntn_fw_path):
+            try:
+                with open(ntn_fw_path, 'r', encoding='utf-8') as f:
+                    s_data = json.load(f)
+                    # NTN 데이터가 비어있지 않은지 검사
+                    if isinstance(s_data, dict) and any(v for v in s_data.values() if v):
+                        has_spacex = True
+                    elif isinstance(s_data, list) and len(s_data) > 0:
+                        has_spacex = True
+            except: pass
+
+        sat_type = None
+
+        # 3. 데이터가 존재하는 위성 타입에 맞춰 UI 독점 렌더링 (상호 배제)
+        if has_tiantong:
+            sat_type = "Tiantong"
+            ui.render_sat_at_analyzer(current_base)
+        elif has_spacex:
+            sat_type = "SpaceX"
+            ui.render_ntn_advanced_fw_analyzer(current_base)
+        else:
+            st.info("💡 이 로그에는 위성(NTN) 통신 관련 데이터(Tiantong 또는 SpaceX)가 존재하지 않거나 추출되지 않았습니다.")
 
         st.divider()
-        ui.render_sat_at_analyzer(current_base)
-    else:
-        st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
+        if sat_type:
+            if st.button(f"🛰️ {sat_type} 위성망 심층 진단", use_container_width=True):
+                with st.spinner(f"{sat_type} 위성 데이터를 분석 중입니다..."):
+                    health_kpi_json = get_device_health_kpi(current_base)
+                    if sat_type == "Tiantong":
+                        sat_query = f"""
+                        [위성 통신(NTN) 팩트 데이터 강제 주입]
+                        아래 JSON 데이터 중 '11_satellite_modem_status' 항목은 위성 모뎀과 AP 간의 AT Command 통신을 분석한 결과입니다.
+
+                        {health_kpi_json}
+
+                        위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 위성 통신 상태를 진단해.
+
+                        [🚨 엄격한 답변 규칙 🚨]
+                        1. [Tiantong 위성 라이프사이클의 이해]: 중국 위성은 사용자의 Pointing UI 조작에 의해 수동으로 On/Off 됩니다. 만약 'is_intentional_power_off'가 true 라면, 'registration_history_flow'가 'NOT_REG_OR_SEARCHING'으로 끝나더라도 이는 연결 불안정이 아니라 "사용자 의도에 의한 정상적인 서비스 종료"입니다.
+                        2. [In-Service 구간 분석]: 분석의 핵심은 위성이 켜져 있던 시간 동안 정상적으로 서비스가 되었는지 여부입니다. 'call_drops_and_fails'와 'sms_tx_fails'가 모두 0이라면, "사용자가 위성을 켠 시간 동안 음성과 문자가 완벽하게 정상 처리되었다"고 평가해야 합니다.
+                        3. [핵심 에러 도출]: 'critical_errors_detected'에 기록된 내역이 있을 경우에만 이를 Root Cause로 삼아 해설할 것.
+
+                        [✍️ 답변 스타일 및 톤앤매너 (매우 중요) 🚨]
+                        1. 단순한 속성-값 나열식 요약을 절대 금지합니다. (예: "위성 모뎀 상태: is_intentional_power_off: true" -> 이런 기계적인 출력 금지)
+                        2. 마치 수석 엔지니어가 경영진에게 브리핑하듯, 자연스럽고 전문가다운 서술형 문장으로 작성하십시오.
+                        3. 제공된 JSON의 수치나 영문 상태값은 문장 안에 자연스럽게 녹여서 해설하십시오. (예: "단말의 등록 이력을 보면 HOME 망에 안정적으로 진입한 이후, 사용자의 명시적인 조작에 의해 정상적으로 등록 해제되었습니다.")
+                        """
+                    else: # SpaceX
+                        sat_query = f"""
+                                [위성 통신 팩트 데이터 강제 주입]
+                                아래 JSON 데이터 중 '6_ntn_satellite' 항목은 안드로이드 프레임워크 레벨의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력입니다.
+                                (주의: 이 로그는 Tiantong 위성이 아니므로 arfcn, AT Command 관련 지표는 존재하지 않습니다.)
+
+                                {health_kpi_json}
+
+                                위 팩트를 바탕으로 15년 차 수석 엔지니어의 관점에서 위성 로밍 상태를 진단해.
+
+                                [🚨 엄격한 도메인 분석 규칙 🚨]
+                                1. [Starlink Hysteresis 타이머 로직의 이해]: LEO(저궤도 위성) 네트워크 특성상 위성 간 핸드오버가 매우 잦습니다. PLMN이 매칭된 상태에서 'is_hysteresis'가 활성화되었다면, 이는 연결 실패가 아니라 "핸드오버로 인한 일시적인 통신 음영 구간이며, 타이머 내에서는 위성망 접속 유지(Connected) 상태로 간주"해야 합니다.
+                                2. [상태 전이 분석]: 단순히 이벤트 발생 횟수(예: 229회)를 지적하는 것은 아마추어 같습니다. PLMN 매칭 → Hysteresis 진입 → 복구 로 이어지는 시퀀스를 분석하여, 단말이 일시적 단절을 극복하고 위성망 Camp-on을 성공적으로 유지했는지 서술하십시오.
+                                3. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 단말에 정상적으로 위성 정책이 적용되어 있음을 의미합니다.
+
+                                [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
+                        """
+
+                    raw_result = engine.ask(sat_query, current_file=actual_file_name)
+                    final_text = raw_result[0] if isinstance(raw_result, tuple) else raw_result
+                    if isinstance(final_text, str):
+                        final_text = final_text.replace('\\n', '\n')
+
+                    st.markdown(f"### 🤖 [AI {sat_type} 위성 진단 결과]")
+                    st.info(final_text)
+
+                    if "chat_history" in st.session_state:
+                        st.session_state.chat_history.append({"role": "user", "content": f"{sat_type} 위성망 심층 진단해 줘."})
+                        st.session_state.chat_history.append({"role": "assistant", "content": final_text})
+

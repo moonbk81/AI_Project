@@ -210,4 +210,45 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     else:
         kpi_report["10_system_crash_and_fatal_errors"] = "시스템 크래시/FATAL 에러 발생 이력 없음 (안정적)"
 
+    # ==========================================
+    # 11. 🛰️ 위성 모뎀(AT Command) 제어 및 에러 상태
+    # ==========================================
+    sat_at_path = os.path.join(result_dir, f"{base_name}_sat_at.json")
+    if os.path.exists(sat_at_path):
+        with open(sat_at_path, 'r', encoding='utf-8') as f:
+            sat_data = json.load(f)
+            sat_metrics = sat_data.get("metrics", {})
+            sat_flow = sat_data.get("call_flow", [])
+            reg_history = sat_data.get("registration_history", [])
+
+            # 상태 전이 흐름 추출
+            achieved_states = []
+            for r in reg_history:
+                state_str = r.get('status_str', 'Unknown')
+                if not achieved_states or achieved_states[-1] != state_str:
+                    achieved_states.append(state_str)
+
+            # 🚨 [신규 로직] 단말/사용자의 명시적인 위성 모뎀 OFF 의도가 있었는지 확인
+            power_off_detected = False
+            for msg in sat_flow:
+                raw_text = msg.get('raw', '')
+                if 'SAT_SET_POWER, state: OFF' in raw_text or 'AT+CFUN=0' in raw_text or 'AT+CFUN=4' in raw_text:
+                    power_off_detected = True
+                    break
+
+            critical_sat_errors = [
+                f"[{msg['time']}] {msg['desc']} (Raw: {msg.get('raw', '')})"
+                for msg in sat_flow if "❌" in msg.get('desc', '') or "ERROR" in msg.get('raw', '')
+            ]
+
+            kpi_report["11_satellite_modem_status"] = {
+                "arfcn": sat_metrics.get("arfcn", "Unknown"),
+                "registration_history_flow": " -> ".join(achieved_states) if achieved_states else "Unknown",
+                "is_intentional_power_off": power_off_detected, # 👈 AI에게 "이거 정상 종료임"을 알려주는 핵심 키
+                "signal_rssi_snr": f"{sat_metrics.get('last_rssi')} / {sat_metrics.get('last_snr')}",
+                "call_drops_and_fails": sat_metrics.get("calls_dropped_or_failed", 0),
+                "sms_tx_fails": sat_metrics.get("sms_tx_fail", 0),
+                "critical_errors_detected": critical_sat_errors if critical_sat_errors else "없음 (해당 기간 내 Call/SMS 정상 처리됨)"
+            }
+
     return json.dumps(kpi_report, indent=4, ensure_ascii=False)

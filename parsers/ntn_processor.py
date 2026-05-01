@@ -16,18 +16,28 @@ class NtnProcessor(BaseParser):
         """정규식으로 NTN(위성) 관련 프레임워크 정책/상태 로그를 추출합니다."""
         self.parsed_data = [] # 초기화 안전장치
 
+        # 🚨 [상태 추적 변수] 중복 로그(Spam) 방지를 위해 이전 상태를 기억
+        last_plmn = None
+        last_radio_power = None
+        last_data_policy = None
+        last_ntn_mode = None
+        last_hysteresis_time = None # Hysteresis 도배 방지용
+
         for line in lines:
             clean_line = self.clean_line(line)
 
             # 1. 위성 PLMN 매칭
             match_ntn_plmn = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?NtnCapabilityResolver:\s*Registered to satellite PLMN\s*(\d+)', line, re.IGNORECASE)
             if match_ntn_plmn:
-                self.parsed_data.append({
-                    'time': match_ntn_plmn.group(1),
-                    'log_type': 'NTN_Policy',
-                    'event_type': 'PLMN_MATCH',
-                    'ntn_plmn': match_ntn_plmn.group(2)
-                })
+                current_plmn = match_ntn_plmn.group(2)
+                if current_plmn != last_plmn: # 상태가 변했을 때만 추가
+                    self.parsed_data.append({
+                        'time': match_ntn_plmn.group(1),
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'PLMN_MATCH',
+                        'ntn_plmn': current_plmn
+                    })
+                    last_plmn = current_plmn
                 continue
 
             # 2. Radio Power 상태 (모뎀 ON/OFF)
@@ -35,55 +45,70 @@ class NtnProcessor(BaseParser):
             if match_radio_power:
                 raw_time = match_radio_power.group(1)
 
-                # 덤프 포맷(2026-03-24T15:29:32.135673)을 일반 포맷(03-24 15:29:32.135)으로 강제 정규화하여 타임라인 정렬 꼬임 방지
                 if 'T' in raw_time:
                     time_str = raw_time[5:10] + ' ' + raw_time[11:23]
                 else:
                     time_str = raw_time
 
                 power_state = 'ON' if match_radio_power.group(2).lower() == 'true' else 'OFF'
-                self.parsed_data.append({
-                    'time': time_str,
-                    'log_type': 'NTN_Policy',
-                    'event_type': 'RADIO_POWER',
-                    'power_state': power_state
-                })
+
+                if power_state != last_radio_power:
+                    self.parsed_data.append({
+                        'time': time_str,
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'RADIO_POWER',
+                        'power_state': power_state
+                    })
+                    last_radio_power = power_state
                 continue
 
             # 3. 데이터 서비스 정책 (DataPolicy)
             match_ntn_policy = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?SatelliteController:\s*getSatelliteDataServicePolicyForPlmn:\s*return data support mode.*?:\s*(\d+)', line, re.IGNORECASE)
             if match_ntn_policy:
                 mode_map = {'1': 'Restricted (SOS)', '2': 'Broadband (Starlink)', '0': 'None'}
-                self.parsed_data.append({
-                    'time': match_ntn_policy.group(1),
-                    'log_type': 'NTN_Policy',
-                    'event_type': 'DATA_POLICY',
-                    'data_policy': mode_map.get(match_ntn_policy.group(2), f"Mode {match_ntn_policy.group(2)}")
-                })
+                current_policy = mode_map.get(match_ntn_policy.group(2), f"Mode {match_ntn_policy.group(2)}")
+
+                if current_policy != last_data_policy:
+                    self.parsed_data.append({
+                        'time': match_ntn_policy.group(1),
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'DATA_POLICY',
+                        'data_policy': current_policy
+                    })
+                    last_data_policy = current_policy
                 continue
 
             # 4. NTN Mode 상태 알림 (상태 전이 추적)
             match_ntn_mode = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?updateLastNotifiedNtnModeAndNotify.*?lastNotifiedNtnMode=(true|false).*?lastNotifiedNtnModePhone=(true|false).*?currNtnMode=(true|false)', line, re.IGNORECASE)
             if match_ntn_mode:
-                self.parsed_data.append({
-                    'time': match_ntn_mode.group(1),
-                    'log_type': 'NTN_Policy',
-                    'event_type': 'NTN_MODE_NOTIFY',
-                    'last_ntn_mode': 'ON' if match_ntn_mode.group(2).lower() == 'true' else 'OFF',
-                    'last_phone_mode': 'ON' if match_ntn_mode.group(3).lower() == 'true' else 'OFF',
-                    'ntn_mode': 'ON' if match_ntn_mode.group(4).lower() == 'true' else 'OFF'
-                })
+                current_ntn_mode = 'ON' if match_ntn_mode.group(4).lower() == 'true' else 'OFF'
+
+                if current_ntn_mode != last_ntn_mode:
+                    self.parsed_data.append({
+                        'time': match_ntn_mode.group(1),
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'NTN_MODE_NOTIFY',
+                        'last_ntn_mode': 'ON' if match_ntn_mode.group(2).lower() == 'true' else 'OFF',
+                        'last_phone_mode': 'ON' if match_ntn_mode.group(3).lower() == 'true' else 'OFF',
+                        'ntn_mode': current_ntn_mode
+                    })
+                    last_ntn_mode = current_ntn_mode
                 continue
 
-            # 5. Hysteresis 구간 아이콘 유지
-            match_hys_icon = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?isInSatelliteModeForCarrierRoaming.*?connected to satellite within hysteresis time', line, re.IGNORECASE)
+            # 5. Hysteresis 구간 아이콘 유지 (1초 단위 내 중복 방지)
+            match_hys_icon = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}).*?isInSatelliteModeForCarrierRoaming.*?connected to satellite within hysteresis time', line, re.IGNORECASE)
             if match_hys_icon:
-                self.parsed_data.append({
-                    'time': match_hys_icon.group(1),
-                    'log_type': 'NTN_Policy',
-                    'event_type': 'HYSTERESIS_ICON_ON',
-                    'is_hysteresis': 'True'
-                })
+                current_time_sec = match_hys_icon.group(1) # 밀리초를 제외한 초 단위까지만 절삭
+
+                # 동일한 초(sec) 내에 수십 개씩 찍히는 것을 1개로 압축
+                if current_time_sec != last_hysteresis_time:
+                    self.parsed_data.append({
+                        'time': match_hys_icon.group(0)[:18], # 원본 로그의 타임스탬프 일부 사용
+                        'log_type': 'NTN_Policy',
+                        'event_type': 'HYSTERESIS_ICON_ON',
+                        'is_hysteresis': 'True'
+                    })
+                    last_hysteresis_time = current_time_sec
                 continue
 
         return self.parsed_data
