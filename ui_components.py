@@ -4,6 +4,7 @@ import streamlit as st
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
+import datetime
 
 def render_dns_analysis_chart(df):
     """패키지별 DNS 차단/실패 상세 원인 분석 차트 렌더링"""
@@ -111,15 +112,18 @@ def render_signal_level_timeline(df):
                 sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
                 sig_df = sig_df[(sig_df['Level'] >= 0) & (sig_df['Level'] <= 5)]
 
+                current_year = datetime.datetime.now().year
+                sig_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + sig_df['time'], format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
+
                 sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
                 sig_df['RAT'] = sig_df['rat'].astype(str)
-                sig_df = sig_df.sort_values(by=["Slot", "RAT", "time"])
+                sig_df = sig_df.sort_values(by=["time_dt", "Slot", "RAT"])
 
                 fig_sig_dash = px.line(
-                    sig_df, x='time', y='Level', color='RAT', facet_row='Slot',
+                    sig_df, x='time_dt', y='Level', color='RAT', facet_row='Slot',
                     line_shape='hv', markers=len(sig_df) < 50,
                     title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
-                    labels={"Level": "안테나 칸 수", "time": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
+                    labels={"Level": "안테나 칸 수", "time_dt": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
                     hover_data=['raw_info'], height=600
                 )
                 fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
@@ -158,11 +162,11 @@ def render_data_usage_profiling(df):
             st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
 
 def render_network_timeseries_and_dns(df):
-    """DNS 에러 통계 및 네트워크 시계열 분석 차트 렌더링"""
+    """DNS 에러 통계 및 네트워크 시계열 분석 차트 렌더링 (시간 정렬 버그 픽스)"""
     st.subheader("🌐 DNS 및 네트워크 시계열 분석")
 
     if 'log_type' in df.columns:
-        # 1. DNS 이슈 요약 (파이 차트 & 바 차트)
+        # 1. DNS 이슈 요약 (기존 유지)
         dns_df = df[df['log_type'] == 'Network_DNS_Issue'].copy()
         if not dns_df.empty:
             col_dns1, col_dns2 = st.columns(2)
@@ -184,16 +188,37 @@ def render_network_timeseries_and_dns(df):
         if not ts_df.empty:
             ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
             ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
-            ts_df = ts_df.sort_values(by='time')
+
+            # 🚨 [버그 수정] 강력하고 안전한 시간 파서 도입
+            def safe_parse_time(t):
+                t_str = str(t).strip()
+                # 연도가 빠진 "MM-DD" 형태인지 확인 (예: 04-12 14:00:00)
+                if len(t_str) > 5 and t_str[2] == '-' and t_str.count('-') == 1:
+                    current_year = datetime.datetime.now().year
+                    t_str = f"{current_year}-{t_str}"
+                return pd.to_datetime(t_str, errors='coerce')
+
+            # 적용 및 정렬
+            ts_df['time_dt'] = ts_df['time'].apply(safe_parse_time)
+            ts_df = ts_df.dropna(subset=['time_dt']).sort_values(by='time_dt')
+
+            # 🚨 방어 로직: 변환 후 데이터가 모두 날아갔는지 체크
+            if ts_df.empty:
+                st.warning("⚠️ 시계열 데이터를 변환할 수 없습니다. (시간 포맷 오류)")
+                return
+
+            # netId를 명시적 문자열로 변환 (숫자일 경우 그라데이션 색상으로 변하는 것 방지)
+            ts_df['netId'] = ts_df['netId'].astype(str)
 
             metric_choice = st.selectbox("확인할 지표 선택", ["DNS 평균 응답 시간(ms)", "DNS 에러율(%)"])
             target_col = 'dns_avg' if "응답 시간" in metric_choice else 'dns_err_rate'
 
             fig_ts = px.line(
-                ts_df, x='time', y=target_col, color='netId', hover_data=['transport'],
+                ts_df, x='time_dt', y=target_col, color='netId', hover_data=['transport'],
                 markers=True, title=f"시간대별 {metric_choice} 변화"
             )
-            fig_ts.update_layout(xaxis_title="발생 시간", yaxis_title="수치")
+            fig_ts.update_xaxes(tickformat="%m-%d\n%H:%M:%S", title="발생 시간")
+            fig_ts.update_layout(yaxis_title="수치")
             st.plotly_chart(fig_ts, use_container_width=True)
         else:
             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
@@ -289,14 +314,20 @@ def render_ntn_advanced_fw_analyzer(current_base):
     chart_df = clean_df[clean_df['event_type'] != 'DATA_POLICY'].copy()
 
     if not chart_df.empty:
+        # 🚨 [PRO FIX] 시간 역전 해결
+        current_year = datetime.datetime.now().year
+        chart_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + chart_df['time'], errors='coerce')
+        chart_df = chart_df.sort_values('time_dt')
+
         fig = px.scatter(
-            chart_df, x='time', y='event_type', color='event_type',
+            chart_df, x='time_dt', y='event_type', color='event_type',
             hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'],
             title="시간대별 주요 이벤트 추적 (값 변경 시점에만 점 표시)",
-            labels={'time': '발생 시간', 'event_type': '이벤트 종류'}
+            labels={'time_dt': '발생 시간', 'event_type': '이벤트 종류'}
         )
 
         fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
+        fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
         order = ['RADIO_POWER', 'PLMN_MATCH', 'HYSTERESIS_ICON_ON', 'NTN_MODE_NOTIFY']
         fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
         st.plotly_chart(fig, use_container_width=True)
@@ -364,16 +395,21 @@ def render_data_call_analyzer(data):
     }
 
     if not chart_df.empty:
+        # 🚨 [PRO FIX] 시간 역전 해결
+        current_year = datetime.datetime.now().year
+        chart_df['req_time_dt'] = pd.to_datetime(str(current_year) + "-" + chart_df['req_time'], errors='coerce')
+        chart_df = chart_df.dropna(subset=['req_time_dt']).sort_values('req_time_dt')
+
         fig = px.scatter(
-            chart_df, x='req_time', y='apn', color='status',
+            chart_df, x='req_time_dt', y='apn', color='status',
             color_discrete_map=color_map,
             symbol='event_type',
             size=[15]*len(chart_df),
             hover_data=['event_type', 'network', 'protocol', 'cause', 'latency_ms', 'cid'],
             title="시간대별 APN 데이터 호 상태 변화 (마우스 오버 시 상세 원인 확인)",
-            labels={'req_time': '시간', 'apn': '대상 APN'}
+            labels={'req_time_dt': '시간', 'apn': '대상 APN'}
         )
-        # key 에러 방지를 위해 난수 대신 명시적 이름 부여
+        fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
         st.plotly_chart(fig, use_container_width=True, key="datacall_scatter_chart")
     else:
         st.info("차트에 표시할 이벤트가 없습니다.")
@@ -690,14 +726,21 @@ def render_service_state_timeline(df):
         st.info("표시할 상태 변화가 없습니다.")
         return
 
-    # Y축 카테고리 순서 고정 (정상 상태가 맨 위로 오도록)
+    current_year = datetime.datetime.now().year
+    clean_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + clean_df['time'], format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
+
+    # 시간 순으로 전체 데이터프레임 완벽 정렬
+    clean_df = clean_df.sort_values(by=['time_dt', 'Slot', 'Type']).reset_index(drop=True)
+
+    # Y축 카테고리 순서 고정
     category_order = ["POWER_OFF", "EMERGENCY_ONLY", "OUT_OF_SERVICE", "IN_SERVICE"]
 
+    # 🚨 [버그 수정 2] x축을 'time_dt'로 변경
     fig = px.line(
-        clean_df, x='time', y='State', color='Type', facet_row='Slot',
-        line_shape='hv', markers=True,  # hv: 계단형(Step) 라인 차트
+        clean_df, x='time_dt', y='State', color='Type', facet_row='Slot',
+        line_shape='hv', markers=True,
         title="시간대별 Voice / Data 등록 상태 변화 (상태 변경 시점에만 마커 표시)",
-        labels={'time': '발생 시간', 'State': '현재 상태', 'Type': '통신 유형'},
+        labels={'time_dt': '발생 시간', 'State': '현재 상태', 'Type': '통신 유형'},
         hover_data=['Event', 'Cause', 'Raw_Reg'],
         category_orders={"State": category_order}
     )
@@ -705,7 +748,9 @@ def render_service_state_timeline(df):
     fig.update_traces(marker=dict(size=8, line=dict(width=1, color='DarkSlateGrey')))
     fig.update_yaxes(categoryorder='array', categoryarray=category_order)
 
-    # 슬롯 개수에 따라 차트 높이를 가변적으로 조절
+    # 🚨 [추가] X축 포맷 예쁘게 다듬기 (연도 감추고 월-일 시:분:초)
+    fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
+
     chart_height = max(300, 200 * clean_df['Slot'].nunique())
     fig.update_layout(height=chart_height, hovermode="x unified", margin=dict(t=50, b=20))
 
