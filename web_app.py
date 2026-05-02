@@ -451,30 +451,56 @@ with tab_chat:
     col_btn4, col_btn5, col_btn6 = st.columns(3)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
-            quick_prompt = "Call Session 로그와 IMS SIP 메시지(INVITE, 4xx/5xx 응답 등)를 함께 분석해서 통화 끊김의 근본 원인을 찾아줘. 특히 SIP 에러가 발생했는지 중점적으로 확인해."
+            quick_prompt = """
+            [Call Drop 심층 분석] Call Session 로그와 IMS SIP 메시지, 그리고 무선 환경(Signal/OOS) 로그를 교차 검증해.
+            1. SIP 에러(4xx/5xx/6xx)나 RTP Timeout에 의한 끊김인지 확인해.
+            2. 끊김 발생 직전 안테나 수신 레벨(RSRP/RSRQ)의 급감이나 핸드오버 실패(RLF)가 있었는지 무선 환경과 연관 지어 분석해.
+            3. 네트워크(기지국)에서 정상 BYE를 보냈는지, 단말이 비정상 종료했는지 구분해.
+            [엔지니어 톤앤매너] 단순 현상 나열을 금지하고, '무선 환경 악화에 따른 SIP 세션 타이머 만료'와 같이 근본 원인을 특정하는 서술형 보고서로 작성해.
+            """
     with col_btn2:
         if st.button("🌐 네트워크 이상 분석", use_container_width=True):
-            quick_prompt = "Network Timeline Stat 및 DNS 로그를 분석해서, 지연(latency) 시간이 비정상적으로 튀는 이상 징후나 앱 차단 이력을 찾아내 줘."
+            quick_prompt = """
+            [Data Network 이상 심층 분석] Network Timeline, DNS 로그, 망 등록(Reg) 상태를 교차 검증해.
+            1. DNS 쿼리 실패나 특정 IP/앱 차단 이력이 있는지 확인해.
+            2. 지연(Latency)이 튀는 구간이 무선 신호 약전계 구간이거나, 망 이탈(OOS)/셀 재선택 구간과 일치하는지 타임라인을 대조해.
+            3. TCP 재전송(Retransmission) 징후가 있는지 추론해.
+            [엔지니어 톤앤매너] 현상과 원인을 연결하여 논리적으로 서술해. (예: "신호 저하로 인한 잦은 셀 재선택이 전체적인 Data Latency를 유발함")
+            """
     with col_btn3:
         if st.button("🔋 배터리/크래시 분석", use_container_width=True):
-            quick_prompt = "Battery Drain Report와 Crash/ANR 로그를 확인해서 전력 광탈 원인과 비정상 종료된 프로세스가 있는지 분석해 줘."
+            quick_prompt = """
+            [Battery & Crash 연관 분석] Battery Drain Report, Crash/ANR 로그, 모뎀 상태를 교차 검증해.
+            1. 배터리 광탈 구간에 잦은 OOS(망 탐색 지속)나 불필요한 모뎀 Wakeup이 있었는지 확인해.
+            2. 비정상 종료된 프로세스(Crash/ANR)가 RIL(Radio Interface Layer)이나 Telephony 프레임워크와 연관되어 있는지 특정해.
+            [엔지니어 톤앤매너] 하드웨어 결함인지, 통신 불량으로 인한 SW 무한 루프(발열/전력 소모)인지 수석 엔지니어의 관점에서 진단해.
+            """
     with col_btn4:
         if st.button("🚫 망 등록(Reg) 및 OOS 분석", use_container_width=True):
-            quick_prompt = (
-                "OOS_Event 로그에서 Slot ID별(Slot 0, Slot 1) voice_reg 및 data_reg 상태 변화를 분석해줘. "
-                "시간대별로 각 슬롯의 망 등록 상태가 어떻게 변했는지 비교하고, "
-                "특정 슬롯만 OOS 에 빠졌는지 아니면 전체 서비스가 이탈했는지 파악해라."
-            )
+            quick_prompt = """
+            [OOS 및 망 등록 해제 분석] OOS_Event 로그와 Slot ID별 상태 변화를 분석해.
+            1. 단순히 OOS 발생 여부가 아니라, 네트워크로부터 Reject Cause(예: Cause #8, #15 등)를 받았는지, 아니면 순수 RF 음영에 의한 단절인지 원인을 구분해.
+            2. 특정 슬롯(Slot 0/1)만 이탈했는지, 양쪽 모두 이탈했는지 비교하여 안테나 H/W 문제인지 기지국 문제인지 추론해.
+            3. 복구(Recovery)까지 걸린 시간을 평가해.
+            [엔지니어 톤앤매너] "OOS가 발생했습니다"가 아니라 "NW Reject 수신으로 인해 망 등록이 해제되었습니다"와 같이 인과관계를 명확히 서술해.
+            """
     with col_btn5:
         if st.button("📶 안테나(Signal) 레벨 분석", use_container_width=True):
-            quick_prompt = (
-                "Signal_Level 로그를 분석해서 Slot별(Slot 0, Slot 1) 안테나 수신 레벨(0~5)이 시간대별로 어떻게 변했는지 파악해 줘."
-                 "신호가 0이나 1로 뚝 떨어지는 수신 저하 구간이 있었는지 확인해라."
-            )
-    with col_btn6: # 신규 SIP 전용 버튼
+            quick_prompt = """
+            [Signal Level 및 품질 분석] 안테나 수신 레벨(0~5) 변화와 단말의 동작을 연관 지어 분석해.
+            1. 신호가 0~1로 급감하는 구간(Deep Indoor 등)이 Call Drop이나 OOS 등 실제 서비스 장애로 이어졌는지 교차 검증해.
+            2. 잦은 신호 레벨 변동이 핑퐁 핸드오버(Ping-pong Handover)나 불필요한 망 탐색을 유발했는지 평가해.
+            [엔지니어 톤앤매너] 단순한 신호 변동 이력 나열을 금지하고, 이 신호 품질이 사용자 체감 품질(QoE)에 어떤 악영향을 미쳤는지 브리핑해.
+            """
+    with col_btn6:
         if st.button("💬 VoLTE/SIP 상세 분석", use_container_width=True):
-            quick_prompt = "현재 파일의 모든 IMS SIP 트랜잭션 정보를 분석해줘. REGISTER 등록 상태는 정상인지, INVITE 과정에서 지연이나 실패 응답이 있었는지 15년 차 엔지니어 관점에서 리포트해 줘."
-
+            quick_prompt = """
+            [IMS/SIP 프로토콜 딥다이브] 전체 IMS SIP 트랜잭션을 수석 엔지니어 관점에서 해부해.
+            1. REGISTER 과정에서 P-CSCF 인증 실패나 지연이 있었는지 확인해.
+            2. INVITE 요청 시 Precondition Failure(PRACK/UPDATE)나 코덱 협상 실패가 있었는지 분석해.
+            3. 특정 에러 코드(4xx Client Error, 5xx Server Error)가 집중적으로 발생하는 패턴을 찾아내고, 망 측(NW) 문제인지 단말(UE) 문제인지 책임 소재를 명확히 해.
+            [엔지니어 톤앤매너] 전문적인 통신 프로토콜 용어를 적극 사용하여, 뎁스 있는 분석 리포트를 작성해.
+            """
     st.divider()
 
     # ==========================================
@@ -500,7 +526,13 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
                 current_target = st.session_state.get("current_file", None)
-                answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:])
+                # 🚨 [수정] 현재 파일의 KPI 정보를 추출하여 에이전트에게 전달
+                current_base = current_target.replace("_payload.json", "") if current_target else "Unknown"
+                health_kpi_json = get_device_health_kpi(current_base) if current_base != "Unknown" else None
+                answer, ids, metas = engine.ask(prompt,
+                                                current_file=current_target,
+                                                chat_history=st.session_state.messages[-5:],
+                                                health_kpi=health_kpi_json)
 
                 # [복구 완료] 원본 로그 텍스트 조립 구역
                 ref_text = ""

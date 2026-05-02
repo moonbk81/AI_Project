@@ -149,7 +149,7 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None, chat_history=None, top_k=20):
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=20, health_kpi=None):
          # 1. 🚨 질문 임베딩 생성 (짧은 후속 질문 대응력 강화)
         search_query = user_query
         if len(user_query) < 15 and chat_history:
@@ -220,6 +220,8 @@ class RilRagChat:
 
         # 4. 🚀 [핵심] LLM 토큰 폭발 방지 & 원본 스니펫 제한적 제공
         context_blocks = []
+        if health_kpi:
+            context_blocks.append(f"=== [현재 단말의 절대적 팩트 지표 (Health KPI)] ===\n{health_kpi}")
         if results and results['documents'] and len(results['documents'][0]) > 0:
             for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
 
@@ -255,7 +257,7 @@ class RilRagChat:
                 if meta and 'log_type' in meta:
                     retrieved_log_types.add(meta['log_type'])
 
-        dynamic_prompt = self.prompts["base_persona"] + "\n[검색된 로그 기반 맞춤형 분석 가이드라인]\n"
+        dynamic_prompt = self.prompts["base_persona"] + "\n[분석 가이드라인]\n"
 
         if retrieved_log_types:
             for l_type in retrieved_log_types:
@@ -288,6 +290,13 @@ class RilRagChat:
         )
 
         # 7. 최종 LLM 프롬프트 생성 (현재 로그 + 과거 대화 + 질문)
+        dynamic_prompt += (
+            "\n⚠️ [분석 엄격 규칙 (Hallucination Zero)]:\n"
+            "1. 'Health KPI' 성적표를 모든 분석의 절대적 기준으로 삼아라.\n"
+            "2. 만약 KPI에서 Call Drop, Crash, SMS Fail 등의 Count가 '0'이라면, 검색된 로그에 에러 키워드가 있더라도 절대로 '장애가 발생했다'고 답변하지 마라.\n"
+            "3. 로그 스니펫에 나타난 TIMEOUT이나 ERROR가 정상적인 Polling 과정인지, 실제 서비스 단절인지 KPI와 대조하여 엄격히 구분해라.\n"
+            "4. 데이터가 부족하거나 KPI 상 에러가 없다면 '현재 데이터상으로는 장애 지표가 발견되지 않습니다'라고 정직하게 리포트해라.\n"
+        )
         system_prompt = dynamic_prompt
         prompt = (
             f"{system_prompt}\n\n"
