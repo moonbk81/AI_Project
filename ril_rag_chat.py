@@ -4,6 +4,15 @@ import glob
 import chromadb
 import torch
 from sentence_transformers import SentenceTransformer
+from agent_tools import (
+    get_cs_call_analytics,
+    get_ps_ims_call_analytics,
+    get_network_oos_analytics,
+    get_dns_latency_analytics,
+    get_battery_thermal_analytics,
+    get_crash_anr_analytics,
+    get_radio_power_analytics
+)
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs"):
@@ -149,217 +158,48 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None, chat_history=None, top_k=20, health_kpi=None):
-         # 1. 🚨 질문 임베딩 생성 (짧은 후속 질문 대응력 강화)
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=15, health_kpi=None):
+        """Plan -> Act -> Retrieve -> Reason 파이프라인"""
+        current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
+
+        # [STAGE 1: Act] 의도 기반 도구 매핑 및 팩트 획득
+        tool_facts = self._get_tool_facts(user_query, current_base)
+
+        # [STAGE 2: Retrieve] 쿼리 증강 및 Vector DB 검색
         search_query = user_query
         if len(user_query) < 15 and chat_history:
-            # "그럼 배터리는?" 같은 짧은 질문에 이전 문맥을 붙여 벡터 검색 품질을 높입니다.
             last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
-        # 1. 질문 임베딩 생성
         query_embedding = self.embed_model.encode(search_query).tolist()
-        # user_query_lower = user_query.lower()
-        search_text_lower = search_query.lower()
+        results = self.collection.query(query_embeddings=[query_embedding], n_results=top_k)
 
-        # ==========================================
-        # 2. 스마트 검색 필터 구성 (조건 자동 조립기)
-        # ==========================================
-        conditions = []
+        # [STAGE 3: Prompt Construction] 팩트와 검색 결과의 융합
+        formatted_logs = self._format_results(results)
 
-        # # (1) 현재 활성 파일 고정
-        if current_file:
-            conditions.append({"source_file": current_file})
-
-        # (2) 사용자 의도(질문)에 따른 로그 타입 필터링
-        target_log_types = []
-        if any(kw in search_text_lower for kw in ["battery", "배터리", "전력", "광탈"]):
-            target_log_types.append("Battery_Drain_Report")
-        if any(kw in search_text_lower for kw in ["call", "콜", "통화", "전화", "끊김"]):
-            target_log_types.append("Call_Session")
-        if any(kw in search_text_lower for kw in ["radio", "전원", "power"]):
-            target_log_types.append("Radio_Power_Event")
-        if any(kw in search_text_lower for kw in ["oos", "이탈", "망", "음영", "서비스"]):
-            target_log_types.append("OOS_Event")
-        if any(kw in search_text_lower for kw in ["crash", "fatal", "크래시", "죽었어"]):
-            target_log_types.append("Crash_Event")
-        if any(kw in search_text_lower for kw in ["anr", "응답없음", "멈춤"]):
-            target_log_types.append("ANR_Context")
-        if any(kw in search_text_lower for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연", "이상", "징후", "튀는"]):
-            target_log_types.extend(["Network_DNS_Issue", "Network_Timeline_Stat"])
-        # 🚨 [신규 추가] 안테나/수신 레벨 키워드
-        if any(kw in search_text_lower for kw in ["안테나", "시그널", "신호", "signal", "level", "수신"]):
-            target_log_types.append("Signal_Level")
-        if any(kw in search_text_lower for kw in ["sip", "ims", "volte", "invite", "register", "응답", "메시지"]):
-            target_log_types.append("IMS_SIP_Message")
-
-        if target_log_types:
-            if len(target_log_types) == 1:
-                conditions.append({"log_type": target_log_types[0]})
-            else:
-                # 💡 핵심: 여러 주제가 나오거나 전환될 때, $in 연산자를 통해 모두 DB에서 꺼내올 수 있게 열어둠
-                conditions.append({"log_type": {"$in": target_log_types}})
-
-        where_filter = None
-        if len(conditions) == 1:
-            where_filter = conditions[0]
-        elif len(conditions) > 1:
-            where_filter = {"$and": conditions}
-
-        # 3. Vector DB 검색 실행
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where_filter
+        system_role = (
+            "당신은 15년 차 안드로이드 통신 프로토콜 수석 엔지니어입니다.\n"
+            "제공된 [도구 분석 팩트]를 절대적인 진실(Ground Truth)로 삼아 [검색된 관련 로그]를 교차 검증하십시오.\n"
+            "🚨 [엄격한 분석 규칙]:\n"
+            "1. 팩트에 'NORMAL_RELEASE'나 에러 카운트 0이 명시되어 있다면, 로그 스니펫의 ERROR나 BYE 키워드에 속지 말고 정상 동작으로 판정하십시오.\n"
+            "2. 팩트와 로그가 일치하는 지점(예: 팩트의 Cause Code와 로그의 메시지)을 찾아 인과관계를 설명하십시오.\n"
+            "3. 답변은 요약, 주요 분석, 엔지니어 소견, 권장 사항 순으로 작성하십시오."
         )
 
-        # [디버깅 출력] 터미널에서 제대로 가져오는지 숫자를 꼭 확인하세요!
-        found_count = len(results['documents'][0]) if results and results.get('documents') else 0
-        print(f"\n[DEBUG] 현재 필터: {where_filter}")
-        print(f"[DEBUG] DB가 가져온 문서 개수: {found_count} 개\n")
-
-        # 4. 🚀 [핵심] LLM 토큰 폭발 방지 & 원본 스니펫 제한적 제공
-        context_blocks = []
-        if health_kpi:
-            context_blocks.append(f"=== [현재 단말의 절대적 팩트 지표 (Health KPI)] ===\n{health_kpi}")
-        if results and results['documents'] and len(results['documents'][0]) > 0:
-            for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
-
-                clean_meta = {k: v for k, v in meta.items() if not k.startswith("raw_") and k != "source_file"}
-
-                # 🚨 [개선] OOS는 raw_context에, Call은 raw_logs에 있으므로 둘 다 확인합니다!
-                snippet = "(DB에 원본 로그가 없습니다)"
-                raw_data = meta.get("raw_logs", meta.get("raw_context", "[]"))
-                try:
-                    raw_list = json.loads(raw_data)
-                    if isinstance(raw_list, list) and len(raw_list) > 0:
-                        # '중략됨' 같은 안내 문구를 제외하고 진짜 로그 5줄만 제공
-                        real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
-                        if real_logs:
-                            snippet = "\n".join(real_logs[-5:])
-                except:
-                    pass
-
-                context_blocks.append(
-                    f"[요약 본문]\n{doc}\n"
-                    f"[핵심 메타정보]\n{clean_meta}\n"
-                    f"[원인 지점 실제 로그 스니펫]\n{snippet}"
-                )
-        else:
-            context_blocks.append("관련된 로그를 DB에서 찾지 못했습니다.")
-
-        final_context = "\n\n---\n\n".join(context_blocks)
-
-        # 5. 동적 프롬프트 조립 (Dynamic Prompt Routing)
-        retrieved_log_types = set()
-        if results and results.get('metadatas') and results['metadatas'][0]:
-            for meta in results['metadatas'][0]:
-                if meta and 'log_type' in meta:
-                    retrieved_log_types.add(meta['log_type'])
-
-        dynamic_prompt = self.prompts["base_persona"] + "\n[분석 가이드라인]\n"
-
-        if retrieved_log_types:
-            for l_type in retrieved_log_types:
-                if l_type in self.prompts["log_guidelines"]:
-                    dynamic_prompt += self.prompts["log_guidelines"][l_type] + "\n"
-        else:
-            dynamic_prompt += "- 현재 관련된 특정 로그 타입을 찾지 못했습니다. 주어진 문맥 내에서 최선을 다해 답변해라.\n"
-
-        import requests
-        url = "http://localhost:11434/api/chat"
-
-        # 6. 이전 대화 내역(Chat History) 조립 최적화
-        history_text = ""
-        if chat_history:
-            # 🚨 최신 문맥만 유지하기 위해 과거 3개가 아닌 '최근 2개'로 줄임
-            recent_history = chat_history[-2:]
-            history_lines = []
-            for msg in recent_history:
-                role = "User" if msg["role"] == "user" else "AI"
-                history_lines.append(f"{role}: {msg['content']}")
-            history_text = "\n".join(history_lines)
-
-        # 7. 프롬프트에 '주제 전환' 강제 인식 규칙 추가
-        dynamic_prompt += (
-            "\n4. 🚨 [데이터 분석 및 과거 대화 참조 규칙]:\n"
-            "원칙적으로 새롭게 검색된 [현재 분석 대상 로그]를 최우선으로 분석해라. "
-            "단, 사용자가 '방금 찾은 데이터', '앞서 말한' 등 이전 대화의 후속 분석(이상징후 탐지 등)을 요구하는 경우, "
-            "[참고용 과거 대화 내역]에 남아있는 이전 수치 데이터를 적극적으로 재분석하여 대답해라. "
-            "절대 '정보가 부족하다'고 회피하지 마라."
-        )
-
-        # 7. 최종 LLM 프롬프트 생성 (현재 로그 + 과거 대화 + 질문)
-        dynamic_prompt += (
-            "\n⚠️ [분석 엄격 규칙 (Hallucination Zero)]:\n"
-            "1. 'Health KPI' 성적표를 모든 분석의 절대적 기준으로 삼아라.\n"
-            "2. 만약 KPI에서 Call Drop, Crash, SMS Fail 등의 Count가 '0'이라면, 검색된 로그에 에러 키워드가 있더라도 절대로 '장애가 발생했다'고 답변하지 마라.\n"
-            "3. 로그 스니펫에 나타난 TIMEOUT이나 ERROR가 정상적인 Polling 과정인지, 실제 서비스 단절인지 KPI와 대조하여 엄격히 구분해라.\n"
-            "4. 데이터가 부족하거나 KPI 상 에러가 없다면 '현재 데이터상으로는 장애 지표가 발견되지 않습니다'라고 정직하게 리포트해라.\n"
-        )
-        system_prompt = dynamic_prompt
         prompt = (
-            f"{system_prompt}\n\n"
-            f"=== [참고용 과거 대화 내역] ===\n"
-            f"{history_text if history_text else '없음'}\n\n"
-            f"========================================\n\n"
-            f"=== [새로 검색된 현재 분석 대상 로그] ===\n"
-            f"{final_context}\n"
-            f"========================================\n\n"
-            f"🚨 [최종 지시사항]: 과거 대화 내용은 문맥 파악용일 뿐이다. "
-            f"위의 [새로 검색된 로그]만을 바탕으로, 아래의 [사용자 질문]에 대해 새롭고 독립적인 답변을 작성해라.\n\n"
+            f"{system_role}\n\n"
+            f"=== [도구 분석 팩트] ===\n{tool_facts}\n\n"
+            f"=== [검색된 관련 로그] ===\n{formatted_logs}\n\n"
             f"사용자 질문: {user_query}"
         )
 
-        print(f"\n[DEBUG] 최종 LLM 프롬프트:\n{prompt}\n")
-
-        try:
-            import ollama
-
-            # 1. 🚨 시스템 롤(페르소나) 정의
-            system_role = """
-            너는 15년 차 안드로이드 통신 프로토콜 및 하드웨어 성능 분석 전문가야.
-            제공되는 로그 데이터를 바탕으로 문제의 '근본 원인(Root Cause)'을 분석하고 엔지니어링 소견을 작성해.
-            답변은 반드시 다음 형식을 지켜:
-            1. 📌 요약: 현재 단말 상태에 대한 한 줄 평
-            2. 🔍 주요 분석: 신호, 데이터, 배터리 등 항목별 분석
-            3. 💡 엔지니어 소견: 원인 추론
-            4. 🚩 권장 사항
-            [🚨 통신 스택 상관관계 절대 규칙 🚨]
-            1. PS Call(데이터 호) 중 APN이 'ims'인 경우, 이는 VoLTE/IMS SIP 세션의 기반(Bearer)이다.
-            2. 따라서 RIL 로그에서 'IMS PS Call Drop'이나 'Deactivate'가 발생한 시간대(±2초 이내)에 SIP 로그에서 '4xx/5xx 에러', 'TIMEOUT' 또는 'UNKNOWN_CODE'가 발생했다면, 이는 우연이 아니다.
-            3. 두 사건이 인접해 있다면 반드시 "RIL 레이어의 IMS PDN 끊김(또는 불안정)으로 인해 상위 스택인 SIP 세션이 연쇄적으로 드랍되었다"고 인과관계를 묶어서 결론을 내릴 것.
-            """
-            # 2. 🚨 messages 배열의 첫 번째에 system 역할로 추가!
-            messages_payload = [
-                {'role': 'system', 'content': system_role},
-                {'role': 'user', 'content': prompt}
-            ]
-            res = ollama.chat(model=self.llm_model_name, messages=messages_payload)
-            answer = res['message']['content']
-        except Exception as e:
-            answer = f"LLM 답변 생성 중 에러가 발생했습니다: {str(e)}"
+        # [STAGE 4: Reason] LLM 추론 실행
+        answer = self._call_llm(prompt)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
         meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
 
         return answer, doc_ids, meta_list
-
-    def save_knowledge(self, ids, analysis_result, severity="Info"):
-        """분석 결과와 심각도를 메타데이터에 함께 저장합니다."""
-        existing = self.collection.get(ids=ids, include=["metadatas"])
-        updated_metas = []
-
-        for meta in existing["metadatas"]:
-            current_meta = meta if meta is not None else {}
-            current_meta["known_solution"] = analysis_result
-            current_meta["severity"] = severity  # 심각도 태그 추가
-            updated_metas.append(current_meta)
-
-        self.collection.update(
-            ids=ids,
-            metadatas=updated_metas
-        )
 
     def get_all_files(self):
         """DB에 적재된 모든 유니크한 파일 목록을 반환합니다."""
@@ -386,6 +226,86 @@ class RilRagChat:
         except Exception as e:
             print(f"[ERROR] DB 초기화 중 오류 발생: {e}")
             return False
+
+    def _get_tool_facts(self, query: str, base_name: str) -> str:
+        """질문을 분석하여 필요한 agent_tools를 실행하고 결과를 취합합니다."""
+        if base_name == "Unknown":
+            return "분석 대상 파일이 지정되지 않아 팩트 조회를 생략합니다."
+
+        facts = []
+        q = query.lower()
+
+        # 1. 배터리 및 발열
+        if any(kw in q for kw in ["battery", "배터리", "전력", "광탈", "발열", "온도", "thermal"]):
+            try: facts.append(f"[Battery/Thermal Fact]: {get_battery_thermal_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        # 2. 통화 (CS/PS 통합)
+        if any(kw in q for kw in ["call", "콜", "통화", "전화", "끊김", "drop"]):
+            try:
+                facts.append(f"[CS Call Fact]: {get_cs_call_analytics(base_name)}")
+                facts.append(f"[PS Call Fact]: {get_ps_ims_call_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        # 3. 라디오 전원
+        if any(kw in q for kw in ["radio", "전원", "power"]):
+            try: facts.append(f"[Radio Power Fact]: {get_radio_power_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        # 4. 망 이탈 및 안테나 신호
+        if any(kw in q for kw in ["oos", "이탈", "망", "음영", "서비스", "안테나", "시그널", "신호", "signal", "level", "수신"]):
+            try: facts.append(f"[Network/OOS Fact]: {get_network_oos_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        # 5. 시스템 크래시 및 ANR
+        if any(kw in q for kw in ["crash", "fatal", "크래시", "죽었어", "anr", "응답없음", "멈춤"]):
+            try: facts.append(f"[Crash/ANR Fact]: {get_crash_anr_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        # 6. 네트워크 지연 및 DNS (SIP 포함)
+        if any(kw in q for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연", "이상", "징후", "튀는", "sip", "ims", "volte"]):
+            try:
+                facts.append(f"[DNS/Network Fact]: {get_dns_latency_analytics(base_name)}")
+                # SIP/IMS 관련 질문이면 통화 분석 도구도 방어적으로 호출
+                if not any("PS Call Fact" in f for f in facts):
+                    facts.append(f"[PS Call Fact]: {get_ps_ims_call_analytics(base_name)}")
+            except Exception as e: print(f"Tool Error: {e}")
+
+        return "\n".join(facts) if facts else "질문과 매칭되는 명시적 팩트 도구가 없습니다."
+
+    def _format_results(self, results) -> str:
+        """Vector DB 검색 결과를 LLM이 읽기 쉬운 구조로 포맷팅합니다."""
+        if not results or not results.get('documents') or not results['documents'][0]:
+            return "관련된 로그를 DB에서 찾지 못했습니다."
+
+        formatted = []
+        for i, (doc, meta) in enumerate(zip(results['documents'][0], results['metadatas'][0])):
+            clean_meta = {k: v for k, v in meta.items() if not k.startswith("raw_") and k != "source_file"}
+            snippet = "(DB에 원본 로그가 없습니다)"
+
+            raw_data = meta.get("raw_logs", meta.get("raw_context", "[]"))
+            try:
+                raw_list = json.loads(raw_data) if isinstance(raw_data, str) else []
+                real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
+                if real_logs:
+                    snippet = "\n".join(real_logs[-5:]) # 핵심 스니펫 5줄만 제공
+            except:
+                pass
+
+            formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n메타정보: {clean_meta}\n요약: {doc}\n원본 로그 스니펫:\n{snippet}")
+
+        return "\n\n".join(formatted)
+
+    def _call_llm(self, prompt: str) -> str:
+        """Ollama API를 통해 실제 LLM 추론을 수행합니다."""
+        import ollama
+        try:
+            res = ollama.chat(model=self.llm_model_name, messages=[
+                {'role': 'user', 'content': prompt}
+            ])
+            return res['message']['content']
+        except Exception as e:
+            return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
 
 if __name__ == "__main__":
     chat_system = RilRagChat()

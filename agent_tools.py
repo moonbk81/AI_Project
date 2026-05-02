@@ -252,3 +252,187 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             }
 
     return json.dumps(kpi_report, indent=4, ensure_ascii=False)
+
+def _load_report_json(base_name: str, result_dir: str = "./result") -> dict:
+    """분석된 통합 리포트 파일을 안전하게 로드합니다."""
+    report_path = os.path.join(result_dir, f"{base_name}_report.json")
+    if not os.path.exists(report_path):
+        return {}
+    with open(report_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def get_cs_call_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """CS(Circuit Switched) 통화의 릴리즈 코드를 엄격하게 파싱하여 정상/드랍 팩트를 제공합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    sessions = report_data.get("telephony", {}).get("sessions", [])
+
+    # CS 타입만 필터링 (telephony_parser.py 기준 "CS")
+    cs_sessions = [s for s in sessions if s.get("type") == "CS"]
+
+    analysis = []
+    for s in cs_sessions:
+        reason_str = str(s.get("fail_reason", ""))
+
+        # [PRO FIX] 텍스트 매칭이 아닌 명확한 코드(ID) 추출 방식
+        # 형태: "16(정상종료): 0(Vendor)" -> split 하여 '16' 확보
+        reason_code = reason_str.split('(')[0].strip()
+        is_normal = reason_code in ['16', '31']
+
+        analysis.append({
+            "time": s.get("start_time"),
+            "status": "NORMAL_RELEASE" if is_normal else "CALL_DROP",
+            "raw_reason": reason_str,
+            "slot": s.get("slot")
+        })
+
+    return json.dumps({"cs_call_facts": analysis}, ensure_ascii=False)
+
+def get_ps_ims_call_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """RIL 레이어의 PS Call 세션과 상위 SIP 에러를 통합 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+
+    # 1. RIL 레이어 PS Call (telephony_parser.py 기준 "PS(VoLTE)")
+    sessions = report_data.get("telephony", {}).get("sessions", [])
+    ps_sessions = [s for s in sessions if "PS" in s.get("type", "")]
+
+    ps_analysis = []
+    for s in ps_sessions:
+        ps_analysis.append({
+            "time": s.get("start_time"),
+            "status": s.get("status"),
+            "fail_reason": s.get("fail_reason", ""),
+        })
+
+    # 2. SIP 레이어 4xx~6xx 에러
+    sip_data = report_data.get("ims_sip_data", [])
+    sip_errors = [m for m in sip_data if m.get("is_error")]
+
+    return json.dumps({
+        "ril_ps_call_facts": ps_analysis,
+        "sip_error_facts": [{"time": e.get("time"), "method": e.get("method_code")} for e in sip_errors[:5]]
+    }, ensure_ascii=False)
+
+def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """망 이탈(OOS) 시점과 후보 원인(Root Cause Candidate)을 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    oos_history = report_data.get("telephony", {}).get("network_history", [])
+
+    oos_facts = []
+    for oos in oos_history:
+        oos_facts.append({
+            "time": oos.get("time"),
+            "event": oos.get("event_type"),
+            "slot": oos.get("slotId"),
+            "reject_cause": oos.get("rej_cause"),
+            "inferred_reason": oos.get("root_cause_candidate") # telephony_parser 의 추론값 활용
+        })
+
+    return json.dumps({
+        "oos_count": len(oos_facts),
+        "oos_events": oos_facts
+    }, ensure_ascii=False)
+
+def get_dns_latency_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """중증(Critical) DNS 지연 현상과 앱 차단 이력을 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    net_ts = report_data.get("network_timeseries", {})
+
+    # [PRO FIX] prepare_rag_payload.py 의 실제 트리 구조 대응
+    timeline = net_ts.get("sorted_timeline", {})
+    critical_latencies = []
+
+    for ts, details in timeline.items():
+        for stat in details.get("net_stats", []):
+            dns_avg = stat.get("dns_avg", 0)
+            if isinstance(dns_avg, (int, float)) and dns_avg > 2000: # 2초 이상 지연만 팩트로 간주
+                critical_latencies.append({
+                    "time": ts,
+                    "netId": stat.get("netId"),
+                    "dns_avg_ms": dns_avg
+                })
+
+    return json.dumps({
+        "dns_blocked_apps_count": len(net_ts.get("dns_issues", [])),
+        "critical_dns_latency_spikes": critical_latencies
+    }, ensure_ascii=False)
+
+def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """배터리 광탈 주범(Wakelock)과 기기 발열(Thermal) 최고 온도를 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    battery_stats = report_data.get("battery_stats", {})
+
+    if not isinstance(battery_stats, dict):
+        return json.dumps({"battery_facts": "데이터 없음"}, ensure_ascii=False)
+
+    thermal_stats = battery_stats.get("thermal_stats", [])
+    wakelock_stats = battery_stats.get("wakelock_stats", [])
+
+    # 최고 온도 추출
+    max_temp = 0
+    if thermal_stats:
+        max_temp = max([float(t.get("temperature", 0)) for t in thermal_stats])
+
+    # 최다 점유 Wakelock Top 3 (단말이 잠들지 못하게 하는 앱)
+    top_wakelocks = []
+    if wakelock_stats:
+        sorted_wl = sorted(wakelock_stats, key=lambda x: int(x.get("times", 0)), reverse=True)[:3]
+        top_wakelocks = [{"app": wl.get("app_name"), "times": wl.get("times")} for wl in sorted_wl]
+
+    return json.dumps({
+        "max_temperature_celsius": max_temp,
+        "top_wakelocks": top_wakelocks
+    }, ensure_ascii=False)
+
+
+def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력을 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    crashes = report_data.get("crash_context", [])
+    anr = report_data.get("anr_context", {})
+
+    # 크래시 팩트 조립
+    crash_facts = []
+    for c in crashes:
+        crash_facts.append({
+            "time": c.get("timestamp"),
+            "process": c.get("process"),
+            "type": c.get("crash_type")
+        })
+
+    # ANR 팩트 조립
+    anr_facts = []
+    if anr and isinstance(anr, dict) and anr.get("time"):
+        anr_facts.append({
+            "time": anr.get("time"),
+            "process": anr.get("process", "Unknown"),
+            "reason": anr.get("reason", "")
+        })
+
+    return json.dumps({
+        "crash_count": len(crashes),
+        "crash_history": crash_facts,
+        "anr_count": 1 if anr_facts else 0,
+        "anr_history": anr_facts
+    }, ensure_ascii=False)
+
+
+def get_radio_power_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """라디오(모뎀) 전원 ON/OFF 제어 이력을 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    power_events = report_data.get("radio_power", [])
+
+    # 모뎀 전원 상태가 변경되는 시점만 필터링하여 전달
+    power_facts = []
+    last_state = None
+    for p in power_events:
+        req = p.get("raw_request", "")
+        if "RADIO_POWER" in req:
+            state = "ON" if " 1" in req else "OFF"
+            if state != last_state:
+                power_facts.append({
+                    "time": p.get("time"),
+                    "power_state_request": state
+                })
+                last_state = state
+
+    return json.dumps({"radio_power_transitions": power_facts}, ensure_ascii=False)

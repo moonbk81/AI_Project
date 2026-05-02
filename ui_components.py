@@ -625,3 +625,88 @@ def render_sat_at_analyzer(current_base=None):
         )
         st.plotly_chart(fig, use_container_width=True)
 
+def render_service_state_timeline(df):
+    """일반 셀룰러 망의 서비스 상태(Service State) 변경 타임라인을 렌더링합니다."""
+    st.subheader("📶 통신망 서비스 상태 (Registration State) 타임라인")
+
+    if 'log_type' not in df.columns:
+        return
+
+    oos_df = df[df['log_type'] == 'OOS_Event'].copy()
+
+    if oos_df.empty:
+        st.success("🎉 분석된 로그 내에 서비스 상태가 변경되거나 망 이탈(OOS)이 발생한 기록이 없습니다. (안정적인 IN_SERVICE 유지)")
+        return
+
+    # 데이터 정제
+    records = []
+    for _, row in oos_df.iterrows():
+        time_val = row.get('time')
+        slot = str(row.get('slot', row.get('slotId', '0')))
+        v_reg = str(row.get('voice_reg', 'Unknown'))
+        d_reg = str(row.get('data_reg', 'Unknown'))
+
+        # Parser가 넘겨준 "0(IN_SERVICE)" 등에서 상태 규격화
+        def map_reg_state(reg_str):
+            if not reg_str or reg_str == 'nan': return "UNKNOWN"
+            if reg_str.startswith("0"): return "IN_SERVICE"
+            if reg_str.startswith("1"): return "OUT_OF_SERVICE"
+            if reg_str.startswith("2"): return "EMERGENCY_ONLY"
+            if reg_str.startswith("3"): return "POWER_OFF"
+            return "UNKNOWN"
+
+        records.append({
+            "time": time_val,
+            "Slot": f"Slot {slot}",
+            "Type": "Voice",
+            "State": map_reg_state(v_reg),
+            "Raw_Reg": v_reg,
+            "Event": row.get('event', row.get('event_type', 'Unknown')),
+            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None'))
+        })
+        records.append({
+            "time": time_val,
+            "Slot": f"Slot {slot}",
+            "Type": "Data",
+            "State": map_reg_state(d_reg),
+            "Raw_Reg": d_reg,
+            "Event": row.get('event', row.get('event_type', 'Unknown')),
+            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None'))
+        })
+
+    state_df = pd.DataFrame(records)
+    # 시간 순 정렬
+    state_df = state_df.sort_values(by=['Slot', 'Type', 'time']).reset_index(drop=True)
+
+    # 🧹 [핵심] 상태가 변경된 시점만 점(Marker)을 남기기 위한 필터링 로직
+    state_df['keep'] = state_df['State'] != state_df.groupby(['Slot', 'Type'])['State'].shift(1)
+
+    # 맨 첫 번째 로그는 무조건 표시하도록 보완
+    state_df.loc[state_df.groupby(['Slot', 'Type']).head(1).index, 'keep'] = True
+
+    clean_df = state_df[state_df['keep']].copy()
+
+    if clean_df.empty:
+        st.info("표시할 상태 변화가 없습니다.")
+        return
+
+    # Y축 카테고리 순서 고정 (정상 상태가 맨 위로 오도록)
+    category_order = ["POWER_OFF", "EMERGENCY_ONLY", "OUT_OF_SERVICE", "IN_SERVICE"]
+
+    fig = px.line(
+        clean_df, x='time', y='State', color='Type', facet_row='Slot',
+        line_shape='hv', markers=True,  # hv: 계단형(Step) 라인 차트
+        title="시간대별 Voice / Data 등록 상태 변화 (상태 변경 시점에만 마커 표시)",
+        labels={'time': '발생 시간', 'State': '현재 상태', 'Type': '통신 유형'},
+        hover_data=['Event', 'Cause', 'Raw_Reg'],
+        category_orders={"State": category_order}
+    )
+
+    fig.update_traces(marker=dict(size=8, line=dict(width=1, color='DarkSlateGrey')))
+    fig.update_yaxes(categoryorder='array', categoryarray=category_order)
+
+    # 슬롯 개수에 따라 차트 높이를 가변적으로 조절
+    chart_height = max(300, 200 * clean_df['Slot'].nunique())
+    fig.update_layout(height=chart_height, hovermode="x unified", margin=dict(t=50, b=20))
+
+    st.plotly_chart(fig, use_container_width=True)
