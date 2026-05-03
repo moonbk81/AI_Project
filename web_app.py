@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 import re
 import hashlib
+from core.config import QUICK_PROMPTS, SATELLITE_PROMPTS
 
 import ui_components as ui
 
@@ -492,62 +493,23 @@ with tab_chat:
     col_btn4, col_btn5, col_btn6 = st.columns(3)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
-            quick_prompt = """
-            [Call Drop 심층 분석] 제공된 '도구 분석 팩트'를 최우선 기준으로 삼아, 검색된 로그와 교차 검증해.
-
-            1. [팩트 절대 신뢰] 팩트 데이터에서 'NORMAL_RELEASE' (정상 종료)로 판정된 통화는 로그에 BYE나 Disconnect가 있더라도 절대 에러로 분석하지 마라.
-            2. [도메인 분리 분석] 에러가 발생했다면, 팩트를 바탕으로 CS(Circuit Switched)인지 PS(VoLTE/IMS)인지 명확히 선언하고 시작해라.
-               - CS Drop의 경우: 팩트에 명시된 Release Cause (예: Cause 34 등)를 파악하고, 기지국/네트워크 거절인지 단말 문제인지 진단해라.
-               - PS Drop의 경우: 팩트의 SIP 에러(4xx/5xx 등) 타임스탬프와 통화 드랍 시점이 일치하는지 확인하고 연쇄 반응을 설명해라.
-            3. [무선 환경(RF) 교차 검증] 끊김 발생 시간대(±2초)에 OOS(망 이탈) 팩트나 Signal Level의 급감이 있었는지 대조하여, 근본 원인(Root Cause)이 단순 호 처리 오류인지 무선 환경 악화인지 최종 결론을 내려라.
-
-            [엔지니어 톤앤매너] 단순 현상 나열을 금지하고, 수석 엔지니어의 관점에서 "기지국 자원 부족(Cause 34)으로 인한 CS Call Drop"과 같이 인과관계를 명확히 밝히는 서술형 보고서로 작성해.
-            """
+            quick_prompt = QUICK_PROMPTS.get('call_drop')
     with col_btn2:
-        if st.button("🌐 네트워크 이상 분석", use_container_width=True):
-            quick_prompt = """
-            [Data Network 이상 심층 분석] 제공된 '도구 분석 팩트(DNS/Network Fact, Network/OOS Fact 등)'를 최우선 기준으로 삼아 검색된 로그와 교차 검증해.
-            1. [팩트 절대 신뢰] 팩트에 명시된 DNS 지연 수치(Latency Spikes)나 차단된 앱 이력을 진실로 삼고, 로그에서 해당 시점의 상세 원인을 파악해라. 지연 팩트가 없다면 일시적 핑 튀김을 장애로 비약하지 마라.
-            2. [Co-working 교차 검증] 지연이나 실패가 발생한 시점이 'Network/OOS Fact'에 기록된 망 이탈(OOS)이나 무선 신호 약전계 구간과 일치하는지 타임라인을 엄격히 대조해라.
-            3. [로그 딥다이브] 팩트로 확인된 에러 구간의 로그 스니펫에서 TCP 재전송(Retransmission) 징후나 기지국 응답 지연 등의 추가 증거를 추론해라.
-            [엔지니어 톤앤매너] "신호 저하로 인한 잦은 셀 재선택이 전체적인 Data Latency를 유발함"과 같이 현상과 원인을 연결하여 논리적으로 서술해.
-            """
+        if st.button("🌐 데이터 네트워크 이상 분석", use_container_width=True):
+            quick_prompt = QUICK_PROMPTS.get('data_network_issue')
     with col_btn3:
         if st.button("🔋 배터리/크래시 분석", use_container_width=True):
-            quick_prompt = """
-            [Battery & Crash 연관 분석] 제공된 '도구 분석 팩트(Battery/Thermal Fact, Crash/ANR Fact)'를 최우선 기준으로 삼아 검색된 로그와 교차 검증해.
-            1. [팩트 절대 신뢰] 팩트에 기록된 '최고 온도', '최다 점유 Wakelock 앱', 'Crash/ANR 발생 횟수'를 기반으로 분석을 시작해라. 팩트에 Crash가 0건이면 로그에 Exception 키워드가 보여도 치명적 장애로 보지 마라.
-            2. [Co-working 교차 검증] 팩트에 명시된 배터리 광탈/발열 구간에 잦은 OOS(망 탐색 지속)나 불필요한 모뎀 Wakeup(Radio Power Fact 참고)이 있었는지 대조해라.
-            3. [로그 딥다이브] 팩트에서 감지된 비정상 종료 프로세스(Crash/ANR)가 RIL이나 Telephony 프레임워크와 연관된 것인지 검색된 콜스택 문맥을 통해 특정해라.
-            [엔지니어 톤앤매너] 하드웨어 결함인지, 통신 불량(잦은 망 탐색)으로 인한 SW 무한 루프(발열/전력 소모)인지 수석 엔지니어의 관점에서 진단해.
-            """
+            quick_prompt = QUICK_PROMPTS.get('battery_crash')
     with col_btn4:
         if st.button("🚫 망 등록(Reg) 및 OOS 분석", use_container_width=True):
-            quick_prompt = """
-            [OOS 및 망 등록 해제 분석] 제공된 '도구 분석 팩트(Network/OOS Fact)'를 최우선 기준으로 삼아 검색된 로그와 교차 검증해.
-            1. [팩트 절대 신뢰] 팩트에 명시된 'Reject Cause (예: #8, #15 등)'와 'inferred_reason'을 절대적 진실로 삼아라. 팩트에 OOS 이력이 없다면 망 등록 해제는 없었던 것이다.
-            2. [Co-working 교차 검증] 팩트상 Reject Cause가 없는 순수 RF 음영(Signal Loss) 단절인지, 네트워크로부터 명시적인 거절을 받았는지 구분해라. 특정 슬롯(Slot 0/1)만 이탈했는지 비교해 안테나 H/W 문제인지 판단해라.
-            3. [로그 딥다이브] 팩트에 기록된 OOS_ENTER/RECOVER 타임스탬프를 바탕으로 복구(Recovery)까지 걸린 시간을 평가하고, 검색된 로그에서 타이머 만료 등의 추가 징후를 찾아라.
-            [엔지니어 톤앤매너] "OOS가 발생했습니다"가 아니라 "NW Reject (Cause #8) 수신으로 인해 망 등록이 강제 해제되었습니다"와 같이 인과관계를 명확히 서술해.
-            """
+            quick_prompt = QUICK_PROMPTS.get('network_oos')
     with col_btn5:
         if st.button("📶 안테나(Signal) 레벨 분석", use_container_width=True):
-            quick_prompt = """
-            [Signal Level 및 품질 분석] 제공된 '도구 분석 팩트'들을 최우선 기준으로 삼아 안테나 수신 레벨 변화와 단말 동작을 연관 지어 분석해.
-            1. [팩트 절대 신뢰] 팩트(CS/PS Call Fact, Network/OOS Fact)에 통화 드랍이나 OOS가 없다고 명시되어 있다면, 신호가 급감한 로그가 보이더라도 "실제 서비스 장애로 이어지지는 않고 방어됨"으로 분석해라.
-            2. [Co-working 교차 검증] 신호가 0~1로 급감하는 약전계 구간(Deep Indoor 등)이 팩트에 명시된 Call Drop 시간이나 OOS_ENTER 시간과 일치하는지 엄격히 대조해라.
-            3. [로그 딥다이브] 잦은 신호 레벨 변동 로그가 핑퐁 핸드오버(Ping-pong Handover)나 불필요한 망 탐색을 유발했는지 평가해라.
-            [엔지니어 톤앤매너] 단순한 신호 변동 이력 나열을 금지하고, 이 신호 품질 저하가 사용자 체감 품질(QoE)에 실제 어떤 악영향을 미쳤는지(또는 방어해냈는지) 브리핑해.
-            """
+            quick_prompt = QUICK_PROMPTS.get('antenna_level_analysis')
     with col_btn6:
         if st.button("💬 VoLTE/SIP 상세 분석", use_container_width=True):
-            quick_prompt = """
-            [IMS/SIP 프로토콜 딥다이브] 제공된 '도구 분석 팩트(PS Call Fact 등)'를 최우선 기준으로 삼아 전체 IMS SIP 트랜잭션을 해부해.
-            1. [팩트 절대 신뢰] 팩트에 SIP 에러(4xx/5xx/6xx)나 RIL PS Drop이 명시되어 있지 않다면, 로그 스니펫의 일반적인 트랜잭션 종료를 에러로 비약하지 마라.
-            2. [Co-working 교차 검증] 팩트에서 짚어준 핵심 에러(Method)와 타임스탬프를 기반으로, 검색된 로그에서 REGISTER 인증 실패인지, INVITE 코덱 협상 실패인지, Precondition Failure인지 특정해라.
-            3. [로그 딥다이브] 특정 에러 코드가 집중적으로 발생하는 패턴을 찾아내고, 망 측(NW) 문제인지 단말(UE) 문제인지 책임 소재를 명확히 해라.
-            [엔지니어 톤앤매너] 전문적인 통신 프로토콜 용어를 적극 사용하여, 뎁스 있는 분석 리포트를 작성해.
-            """
+            quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
+
     st.divider()
 
     # ==========================================
@@ -1115,42 +1077,9 @@ with tab_ntn:
             if st.button(f"🛰️ {sat_type} 위성망 심층 진단", use_container_width=True):
                 with st.spinner(f"{sat_type} 위성 데이터를 분석 중입니다..."):
                     health_kpi_json = get_device_health_kpi(current_base)
-                    if sat_type == "Tiantong":
-                        sat_query = f"""
-                        [위성 통신(NTN) 팩트 데이터 강제 주입]
-                        아래 JSON 데이터 중 '11_satellite_modem_status' 항목은 위성 모뎀과 AP 간의 AT Command 통신을 분석한 결과입니다.
-
-                        {health_kpi_json}
-
-                        위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 위성 통신 상태를 진단해.
-
-                        [🚨 엄격한 답변 규칙 🚨]
-                        1. [Tiantong 위성 라이프사이클의 이해]: 중국 위성은 사용자의 Pointing UI 조작에 의해 수동으로 On/Off 됩니다. 만약 'is_intentional_power_off'가 true 라면, 'registration_history_flow'가 'NOT_REG_OR_SEARCHING'으로 끝나더라도 이는 연결 불안정이 아니라 "사용자 의도에 의한 정상적인 서비스 종료"입니다.
-                        2. [In-Service 구간 분석]: 분석의 핵심은 위성이 켜져 있던 시간 동안 정상적으로 서비스가 되었는지 여부입니다. 'call_drops_and_fails'와 'sms_tx_fails'가 모두 0이라면, "사용자가 위성을 켠 시간 동안 음성과 문자가 완벽하게 정상 처리되었다"고 평가해야 합니다.
-                        3. [핵심 에러 도출]: 'critical_errors_detected'에 기록된 내역이 있을 경우에만 이를 Root Cause로 삼아 해설할 것.
-
-                        [✍️ 답변 스타일 및 톤앤매너 (매우 중요) 🚨]
-                        1. 단순한 속성-값 나열식 요약을 절대 금지합니다. (예: "위성 모뎀 상태: is_intentional_power_off: true" -> 이런 기계적인 출력 금지)
-                        2. 마치 수석 엔지니어가 경영진에게 브리핑하듯, 자연스럽고 전문가다운 서술형 문장으로 작성하십시오.
-                        3. 제공된 JSON의 수치나 영문 상태값은 문장 안에 자연스럽게 녹여서 해설하십시오. (예: "단말의 등록 이력을 보면 HOME 망에 안정적으로 진입한 이후, 사용자의 명시적인 조작에 의해 정상적으로 등록 해제되었습니다.")
-                        """
-                    else: # SpaceX
-                        sat_query = f"""
-                                [위성 통신 팩트 데이터 강제 주입]
-                                아래 JSON 데이터 중 '6_ntn_satellite' 항목은 안드로이드 프레임워크 레벨의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력입니다.
-                                (주의: 이 로그는 Tiantong 위성이 아니므로 arfcn, AT Command 관련 지표는 존재하지 않습니다.)
-
-                                {health_kpi_json}
-
-                                위 팩트를 바탕으로 15년 차 수석 엔지니어의 관점에서 위성 로밍 상태를 진단해.
-
-                                [🚨 엄격한 도메인 분석 규칙 🚨]
-                                1. [Starlink Hysteresis 타이머 로직의 이해]: LEO(저궤도 위성) 네트워크 특성상 위성 간 핸드오버가 매우 잦습니다. PLMN이 매칭된 상태에서 'is_hysteresis'가 활성화되었다면, 이는 연결 실패가 아니라 "핸드오버로 인한 일시적인 통신 음영 구간이며, 타이머 내에서는 위성망 접속 유지(Connected) 상태로 간주"해야 합니다.
-                                2. [상태 전이 분석]: 단순히 이벤트 발생 횟수(예: 229회)를 지적하는 것은 아마추어 같습니다. PLMN 매칭 → Hysteresis 진입 → 복구 로 이어지는 시퀀스를 분석하여, 단말이 일시적 단절을 극복하고 위성망 Camp-on을 성공적으로 유지했는지 서술하십시오.
-                                3. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 단말에 정상적으로 위성 정책이 적용되어 있음을 의미합니다.
-
-                                [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
-                        """
+                    # 🚨 [하드코딩 제거] YAML에서 템플릿을 꺼내고, JSON 팩트를 동적으로 꽂아 넣습니다.
+                    prompt_template = SATELLITE_PROMPTS.get(sat_type, "위성 분석 템플릿을 찾을 수 없습니다.")
+                    sat_query = prompt_template.format(health_kpi_json=health_kpi_json)
 
                     raw_result = engine.ask(sat_query, current_file=actual_file_name)
                     final_text = raw_result[0] if isinstance(raw_result, tuple) else raw_result

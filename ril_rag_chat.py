@@ -1,20 +1,15 @@
 import os
 import json
 import glob
+from turtle import st
 import chromadb
 import torch
 import numpy as np
 import re
+import agent_tools
+
 from sentence_transformers import SentenceTransformer
-from agent_tools import (
-    get_cs_call_analytics,
-    get_ps_ims_call_analytics,
-    get_network_oos_analytics,
-    get_dns_latency_analytics,
-    get_battery_thermal_analytics,
-    get_crash_anr_analytics,
-    get_radio_power_analytics
-)
+from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs"):
@@ -38,84 +33,20 @@ class RilRagChat:
         self.llm_model_name = 'gemma2:9b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
+        self._load_config()
 
-        # 4. 동적 프롬프트 관리를 위한 템플릿 딕셔너리
-        self.prompts = {
-            "base_persona": (
-                "너는 안드로이드 무선 통신(RIL/Telephony) 및 Network Stack을 분석하는 최고 수준의 수석 엔지니어다.\n"
-                "🚨 [데이터 분석 및 과거 대화 참조 규칙]\n"
-                "1. 원칙적으로 새롭게 검색된 [현재 분석 대상 로그]를 최우선으로 분석해라.\n"
-                "2. 단, 사용자가 '방금 찾은 데이터', '앞서 말한' 등 이전 대화의 후속 분석(이상징후 탐지 등)을 요구하는 경우, [참고용 과거 대화 내역]에 남아있는 이전 수치 데이터를 적극적으로 재분석하여 대답해도 좋다.\n"
-                "3. '궁금한 점이 있으신가요?' 같은 역질문은 절대 금지한다."),
-            "log_guidelines": {
-                "Call_Session": "- [Call_Session (통화)]: status가 'FAIL/DROP'인 세션을 찾고, 'fail_reason'을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 OOS와 혼동 금지)",
-                "OOS_Event": "- [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.",
-                "Battery_Drain_Report": "- [Battery_Drain_Report (배터리)]: stats_period와 신호 세기 분포(none/poor 비중)를 바탕으로 배터리 광탈 원인을 진단해라.",
-                "Network_Timeline_Stat": (
-                    "- [Network_Timeline_Stat (긴급)]: 절대 '시간 기준/방식 기준' 같은 이론적인 설명을 하지 마라.\n"
-                    "- 로그에 적힌 netId별 dns_avg(ms), dns_err_rate(%), tcp_avg_loss(%) 수치를 직접 나열해라.\n"
-                    "- 예: '14:20:05 시점에 netId=117의 DNS 평균 지연은 3005ms였으며, 손실률은 1.5%입니다.'와 같이 "
-                    "시간대별로 구체적인 팩트만 보고해라."
-                    "- 🚨 [이상징후 판단 기준]: 전체 데이터의 평균(보통 0~100ms)과 비교하여 혼자 수백~수천 ms로 비정상적으로 급증한(튀는) 지점이 있다면, 그것이 바로 이상징후다.\n"
-                    "- '09:50:00에 DNS 지연이 3049ms로 비정상적으로 급증했습니다.' 처럼 팩트를 짚어내라."
-                ),
-                "Network_DNS_Issue": (
-                    "- [Network_DNS_Issue (긴급)]: 앱이 차단된 원인을 '이론'이 아닌 '팩트'로 말해라.\n"
-                    "- effective_policy가 BATTERY_SAVER라면 '절전 모드 때문'이라고 한 줄로 요약해라."
-                ),
-                "Signal_Level": (
-                    "- [Signal_Level]: Slot별 안테나 수신 레벨(0~5)의 시간대별 변화를 분석해라.\n"
-                    "- 수신 레벨이 0이나 1로 뚝 떨어지는 지점을 찾아내어 '음영/수신 저하 구간'으로 팩트만 보고해라.\n"
-                    "- 절대 OOS 로그와 헷갈리지 마라."
-                )
-            }
-        }
-        # 1. prompts["log_guidelines"]에 SIP 분석 규칙 추가
-        self.prompts["log_guidelines"]["IMS_SIP_Message"] = (
-            "- [IMS_SIP_Message (VoLTE)]: SipReq(요청)와 SipResp(응답)의 흐름을 분석해라.\n"
-            "- 🚨 [에러 판단]: 4xx(Client Error), 5xx(Server Error) 응답이 있다면 즉시 지적하고 원인을 추론해라.\n"
-            "- INVITE 후 200 OK까지의 지연이 크다면 '호 설정 지연'으로 판단해라."
-        )
+    def _load_config(self):
+        try:
+            self.routing_map = ROUTING_MAP
+            self.system_role_prompt = SYSTEM_PROMPTS
+            self.prompts = PROMPTS
+        except Exception as e:
+            self.routing_map = {}
+            self.system_role_prompt = "시스템 프롬프트를 불러올 수 없습니다."
+            self.rompts = {}
 
     def _get_semantic_routing(self, query):
-        """임베딩 벡터 유사도를 기반으로 분석 도구와 로그 타입을 결정하는 지능형 라우터 (Max-Pooling 적용)"""
-
-        routing_map = {
-            "Call_Analysis": {
-                "desc": "전화가 안돼요, 통화가 끊겨요, 콜 드랍, 목소리가 안들림, VoLTE 에러, 전화 수신 불가, SIP, IMS, 통화 실패, CSFB, 세션 종료",
-                "tools": ["get_cs_call_analytics", "get_ps_ims_call_analytics"],
-                "log_types": ["Call_Session", "IMS_SIP_Message"]
-            },
-            "Network_OOS": {
-                "desc": "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF",
-                "tools": ["get_network_oos_analytics", "get_cs_call_analytics"],
-                "log_types": ["OOS_Event", "Signal_Level"]
-            },
-            "DNS_Latency": {
-                "desc": "인터넷 안됨, 네트워크 차단, DNS 에러, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연",
-                "tools": ["get_dns_latency_analytics"],
-                "log_types": ["Network_DNS_Issue", "Network_Timeline_Stat"]
-            },
-            "Battery_Thermal": {
-                "desc": "배터리 광탈, 폰이 뜨거워요, 발열이 심해요, 전력 소모, 핫스팟 발열, 소모 전류, 온도가 높음",
-                "tools": ["get_battery_thermal_analytics"],
-                "log_types": ["Battery_Drain_Report"]
-            },
-            "Crash_ANR": {
-                "desc": "폰이 멈췄어요, 앱이 죽었어요, 강제종료, 크래시, ANR, 응답없음, 시스템 에러, 리부팅, 프로세스 종료",
-                "tools": ["get_crash_anr_analytics"],
-                "log_types": ["Crash_Event", "ANR_Context"]
-            },
-            "Radio_Power": {
-                "desc": "모뎀 전원 꺼짐, 비행기 모드, 라디오 파워, 전원 제어, 위성 모뎀 끄기, Power OFF",
-                "tools": ["get_radio_power_analytics"],
-                "log_types": ["Radio_Power_Event"]
-            }
-        }
-
-        # 🚨 [핵심 아키텍처] 긴 질문을 줄바꿈이나 마침표 기준으로 쪼갬 (Chunking)
-        # 예: "[Data Network 이상 심층 분석]" -> Chunk 1
-        #     "DNS 로그와 망 상태를 교차 검증해" -> Chunk 2
+        """config.yaml의 설정을 기반으로 지능형 라우팅 수행"""
         chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
         if not chunks:
             chunks = [query]
@@ -126,12 +57,11 @@ class RilRagChat:
 
         print(f"\n[Semantic Router] {len(chunks)}개의 청크로 분할하여 검사 시작...")
 
-        for category, data in routing_map.items():
+        for category, data in self.routing_map.items():
             intent_vec = self.embed_model.encode(data["desc"])
             max_similarity = 0.0
             best_chunk = ""
 
-            # 각 청크별로 유사도를 구하고, 가장 높은 점수(Max-Pooling)를 해당 도메인의 최종 점수로 채택
             for chunk in chunks:
                 chunk_vec = self.embed_model.encode(chunk)
                 sim = np.dot(chunk_vec, intent_vec) / (np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec))
@@ -242,24 +172,40 @@ class RilRagChat:
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         # [STAGE 2: Semantic Intent Routing]
-        # 키워드 없이 '의미'로 도구와 로그 타입을 자동 결정
         selected_tools, target_log_types = self._get_semantic_routing(search_query)
+
+        # 🚨 [버그 수정 1] TOOL_REGISTRY 도입: 동적 호출(getattr)의 불안정성 제거
+        # 문자열을 실제 함수 객체와 1:1로 안전하게 매핑합니다.
+        TOOL_REGISTRY = {
+            "get_cs_call_analytics": agent_tools.get_cs_call_analytics,
+            "get_ps_ims_call_analytics": agent_tools.get_ps_ims_call_analytics,
+            "get_network_oos_analytics": agent_tools.get_network_oos_analytics,
+            "get_dns_latency_analytics": agent_tools.get_dns_latency_analytics,
+            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None), # 없는 함수 방어 로직
+            "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
+            "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
+        }
 
         # [STAGE 3: Act - Tool Execution]
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
-                try:
-                    # agent_tools 모듈에서 해당 함수를 동적으로 가져와 실행
-                    tool_fn = getattr(agent_tools, tool_name)
-                    tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
-                except Exception as e:
-                    print(f"Tool 실행 에러 ({tool_name}): {e}")
+                tool_fn = TOOL_REGISTRY.get(tool_name)
+                if tool_fn:
+                    try:
+                        tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
+                    except Exception as e:
+                        print(f"Tool 실행 에러 ({tool_name}): {e}")
+                else:
+                    print(f"⚠️ 경고: {tool_name} 함수가 agent_tools에 구현되지 않았습니다.")
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
 
+        # 🚨 [버그 수정 2] health_kpi를 LLM 프롬프트용 팩트에 합체!
+        if health_kpi:
+            tool_facts = f"=== [단말 전반 KPI 상태] ===\n{health_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
+
         # [STAGE 4: Retrieve - Vector DB Filtered Search]
-        # 라우터가 결정한 로그 타입만 조회하도록 필터 구성
         conditions = []
         if current_file:
             conditions.append({"source_file": current_file})
@@ -285,20 +231,9 @@ class RilRagChat:
         # [STAGE 5: Reason - Prompt Construction & LLM Inference]
         formatted_logs = self._format_results(results)
 
-        system_role = (
-            "당신은 15년 차 안드로이드 통신 프레임워크(RIL/Telephony) 수석 엔지니어입니다.\n"
-            "제공된 [도구 분석 팩트]를 절대적인 진실(Ground Truth)로 삼아 [검색된 관련 로그]를 교차 검증하십시오.\n"
-            "🚨 [엄격한 분석 규칙 - 반드시 지킬 것]:\n"
-            "1. 팩트에 'NORMAL_RELEASE'나 에러 카운트 0이 명시되어 있다면, 로그의 ERROR 키워드에 속지 말고 정상 동작으로 판정하십시오.\n"
-            "2. 팩트와 로그가 일치하는 지점(예: 팩트의 Cause Code와 로그의 메시지)을 찾아 인과관계를 설명하십시오.\n"
-            "3. [변명 금지] 당신은 현재 AP(Application Processor) 로그만 분석할 수 있는 환경입니다. 모뎀 로그(CP/QXDM), 네트워크 패킷(PCAP), 서버 로그 등 '추가 로그가 필요하다'는 변명이나 회피성 멘트를 절대 출력하지 마십시오.\n"
-            "4. [최선의 추론] 주어진 AP 로그와 팩트 정보가 제한적이더라도, 그 안에서 도출할 수 있는 가장 확률 높은 원인(가설) 1가지를 반드시 제시하십시오.\n"
-            "5. 답변은 요약, 주요 분석, 엔지니어 소견(단정적 어조 사용), 권장 사항 순으로 작성하십시오."
-        )
-
         prompt = (
-            f"{system_role}\n\n"
-            f"=== [도구 분석 팩트] ===\n{tool_facts}\n\n"
+            f"{self.system_role_prompt}\n\n"
+            f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n"
             f"=== [검색된 관련 로그] ===\n{formatted_logs}\n\n"
             f"사용자 질문: {user_query}"
         )
@@ -369,6 +304,16 @@ class RilRagChat:
             return res['message']['content']
         except Exception as e:
             return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
+
+    def save_knowledge(self, log_name, issue_title, solution_text):
+        """사내 지식 베이스(DB)에 우수 분석 사례를 저장하는 함수 (향후 고도화 예정)"""
+        try:
+            print(f"💾 [Knowledge Save] {issue_title} 지식 저장 시도 중...")
+            # TODO: 향후 별도의 ChromaDB 컬렉션(knowledge_base)을 만들어 저장하는 로직 추가
+            return True
+        except Exception as e:
+            print(f"❌ 지식 저장 실패: {e}")
+            return False
 
 if __name__ == "__main__":
     chat_system = RilRagChat()
