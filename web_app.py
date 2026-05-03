@@ -45,6 +45,31 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
 
     return written_lines
 
+# ==========================================
+# [신규 추가] 다중 파일 시계열 병합 함수
+# ==========================================
+def merge_log_files(file_paths, output_path):
+    """여러 로그 파일을 읽어 시간(Timestamp) 기준으로 완벽히 교차 정렬하여 병합합니다."""
+    import re
+    # 안드로이드 로그 표준 시간 포맷 (예: 04-13 14:19:07.123)
+    time_pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})')
+    all_lines = []
+
+    for fp in file_paths:
+        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                match = time_pattern.search(line)
+                # 시간이 없는 헤더/덤프 라인은 '00-00 00:00:00.000' 처리하여 최상단으로 밀어냄
+                sort_key = match.group(1) if match else "00-00 00:00:00.000"
+                all_lines.append((sort_key, line))
+
+    # 추출한 Timestamp를 기준으로 전체 로그 오름차순 정렬
+    all_lines.sort(key=lambda x: x[0])
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for _, line in all_lines:
+            f.write(line)
+
 def generate_unique_key(prefix, data_string):
     hash_obj = hashlib.md5(data_string.encode('utf-8')).hexdigest()[:8]
     return f"{prefix}_{hash_obj}"
@@ -211,8 +236,8 @@ def render_chat_interface(key_suffix="main", show_input=True):
 # ==========================================
 # ⚙️ [리팩토링] 파이프라인 비즈니스 로직 추상화
 # ==========================================
-def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
-    """UI와 분리된 순수 백엔드 데이터 처리 파이프라인"""
+def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
+    """UI와 분리된 순수 백엔드 데이터 처리 파이프라인 (다중 파일 지원)"""
     start_total = time.time()
     progress_bar = st.progress(0)
 
@@ -220,20 +245,35 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
         try:
             # 1. 파일 준비 및 슬라이싱
             os.makedirs("./temp_logs", exist_ok=True)
-            target_log_path = os.path.join("./temp_logs", file.name)
-            with open(target_log_path, "wb") as f:
-                f.write(file.getbuffer())
+            saved_paths = []
 
-            filename = file.name
-            base_name = os.path.splitext(filename)[0]
+            # 1. 업로드된 모든 파일을 디스크에 임시 저장
+            for file in uploaded_files:
+                path = os.path.join("./temp_logs", file.name)
+                with open(path, "wb") as f:
+                    f.write(file.getbuffer())
+                saved_paths.append(path)
 
+            # 🚨 2. 다중 파일 병합 로직 (핵심)
+            if len(saved_paths) > 1:
+                st.write(f"🔄 {len(saved_paths)}개의 파편화된 로그를 시간순으로 병합 중...")
+                # 첫 번째 파일 이름을 기반으로 _merged라는 꼬리표를 붙임
+                base_name = os.path.splitext(uploaded_files[0].name)[0] + "_merged"
+                target_log_path = os.path.join("./temp_logs", f"{base_name}.txt")
+                merge_log_files(saved_paths, target_log_path)
+            else:
+                # 단일 파일일 경우 그대로 사용
+                target_log_path = saved_paths[0]
+                base_name = os.path.splitext(uploaded_files[0].name)[0]
+
+            # 3. 타임라인 슬라이싱
             if use_slice:
                 st.write(f"✂️ 타임라인 슬라이싱 적용 중...")
-                sliced_path = os.path.join("./temp_logs", f"sliced_{filename}")
+                sliced_path = os.path.join("./temp_logs", f"sliced_{base_name}.txt")
                 slice_log_by_time(target_log_path, sliced_path, start_t, end_t)
                 target_log_path = sliced_path
 
-            # 2. 통합 오케스트레이터 호출 (단 한 줄!)
+            # 4. 통합 오케스트레이터 호출
             st.write("1️⃣ 모든 통신 스택 로그 교차 분석 중...")
             orchestrator = LogOrchestrator(target_log_path)
 
@@ -241,7 +281,7 @@ def run_analysis_pipeline(file, use_slice, start_t, end_t, ai_engine):
             orchestrator.run_batch(report_path)
             progress_bar.progress(50)
 
-            # 3. RAG 페이로드 생성 및 적재
+            # 5. RAG 페이로드 생성 및 적재
             st.write("2️⃣ RAG 지식 조각 생성 및 DB 임베딩 중...")
             builder = RagPayloadBuilder(report_path)
             builder.build_payload(f"{base_name}_payload.json")
@@ -288,9 +328,10 @@ with st.sidebar:
     st.header("⚙️ 1-Click 자동 분석 파이프라인")
     # ✅ 여기서 엔진의 LLM 모델명과 임베딩 디바이스를 깔끔하게 출력
     st.info(f"🧠 활성 LLM: **{engine.llm_model_name}**\n\n⚡ 임베딩: **{str(engine.embed_model.device).upper()}**")
-    uploaded_file = st.file_uploader(
-        "📁 원시 로그 파일 업로드",
-        type=['txt', 'log'],
+    uploaded_files = st.file_uploader(
+        "📁 원시 로그 파일 업로드 (여러 개 동시 선택 가능)",
+        type=['txt', 'log', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10'],
+        accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}"
     )
 
@@ -350,12 +391,12 @@ with st.sidebar:
         with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
 
     if st.button("🚀 분석 및 DB 적재 시작", use_container_width=True, type="primary"):
-        if uploaded_file is None:
-            st.error("❌ 먼저 파일을 업로드해주세요.")
+        if not uploaded_files:  # 단일 객체가 아닌 빈 리스트인지 검사
+            st.error("❌ 먼저 파일을 하나 이상 업로드해주세요.")
         elif use_slicing and (not start_time or not end_time):
             st.error("❌ 슬라이싱을 켰다면 시작/종료 시간을 모두 입력해주세요.")
         else:
-            run_analysis_pipeline(uploaded_file, use_slicing, start_time, end_time, engine)
+            run_analysis_pipeline(uploaded_files, use_slicing, start_time, end_time, engine)
 
     st.divider()
 

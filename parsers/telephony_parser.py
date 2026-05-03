@@ -29,8 +29,16 @@ class TelephonyParser(BaseParser):
             ts_m = RE_TIME.search(clean_line)
             ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
 
-            if "logcat -b radio" in line: in_radio = True; continue
-            if in_radio and "was the duration of 'RADIO LOG'" in line: in_radio = False; continue
+            if "logcat -b radio" in line or "--------- beginning of radio" in line:
+                in_radio = True
+                continue
+            if in_radio and any(kw in line for kw in [
+                "was the duration of 'RADIO LOG'",
+                "--------- beginning of main",
+                "--------- beginning of system"
+            ]):
+                in_radio = False
+                continue
 
             if in_radio:
                 tag_m = RE_TAG.search(line)
