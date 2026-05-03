@@ -3,6 +3,8 @@ import json
 import glob
 import chromadb
 import torch
+import numpy as np
+import re
 from sentence_transformers import SentenceTransformer
 from agent_tools import (
     get_cs_call_analytics,
@@ -74,6 +76,77 @@ class RilRagChat:
             "- 🚨 [에러 판단]: 4xx(Client Error), 5xx(Server Error) 응답이 있다면 즉시 지적하고 원인을 추론해라.\n"
             "- INVITE 후 200 OK까지의 지연이 크다면 '호 설정 지연'으로 판단해라."
         )
+
+    def _get_semantic_routing(self, query):
+        """임베딩 벡터 유사도를 기반으로 분석 도구와 로그 타입을 결정하는 지능형 라우터 (Max-Pooling 적용)"""
+
+        routing_map = {
+            "Call_Analysis": {
+                "desc": "전화가 안돼요, 통화가 끊겨요, 콜 드랍, 목소리가 안들림, VoLTE 에러, 전화 수신 불가, SIP, IMS, 통화 실패, CSFB, 세션 종료",
+                "tools": ["get_cs_call_analytics", "get_ps_ims_call_analytics"],
+                "log_types": ["Call_Session", "IMS_SIP_Message"]
+            },
+            "Network_OOS": {
+                "desc": "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF",
+                "tools": ["get_network_oos_analytics", "get_cs_call_analytics"],
+                "log_types": ["OOS_Event", "Signal_Level"]
+            },
+            "DNS_Latency": {
+                "desc": "인터넷 안됨, 네트워크 차단, DNS 에러, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연",
+                "tools": ["get_dns_latency_analytics"],
+                "log_types": ["Network_DNS_Issue", "Network_Timeline_Stat"]
+            },
+            "Battery_Thermal": {
+                "desc": "배터리 광탈, 폰이 뜨거워요, 발열이 심해요, 전력 소모, 핫스팟 발열, 소모 전류, 온도가 높음",
+                "tools": ["get_battery_thermal_analytics"],
+                "log_types": ["Battery_Drain_Report"]
+            },
+            "Crash_ANR": {
+                "desc": "폰이 멈췄어요, 앱이 죽었어요, 강제종료, 크래시, ANR, 응답없음, 시스템 에러, 리부팅, 프로세스 종료",
+                "tools": ["get_crash_anr_analytics"],
+                "log_types": ["Crash_Event", "ANR_Context"]
+            },
+            "Radio_Power": {
+                "desc": "모뎀 전원 꺼짐, 비행기 모드, 라디오 파워, 전원 제어, 위성 모뎀 끄기, Power OFF",
+                "tools": ["get_radio_power_analytics"],
+                "log_types": ["Radio_Power_Event"]
+            }
+        }
+
+        # 🚨 [핵심 아키텍처] 긴 질문을 줄바꿈이나 마침표 기준으로 쪼갬 (Chunking)
+        # 예: "[Data Network 이상 심층 분석]" -> Chunk 1
+        #     "DNS 로그와 망 상태를 교차 검증해" -> Chunk 2
+        chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
+        if not chunks:
+            chunks = [query]
+
+        selected_tools = set()
+        selected_log_types = set()
+        threshold = 0.52
+
+        print(f"\n[Semantic Router] {len(chunks)}개의 청크로 분할하여 검사 시작...")
+
+        for category, data in routing_map.items():
+            intent_vec = self.embed_model.encode(data["desc"])
+            max_similarity = 0.0
+            best_chunk = ""
+
+            # 각 청크별로 유사도를 구하고, 가장 높은 점수(Max-Pooling)를 해당 도메인의 최종 점수로 채택
+            for chunk in chunks:
+                chunk_vec = self.embed_model.encode(chunk)
+                sim = np.dot(chunk_vec, intent_vec) / (np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec))
+                if sim > max_similarity:
+                    max_similarity = sim
+                    best_chunk = chunk
+
+            if max_similarity >= threshold:
+                print(f"✅ 매칭됨: {category} (최고 점수: {max_similarity:.3f} | 원인 청크: '{best_chunk[:20]}...')")
+                selected_tools.update(data["tools"])
+                selected_log_types.update(data["log_types"])
+            else:
+                print(f" └─ 제외: {category} (최고 점수: {max_similarity:.3f})")
+
+        return list(selected_tools), list(selected_log_types)
 
     def ingest_folder(self, folder_path="./payloads"):
         """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
@@ -159,31 +232,68 @@ class RilRagChat:
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
     def ask(self, user_query, current_file=None, chat_history=None, top_k=15, health_kpi=None):
-        """Plan -> Act -> Retrieve -> Reason 파이프라인"""
+        """Semantic Router 기반의 Plan -> Act -> Retrieve -> Reason 파이프라인"""
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
 
-        # [STAGE 1: Act] 의도 기반 도구 매핑 및 팩트 획득
-        tool_facts = self._get_tool_facts(user_query, current_base)
-
-        # [STAGE 2: Retrieve] 쿼리 증강 및 Vector DB 검색
+        # [STAGE 1: Search Query Augmentation]
         search_query = user_query
         if len(user_query) < 15 and chat_history:
             last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
-        query_embedding = self.embed_model.encode(search_query).tolist()
-        results = self.collection.query(query_embeddings=[query_embedding], n_results=top_k)
+        # [STAGE 2: Semantic Intent Routing]
+        # 키워드 없이 '의미'로 도구와 로그 타입을 자동 결정
+        selected_tools, target_log_types = self._get_semantic_routing(search_query)
 
-        # [STAGE 3: Prompt Construction] 팩트와 검색 결과의 융합
+        # [STAGE 3: Act - Tool Execution]
+        tool_facts_list = []
+        if current_base != "Unknown" and selected_tools:
+            for tool_name in selected_tools:
+                try:
+                    # agent_tools 모듈에서 해당 함수를 동적으로 가져와 실행
+                    tool_fn = getattr(agent_tools, tool_name)
+                    tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
+                except Exception as e:
+                    print(f"Tool 실행 에러 ({tool_name}): {e}")
+
+        tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
+
+        # [STAGE 4: Retrieve - Vector DB Filtered Search]
+        # 라우터가 결정한 로그 타입만 조회하도록 필터 구성
+        conditions = []
+        if current_file:
+            conditions.append({"source_file": current_file})
+        if target_log_types:
+            if len(target_log_types) == 1:
+                conditions.append({"log_type": target_log_types[0]})
+            else:
+                conditions.append({"log_type": {"$in": target_log_types}})
+
+        where_filter = None
+        if len(conditions) == 1:
+            where_filter = conditions[0]
+        elif len(conditions) > 1:
+            where_filter = {"$and": conditions}
+
+        query_embedding = self.embed_model.encode(search_query).tolist()
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where_filter
+        )
+
+        # [STAGE 5: Reason - Prompt Construction & LLM Inference]
         formatted_logs = self._format_results(results)
 
         system_role = (
-            "당신은 15년 차 안드로이드 통신 프로토콜 수석 엔지니어입니다.\n"
+            "당신은 15년 차 안드로이드 통신 프레임워크(RIL/Telephony) 수석 엔지니어입니다.\n"
             "제공된 [도구 분석 팩트]를 절대적인 진실(Ground Truth)로 삼아 [검색된 관련 로그]를 교차 검증하십시오.\n"
-            "🚨 [엄격한 분석 규칙]:\n"
-            "1. 팩트에 'NORMAL_RELEASE'나 에러 카운트 0이 명시되어 있다면, 로그 스니펫의 ERROR나 BYE 키워드에 속지 말고 정상 동작으로 판정하십시오.\n"
+            "🚨 [엄격한 분석 규칙 - 반드시 지킬 것]:\n"
+            "1. 팩트에 'NORMAL_RELEASE'나 에러 카운트 0이 명시되어 있다면, 로그의 ERROR 키워드에 속지 말고 정상 동작으로 판정하십시오.\n"
             "2. 팩트와 로그가 일치하는 지점(예: 팩트의 Cause Code와 로그의 메시지)을 찾아 인과관계를 설명하십시오.\n"
-            "3. 답변은 요약, 주요 분석, 엔지니어 소견, 권장 사항 순으로 작성하십시오."
+            "3. [변명 금지] 당신은 현재 AP(Application Processor) 로그만 분석할 수 있는 환경입니다. 모뎀 로그(CP/QXDM), 네트워크 패킷(PCAP), 서버 로그 등 '추가 로그가 필요하다'는 변명이나 회피성 멘트를 절대 출력하지 마십시오.\n"
+            "4. [최선의 추론] 주어진 AP 로그와 팩트 정보가 제한적이더라도, 그 안에서 도출할 수 있는 가장 확률 높은 원인(가설) 1가지를 반드시 제시하십시오.\n"
+            "5. 답변은 요약, 주요 분석, 엔지니어 소견(단정적 어조 사용), 권장 사항 순으로 작성하십시오."
         )
 
         prompt = (
@@ -193,7 +303,6 @@ class RilRagChat:
             f"사용자 질문: {user_query}"
         )
 
-        # [STAGE 4: Reason] LLM 추론 실행
         answer = self._call_llm(prompt)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
@@ -226,52 +335,6 @@ class RilRagChat:
         except Exception as e:
             print(f"[ERROR] DB 초기화 중 오류 발생: {e}")
             return False
-
-    def _get_tool_facts(self, query: str, base_name: str) -> str:
-        """질문을 분석하여 필요한 agent_tools를 실행하고 결과를 취합합니다."""
-        if base_name == "Unknown":
-            return "분석 대상 파일이 지정되지 않아 팩트 조회를 생략합니다."
-
-        facts = []
-        q = query.lower()
-
-        # 1. 배터리 및 발열
-        if any(kw in q for kw in ["battery", "배터리", "전력", "광탈", "발열", "온도", "thermal"]):
-            try: facts.append(f"[Battery/Thermal Fact]: {get_battery_thermal_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        # 2. 통화 (CS/PS 통합)
-        if any(kw in q for kw in ["call", "콜", "통화", "전화", "끊김", "drop"]):
-            try:
-                facts.append(f"[CS Call Fact]: {get_cs_call_analytics(base_name)}")
-                facts.append(f"[PS Call Fact]: {get_ps_ims_call_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        # 3. 라디오 전원
-        if any(kw in q for kw in ["radio", "전원", "power"]):
-            try: facts.append(f"[Radio Power Fact]: {get_radio_power_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        # 4. 망 이탈 및 안테나 신호
-        if any(kw in q for kw in ["oos", "이탈", "망", "음영", "서비스", "안테나", "시그널", "신호", "signal", "level", "수신"]):
-            try: facts.append(f"[Network/OOS Fact]: {get_network_oos_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        # 5. 시스템 크래시 및 ANR
-        if any(kw in q for kw in ["crash", "fatal", "크래시", "죽었어", "anr", "응답없음", "멈춤"]):
-            try: facts.append(f"[Crash/ANR Fact]: {get_crash_anr_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        # 6. 네트워크 지연 및 DNS (SIP 포함)
-        if any(kw in q for kw in ["dns", "네트워크", "차단", "앱", "인터넷", "지연", "이상", "징후", "튀는", "sip", "ims", "volte"]):
-            try:
-                facts.append(f"[DNS/Network Fact]: {get_dns_latency_analytics(base_name)}")
-                # SIP/IMS 관련 질문이면 통화 분석 도구도 방어적으로 호출
-                if not any("PS Call Fact" in f for f in facts):
-                    facts.append(f"[PS Call Fact]: {get_ps_ims_call_analytics(base_name)}")
-            except Exception as e: print(f"Tool Error: {e}")
-
-        return "\n".join(facts) if facts else "질문과 매칭되는 명시적 팩트 도구가 없습니다."
 
     def _format_results(self, results) -> str:
         """Vector DB 검색 결과를 LLM이 읽기 쉬운 구조로 포맷팅합니다."""
