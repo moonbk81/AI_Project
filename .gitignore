@@ -230,3 +230,4 @@ result/
 temp_logs/
 chroma_db/
 .streamlit/
+test_reports/

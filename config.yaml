@@ -1,6 +1,6 @@
 routing_map:
   Call_Analysis:
-    desc: "전화가 안돼요, 통화가 끊겨요, 콜 드랍, 목소리가 안들림, VoLTE 에러, 전화 수신 불가, SIP, IMS, 통화 실패, CSFB, 세션 종료"
+    desc: "전화가 안돼요, 통화가 끊겨요, 콜 드랍, 통화 중 끊김, 통화 연결 실패, 발신 실패, 수신 실패, 목소리가 안들림, VoLTE 에러, 전화 수신 불가, SIP, IMS, 통화 실패, CSFB, 세션 종료, call drop, call end, call release"
     tools:
       - get_cs_call_analytics
       - get_ps_ims_call_analytics
@@ -8,7 +8,7 @@ routing_map:
       - Call_Session
       - IMS_SIP_Message
   Network_OOS:
-    desc: "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF"
+    desc: "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF, 네트워크 복구 안됨, 망 복구 실패, 비행기 모드 해제 후 서비스 없음, 비행기 모드 해제 후 네트워크 미복구"
     tools:
       - get_network_oos_analytics
       - get_cs_call_analytics
@@ -16,7 +16,7 @@ routing_map:
       - OOS_Event
       - Signal_Level
   DNS_Latency:
-    desc: "인터넷 안됨, 네트워크 차단, DNS 에러, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연"
+    desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연"
     tools:
       - get_dns_latency_analytics
     log_types:
@@ -29,14 +29,14 @@ routing_map:
     log_types:
       - Battery_Drain_Report
   Crash_ANR:
-    desc: "폰이 멈췄어요, 앱이 죽었어요, 강제종료, 크래시, ANR, 응답없음, 시스템 에러, 리부팅, 프로세스 종료"
+    desc: "앱 강제종료, 앱 크래시, ANR, 응답 없음, 응답 없음 팝업, 앱 응답 없음, 폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, 시스템 리부팅, watchdog reset, fatal exception"
     tools:
       - get_crash_anr_analytics
     log_types:
       - Crash_Event
       - ANR_Context
   Radio_Power:
-    desc: "모뎀 전원 꺼짐, 비행기 모드, 라디오 파워, 전원 제어, 위성 모뎀 끄기, Power OFF"
+    desc: "모뎀 전원 꺼짐, 비행기 모드, 비행기 모드 전환, 비행기 모드 해제, 비행기 모드 ON, 비행기 모드 OFF, 비행기 모드 이후 네트워크 안됨, 비행기 모드 해제 후 데이터 안됨, 비행기 모드 해제 후 망 복구 실패, airplane mode, airplane mode off, radio power, radio power on, radio power off, modem power off, 전원 제어, 위성 모뎀 끄기, Power OFF"
     tools:
       - get_radio_power_analytics
     log_types:

@@ -1,0 +1,132 @@
+[
+  {
+    "id": "fuzzy_001",
+    "query": "네트워크가 이상해요.",
+    "acceptable_tools": [
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics",
+      "get_radio_power_analytics"
+    ],
+    "acceptable_log_types": [
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Network_DNS_Issue",
+      "Radio_Power_Event"
+    ]
+  },
+  {
+    "id": "fuzzy_002",
+    "query": "폰 상태가 전체적으로 불안정합니다.",
+    "acceptable_tools": [
+      "get_cs_call_analytics",
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics",
+      "get_crash_anr_analytics",
+      "get_battery_thermal_analytics"
+    ],
+    "acceptable_log_types": [
+      "Call_Session",
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Crash_Event",
+      "ANR_Context",
+      "Battery_Drain_Report"
+    ]
+  },
+  {
+    "id": "fuzzy_003",
+    "query": "갑자기 안 돼요.",
+    "acceptable_tools": [
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics",
+      "get_crash_anr_analytics",
+      "get_radio_power_analytics"
+    ],
+    "acceptable_log_types": [
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Network_DNS_Issue",
+      "Crash_Event",
+      "Radio_Power_Event"
+    ]
+  },
+  {
+    "id": "fuzzy_004",
+    "query": "가끔 먹통이 됩니다.",
+    "acceptable_tools": [
+      "get_crash_anr_analytics",
+      "get_network_oos_analytics"
+    ],
+    "acceptable_log_types": [
+      "Crash_Event",
+      "ANR_Context",
+      "OOS_Event",
+      "Signal_Level"
+    ]
+  },
+  {
+    "id": "fuzzy_005",
+    "query": "인터넷이 됐다 안 됐다 합니다.",
+    "acceptable_tools": [
+      "get_dns_latency_analytics",
+      "get_network_oos_analytics"
+    ],
+    "acceptable_log_types": [
+      "Network_DNS_Issue",
+      "Network_Timeline_Stat",
+      "OOS_Event",
+      "Signal_Level"
+    ]
+  },
+  {
+    "id": "fuzzy_006",
+    "query": "통신 상태가 불안정해요.",
+    "acceptable_tools": [
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics",
+      "get_cs_call_analytics"
+    ],
+    "acceptable_log_types": [
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Network_DNS_Issue",
+      "Call_Session"
+    ]
+  },
+  {
+    "id": "fuzzy_007",
+    "query": "어느 순간부터 연결이 이상합니다.",
+    "acceptable_tools": [
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics",
+      "get_radio_power_analytics"
+    ],
+    "acceptable_log_types": [
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Network_DNS_Issue",
+      "Radio_Power_Event"
+    ]
+  },
+  {
+    "id": "fuzzy_008",
+    "query": "사용 중에 갑자기 끊깁니다.",
+    "acceptable_tools": [
+      "get_cs_call_analytics",
+      "get_network_oos_analytics",
+      "get_dns_latency_analytics"
+    ],
+    "acceptable_log_types": [
+      "Call_Session",
+      "OOS_Event",
+      "Signal_Level",
+      "Network_Timeline_Stat",
+      "Network_DNS_Issue"
+    ]
+  }
+]

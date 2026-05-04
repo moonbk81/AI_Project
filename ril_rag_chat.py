@@ -61,62 +61,145 @@ class RilRagChat:
         if not chunks:
             chunks = [query]
 
-        # 1. 각 카테고리별로 청크들과 비교하여 '최고 점수'를 계산해 리스트에 담습니다.
+        # 1. 각 카테고리별로 청크들과 비교하여 '최고 점수'를 계산
         category_scores = []
+
         for category, data in self.routing_map.items():
             intent_vec = self.embed_model.encode(data["desc"])
             max_sim = 0.0
+
             for chunk in chunks:
                 chunk_vec = self.embed_model.encode(chunk)
-                sim = np.dot(chunk_vec, intent_vec) / (np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec))
+                sim = np.dot(chunk_vec, intent_vec) / (
+                    np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec)
+                )
+
                 if sim > max_sim:
                     max_sim = sim
-            category_scores.append((category, max_sim, data))
+
+            category_scores.append((category, float(max_sim), data))
 
         # 2. 점수(max_sim)가 높은 순서대로 내림차순 정렬
         category_scores.sort(key=lambda x: x[1], reverse=True)
 
         selected_tools = set()
         selected_log_types = set()
+        selected_intents = set()
+
         threshold = 0.52
+        multi_threshold = 0.50
+
+        # 점수 로그 저장용
+        routing_scores = {
+            category: float(score)
+            for category, score, _ in category_scores
+        }
+
+        if not category_scores:
+            print("⚠️ [Fallback] routing_map이 비어 있어 범용 기본 로그를 조회합니다.")
+            selected_intents.add("Fallback_General")
+            selected_tools.update([
+                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
+            ])
+            selected_log_types.update([
+                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
+            ])
+
+            return {
+                "intents": list(selected_intents), "tools": list(selected_tools), "log_types": list(selected_log_types), "scores": routing_scores, "top_matches": [],
+            }
 
         top1_cat, top1_score, top1_data = category_scores[0]
         print(f"\n[Semantic Router] 🥇 Top-1 의도: {top1_cat} (유사도: {top1_score:.3f})")
 
-        # 🚨 [개선 1: Fallback 안전망] 질문이 너무 짧거나 모호해서 1등 점수조차 기준치 미달일 때
+        # 3. Top-1 점수가 낮으면 fallback
+        # 기존처럼 여기서 바로 return 하지 말고, selected_*에 기본값을 넣고 마지막 dict return으로 보낸다.
         if top1_score < threshold:
             print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그(통화/망/타임라인)만 조회합니다.")
-            return [], ["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat"]
 
-        # 1등 의도는 무조건 채택
-        selected_tools.update(top1_data["tools"])
-        selected_log_types.update(top1_data["log_types"])
-
-        # 🚨 [개선 2: Top-K Multi-Intent] 2등 의도도 점수가 꽤 높다면(0.50 이상), 복합 장애로 간주하고 합침!
-        if len(category_scores) > 1:
-            top2_cat, top2_score, top2_data = category_scores[1]
-            if top2_score >= 0.50:
-                print(f"🔗 [Multi-Intent] 🥈 Top-2 복합 의도 병합: {top2_cat} (유사도: {top2_score:.3f})")
-                selected_tools.update(top2_data["tools"])
-                selected_log_types.update(top2_data["log_types"])
-
-        # 🚨 [Fallback 안전망 추가] 일치하는 의도가 전혀 없을 경우 기본 범용 로그 세팅
-        if not selected_tools and not selected_log_types:
-            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그를 조회합니다.")
+            selected_intents.add("Fallback_General")
             selected_tools.update([
-                "get_cs_call_analytics",
-                "get_network_oos_analytics",
-                "get_dns_latency_analytics"
+                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
             ])
             selected_log_types.update([
-                "Call_Session",
-                "OOS_Event",
-                "Signal_Level",
-                "Network_Timeline_Stat",
-                "Network_DNS_Issue"
+                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
             ])
 
-        return list(selected_tools), list(selected_log_types)
+        else:
+            # 4. 1등 의도 채택
+            selected_intents.add(top1_cat)
+            selected_tools.update(top1_data["tools"])
+            selected_log_types.update(top1_data["log_types"])
+
+            # 5. Top-2 복합 의도 병합
+            if len(category_scores) > 1:
+                top2_cat, top2_score, top2_data = category_scores[1]
+
+                if top2_score >= multi_threshold:
+                    print(f"🔗 [Multi-Intent] 🥈 Top-2 복합 의도 병합: {top2_cat} (유사도: {top2_score:.3f})")
+                    selected_intents.add(top2_cat)
+                    selected_tools.update(top2_data["tools"])
+                    selected_log_types.update(top2_data["log_types"])
+
+        # 6. 혹시 selected가 비어 있으면 fallback
+        if not selected_tools and not selected_log_types:
+            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그를 조회합니다.")
+
+            selected_intents.add("Fallback_General")
+            selected_tools.update([
+                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
+            ])
+            selected_log_types.update([
+                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
+            ])
+
+        # 7. 키워드 override
+        query_lower = query.lower()
+
+        if any(keyword in query_lower for keyword in [
+            "비행기 모드",
+            "airplane mode",
+            "flight mode",
+            "radio power",
+            "모뎀 전원",
+            "라디오 파워",
+        ]):
+            selected_intents.add("Radio_Power")
+            selected_tools.add("get_radio_power_analytics")
+            selected_log_types.add("Radio_Power_Event")
+
+        if any(keyword in query_lower for keyword in [
+            "dns",
+            "데이터",
+            "인터넷",
+            "패킷",
+            "ping",
+            "핑",
+        ]):
+            selected_intents.add("DNS_Latency")
+            selected_tools.add("get_dns_latency_analytics")
+            selected_log_types.update([
+                "Network_DNS_Issue",
+                "Network_Timeline_Stat",
+            ])
+
+        # 8. Top 점수 로그용 정리
+        top_matches = [
+            {
+                "intent": category,
+                "score": float(score),
+            }
+            for category, score, _ in category_scores[:3]
+        ]
+
+        # 9. 이제 tuple이 아니라 dict로 반환
+        return {
+            "intents": sorted(list(selected_intents)),
+            "tools": sorted(list(selected_tools)),
+            "log_types": sorted(list(selected_log_types)),
+            "scores": routing_scores,
+            "top_matches": top_matches,
+        }
 
     def ingest_folder(self, folder_path="./payloads"):
         """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
@@ -212,7 +295,9 @@ class RilRagChat:
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         # [STAGE 2: Semantic Intent Routing]
-        selected_tools, target_log_types = self._get_semantic_routing(search_query)
+        routing_result = self._get_semantic_routing(search_query)
+        selected_tools = routing_result.get("tools", [])
+        target_log_types = routing_result.get("log_types", [])
 
         # [STAGE 3: Act - Tool Execution]
         tool_facts_list = []
