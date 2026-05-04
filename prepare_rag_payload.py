@@ -102,23 +102,53 @@ class RagPayloadBuilder:
             meta = self._extract_metadata(item, type_name)
             rag_payload.append({"document": doc, "metadata": meta})
 
+        def add_clean_state(log_type, clean_message):
+            clean_meta = {
+                "log_type": log_type,
+                "status": "CLEAN",
+                "source_file": os.path.basename(self.input_file)
+            }
+            clean_doc = f"### [Type: {log_type}]\nNO_EVENT_DETECTED: {clean_message}"
+            rag_payload.append({"document": clean_doc, "metadata": clean_meta})
+
         if "radio_power" in report_data:
             for rp in report_data["radio_power"]:
                 add_to_payload(rp, "Radio_Power_Event")
 
         if "telephony" in report_data:
-            for session in report_data["telephony"].get("sessions", []):
-                add_to_payload(session, "Call_Session")
-            for oos in report_data["telephony"].get("network_history", []):
-                add_to_payload(oos, "OOS_Event")
+            # 1. Call Drop 방어 로직 적용
+            sessions = report_data["telephony"].get("sessions", [])
+            error_sessions = [s for s in sessions if "FAIL" in s.get("status", "") or "DROP" in s.get("status", "")]
+            if not error_sessions:
+                add_clean_state("Call_Session", "분석 구간 내 명시적인 Call Drop(호 절단) 이력이 없습니다.")
+            else:
+                for session in sessions:
+                    add_to_payload(session, "Call_Session")
 
-        if "anr_context" in report_data:
+            # 2. OOS (망 이탈) 방어 로직 적용
+            oos_events = report_data["telephony"].get("network_history", [])
+            if not oos_events:
+                add_clean_state("OOS_Event", "분석 구간 내 망 이탈(OOS) 이력이 없으며 IN_SERVICE를 유지했습니다.")
+            else:
+                for oos in oos_events:
+                    add_to_payload(oos, "OOS_Event")
+
+        # 3. ANR 방어
+        if "anr_context" in report_data and report_data["anr_context"]:
             add_to_payload(report_data["anr_context"], "ANR_Context")
 
+        # 4. Crash 방어 로직 적용
         if "crash_context" in report_data:
-            for crash in report_data["crash_context"]:
-                add_to_payload(crash, "Crash_Event")
+            crashes = report_data["crash_context"]
+            if not crashes:
+                add_clean_state("Crash_Event", "분석 구간 내 치명적인 Crash 이력이 발견되지 않았습니다.")
+            else:
+                for crash in crashes:
+                    add_to_payload(crash, "Crash_Event")
+        else:
+            add_clean_state("Crash_Event", "분석 구간 내 치명적인 Crash 이력이 발견되지 않았습니다.")
 
+        # 배터리 통계 (기존 로직 유지)
         if "battery_stats" in report_data:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
 
