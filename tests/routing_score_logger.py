@@ -54,7 +54,7 @@ def extract_scores(raw_result):
 
 
 def get_top_scores(scores):
-    sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_items = sorted(scores.items(), key=lambda item: float(item[1]), reverse=True)
 
     top1_intent, top1_score = "", ""
     top2_intent, top2_score = "", ""
