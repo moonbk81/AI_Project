@@ -755,3 +755,100 @@ def render_service_state_timeline(df):
     fig.update_layout(height=chart_height, hovermode="x unified", margin=dict(t=50, b=20))
 
     st.plotly_chart(fig, use_container_width=True)
+
+def render_integrated_rf_call_timeline(report_data):
+    """
+    통화 세션(배경색), Signal Level(꺾은선), SIP 에러(마커)를
+    하나의 차트에 오버레이(Overlay)하여 교차 분석 타임라인을 제공합니다.
+    """
+    st.subheader("📊 [통합 타임라인] 통화 상태 & 무선 환경(RF) 교차 분석")
+    st.markdown("통화 구간(배경색) 내에서 발생한 **신호 급감(꺾은선)**과 **SIP 에러(빨간 마커)**의 상관관계를 시각적으로 확인합니다.")
+
+    # 1. 안테나 신호 데이터 (꺾은선)
+    signal_history = report_data.get("signal_level_history", [])
+    if not signal_history:
+        st.info("신호 레벨(Signal Level) 이력이 없어 통합 차트를 생성할 수 없습니다.")
+        return
+
+    import datetime
+    current_year = datetime.datetime.now().year
+
+    sig_times, sig_levels = [], []
+    for s in signal_history:
+        t_str = str(s.get("time", ""))[:14]
+        try:
+            dt = pd.to_datetime(f"{current_year}-{t_str}", format='%Y-%m-%d %H:%M:%S')
+            sig_times.append(dt)
+            sig_levels.append(int(s.get("level", s.get("max_level", 0))))
+        except: pass
+
+    fig = go.Figure()
+
+    # 꺾은선 차트 추가
+    fig.add_trace(go.Scatter(
+        x=sig_times, y=sig_levels,
+        mode='lines+markers',
+        name='Signal Level',
+        line=dict(color='royalblue', width=2),
+        marker=dict(size=6, symbol='circle')
+    ))
+
+    # 2. 통화 세션 데이터 (배경 하이라이트)
+    sessions = report_data.get("telephony", {}).get("sessions", [])
+    for s in sessions:
+        try:
+            start_dt = pd.to_datetime(f"{current_year}-{s.get('start_time')[:14]}", format='%Y-%m-%d %H:%M:%S')
+            # end_time이 없으면 시작 시간 + 5초로 임시 박스 생성
+            end_time_str = s.get('end_time')
+            if end_time_str:
+                end_dt = pd.to_datetime(f"{current_year}-{end_time_str[:14]}", format='%Y-%m-%d %H:%M:%S')
+            else:
+                end_dt = start_dt + pd.Timedelta(seconds=5)
+
+            status = str(s.get("status", "")).upper()
+            is_drop = "DROP" in status or "FAIL" in status
+            color = "rgba(255, 0, 0, 0.15)" if is_drop else "rgba(0, 255, 0, 0.15)"
+            label = "Call Drop 🚨" if is_drop else f"{s.get('type', 'CALL')} (정상)"
+
+            fig.add_vrect(
+                x0=start_dt, x1=end_dt,
+                fillcolor=color, opacity=1,
+                layer="below", line_width=1, line_color="red" if is_drop else "green",
+                annotation_text=label, annotation_position="top left"
+            )
+        except: pass
+
+    # 3. SIP 에러 데이터 (빨간색 X 마커)
+    sip_data = report_data.get("ims_sip_data", [])
+    sip_errors = [m for m in sip_data if m.get("is_error")]
+    if sip_errors:
+        err_times, err_texts = [], []
+        for e in sip_errors:
+            try:
+                dt = pd.to_datetime(f"{current_year}-{e.get('time')[:14]}", format='%Y-%m-%d %H:%M:%S')
+                err_times.append(dt)
+                err_texts.append(e.get("method_code", "SIP Error"))
+            except: pass
+
+        # 에러 마커는 보기 쉽게 y=0(바닥) 라인에 배치
+        fig.add_trace(go.Scatter(
+            x=err_times, y=[0]*len(err_times),
+            mode='markers+text',
+            name='SIP Error',
+            marker=dict(symbol='x', color='red', size=14, line=dict(width=2, color='darkred')),
+            text=err_texts,
+            textposition="top center",
+            textfont=dict(color='red', size=11)
+        ))
+
+    # 차트 레이아웃 최적화
+    fig.update_layout(
+        yaxis_title="안테나 신호 (Level 0~4)",
+        yaxis=dict(range=[-0.5, 4.5], tickmode='linear', tick0=0, dtick=1),
+        height=350,
+        hovermode="x unified",
+        margin=dict(l=0, r=0, t=40, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)

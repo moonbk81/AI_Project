@@ -772,48 +772,26 @@ with tab_dash:
                     st.divider()
 
                     # ==========================================
-                    # 📈 1. 통합 로그 타임라인 차트 (Event Correlation)
+                    # 📈 [신규] 통합 로그 타임라인 (Call + Signal + SIP 오버레이)
                     # ==========================================
-                    st.subheader("📈 통합 로그 타임라인 분석")
+                    if st.session_state.current_file:
+                        current_base_name = st.session_state.current_file.replace("_payload.json", "")
+                        target_report_path = os.path.join("./result", f"{current_base_name}_report.json")
 
-                    import plotly.graph_objects as go
+                        if os.path.exists(target_report_path):
+                            try:
+                                with open(target_report_path, 'r', encoding='utf-8') as _f:
+                                    _loaded_report_data = json.load(_f)
 
-                    # 데이터 사용량은 시계열 데이터가 아니므로 1개의 Y축만 사용하도록 심플하게 원복
-                    fig = go.Figure()
+                                # ui_components.py에 추가한 멋진 오버레이 차트 호출!
+                                ui.render_integrated_rf_call_timeline(_loaded_report_data)
+                            except Exception as e:
+                                st.error(f"차트 렌더링 중 에러가 발생했습니다: {e}")
+                        else:
+                            st.info("📊 통합 타임라인을 그리기 위한 JSON 파일이 아직 생성되지 않았습니다.")
+                    else:
+                        st.info("파일을 먼저 선택해주세요.")
 
-                    # [A] 신호 세기 (Line Chart)
-                    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-                    if not sig_df.empty:
-                        sig_df = sig_df.sort_values('time')
-                        fig.add_trace(
-                            go.Scatter(x=sig_df['time'], y=sig_df['level'], name="Signal Level", mode='lines+markers', line=dict(color='#1f77b4', width=2))
-                        )
-
-                    # [B] 통화 드랍 (Scatter - Red ❌)
-                    call_df = df[df['log_type'] == 'Call_Session'].copy()
-                    if not call_df.empty and 'status' in call_df.columns:
-                        fail_calls = call_df[call_df['status'].str.contains('FAIL|DROP', na=False, case=False)]
-                        if not fail_calls.empty:
-                            hover_text = fail_calls['fail_reason'] if 'fail_reason' in fail_calls.columns else "Unknown Reason"
-                            fig.add_trace(
-                                go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls),
-                                        mode='markers', marker=dict(size=12, color='red', symbol='x'),
-                                        name="Call Drop", text=hover_text, hoverinfo='text+x'))
-
-
-                    # 레이아웃 튜닝
-                    fig.update_layout(
-                        height=450,
-                        hovermode="x unified",
-                        margin=dict(l=0, r=0, t=30, b=0),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-
-                    # 🚨 [핵심 픽스] X축 글자 떡짐 방지 적용!
-                    fig.update_xaxes(nticks=15, tickangle=-45)
-                    fig.update_yaxes(title_text="Signal Level (0~5)", range=[-0.5, 5.5], dtick=1)
-
-                    st.plotly_chart(fig, use_container_width=True)
                     st.divider()
 
                     # ==========================================

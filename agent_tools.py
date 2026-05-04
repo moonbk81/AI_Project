@@ -1,6 +1,7 @@
 import os
 import json
 import pandas as pd
+from datetime import datetime, timedelta
 
 def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     """
@@ -35,7 +36,6 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # ==========================================
     data_usage_stats = report_data.get("data_usage_stats", [])
     if data_usage_stats:
-        # total_mb 기준으로 내림차순 정렬 후 Top 3 추출
         sorted_usage = sorted(data_usage_stats, key=lambda x: x.get('total_mb', 0), reverse=True)[:3]
         kpi_report["1_data_usage_top3"] = [
             f"{u.get('app_name', 'Unknown')} ({u.get('rat', 'Unknown')}망 {u.get('total_mb', 0)}MB)"
@@ -135,10 +135,8 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     dns_issues = net_ts.get("dns_issues", [])
     private_dns = net_ts.get("private_dns_status", {})
 
-    # 1) 앱별 DNS 차단 이력
     blocked_packages = list(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
 
-    # 2) Private DNS (DoT) 붕괴 상태 확인
     dot_failures = []
     for net_id, info in private_dns.items():
         if info.get("fail_count", 0) > 0:
@@ -175,14 +173,12 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             c_time_str = call.get('time')
             if not c_time_str: continue
 
-            # Timestamp 파싱 (연도는 임의 처리, 시간차 비교용)
             c_time = pd.to_datetime(c_time_str, format='%m-%d %H:%M:%S.%f', errors='coerce')
 
             for sip in sip_errors:
                 s_time_str = sip.get('time')
                 s_time = pd.to_datetime(s_time_str, format='%m-%d %H:%M:%S.%f', errors='coerce')
 
-                # 2.0초 이내 상관관계 판정
                 if pd.notna(c_time) and pd.notna(s_time) and abs((c_time - s_time).total_seconds()) <= 2.0:
                     kpi_report["9_ril_sip_correlation"].append({
                         "message": "🔥 [핵심 상관관계 발견]: RIL 통화 드랍과 동시간대(±2초)에 SIP 에러 발생 확인",
@@ -221,14 +217,12 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             sat_flow = sat_data.get("call_flow", [])
             reg_history = sat_data.get("registration_history", [])
 
-            # 상태 전이 흐름 추출
             achieved_states = []
             for r in reg_history:
                 state_str = r.get('status_str', 'Unknown')
                 if not achieved_states or achieved_states[-1] != state_str:
                     achieved_states.append(state_str)
 
-            # 🚨 [신규 로직] 단말/사용자의 명시적인 위성 모뎀 OFF 의도가 있었는지 확인
             power_off_detected = False
             for msg in sat_flow:
                 raw_text = msg.get('raw', '')
@@ -244,7 +238,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             kpi_report["11_satellite_modem_status"] = {
                 "arfcn": sat_metrics.get("arfcn", "Unknown"),
                 "registration_history_flow": " -> ".join(achieved_states) if achieved_states else "Unknown",
-                "is_intentional_power_off": power_off_detected, # 👈 AI에게 "이거 정상 종료임"을 알려주는 핵심 키
+                "is_intentional_power_off": power_off_detected,
                 "signal_rssi_snr": f"{sat_metrics.get('last_rssi')} / {sat_metrics.get('last_snr')}",
                 "call_drops_and_fails": sat_metrics.get("calls_dropped_or_failed", 0),
                 "sms_tx_fails": sat_metrics.get("sms_tx_fail", 0),
@@ -261,55 +255,117 @@ def _load_report_json(base_name: str, result_dir: str = "./result") -> dict:
     with open(report_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+# ==========================================
+# 🛠️ [신규 추가] 메모리 기반 타임라인 교차 검증 헬퍼
+# ==========================================
+def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: int = 2) -> list:
+    """에러 발생 시간 기준 ±window_sec 내의 망 이탈(OOS) 및 신호 급감(Level 0~1) 이력을 탐색합니다."""
+    if not target_time_str:
+        return []
+
+    current_year = datetime.now().year
+    try:
+        clean_time = target_time_str[:14]
+        target_dt = datetime.strptime(f"{current_year}-{clean_time}", "%Y-%m-%d %H:%M:%S")
+    except:
+        return ["시간 파싱 불가"]
+
+    correlated = []
+
+    # 1. OOS 타임라인 교차 검증
+    oos_events = report_data.get("telephony", {}).get("network_history", [])
+    for oos in oos_events:
+        oos_time = str(oos.get("time", ""))[:14]
+        if oos_time:
+            try:
+                oos_dt = datetime.strptime(f"{current_year}-{oos_time}", "%Y-%m-%d %H:%M:%S")
+                diff = abs((oos_dt - target_dt).total_seconds())
+                if diff <= window_sec:
+                    v_reg = str(oos.get("voice_reg", ""))
+                    d_reg = str(oos.get("data_reg", ""))
+                    if "1" in v_reg or "1" in d_reg or "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg:
+                        correlated.append(f"[OOS 동반] 망 이탈 발생 (시간차: {diff}초)")
+            except: pass
+
+    # 2. Signal 타임라인 교차 검증
+    signal_events = report_data.get("signal_level_history", [])
+    for sig in signal_events:
+        sig_time = str(sig.get("time", ""))[:14]
+        sig_level = str(sig.get("level", sig.get("max_level", "")))
+        if sig_time and sig_level in ["0", "1"]:
+            try:
+                sig_dt = datetime.strptime(f"{current_year}-{sig_time}", "%Y-%m-%d %H:%M:%S")
+                diff = abs((sig_dt - target_dt).total_seconds())
+                if diff <= window_sec:
+                    correlated.append(f"[약전계 진입] Level {sig_level} (시간차: {diff}초)")
+            except: pass
+
+    return correlated if correlated else ["명시적인 무선 환경(RF) 악화 동반 안됨"]
+
 def get_cs_call_analytics(base_name: str, result_dir: str = "./result") -> str:
-    """CS(Circuit Switched) 통화의 릴리즈 코드를 엄격하게 파싱하여 정상/드랍 팩트를 제공합니다."""
+    """CS 통화의 릴리즈 코드를 파싱하고 장애 시 무선 환경(RF)을 교차 검증합니다."""
     report_data = _load_report_json(base_name, result_dir)
     sessions = report_data.get("telephony", {}).get("sessions", [])
 
-    # CS 타입만 필터링 (telephony_parser.py 기준 "CS")
     cs_sessions = [s for s in sessions if s.get("type") == "CS"]
 
     analysis = []
     for s in cs_sessions:
         reason_str = str(s.get("fail_reason", ""))
-
-        # [PRO FIX] 텍스트 매칭이 아닌 명확한 코드(ID) 추출 방식
-        # 형태: "16(정상종료): 0(Vendor)" -> split 하여 '16' 확보
         reason_code = reason_str.split('(')[0].strip()
         is_normal = reason_code in ['16', '31']
+        status = "NORMAL_RELEASE" if is_normal else "CALL_DROP"
+
+        # 에러 시에만 2초 내의 RF(OOS/약전계) 환경 자동 조회
+        target_time = s.get("end_time") or s.get("start_time")
+        rf_context = _check_rf_correlation(target_time, report_data) if not is_normal else []
 
         analysis.append({
             "time": s.get("start_time"),
-            "status": "NORMAL_RELEASE" if is_normal else "CALL_DROP",
+            "status": status,
             "raw_reason": reason_str,
-            "slot": s.get("slot")
+            "slot": s.get("slot"),
+            "rf_correlation": rf_context
         })
 
     return json.dumps({"cs_call_facts": analysis}, ensure_ascii=False)
 
 def get_ps_ims_call_analytics(base_name: str, result_dir: str = "./result") -> str:
-    """RIL 레이어의 PS Call 세션과 상위 SIP 에러를 통합 추출합니다."""
+    """PS Call 세션과 SIP 에러를 통합 추출하고, 무선 환경(RF)과 교차 검증합니다."""
     report_data = _load_report_json(base_name, result_dir)
 
-    # 1. RIL 레이어 PS Call (telephony_parser.py 기준 "PS(VoLTE)")
     sessions = report_data.get("telephony", {}).get("sessions", [])
     ps_sessions = [s for s in sessions if "PS" in s.get("type", "")]
 
     ps_analysis = []
     for s in ps_sessions:
+        status = s.get("status", "")
+        target_time = s.get("end_time") if "DROP" in status else s.get("start_time")
+        # 에러(FAIL/DROP)일 경우에만 RF 교차 검증
+        rf_context = _check_rf_correlation(target_time, report_data) if "FAIL" in status or "DROP" in status else []
+
         ps_analysis.append({
             "time": s.get("start_time"),
-            "status": s.get("status"),
+            "status": status,
             "fail_reason": s.get("fail_reason", ""),
+            "rf_correlation": rf_context
         })
 
-    # 2. SIP 레이어 4xx~6xx 에러
     sip_data = report_data.get("ims_sip_data", [])
     sip_errors = [m for m in sip_data if m.get("is_error")]
 
+    sip_analysis = []
+    for e in sip_errors[:5]:
+        err_time = e.get("time")
+        sip_analysis.append({
+            "time": err_time,
+            "method": e.get("method_code"),
+            "rf_correlation": _check_rf_correlation(err_time, report_data) # SIP 에러 발생 시점 환경 체크
+        })
+
     return json.dumps({
         "ril_ps_call_facts": ps_analysis,
-        "sip_error_facts": [{"time": e.get("time"), "method": e.get("method_code")} for e in sip_errors[:5]]
+        "sip_error_facts": sip_analysis
     }, ensure_ascii=False)
 
 def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> str:
@@ -324,7 +380,7 @@ def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> s
             "event": oos.get("event_type"),
             "slot": oos.get("slotId"),
             "reject_cause": oos.get("rej_cause"),
-            "inferred_reason": oos.get("root_cause_candidate") # telephony_parser 의 추론값 활용
+            "inferred_reason": oos.get("root_cause_candidate")
         })
 
     return json.dumps({
@@ -337,14 +393,13 @@ def get_dns_latency_analytics(base_name: str, result_dir: str = "./result") -> s
     report_data = _load_report_json(base_name, result_dir)
     net_ts = report_data.get("network_timeseries", {})
 
-    # [PRO FIX] prepare_rag_payload.py 의 실제 트리 구조 대응
     timeline = net_ts.get("sorted_timeline", {})
     critical_latencies = []
 
     for ts, details in timeline.items():
         for stat in details.get("net_stats", []):
             dns_avg = stat.get("dns_avg", 0)
-            if isinstance(dns_avg, (int, float)) and dns_avg > 2000: # 2초 이상 지연만 팩트로 간주
+            if isinstance(dns_avg, (int, float)) and dns_avg > 2000:
                 critical_latencies.append({
                     "time": ts,
                     "netId": stat.get("netId"),
@@ -367,12 +422,10 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
     thermal_stats = battery_stats.get("thermal_stats", [])
     wakelock_stats = battery_stats.get("wakelock_stats", [])
 
-    # 최고 온도 추출
     max_temp = 0
     if thermal_stats:
         max_temp = max([float(t.get("temperature", 0)) for t in thermal_stats])
 
-    # 최다 점유 Wakelock Top 3 (단말이 잠들지 못하게 하는 앱)
     top_wakelocks = []
     if wakelock_stats:
         sorted_wl = sorted(wakelock_stats, key=lambda x: int(x.get("times", 0)), reverse=True)[:3]
@@ -383,14 +436,12 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
         "top_wakelocks": top_wakelocks
     }, ensure_ascii=False)
 
-
 def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str:
     """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력을 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     crashes = report_data.get("crash_context", [])
     anr = report_data.get("anr_context", {})
 
-    # 크래시 팩트 조립
     crash_facts = []
     for c in crashes:
         crash_facts.append({
@@ -399,7 +450,6 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
             "type": c.get("crash_type")
         })
 
-    # ANR 팩트 조립
     anr_facts = []
     if anr and isinstance(anr, dict) and anr.get("time"):
         anr_facts.append({
@@ -415,13 +465,11 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
         "anr_history": anr_facts
     }, ensure_ascii=False)
 
-
 def get_radio_power_analytics(base_name: str, result_dir: str = "./result") -> str:
     """라디오(모뎀) 전원 ON/OFF 제어 이력을 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     power_events = report_data.get("radio_power", [])
 
-    # 모뎀 전원 상태가 변경되는 시점만 필터링하여 전달
     power_facts = []
     last_state = None
     for p in power_events:
