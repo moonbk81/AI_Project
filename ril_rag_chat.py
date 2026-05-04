@@ -1,7 +1,6 @@
 import os
 import json
 import glob
-from turtle import st
 import chromadb
 import torch
 import numpy as np
@@ -35,6 +34,16 @@ class RilRagChat:
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
+
+        self.tool_registry = {
+            "get_cs_call_analytics": agent_tools.get_cs_call_analytics,
+            "get_ps_ims_call_analytics": agent_tools.get_ps_ims_call_analytics,
+            "get_network_oos_analytics": agent_tools.get_network_oos_analytics,
+            "get_dns_latency_analytics": agent_tools.get_dns_latency_analytics,
+            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None), # 없는 함수 방어 로직
+            "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
+            "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
+        }
 
     def _load_config(self):
         try:
@@ -90,6 +99,22 @@ class RilRagChat:
                 print(f"🔗 [Multi-Intent] 🥈 Top-2 복합 의도 병합: {top2_cat} (유사도: {top2_score:.3f})")
                 selected_tools.update(top2_data["tools"])
                 selected_log_types.update(top2_data["log_types"])
+
+        # 🚨 [Fallback 안전망 추가] 일치하는 의도가 전혀 없을 경우 기본 범용 로그 세팅
+        if not selected_tools and not selected_log_types:
+            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그를 조회합니다.")
+            selected_tools.update([
+                "get_cs_call_analytics",
+                "get_network_oos_analytics",
+                "get_dns_latency_analytics"
+            ])
+            selected_log_types.update([
+                "Call_Session",
+                "OOS_Event",
+                "Signal_Level",
+                "Network_Timeline_Stat",
+                "Network_DNS_Issue"
+            ])
 
         return list(selected_tools), list(selected_log_types)
 
@@ -189,23 +214,11 @@ class RilRagChat:
         # [STAGE 2: Semantic Intent Routing]
         selected_tools, target_log_types = self._get_semantic_routing(search_query)
 
-        # 🚨 [버그 수정 1] TOOL_REGISTRY 도입: 동적 호출(getattr)의 불안정성 제거
-        # 문자열을 실제 함수 객체와 1:1로 안전하게 매핑합니다.
-        TOOL_REGISTRY = {
-            "get_cs_call_analytics": agent_tools.get_cs_call_analytics,
-            "get_ps_ims_call_analytics": agent_tools.get_ps_ims_call_analytics,
-            "get_network_oos_analytics": agent_tools.get_network_oos_analytics,
-            "get_dns_latency_analytics": agent_tools.get_dns_latency_analytics,
-            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None), # 없는 함수 방어 로직
-            "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
-            "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
-        }
-
         # [STAGE 3: Act - Tool Execution]
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
-                tool_fn = TOOL_REGISTRY.get(tool_name)
+                tool_fn = self.tool_registry.get(tool_name)
                 if tool_fn:
                     try:
                         tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")

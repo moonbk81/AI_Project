@@ -540,7 +540,8 @@ with tab_chat:
                 health_kpi_json = get_device_health_kpi(current_base) if current_base != "Unknown" else None
                 answer, ids, metas = engine.ask(prompt,
                                                 current_file=current_target,
-                                                chat_history=st.session_state.messages[-5:])
+                                                chat_history=st.session_state.messages[-5:],
+                                                health_kpi_json=health_kpi_json)
 
                 # [복구 완료] 원본 로그 텍스트 조립 구역
                 ref_text = ""
