@@ -18,6 +18,7 @@ class RilRagChat:
         # 1. Vector DB 초기화
         self.chroma_client = chromadb.PersistentClient(path=db_path)
         self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
+        self.knowledge_collection = self.chroma_client.get_or_create_collection(name="engineer_knowledge_base")
 
         # Mac(MPS) 또는 Ubuntu(CUDA) 환경에 맞게 디바이스 자동 설정
         device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -51,30 +52,44 @@ class RilRagChat:
         if not chunks:
             chunks = [query]
 
+        # 1. 각 카테고리별로 청크들과 비교하여 '최고 점수'를 계산해 리스트에 담습니다.
+        category_scores = []
+        for category, data in self.routing_map.items():
+            intent_vec = self.embed_model.encode(data["desc"])
+            max_sim = 0.0
+            for chunk in chunks:
+                chunk_vec = self.embed_model.encode(chunk)
+                sim = np.dot(chunk_vec, intent_vec) / (np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec))
+                if sim > max_sim:
+                    max_sim = sim
+            category_scores.append((category, max_sim, data))
+
+        # 2. 점수(max_sim)가 높은 순서대로 내림차순 정렬
+        category_scores.sort(key=lambda x: x[1], reverse=True)
+
         selected_tools = set()
         selected_log_types = set()
         threshold = 0.52
 
-        print(f"\n[Semantic Router] {len(chunks)}개의 청크로 분할하여 검사 시작...")
+        top1_cat, top1_score, top1_data = category_scores[0]
+        print(f"\n[Semantic Router] 🥇 Top-1 의도: {top1_cat} (유사도: {top1_score:.3f})")
 
-        for category, data in self.routing_map.items():
-            intent_vec = self.embed_model.encode(data["desc"])
-            max_similarity = 0.0
-            best_chunk = ""
+        # 🚨 [개선 1: Fallback 안전망] 질문이 너무 짧거나 모호해서 1등 점수조차 기준치 미달일 때
+        if top1_score < threshold:
+            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그(통화/망/타임라인)만 조회합니다.")
+            return [], ["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat"]
 
-            for chunk in chunks:
-                chunk_vec = self.embed_model.encode(chunk)
-                sim = np.dot(chunk_vec, intent_vec) / (np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec))
-                if sim > max_similarity:
-                    max_similarity = sim
-                    best_chunk = chunk
+        # 1등 의도는 무조건 채택
+        selected_tools.update(top1_data["tools"])
+        selected_log_types.update(top1_data["log_types"])
 
-            if max_similarity >= threshold:
-                print(f"✅ 매칭됨: {category} (최고 점수: {max_similarity:.3f} | 원인 청크: '{best_chunk[:20]}...')")
-                selected_tools.update(data["tools"])
-                selected_log_types.update(data["log_types"])
-            else:
-                print(f" └─ 제외: {category} (최고 점수: {max_similarity:.3f})")
+        # 🚨 [개선 2: Top-K Multi-Intent] 2등 의도도 점수가 꽤 높다면(0.50 이상), 복합 장애로 간주하고 합침!
+        if len(category_scores) > 1:
+            top2_cat, top2_score, top2_data = category_scores[1]
+            if top2_score >= 0.50:
+                print(f"🔗 [Multi-Intent] 🥈 Top-2 복합 의도 병합: {top2_cat} (유사도: {top2_score:.3f})")
+                selected_tools.update(top2_data["tools"])
+                selected_log_types.update(top2_data["log_types"])
 
         return list(selected_tools), list(selected_log_types)
 
@@ -305,99 +320,38 @@ class RilRagChat:
         except Exception as e:
             return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
 
-    def save_knowledge(self, log_name, issue_title, solution_text):
-        """사내 지식 베이스(DB)에 우수 분석 사례를 저장하는 함수 (향후 고도화 예정)"""
+    def save_knowledge(self, target_ids, feedback, severity="Normal", **kwargs):
+        """
+        웹 UI에서 전달받은 파라미터(대상 로그 ID, 엔지니어 코멘트, 심각도)를
+        사내 지식 베이스(ChromaDB)에 영구 저장합니다.
+        """
         try:
-            print(f"💾 [Knowledge Save] {issue_title} 지식 저장 시도 중...")
-            # TODO: 향후 별도의 ChromaDB 컬렉션(knowledge_base)을 만들어 저장하는 로직 추가
+            import uuid
+            doc_id = str(uuid.uuid4())
+
+            # target_ids가 리스트일 경우 문자열로 합쳐서 저장
+            if isinstance(target_ids, list):
+                target_ids_str = ",".join(target_ids)
+            else:
+                target_ids_str = str(target_ids)
+
+            # 메타데이터: UI에서 넘어온 severity와 타겟 로그 ID를 모두 보존
+            metadata = {
+                "target_ids": target_ids_str,
+                "solution": feedback,
+                "severity": severity,
+                "type": "expert_knowledge"
+            }
+
+            # 지식 베이스 전용 컬렉션에 적재 (텍스트 본문은 엔지니어 피드백)
+            self.knowledge_collection.add(
+                documents=[feedback],
+                metadatas=[metadata],
+                ids=[doc_id]
+            )
+
+            print(f"💾 [Knowledge Save] 지식 DB 박제 완료! (ID: {doc_id}, Severity: {severity})")
             return True
         except Exception as e:
             print(f"❌ 지식 저장 실패: {e}")
             return False
-
-if __name__ == "__main__":
-    chat_system = RilRagChat()
-
-    # 시작할 때 자동으로 payloads 폴더를 스캔해서 적재합니다.
-    chat_system.ingest_folder()
-
-    print("\n" + "="*60)
-    print("🤖 RIL RAG 챗봇이 준비되었습니다. (종료: q, quit, exit)")
-    print("="*60)
-
-    while True:
-        try:
-            query = input("\n[사용자]: ")
-            if query.lower() in ['exit', 'quit', 'q']:
-                print("챗봇을 종료합니다. 수고하셨습니다!")
-                break
-            if not query.strip():
-                continue
-
-            # 1. AI 분석 요청
-            answer, ids, metas = chat_system.ask(query)
-
-            # 2. 결과 출력
-            print("\n" + "="*60)
-            print("💡 [분석 결과]")
-            print(answer)
-            print("\n" + "-"*60)
-            print("🔎 [참고 원본 로그 (엔지니어 확인용)]")
-
-            for i, meta in enumerate(metas):
-                # 저장된 해결책이 있다면 함께 출력
-                known_solution = meta.get('known_solution')
-                solution_text = f" [💡과거 해결사례 존재]" if known_solution else ""
-
-                print(f"\n--- 참고 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_text} ---")
-
-                # 과거 해결 사례 출력
-                if known_solution:
-                    print(f"  👉 과거 분석 기록: {known_solution}")
-
-                # Call/OOS 원본 로그 출력 로직 (다중 fallback)
-                raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                try:
-                    raw_logs = json.loads(raw_data) if isinstance(raw_data, str) else []
-                except json.JSONDecodeError:
-                    raw_logs = []
-
-                if raw_logs:
-                    for log in raw_logs[:5]:
-                        print(f"  {log}")
-                    if len(raw_logs) > 5:
-                        print("  ... (중략) ...")
-
-                # RADIO_POWER 원본 로그 출력 로직
-                raw_req = meta.get('raw_request')
-                raw_resp = meta.get('raw_response')
-                if raw_req or raw_resp:
-                    if raw_req: print(f"  [REQ]  {raw_req}")
-                    if raw_resp: print(f"  [RESP] {raw_resp}")
-
-                if not raw_logs and not raw_req and not raw_resp:
-                    print("  (원본 로그 데이터 없음)")
-
-            print("="*60 + "\n")
-
-            # 3. 지식 저장 (피드백 루프)
-            if ids: # 검색된 데이터가 있을 때만 물어봄
-                print("\n" + "-"*60)
-                print("📝 [사내 지식 베이스(트랙 B) 업데이트]")
-                print("이 에러에 대한 '원인'이나 '해결책'을 엔지니어의 시각으로 기록해두면,")
-                print("추후 유사한 에러 발생 시 후배들이나 AI가 이 해결책을 참고할 수 있습니다.")
-
-                # y/n이 아니라, 사용자의 주관적인 텍스트를 직접 입력받습니다.
-                feedback = input("❓ 엔지니어 코멘트 입력 (저장하지 않으려면 그냥 Enter 입력): ").strip()
-
-                if feedback:
-                    # AI의 추출 결과(answer)가 아닌, 엔지니어의 코멘트(feedback)를 DB에 박제!
-                    chat_system.save_knowledge(ids, feedback)
-                else:
-                    print("지식 저장을 건너뜁니다.")
-
-        except KeyboardInterrupt:
-            print("\n챗봇을 강제 종료합니다.")
-            break
-        except Exception as e:
-            print(f"\n❌ 오류 발생: {e}")
