@@ -5,7 +5,8 @@ class BatteryThermalAnalyzer(BaseParser):
     """발열(Thermal) 센서 및 배터리 광탈 주범(Wakelock) 분석기"""
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
-        self.re_thermal = re.compile(r'Temperature:\s*(\d+).*?Sensor:\s*([a-zA-Z0-9_]+)', re.I)
+        self.re_thermal_new = re.compile(r'Temperature\{mValue=([-\d.]+).*?mName=([a-zA-Z0-9_]+)', re.I)
+        self.re_thermal_old = re.compile(r'Temperature:\s*(\d+).*?Sensor:\s*([a-zA-Z0-9_]+)', re.I)
         # 앱 이름 부분에 u0a123, 10123, *alarm*, 콜론(:) 등이 올 수 있도록 정규식 확장
         self.re_wakelock = re.compile(r'Wake lock\s+([a-zA-Z0-9_.*:-]+).*?(\d+)\s*ms.*?(\d+)\s*times', re.I)
 
@@ -14,14 +15,13 @@ class BatteryThermalAnalyzer(BaseParser):
         self.re_package = re.compile(r'Package:\s*([a-zA-Z0-9_.]+)', re.I)
 
     def analyze(self, lines):
-        thermals = []
+        thermals = {}
         wakelocks = []
         uid_map = {}
         current_app_id = None
 
         for line in lines:
             clean_line = self.clean_line(line)
-
             # ==========================================
             # 1. 패키지명 <-> UID(App ID) 매핑 수집
             # ==========================================
@@ -40,12 +40,19 @@ class BatteryThermalAnalyzer(BaseParser):
             # 2. 써멀(발열) 분석
             # ==========================================
             if "Temperature" in clean_line or "CurrentValue" in clean_line:
-                m = self.re_thermal.search(clean_line)
-                if m:
-                    thermals.append({
-                        "sensor": m.group(2),
-                        "temperature": float(m.group(1))
-                    })
+
+                # 1순위: 신형 포맷 매칭 시도
+                m_new = self.re_thermal_new.search(clean_line)
+                if m_new:
+                    sensor_name = m_new.group(2)
+                    thermals[sensor_name] = float(m_new.group(1))
+                    continue # 매칭 성공 시 구형 포맷 검사는 스킵
+
+                # 2순위: 구형 포맷 매칭 시도
+                m_old = self.re_thermal_old.search(clean_line)
+                if m_old:
+                    sensor_name = m_old.group(2)
+                    thermals[sensor_name] = float(m_old.group(1))
 
             # ==========================================
             # 3. 웨이크락(배터리 점유) 분석 및 UID 매핑
@@ -82,6 +89,7 @@ class BatteryThermalAnalyzer(BaseParser):
                         "times": int(m.group(3))
                     })
 
+        thermals = [{"sensor": k, "temperature": v} for k, v in thermals.items()]
         return {
             "thermal_stats": thermals,
             "wakelock_stats": wakelocks

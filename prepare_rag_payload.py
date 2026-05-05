@@ -239,11 +239,12 @@ class RagPayloadBuilder:
 
                 rag_payload.append({"document": text_content, "metadata": meta})
 
+        battery_thermal = report_data.get("battery_thermal_stats", {})
         # ==========================================
         # 🚨 배터리 발열(Thermal) 기록 페이로드 변환
         # ==========================================
-        if "thermal_stats" in report_data:
-            for thermal in report_data["thermal_stats"]:
+        if "thermal_stats" in battery_thermal:
+            for thermal in battery_thermal["thermal_stats"]:
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Thermal_Stat",
@@ -256,8 +257,8 @@ class RagPayloadBuilder:
         # ==========================================
         # 🚨 Wakelock (배터리 광탈 주범) 기록 페이로드 변환
         # ==========================================
-        if "wakelock_stats" in report_data:
-            for wl in report_data["wakelock_stats"]:
+        if "wakelock_stats" in battery_thermal:
+            for wl in battery_thermal["wakelock_stats"]:
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Wakelock_Stat",
