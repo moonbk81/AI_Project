@@ -6,6 +6,50 @@ import pandas as pd
 import plotly.graph_objects as go
 import datetime
 
+import json
+import ast
+
+def parse_raw_logs(raw_data):
+    """
+    다양한 형태(JSON, 파이썬 리스트, 특수문자가 섞인 기형적 배열, 일반 텍스트 등)의
+    로그 데이터를 안전하게 파싱하여 리스트 형태로 반환합니다.
+    """
+    if isinstance(raw_data, list):
+        raw_logs = raw_data
+    elif isinstance(raw_data, str):
+        raw_data_clean = raw_data.strip()
+        try:
+            # 1단계: 정석적인 JSON 파싱
+            raw_logs = json.loads(raw_data_clean)
+            if not isinstance(raw_logs, list):
+                raw_logs = [raw_data_clean]
+        except Exception:
+            try:
+                # 2단계: 파이썬 문법의 리스트 문자열 (ast 모듈)
+                raw_logs = ast.literal_eval(raw_data_clean)
+                if not isinstance(raw_logs, list):
+                    raw_logs = [raw_data_clean]
+            except Exception:
+                # 3단계: 기형적인 배열 문자열 강제 분리
+                if raw_data_clean.startswith('[') and raw_data_clean.endswith(']'):
+                    inner_text = raw_data_clean[1:-1]
+                    if '", "' in inner_text:
+                        raw_logs = inner_text.split('", "')
+                    elif "', '" in inner_text:
+                        raw_logs = inner_text.split("', '")
+                    else:
+                        raw_logs = [inner_text]
+                    raw_logs = [log.strip(' "\'') for log in raw_logs]
+                else:
+                    # 4단계: 최후의 수단 (줄바꿈 분리)
+                    clean_text = raw_data_clean.replace('\\n', '\n').replace('\\r', '')
+                    raw_logs = clean_text.split('\n')
+    else:
+        raw_logs = []
+
+    # 빈 줄 제거 후 반환
+    return [log for log in raw_logs if str(log).strip()]
+
 def render_dns_analysis_chart(df):
     """패키지별 DNS 차단/실패 상세 원인 분석 차트 렌더링"""
     st.subheader("🎯 패키지별 DNS 차단/실패 상세 원인 분석")

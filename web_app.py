@@ -205,23 +205,10 @@ def render_chat_interface(key_suffix="main", show_input=True):
                             ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
 
                         raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                        if isinstance(raw_data, str):
-                            try:
-                                raw_logs = json.loads(raw_data)
-                                if not isinstance(raw_logs, list):
-                                    raw_logs = [raw_data]
-                            except:
-                                clean_text = raw_data.replace('\\n', '\n').replace('\\r', '')
-                                raw_logs = clean_text.strip().split('\n')
-                        elif isinstance(raw_data, list):
-                            raw_logs = raw_data
-                        else:
-                            raw_logs = []
+                        # 🚀 복잡한 파싱 로직을 함수 한 줄로 처리!
+                        raw_logs = ui.parse_raw_logs(raw_data)
 
-                        # 2. 공백 줄 제거
-                        raw_logs = [log for log in raw_logs if str(log).strip()]
-
-                        # 3. 화면 렌더링 (답답하지 않게 기본 5줄 -> 최대 10줄로 늘림)
+                        # 화면 렌더링
                         if raw_logs:
                             ref_text += "```text\n"
                             for log in raw_logs[:10]:
@@ -568,24 +555,10 @@ with tab_chat:
                         ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
 
                     raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                    # 1. 텍스트가 JSON 리스트형태면 파싱, 일반 텍스트면 줄바꿈 기준으로 나누기
-                    if isinstance(raw_data, str):
-                        try:
-                            raw_logs = json.loads(raw_data)
-                            if not isinstance(raw_logs, list):
-                                clean_text = raw_data.replace('\\n', '\n').replace('\\r', '')
-                                raw_logs = clean_text.strip().split('\n')
-                        except:
-                            raw_logs = raw_data.strip().split('\n')
-                    elif isinstance(raw_data, list):
-                        raw_logs = raw_data
-                    else:
-                        raw_logs = []
+                    # 🚀 복잡한 파싱 로직을 함수 한 줄로 처리!
+                    raw_logs = ui.parse_raw_logs(raw_data)
 
-                    # 2. 공백 줄 제거
-                    raw_logs = [log for log in raw_logs if str(log).strip()]
-
-                    # 3. 화면 렌더링 (답답하지 않게 기본 5줄 -> 최대 10줄로 늘림)
+                    # 화면 렌더링
                     if raw_logs:
                         ref_text += "```text\n"
                         for log in raw_logs[:10]:
