@@ -3,6 +3,14 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 
+def _ensure_dict(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
 def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     """
     단말의 9대 핵심 성능 지표(Health KPI)를 종합하여 반환합니다.
@@ -102,10 +110,10 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # ==========================================
     # 5. 🔋 발열(Thermal) 및 배터리 점유
     # ==========================================
-    battery_stats = report_data.get("battery_stats", {})
-    if isinstance(battery_stats, dict):
-        thermal_stats = battery_stats.get("thermal_stats", [])
-        wakelock_stats = battery_stats.get("wakelock_stats", [])
+    battery_thermal_stats = _ensure_dict(report_data.get("battery_thermal_stats", {}))
+    if isinstance(battery_thermal_stats, dict):
+        thermal_stats = battery_thermal_stats.get("thermal_stats", [])
+        wakelock_stats = battery_thermal_stats.get("wakelock_stats", [])
 
         max_temp = max([float(t.get("temperature", 0)) for t in thermal_stats]) if thermal_stats else "기록 없음"
         top_wl = sorted(wakelock_stats, key=lambda x: int(x.get("times", 0)), reverse=True)[0].get("app_name") if wakelock_stats else "없음"
@@ -414,13 +422,13 @@ def get_dns_latency_analytics(base_name: str, result_dir: str = "./result") -> s
 def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") -> str:
     """배터리 광탈 주범(Wakelock)과 기기 발열(Thermal) 최고 온도를 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
-    battery_stats = report_data.get("battery_stats", {})
+    battery_thermal_stats = _ensure_dict(report_data.get("battery_thermal_stats", {}))
 
-    if not isinstance(battery_stats, dict):
+    if not isinstance(battery_thermal_stats, dict):
         return json.dumps({"battery_facts": "데이터 없음"}, ensure_ascii=False)
 
-    thermal_stats = battery_stats.get("thermal_stats", [])
-    wakelock_stats = battery_stats.get("wakelock_stats", [])
+    thermal_stats = battery_thermal_stats.get("thermal_stats", [])
+    wakelock_stats = battery_thermal_stats.get("wakelock_stats", [])
 
     max_temp = 0
     if thermal_stats:

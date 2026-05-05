@@ -11,6 +11,8 @@ from parsers.ntn_processor import NtnProcessor
 from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
 from parsers.sat_at_parser import SatAtProcessor
+from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
+
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -24,6 +26,9 @@ class LogOrchestrator:
         self.dns_parser = DnsParser()
         self.crash_parser = CrashParser(self._get_surrounding_context_logs)
         self.battery_parser = BatteryParser()
+        self.battery_thermal_parser = BatteryThermalAnalyzer(
+            context_getter=self._get_surrounding_context_logs
+        )
         self.radio_power_parser = RadioPowerParser(self._get_surrounding_context_logs)
         self.net_ts_analyzer = NetworkTimeSeriesAnalyzer()
         self.ntn_processor = NtnProcessor(filename=self.base_name)
@@ -91,6 +96,8 @@ class LogOrchestrator:
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
             if net_usage := self.data_usage_parser.analyze(buckets['usage']): result['data_usage_stats'] = net_usage
             if dns_res := self.dns_parser.analyze(buckets['dns']): result['dns_queries'] = dns_res
+            if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
+                result["battery_thermal_stats"] = battery_thermal_res
 
             # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
             self.ntn_processor.save_ui_report("./result", self.base_name)
