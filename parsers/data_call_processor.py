@@ -5,10 +5,10 @@ from datetime import datetime
 from parsers.base import BaseParser
 
 class DataCallProcessor(BaseParser):
-    """RIL SETUP_DATA_CALL Request/Response 매칭 및 분석기"""
+    """RIL SETUP_DATA_CALL Request/Response 매칭 및 데이터 스톨(Stall) 분석기"""
 
     def __init__(self, context_getter=None):
-        super().__init__(context_getter) # log_path 완전 제거, 공통 의존성 주입
+        super().__init__(context_getter)
         self.parsed_data = []
 
     def analyze(self, lines):
@@ -182,6 +182,43 @@ class DataCallProcessor(BaseParser):
                             'latency_ms': 0
                         })
                         sess['active_state'] = current_active
+                continue
+
+            # ==========================================
+            # 4. DATA STALL & RECOVERY (스톨 감지 및 복구 액션)
+            # ==========================================
+            stall_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?(onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
+            if stall_match:
+                time_str, keyword, payload = stall_match.groups()
+
+                # Recovery Action 레벨 추출 (예: action=1, step=2 등)
+                action_m = re.search(r'(?:action|step|recoveryAction)\s*[=:]?\s*(\d+)', payload, re.IGNORECASE)
+                action_level = action_m.group(1) if action_m else "DETECTED"
+
+                # AOSP 표준 복구 시퀀스 매핑
+                action_desc = "UNKNOWN"
+                if action_level == "0": action_desc = "GET_DATA_CALL_LIST (상태 확인)"
+                elif action_level == "1": action_desc = "CLEANUP (PDP 해제 및 재연결)"
+                elif action_level == "2": action_desc = "REREGISTER (망 재등록)"
+                elif action_level == "3": action_desc = "RADIO_RESTART (모뎀 리셋)"
+                elif action_level == "4": action_desc = "MODEM_RESET (하드웨어 리셋)"
+                elif action_level == "DETECTED": action_desc = "스톨(병목) 현상 감지됨"
+
+                self.parsed_data.append({
+                    'event_type': 'DATA_STALL_RECOVERY',
+                    'req_time': time_str,
+                    'res_time': time_str,
+                    'token': 'STAL',
+                    'cid': 'N/A',
+                    'apn': 'N/A',
+                    'protocol': 'N/A',
+                    'network': 'N/A',
+                    'status': f"ACTION_{action_level}",
+                    'cause': action_desc,
+                    'latency_ms': 0,
+                    'raw_payload': payload.strip()
+                })
+                continue
 
         return self.parsed_data
 

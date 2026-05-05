@@ -484,3 +484,44 @@ def get_radio_power_analytics(base_name: str, result_dir: str = "./result") -> s
                 last_state = state
 
     return json.dumps({"radio_power_transitions": power_facts}, ensure_ascii=False)
+
+def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """데이터 스톨(병목) 감지 및 프레임워크의 복구 동작(Recovery Action) 시퀀스를 분석합니다."""
+    datacall_path = os.path.join(result_dir, f"{base_name}_datacall.json")
+    if not os.path.exists(datacall_path):
+        return json.dumps({"error": "Data call report not found. 데이터 스톨 분석 불가."})
+
+    with open(datacall_path, 'r', encoding='utf-8') as f:
+        dc_data = json.load(f)
+
+    # 파서가 추출한 'DATA_STALL_RECOVERY' 이벤트만 필터링
+    stall_events = [d for d in dc_data if d.get('event_type') == 'DATA_STALL_RECOVERY']
+
+    if not stall_events:
+        return json.dumps({
+            "status": "CLEAN",
+            "message": "해당 구간 내 데이터 스톨(병목) 및 복구 이력 없음 (정상)"
+        }, ensure_ascii=False)
+
+    # RF 환경(OOS/약전계) 교차 검증을 위해 메인 리포트도 로드
+    report_data = _load_report_json(base_name, result_dir)
+
+    analysis = []
+    for event in stall_events:
+        stall_time = event.get('req_time')
+
+        # 스톨 발생 시점 기준 ±5초 내외의 무선 환경 상태 확인 (어제 만든 함수 재활용!)
+        rf_context = _check_rf_correlation(stall_time, report_data, window_sec=5)
+
+        analysis.append({
+            "time": stall_time,
+            "action_status": event.get('status'),
+            "action_description": event.get('cause'),
+            "rf_correlation": rf_context,  # AI가 인과관계를 파악할 핵심 키
+            "raw_log": event.get('raw_payload')
+        })
+
+    return json.dumps({
+        "total_stall_events": len(stall_events),
+        "stall_and_recovery_facts": analysis
+    }, ensure_ascii=False)

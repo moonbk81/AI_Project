@@ -50,26 +50,33 @@
     "expected_log_types": ["OOS_Event", "Signal_Level"]
   },
 
-  {
+    {
     "id": "dns_001",
     "query": "인터넷이 안 되고 DNS 에러가 발생합니다.",
     "expected_intents": ["DNS_Latency"],
-    "expected_tools": ["get_dns_latency_analytics"],
-    "expected_log_types": ["Network_DNS_Issue", "Network_Timeline_Stat"]
+    "expected_tools": ["get_dns_latency_analytics", "get_data_stall_and_recovery_analytics"],
+    "expected_log_types": ["Network_DNS_Issue", "Network_Timeline_Stat", "Data_Stall_Recovery"]
   },
   {
     "id": "dns_002",
     "query": "앱 접속이 느리고 핑이 튀는 현상이 있습니다.",
     "expected_intents": ["DNS_Latency"],
-    "expected_tools": ["get_dns_latency_analytics"],
-    "expected_log_types": ["Network_Timeline_Stat", "Network_DNS_Issue"]
+    "expected_tools": ["get_dns_latency_analytics", "get_data_stall_and_recovery_analytics"],
+    "expected_log_types": ["Network_Timeline_Stat", "Network_DNS_Issue", "Data_Stall_Recovery"]
   },
   {
     "id": "dns_003",
     "query": "패킷 로스가 있고 데이터 속도가 너무 느려요.",
     "expected_intents": ["DNS_Latency"],
-    "expected_tools": ["get_dns_latency_analytics"],
-    "expected_log_types": ["Network_Timeline_Stat"]
+    "expected_tools": ["get_dns_latency_analytics", "get_data_stall_and_recovery_analytics"],
+    "expected_log_types": ["Network_Timeline_Stat", "Network_DNS_Issue", "Data_Stall_Recovery"]
+  },
+  {
+    "id": "dns_004",
+    "query": "데이터가 완전히 멈추고 스톨(Stall) 감지 로그가 보여요.",
+    "expected_intents": ["DNS_Latency"],
+    "expected_tools": ["get_dns_latency_analytics", "get_data_stall_and_recovery_analytics"],
+    "expected_log_types": ["Data_Stall_Recovery", "Network_DNS_Issue", "Network_Timeline_Stat"]
   },
 
   {
@@ -142,8 +149,8 @@
     "id": "multi_002",
     "query": "인터넷도 느리고 가끔 서비스 없음으로 바뀝니다.",
     "expected_intents": ["DNS_Latency", "Network_OOS"],
-    "expected_tools": ["get_dns_latency_analytics", "get_network_oos_analytics"],
-    "expected_log_types": ["Network_Timeline_Stat", "Network_DNS_Issue", "OOS_Event", "Signal_Level"]
+    "expected_tools": ["get_dns_latency_analytics", "get_network_oos_analytics", "get_data_stall_and_recovery_analytics"],
+    "expected_log_types": ["Network_Timeline_Stat", "Network_DNS_Issue", "OOS_Event", "Signal_Level", "Data_Stall_Recovery"]
   },
   {
     "id": "multi_003",
@@ -153,21 +160,23 @@
     "expected_log_types": ["Call_Session", "IMS_SIP_Message", "Battery_Drain_Report"]
   },
   {
-  "id": "multi_004",
-  "query": "비행기 모드 해제 후에도 데이터가 안 되고 DNS 실패가 발생합니다.",
-  "expected_intents": ["Radio_Power", "DNS_Latency", "Network_OOS"],
-  "expected_tools": [
-    "get_radio_power_analytics",
-    "get_dns_latency_analytics",
-    "get_network_oos_analytics"
-  ],
-  "expected_log_types": [
-    "Radio_Power_Event",
-    "Network_DNS_Issue",
-    "Network_Timeline_Stat",
-    "OOS_Event",
-    "Signal_Level"
-  ]
+    "id": "multi_004",
+    "query": "비행기 모드 해제 후에도 데이터가 안 되고 DNS 실패가 발생합니다.",
+    "expected_intents": ["Radio_Power", "DNS_Latency", "Network_OOS"],
+    "expected_tools": [
+      "get_radio_power_analytics",
+      "get_dns_latency_analytics",
+      "get_network_oos_analytics",
+      "get_data_stall_and_recovery_analytics"
+    ],
+    "expected_log_types": [
+      "Radio_Power_Event",
+      "Network_DNS_Issue",
+      "Network_Timeline_Stat",
+      "OOS_Event",
+      "Signal_Level",
+      "Data_Stall_Recovery"
+    ]
   },
   {
     "id": "ambiguous_001",

@@ -5,14 +5,16 @@
     "acceptable_tools": [
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
-      "get_radio_power_analytics"
+      "get_radio_power_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
       "Signal_Level",
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
-      "Radio_Power_Event"
+      "Radio_Power_Event",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -23,7 +25,8 @@
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
       "get_crash_anr_analytics",
-      "get_battery_thermal_analytics"
+      "get_battery_thermal_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "Call_Session",
@@ -32,7 +35,8 @@
       "Network_Timeline_Stat",
       "Crash_Event",
       "ANR_Context",
-      "Battery_Drain_Report"
+      "Battery_Drain_Report",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -42,7 +46,8 @@
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
       "get_crash_anr_analytics",
-      "get_radio_power_analytics"
+      "get_radio_power_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
@@ -50,7 +55,8 @@
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
       "Crash_Event",
-      "Radio_Power_Event"
+      "Radio_Power_Event",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -72,13 +78,15 @@
     "query": "인터넷이 됐다 안 됐다 합니다.",
     "acceptable_tools": [
       "get_dns_latency_analytics",
-      "get_network_oos_analytics"
+      "get_network_oos_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "Network_DNS_Issue",
       "Network_Timeline_Stat",
       "OOS_Event",
-      "Signal_Level"
+      "Signal_Level",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -87,14 +95,16 @@
     "acceptable_tools": [
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
-      "get_cs_call_analytics"
+      "get_cs_call_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
       "Signal_Level",
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
-      "Call_Session"
+      "Call_Session",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -103,14 +113,16 @@
     "acceptable_tools": [
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
-      "get_radio_power_analytics"
+      "get_radio_power_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
       "Signal_Level",
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
-      "Radio_Power_Event"
+      "Radio_Power_Event",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -119,14 +131,16 @@
     "acceptable_tools": [
       "get_cs_call_analytics",
       "get_network_oos_analytics",
-      "get_dns_latency_analytics"
+      "get_dns_latency_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "Call_Session",
       "OOS_Event",
       "Signal_Level",
       "Network_Timeline_Stat",
-      "Network_DNS_Issue"
+      "Network_DNS_Issue",
+      "Data_Stall_Recovery"
     ]
   }
 ]

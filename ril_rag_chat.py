@@ -43,6 +43,7 @@ class RilRagChat:
             "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None), # 없는 함수 방어 로직
             "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
             "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
+            "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
         }
 
     def _load_config(self):
@@ -153,35 +154,28 @@ class RilRagChat:
                 "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
             ])
 
-        # 7. 키워드 override
+                # 7. 키워드 override
         query_lower = query.lower()
 
+        # [Radio Power 오버라이드]
         if any(keyword in query_lower for keyword in [
-            "비행기 모드",
-            "airplane mode",
-            "flight mode",
-            "radio power",
-            "모뎀 전원",
-            "라디오 파워",
+            "비행기 모드", "airplane mode", "flight mode",
+            "radio power", "모뎀 전원", "라디오 파워",
         ]):
             selected_intents.add("Radio_Power")
-            selected_tools.add("get_radio_power_analytics")
-            selected_log_types.add("Radio_Power_Event")
+            if "Radio_Power" in self.routing_map:
+                selected_tools.update(self.routing_map["Radio_Power"].get("tools", []))
+                selected_log_types.update(self.routing_map["Radio_Power"].get("log_types", []))
 
+        # [DNS / Data Stall 오버라이드]
         if any(keyword in query_lower for keyword in [
-            "dns",
-            "데이터",
-            "인터넷",
-            "패킷",
-            "ping",
-            "핑",
+            "dns", "데이터", "인터넷", "패킷", "ping", "핑", "스톨", "먹통",
         ]):
             selected_intents.add("DNS_Latency")
-            selected_tools.add("get_dns_latency_analytics")
-            selected_log_types.update([
-                "Network_DNS_Issue",
-                "Network_Timeline_Stat",
-            ])
+            if "DNS_Latency" in self.routing_map:
+                # 하드코딩 대신 config.yaml(routing_map)의 배열을 그대로 가져와서 붙임!
+                selected_tools.update(self.routing_map["DNS_Latency"].get("tools", []))
+                selected_log_types.update(self.routing_map["DNS_Latency"].get("log_types", []))
 
         # 8. Top 점수 로그용 정리
         top_matches = [
