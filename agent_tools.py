@@ -219,16 +219,95 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
 
     if isinstance(anr_data, dict) and anr_data:
         anr_data = [anr_data]
+    elif not isinstance(anr_data, list):
+        anr_data = []
 
     if anr_data:
         has_fatal_or_anr = True
-        kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = [
-            {
+
+        anr_events = []
+        for a in anr_data:
+            if not isinstance(a, dict):
+                continue
+
+            process_info = a.get("process_info", {}) or {}
+            analysis_summary = a.get("analysis_summary", {}) or {}
+            lock_chain = a.get("lock_chain", {}) or {}
+            main_info = a.get("main", {}) or {}
+            main_stack = main_info.get("stack", []) or []
+            binder_txs = a.get("active_binder_transactions", []) or []
+            context_analysis = a.get("context_analysis", {}) or {}
+            pre_anr_logcat = a.get("pre_anr_logcat", []) or []
+
+            root_cause_candidates = []
+            if analysis_summary.get("has_lock_contention"):
+                root_cause_candidates.append(
+                    f"Main thread lock wait: blocker_tid={lock_chain.get('blocker_thread')}, lock={lock_chain.get('lock_address')}"
+                )
+            if analysis_summary.get("has_active_binder"):
+                target_pids = sorted({str(tx.get("to_pid")) for tx in binder_txs if isinstance(tx, dict) and tx.get("to_pid")})
+                root_cause_candidates.append(
+                    f"Main thread outgoing Binder wait: target_pid={', '.join(target_pids) if target_pids else 'Unknown'}"
+                )
+            if analysis_summary.get("has_cpu_hint"):
+                root_cause_candidates.append("CPU usage/load 관련 힌트 존재")
+            if analysis_summary.get("has_system_server_hint"):
+                root_cause_candidates.append("system_server/InputDispatcher/ActivityManager 관련 힌트 존재")
+            if analysis_summary.get("has_io_hint"):
+                root_cause_candidates.append("I/O wait 또는 disk 관련 힌트 존재")
+
+            if not root_cause_candidates:
+                root_cause_candidates.append("명확한 lock/binder/CPU/system_server/I/O 원인 힌트 없음")
+
+            anr_events.append({
                 "time": a.get("time"),
-                "process": a.get("process", "Unknown"),
-                "reason": a.get("reason", "Unknown ANR Reason")
-            } for a in anr_data
-        ]
+                "process": a.get("process") or process_info.get("name", "Unknown"),
+                "pid": process_info.get("pid"),
+                "reason": a.get("reason", "Unknown ANR Reason"),
+                "summary_flags": {
+                    "has_main_stack": analysis_summary.get("has_main_stack", False),
+                    "has_lock_contention": analysis_summary.get("has_lock_contention", False),
+                    "has_active_binder": analysis_summary.get("has_active_binder", False),
+                    "has_cpu_hint": analysis_summary.get("has_cpu_hint", False),
+                    "has_system_server_hint": analysis_summary.get("has_system_server_hint", False),
+                    "has_io_hint": analysis_summary.get("has_io_hint", False),
+                    "has_pre_anr_logcat": analysis_summary.get("has_pre_anr_logcat", False)
+                },
+                "root_cause_candidates": root_cause_candidates,
+                "main_thread_top_stack": main_stack[:8],
+                "lock_chain": {
+                    "waiting_thread": lock_chain.get("waiting_thread"),
+                    "blocker_thread": lock_chain.get("blocker_thread"),
+                    "lock_address": lock_chain.get("lock_address")
+                },
+                "binder_targets": [
+                    {
+                        "to_pid": tx.get("to_pid"),
+                        "to_tid": tx.get("to_tid"),
+                        "code": tx.get("code")
+                    }
+                    for tx in binder_txs[:5]
+                    if isinstance(tx, dict)
+                ],
+                "context_log_counts": {
+                    "cpu": len(context_analysis.get("cpu_logs", []) or []),
+                    "system_server": len(context_analysis.get("system_server_logs", []) or []),
+                    "io": len(context_analysis.get("io_logs", []) or []),
+                    "pre_anr_logcat": len(pre_anr_logcat)
+                }
+            })
+
+        kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = anr_events
+    if has_fatal_or_anr and "anr_events" in kpi_report["10_system_crash_and_fatal_errors"]:
+        anr_events = kpi_report["10_system_crash_and_fatal_errors"].get("anr_events", [])
+        kpi_report["10_system_crash_and_fatal_errors"]["anr_summary"] = {
+            "total_anrs": len(anr_events),
+            "lock_contention_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_lock_contention")),
+            "binder_wait_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_active_binder")),
+            "cpu_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_cpu_hint")),
+            "system_server_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_system_server_hint")),
+            "io_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_io_hint"))
+        }
 
     if not has_fatal_or_anr:
         kpi_report["10_system_crash_and_fatal_errors"] = "시스템 크래시/FATAL 에러 발생 이력 없음 (안정적)"
@@ -464,7 +543,7 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
     }, ensure_ascii=False)
 
 def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str:
-    """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력을 추출합니다."""
+    """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력과 ANR 원인 분석 힌트를 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     crashes = report_data.get("crash_context", [])
     anr = report_data.get("anr_context", [])
@@ -477,17 +556,68 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
             "type": c.get("crash_type")
         })
 
-    anr_facts = []
     if isinstance(anr, dict):
         anr = [anr] if anr else []
+    elif not isinstance(anr, list):
+        anr = []
 
+    anr_facts = []
     for a in anr:
-        if a.get("time"):
-            anr_facts.append({
-                "time": anr.get("time"),
-                "process": anr.get("process", "Unknown"),
-                "reason": anr.get("reason", "")
-            })
+        if not isinstance(a, dict):
+            continue
+
+        process_info = a.get("process_info", {}) or {}
+        analysis_summary = a.get("analysis_summary", {}) or {}
+        lock_chain = a.get("lock_chain", {}) or {}
+        main_info = a.get("main", {}) or {}
+        main_stack = main_info.get("stack", []) or []
+        binder_txs = a.get("active_binder_transactions", []) or []
+        context_analysis = a.get("context_analysis", {}) or {}
+        pre_anr_logcat = a.get("pre_anr_logcat", []) or []
+
+        blocker_stack = lock_chain.get("blocker_stack") or []
+
+        anr_facts.append({
+            "time": a.get("time"),
+            "process": a.get("process") or process_info.get("name", "Unknown"),
+            "pid": process_info.get("pid"),
+            "reason": a.get("reason", ""),
+            "main_thread": {
+                "tid": main_info.get("tid"),
+                "top_stack": main_stack[:12]
+            },
+            "lock_analysis": {
+                "has_lock_contention": analysis_summary.get("has_lock_contention", False),
+                "waiting_thread": lock_chain.get("waiting_thread"),
+                "blocker_thread": lock_chain.get("blocker_thread"),
+                "lock_address": lock_chain.get("lock_address"),
+                "blocker_top_stack": blocker_stack[:12]
+            },
+            "binder_analysis": {
+                "has_active_binder": analysis_summary.get("has_active_binder", False),
+                "transactions": [
+                    {
+                        "from_pid": tx.get("from_pid"),
+                        "from_tid": tx.get("from_tid"),
+                        "to_pid": tx.get("to_pid"),
+                        "to_tid": tx.get("to_tid"),
+                        "code": tx.get("code"),
+                        "raw": tx.get("raw")
+                    }
+                    for tx in binder_txs[:10]
+                    if isinstance(tx, dict)
+                ]
+            },
+            "context_hints": {
+                "has_cpu_hint": analysis_summary.get("has_cpu_hint", False),
+                "has_system_server_hint": analysis_summary.get("has_system_server_hint", False),
+                "has_io_hint": analysis_summary.get("has_io_hint", False),
+                "cpu_logs": (context_analysis.get("cpu_logs", []) or [])[-20:],
+                "system_server_logs": (context_analysis.get("system_server_logs", []) or [])[-20:],
+                "io_logs": (context_analysis.get("io_logs", []) or [])[-20:]
+            },
+            "pre_anr_logcat_tail": pre_anr_logcat[-40:]
+        })
 
     return json.dumps({
         "crash_count": len(crashes),

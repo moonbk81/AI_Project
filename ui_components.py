@@ -603,6 +603,68 @@ def render_crash_analyzer(report_data):
             with st.expander(f"🐌 [{anr_time}] ANR 발생 - {anr_process} (PID: {anr_pid})"):
                 st.markdown(f"**ANR 원인(Reason):** `{anr_reason}`")
 
+                # ---------------------------------------------------------
+                # 🧭 ANR 분석 요약 카드
+                # ---------------------------------------------------------
+                analysis_summary = anr_data.get('analysis_summary', {})
+                if analysis_summary:
+                    st.markdown("**🧭 ANR 분석 요약:**")
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Main Stack", "있음" if analysis_summary.get('has_main_stack') else "없음")
+                    c2.metric("Lock 병목", "감지" if analysis_summary.get('has_lock_contention') else "없음")
+                    c3.metric("Binder 대기", "감지" if analysis_summary.get('has_active_binder') else "없음")
+                    c4.metric("직전 로그", "있음" if analysis_summary.get('has_pre_anr_logcat') else "없음")
+
+                    c5, c6, c7 = st.columns(3)
+                    c5.metric("CPU 힌트", "있음" if analysis_summary.get('has_cpu_hint') else "없음")
+                    c6.metric("system_server 힌트", "있음" if analysis_summary.get('has_system_server_hint') else "없음")
+                    c7.metric("I/O 힌트", "있음" if analysis_summary.get('has_io_hint') else "없음")
+
+                # ---------------------------------------------------------
+                # 🧩 ANR 직전 Logcat Context
+                # ---------------------------------------------------------
+                pre_anr_logs = anr_data.get('pre_anr_logcat', [])
+                if pre_anr_logs:
+                    with st.expander("🧩 ANR 직전 Logcat Context 보기", expanded=False):
+                        st.caption("ANR 감지 직전의 주변 로그입니다. 앱 로그, ActivityManager, InputDispatcher 흐름 확인에 사용합니다.")
+                        st.code("\n".join(pre_anr_logs[-120:]), language='log')
+
+                # ---------------------------------------------------------
+                # 🧠 CPU / system_server / I/O 보조 분석 로그
+                # ---------------------------------------------------------
+                context_analysis = anr_data.get('context_analysis', {})
+                if context_analysis:
+                    cpu_logs = context_analysis.get('cpu_logs', [])
+                    system_server_logs = context_analysis.get('system_server_logs', [])
+                    io_logs = context_analysis.get('io_logs', [])
+
+                    if cpu_logs or system_server_logs or io_logs:
+                        st.markdown("**🧠 보조 분석 로그:**")
+
+                        tab_cpu, tab_system, tab_io = st.tabs(["CPU", "system_server", "I/O"])
+
+                        with tab_cpu:
+                            if cpu_logs:
+                                st.caption("CPU usage / Load 관련 로그입니다. ANR 시점에 CPU 과점유 또는 부하가 있었는지 확인합니다.")
+                                st.code("\n".join(cpu_logs[-80:]), language='log')
+                            else:
+                                st.info("CPU 관련 힌트 로그가 없습니다.")
+
+                        with tab_system:
+                            if system_server_logs:
+                                st.caption("ActivityManager, InputDispatcher, WindowManager, Watchdog 등 system_server 관련 로그입니다.")
+                                st.code("\n".join(system_server_logs[-80:]), language='log')
+                            else:
+                                st.info("system_server 관련 힌트 로그가 없습니다.")
+
+                        with tab_io:
+                            if io_logs:
+                                st.caption("iowait, blocked, disk, fsync, StrictMode 등 I/O 지연 의심 로그입니다.")
+                                st.code("\n".join(io_logs[-80:]), language='log')
+                            else:
+                                st.info("I/O 관련 힌트 로그가 없습니다.")
+
                 lock_chain = anr_data.get('lock_chain', {})
                 if lock_chain and lock_chain.get('blocker_thread'):
                     st.markdown("**⛔ 데드락(Lock) 병목 감지:**")
@@ -615,13 +677,25 @@ def render_crash_analyzer(report_data):
                 binder_txs = anr_data.get('active_binder_transactions', [])
                 if binder_txs:
                     st.markdown("**🔗 대기 중인 Binder 트랜잭션 (Outgoing):**")
+
+                    binder_rows = []
                     for tx in binder_txs:
-                        st.info(f"Target PID: {tx['to_pid']}, TID: {tx['to_tid']} (Code: {tx['code']})")
+                        binder_rows.append({
+                            "from_pid": tx.get('from_pid', '-'),
+                            "from_tid": tx.get('from_tid', '-'),
+                            "to_pid": tx.get('to_pid', '-'),
+                            "to_tid": tx.get('to_tid', '-'),
+                            "code": tx.get('code', '-'),
+                            "raw": tx.get('raw', '')
+                        })
+
+                    st.dataframe(pd.DataFrame(binder_rows), use_container_width=True)
 
                 main_stack = anr_data.get('main', {}).get('stack', [])
                 if main_stack:
-                    st.markdown("**메인 스레드 콜스택:**")
-                    st.code("\n".join(main_stack[:15]) + ("\n... (중략)" if len(main_stack) > 15 else ""), language='java')
+                    st.markdown("**🧵 메인 스레드 콜스택:**")
+                    with st.expander("Main Thread 전체 Stack 보기", expanded=True):
+                        st.code("\n".join(main_stack), language='java')
 
     if crash_data:
         st.error(f"🚨 총 {len(crash_data)}건의 크래시/FATAL 에러가 감지되었습니다!")

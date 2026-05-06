@@ -173,6 +173,12 @@ class AnrParser(BaseParser):
         anr_reason_re = re.compile(r'ActivityManager:\s+Reason:\s+(.+)')
         cmd_line_re = re.compile(r'Cmd line:\s+(.+)')
 
+        cpu_re = re.compile(r'CPU usage from|CPU usage since|Load:')
+        system_server_re = re.compile(r'system_server|Watchdog|ActivityManager|InputDispatcher|WindowManager')
+        io_re = re.compile(r'\biowait\b|\bblocked\b|slow operation|StrictMode|fsync|disk|I/O|io ', re.I)
+
+        pre_context = deque(maxlen=120)
+
         all_threads = {}
         target_pid = None
         main_tid = None
@@ -184,10 +190,15 @@ class AnrParser(BaseParser):
         in_binder = False
         matched_tx = []
 
+        cpu_logs = []
+        system_server_logs = []
+        io_logs = []
+
         def reset_trace_state():
             nonlocal all_threads, target_pid, main_tid
             nonlocal in_anr_trace, in_target_process, current_tid
             nonlocal in_binder, matched_tx
+            nonlocal cpu_logs, system_server_logs, io_logs
 
             all_threads = {}
             target_pid = None
@@ -197,6 +208,9 @@ class AnrParser(BaseParser):
             current_tid = None
             in_binder = False
             matched_tx = []
+            cpu_logs = []
+            system_server_logs = []
+            io_logs = []
 
         def find_cmd_line(start_idx):
             for k in range(1, 6):
@@ -209,6 +223,19 @@ class AnrParser(BaseParser):
                     return m.group(1).strip()
 
             return None
+
+        def collect_context_hint(clean_line):
+            if cpu_re.search(clean_line):
+                cpu_logs.append(clean_line)
+
+            if system_server_re.search(clean_line):
+                if current_anr and current_anr.get("process") in clean_line:
+                    system_server_logs.append(clean_line)
+                elif "ANR" in clean_line or "InputDispatcher" in clean_line or "Watchdog" in clean_line:
+                    system_server_logs.append(clean_line)
+
+            if io_re.search(clean_line):
+                io_logs.append(clean_line)
 
         def finalize_current_anr():
             if not current_anr:
@@ -246,7 +273,11 @@ class AnrParser(BaseParser):
                 "analysis_summary": {
                     "has_lock_contention": lock_info is not None,
                     "has_active_binder": len(matched_tx) > 0,
-                    "has_main_stack": len(main_stack) > 0
+                    "has_main_stack": len(main_stack) > 0,
+                    "has_cpu_hint": len(cpu_logs) > 0,
+                    "has_system_server_hint": len(system_server_logs) > 0,
+                    "has_io_hint": len(io_logs) > 0,
+                    "has_pre_anr_logcat": len(current_anr.get("pre_anr_logcat", [])) > 0
                 },
                 "lock_chain": {
                     "waiting_thread": main_tid,
@@ -254,7 +285,12 @@ class AnrParser(BaseParser):
                     "lock_address": lock_info["addr"] if lock_info else None,
                     "blocker_stack": blocker_stack
                 },
-                "active_binder_transactions": matched_tx
+                "active_binder_transactions": matched_tx,
+                "context_analysis": {
+                    "cpu_logs": cpu_logs[-80:],
+                    "system_server_logs": system_server_logs[-80:],
+                    "io_logs": io_logs[-80:]
+                }
             })
 
             anr_list.append(current_anr)
@@ -263,6 +299,7 @@ class AnrParser(BaseParser):
 
         for i, line in enumerate(lines):
             clean_line = self.clean_line(line)
+            collect_context_hint(clean_line)
 
             # 1. ANR 시작 감지
             if anr_m := anr_start_re.search(clean_line):
@@ -273,41 +310,41 @@ class AnrParser(BaseParser):
 
                 process_name = anr_m.group(1)
 
-                # 특정 패키지만 보고 싶을 때 필터링
                 if target_package and process_name != target_package:
                     current_anr = None
+                    pre_context.append(clean_line)
                     continue
 
                 current_anr = {
                     "time": "Unknown",
                     "process": process_name,
                     "reason": "Unknown",
-                    "raw_log": clean_line + "\n"
+                    "raw_log": clean_line + "\n",
+                    "pre_anr_logcat": list(pre_context)
                 }
 
                 if ts_m := RE_TIME.search(clean_line):
                     current_anr["time"] = ts_m.group(0)
 
+                pre_context.append(clean_line)
                 continue
 
-            # ANR 대상이 없으면 아래 분석 생략
             if not current_anr:
+                pre_context.append(clean_line)
                 continue
 
-            # 2. ANR Reason 수집
+            # 2. Reason 수집
             if reason_m := anr_reason_re.search(clean_line):
                 current_anr["reason"] = reason_m.group(1)
                 current_anr["raw_log"] += clean_line + "\n"
-                continue
 
-            # 3. VM TRACES 시작
+            # 3. ANR traces 진입
             if DIAG_PATTERNS['ANR_TRACES'].search(line):
                 in_anr_trace = True
-                in_target_process = False
-                current_tid = None
+                pre_context.append(clean_line)
                 continue
 
-            # 4. VM TRACES 안에서 대상 프로세스 PID 찾기
+            # 4. 대상 PID / Cmd line 매칭
             if in_anr_trace:
                 pid_m = DIAG_PATTERNS['PID_LINE'].search(line)
 
@@ -323,9 +360,10 @@ class AnrParser(BaseParser):
                         in_target_process = False
                         current_tid = None
 
+                    pre_context.append(clean_line)
                     continue
 
-                # 5. 대상 프로세스의 thread stack 수집
+                # 5. main thread / thread stack 수집
                 if in_target_process:
                     thread_m = DIAG_PATTERNS['THREAD_HEADER'].search(line.strip())
 
@@ -351,6 +389,7 @@ class AnrParser(BaseParser):
             # 6. Binder transaction 분석
             if "BINDER TRANSACTIONS" in line:
                 in_binder = True
+                pre_context.append(clean_line)
                 continue
 
             if in_binder and "BINDER" in line and ":" not in line and "TRANSACTIONS" not in line:
@@ -371,8 +410,11 @@ class AnrParser(BaseParser):
                         "from_tid": out_m.group(2),
                         "to_pid": out_m.group(3),
                         "to_tid": out_m.group(4),
-                        "code": out_m.group(5)
+                        "code": out_m.group(5),
+                        "raw": clean_line
                     })
+
+            pre_context.append(clean_line)
 
         if current_anr:
             finalize_current_anr()
