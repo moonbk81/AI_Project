@@ -726,6 +726,10 @@ def render_service_state_timeline(df):
         v_reg = str(row.get('voice_reg', 'Unknown'))
         d_reg = str(row.get('data_reg', 'Unknown'))
 
+        # 💡 [핵심 추가] 파서에서 넘어온 망 사업자 및 Radio Tech 정보 추출
+        operator_info = row.get('operator', 'Unknown')
+        radio_tech = row.get('rat', 'Unknown')
+
         # Parser가 넘겨준 "0(IN_SERVICE)" 등에서 상태 규격화
         def map_reg_state(reg_str):
             if not reg_str or reg_str == 'nan': return "UNKNOWN"
@@ -742,7 +746,9 @@ def render_service_state_timeline(df):
             "State": map_reg_state(v_reg),
             "Raw_Reg": v_reg,
             "Event": row.get('event', row.get('event_type', 'Unknown')),
-            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None'))
+            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None')),
+            "Operator": operator_info, # 신규 데이터 연동
+            "Radio_Tech": radio_tech   # 신규 데이터 연동
         })
         records.append({
             "time": time_val,
@@ -751,7 +757,9 @@ def render_service_state_timeline(df):
             "State": map_reg_state(d_reg),
             "Raw_Reg": d_reg,
             "Event": row.get('event', row.get('event_type', 'Unknown')),
-            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None'))
+            "Cause": row.get('candidate_reason', row.get('root_cause_candidate', 'None')),
+            "Operator": operator_info, # 신규 데이터 연동
+            "Radio_Tech": radio_tech   # 신규 데이터 연동
         })
 
     state_df = pd.DataFrame(records)
@@ -770,29 +778,41 @@ def render_service_state_timeline(df):
         st.info("표시할 상태 변화가 없습니다.")
         return
 
+    import datetime
     current_year = datetime.datetime.now().year
     clean_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + clean_df['time'], format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
 
     # 시간 순으로 전체 데이터프레임 완벽 정렬
     clean_df = clean_df.sort_values(by=['time_dt', 'Slot', 'Type']).reset_index(drop=True)
 
+    # 💡 [추가 UI 로직] IN_SERVICE로 복구되었을 때 그래프에 즉시 보여줄 라벨 생성
+    clean_df['Label'] = clean_df.apply(
+        lambda x: f"[{x['Radio_Tech']}] {x['Operator']}" if x['State'] == 'IN_SERVICE' else "",
+        axis=1
+    )
+
     # Y축 카테고리 순서 고정
     category_order = ["POWER_OFF", "EMERGENCY_ONLY", "OUT_OF_SERVICE", "IN_SERVICE"]
 
-    # 🚨 [버그 수정 2] x축을 'time_dt'로 변경
+    # 🚨 px.line에 hover_data와 text 파라미터 업데이트 적용
     fig = px.line(
         clean_df, x='time_dt', y='State', color='Type', facet_row='Slot',
         line_shape='hv', markers=True,
+        text='Label', # 💡 점(Marker) 옆에 망 정보 출력
         title="시간대별 Voice / Data 등록 상태 변화 (상태 변경 시점에만 마커 표시)",
         labels={'time_dt': '발생 시간', 'State': '현재 상태', 'Type': '통신 유형'},
-        hover_data=['Event', 'Cause', 'Raw_Reg'],
+        hover_data=['Event', 'Cause', 'Raw_Reg', 'Operator', 'Radio_Tech'], # 💡 툴팁(마우스 오버)에도 세부 정보 추가
         category_orders={"State": category_order}
     )
 
-    fig.update_traces(marker=dict(size=8, line=dict(width=1, color='DarkSlateGrey')))
+    fig.update_traces(
+        marker=dict(size=8, line=dict(width=1, color='DarkSlateGrey')),
+        textposition="top right", # 라벨이 그래프 선을 가리지 않도록 위치 조정
+        textfont=dict(size=11)
+    )
     fig.update_yaxes(categoryorder='array', categoryarray=category_order)
 
-    # 🚨 [추가] X축 포맷 예쁘게 다듬기 (연도 감추고 월-일 시:분:초)
+    # X축 포맷 예쁘게 다듬기 (연도 감추고 월-일 시:분:초)
     fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
 
     chart_height = max(300, 200 * clean_df['Slot'].nunique())

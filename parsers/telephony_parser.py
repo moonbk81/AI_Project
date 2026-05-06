@@ -20,15 +20,102 @@ class TelephonyParser(BaseParser):
 
     def analyze(self, lines):
         all_sessions, oos_history = [], []
+        call_log_dumps = []
         current_session = None
+        dump_current_session = None
         target_phone_id = None
         in_radio = False
+        in_call_log = False
+
+        import re
+        dump_time_re = re.compile(r'\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})')
 
         for line in lines:
             clean_line = line.strip()
             ts_m = RE_TIME.search(clean_line)
             ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
 
+            # ==========================================
+            # 1. Framework Dump (Call Log) 심층 상태 추적 파싱
+            # ==========================================
+            if clean_line.startswith("Call Log") or "DUMP OF SERVICE telecom" in clean_line:
+                in_call_log = True
+                continue
+
+            if in_call_log:
+                if clean_line.startswith("---------") or ("DUMP OF" in clean_line and "telecom" not in clean_line):
+                    in_call_log = False
+                    if dump_current_session:
+                        call_log_dumps.append(dump_current_session)
+                        dump_current_session = None
+                    continue
+
+                dt_match = dump_time_re.search(clean_line)
+                if not dt_match:
+                    continue
+
+                date_str, time_str = dt_match.group(1), dt_match.group(2)
+                d_ts = f"{date_str} {time_str}.000"
+
+                # (1) 380 에러 발생 -> 기존 IMS 끊고 CS 리다이얼 생성
+                if "CODE_LOCAL_CALL_CS_RETRY_REQUIRED" in clean_line or "380, ALTERNATIVE SERVICE" in clean_line:
+                    if dump_current_session:
+                        dump_current_session["end_time"] = d_ts
+                        dump_current_session["status"] = "FAIL (CS_FALLBACK)"
+                        dump_current_session["fail_reason"] = "380 Alternative Service"
+                        dump_current_session["logs"].append(f"[{d_ts}] IMS Call Failed by 380 -> Triggering CS Redial")
+                        call_log_dumps.append(dump_current_session)
+
+                    # 새로운 CS 리다이얼 세션 오픈
+                    dump_current_session = {
+                        "type": "CS",
+                        "slot": "Unknown",
+                        "start_time": d_ts,
+                        "end_time": None,
+                        "id": "RESTORED_CS",
+                        "status": "DIALING",
+                        "is_user_reject": False,
+                        "fail_reason": "0",
+                        "logs": [f"[{d_ts}] CS Silent Redial Started", clean_line]
+                    }
+
+                # (2) 통화 연결 (ACTIVE 상태 감지)
+                elif dump_current_session and ",ACTIVE," in clean_line:
+                    dump_current_session["status"] = "SUCCESS"
+                    dump_current_session["logs"].append(f"[{d_ts}] Call Active: {clean_line}")
+
+                # 💡 (3) [핵심 수정] 통화 종료 판단 로직 (CS와 PS 엄격 분리 및 방어)
+                elif dump_current_session and (
+                    (dump_current_session["type"] == "CS" and any(kw in clean_line for kw in ["> HANGUP", "< GET_CURRENT_CALLS {}"])) or
+                    (dump_current_session["type"] != "CS" and any(kw in clean_line for kw in ["> terminate", "> close", "> HANGUP", "< GET_CURRENT_CALLS {}"]) and "redialToCs" not in clean_line)
+                ):
+                    dump_current_session["end_time"] = d_ts
+                    if dump_current_session["status"] == "DIALING":
+                        dump_current_session["status"] = "CALL DROP" # 연결 전 끊김
+                    dump_current_session["logs"].append(f"[{d_ts}] Call Ended: {clean_line}")
+                    call_log_dumps.append(dump_current_session)
+                    dump_current_session = None
+
+                # (4) 정확한 통화 시작 감지
+                elif not dump_current_session and any(kw in clean_line for kw in ["> makeCall", "> DIAL", "> EMERGENCY_DIAL"]):
+                    call_type = "PS(VoLTE)" if "makeCall" in clean_line else "CS"
+                    dump_current_session = {
+                        "type": call_type,
+                        "slot": "Unknown",
+                        "start_time": d_ts,
+                        "end_time": None,
+                        "id": "RESTORED_" + call_type[:2],
+                        "status": "DIALING",
+                        "is_user_reject": False,
+                        "fail_reason": "0",
+                        "logs": [f"[{d_ts}] Call Initiated", clean_line]
+                    }
+
+                continue
+
+            # ==========================================
+            # 2. Radio Log 구간 (기존 로직 유지)
+            # ==========================================
             if "logcat -b radio" in line or "--------- beginning of radio" in line:
                 in_radio = True
                 continue
@@ -45,7 +132,6 @@ class TelephonyParser(BaseParser):
                 tag = tag_m.group(1).strip() if tag_m else None
                 if not tag or tag not in VALID_TAGS: continue
 
-                # 1. OOS 분석 로직
                 if TEL_PATTERNS['SST_POLL'].search(clean_line) and "newSS={" in clean_line:
                     ss_data = clean_line.split("newSS={")[1].rsplit("}", 1)[0]
                     v_reg, d_reg = self._parse_sst_val(ss_data, 'v_reg'), self._parse_sst_val(ss_data, 'd_reg')
@@ -90,7 +176,6 @@ class TelephonyParser(BaseParser):
                         oos_history.append(oos_event)
                         self.last_slot_states[slot_id] = {"v": v_reg[0], "d": d_reg[0]}
 
-                # 2. Call 세션 시작 매칭
                 is_cs = TEL_PATTERNS['CS_START'].search(clean_line)
                 is_ps = TEL_PATTERNS['PS_START'].search(clean_line)
                 if is_cs or is_ps:
@@ -106,7 +191,6 @@ class TelephonyParser(BaseParser):
                     }
                     continue
 
-                # 3. Call 세션 진행 중 추적
                 if current_session:
                     is_low_level_in_ps = (current_session["type"] == "PS(VoLTE)" and tag in PS_EXCLUDE_TAGS)
                     if is_low_level_in_ps: continue
@@ -127,11 +211,34 @@ class TelephonyParser(BaseParser):
                     if TEL_PATTERNS['FAIL_EV'].search(clean_line) and ims_m:
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
 
-                    if ims_m:
-                        if ims_m.group(1) in ["501", "510"]:
-                            current_session["status"], current_session["fail_reason"] = "SUCCESS", f"{ims_m.group(1)}: {ims_m.group(2)}"
+                    is_380_fallback = ("380" in clean_line and "INVITE" in clean_line and ("Alternative" in clean_line or "Unknown" in clean_line))
+
+                    if ims_m or is_380_fallback:
+                        code = ims_m.group(1) if ims_m else "380"
+                        reason = ims_m.group(2) if ims_m else "Alternative Service (Silent Redial)"
+
+                        if code in ["501", "510"]:
+                            current_session["status"], current_session["fail_reason"] = "SUCCESS", f"{code}: {reason}"
+                        elif code == "380":
+                            current_session["status"] = "CS_FALLBACK"
+                            current_session["fail_reason"] = f"{code}: {reason}"
+                            current_session["end_time"] = ts
+                            all_sessions.append(current_session)
+
+                            current_session = {
+                                "type": "CS",
+                                "slot": current_session.get("slot", "PHONE0"),
+                                "start_time": ts,
+                                "end_time": None,
+                                "id": "SILENT_REDIAL",
+                                "status": "Unknown",
+                                "is_user_reject": False,
+                                "fail_reason": "0",
+                                "logs": [f"==> [CS_FALLBACK_START]: Silent Redial Triggered by 380 Error", clean_line]
+                            }
+                            continue
                         else:
-                            current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
+                            current_session["status"], current_session["fail_reason"] = "FAIL", f"{code}: {reason}"
 
                     cs_m = TEL_PATTERNS['CS_REASON'].search(clean_line)
                     cs_fail_cause = ['34', '41', '42', '44', '49', '58', '65535']
@@ -141,7 +248,6 @@ class TelephonyParser(BaseParser):
                         current_session["status"] = "CALL DROP" if cs_m.group(1) in cs_fail_cause else "SUCCESS"
                         current_session["fail_reason"] = f"{cs_m.group(1)}({readerable_reason}): {cs_m.group(2)}({readerable_vendor_cause})"
 
-                    # 세션 종료 판정
                     if TEL_PATTERNS['END_EV'].search(clean_line):
                         current_session["end_time"] = ts
                         current_session["logs"].append(f"==> [END_{target_phone_id}]: {clean_line}")
@@ -154,4 +260,42 @@ class TelephonyParser(BaseParser):
                         target_phone_id = None
 
             self.pre_context.append(clean_line)
+
+        # ==========================================
+        # 3. 루프 종료 후 남은 세션 수거 및 스마트 병합 (초 단위)
+        # ==========================================
+        if current_session:
+            all_sessions.append(current_session)
+        if dump_current_session:
+            call_log_dumps.append(dump_current_session)
+
+        def time_to_sec(t_str):
+            try:
+                parts = t_str.split(" ")[1].split(".")[0].split(":")
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            except:
+                return 0
+
+        for dump_call in call_log_dumps:
+            d_sec = time_to_sec(dump_call["start_time"])
+            matched_radio_session = None
+
+            for r_call in all_sessions:
+                if "RESTORED" not in r_call.get("id", ""):
+                    r_sec = time_to_sec(r_call["start_time"])
+                    if abs(d_sec - r_sec) <= 3:
+                        matched_radio_session = r_call
+                        break
+
+            if matched_radio_session:
+                if matched_radio_session["status"] in ["Unknown", "PENDING"] or matched_radio_session["end_time"] is None:
+                    matched_radio_session["status"] = dump_call["status"]
+                    matched_radio_session["end_time"] = dump_call["end_time"]
+                    if dump_call["fail_reason"] != "0":
+                        matched_radio_session["fail_reason"] = dump_call["fail_reason"]
+                    matched_radio_session["logs"].extend(dump_call["logs"])
+            else:
+                all_sessions.append(dump_call)
+
         return {"sessions": all_sessions, "network_history": oos_history}
+
