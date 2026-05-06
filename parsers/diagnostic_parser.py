@@ -127,6 +127,7 @@ class CrashParser(BaseParser):
     def analyze(self, lines):
         crashes, is_cap, step, tmp = [], False, 0, None
         pre_ctx = deque(maxlen=10)
+
         for line in lines:
             clean_line = self.clean_line(line)
             if not clean_line: continue
@@ -155,7 +156,121 @@ class CrashParser(BaseParser):
                             crashes.append(tmp); is_cap = False
                         else: tmp["exception_info"] += clean_line + " "; fatal_info_count += 1
             pre_ctx.append(line.strip())
+
+        if is_cap and tmp and (len(tmp["call_stack"]) > 0 or fatal_info_count > 0):
+            if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+            crashes.append(tmp)
+
+        # 💡 리스트만 안전하게 반환!
         return crashes
+
+class AnrParser(BaseParser):
+    def analyze(self, lines):
+        anr_list = [] # 💡 단일 딕셔너리가 아닌 리스트로 변경
+        current_anr = None
+
+        anr_start_re = re.compile(r'ActivityManager:\s+ANR in\s+(\S+)')
+        anr_reason_re = re.compile(r'ActivityManager:\s+Reason:\s+(.+)')
+
+        # ANR 트래킹 변수들
+        all_threads, phone_pid, main_tid = {}, None, None
+        in_anr, in_phone = False, False
+        current_tid = None
+        in_binder = False
+        matched_tx = []
+
+        def finalize_current_anr():
+            """현재까지 수집된 단일 ANR을 분석 후 리스트에 추가"""
+            if not current_anr: return
+
+            lock_info = None
+            if main_tid and main_tid in all_threads:
+                for s_line in all_threads[main_tid]["stack"]:
+                    if lock_m := DIAG_PATTERNS['LOCK_HELD'].search(s_line):
+                        lock_info = {"addr": lock_m.group(1), "owner_tid": lock_m.group(2)}
+                        break
+
+            main_stack = all_threads[main_tid]["stack"] if (main_tid and main_tid in all_threads) else []
+
+            current_anr.update({
+                "process_info": {"name": "com.android.phone", "pid": phone_pid},
+                "main": {"tid": main_tid, "stack": main_stack},
+                "analysis_summary": {
+                    "has_lock_contention": lock_info is not None,
+                    "has_active_binder": len(matched_tx) > 0
+                },
+                "lock_chain": {
+                    "waiting_thread": main_tid,
+                    "blocker_thread": lock_info["owner_tid"] if lock_info else None,
+                    "lock_address": lock_info["addr"] if lock_info else None,
+                    "blocker_stack": all_threads.get(lock_info["owner_tid"], {}).get("stack") if lock_info else None
+                },
+                "active_binder_transactions": matched_tx
+            })
+            anr_list.append(current_anr)
+
+        for i, line in enumerate(lines):
+            clean_line = self.clean_line(line)
+
+            # 새로운 ANR 감지 시
+            if anr_m := anr_start_re.search(clean_line):
+                # 기존에 캡처 중이던 ANR이 있으면 리스트에 저장하고 트래킹 변수 초기화
+                if current_anr:
+                    finalize_current_anr()
+
+                all_threads, phone_pid, main_tid = {}, None, None
+                in_anr, in_phone, in_binder = False, False, False
+                current_tid = None
+                matched_tx = []
+
+                current_anr = {
+                    "time": "Unknown",
+                    "process": anr_m.group(1),
+                    "reason": "Unknown",
+                    "raw_log": clean_line + "\n"
+                }
+                if ts_m := RE_TIME.search(clean_line):
+                    current_anr["time"] = ts_m.group(0)
+
+            elif current_anr and (reason_m := anr_reason_re.search(clean_line)):
+                current_anr["reason"] = reason_m.group(1)
+                current_anr["raw_log"] += clean_line + "\n"
+
+            # VM TRACES 및 BINDER 로직 (기존과 동일)
+            if DIAG_PATTERNS['ANR_TRACES'].search(line):
+                in_anr = True
+                continue
+
+            if in_anr:
+                pid_m = DIAG_PATTERNS['PID_LINE'].search(line)
+                if pid_m:
+                    if any(DIAG_PATTERNS['CMD_PHONE'].search(lines[i+k]) for k in range(1, 5) if i+k < len(lines)):
+                        phone_pid, in_phone = pid_m.group(1), True
+                    elif in_phone: in_phone = False
+
+                if in_phone:
+                    thread_m = DIAG_PATTERNS['THREAD_HEADER'].search(line.strip())
+                    if thread_m:
+                        current_tid = thread_m.group(2)
+                        name = thread_m.group(1)
+                        if "main" in name.lower(): main_tid = current_tid
+                        all_threads[current_tid] = {"name": name, "stack": [], "is_main": "main" in name.lower()}
+                        all_threads[current_tid]["stack"].append(clean_line)
+                    elif current_tid and clean_line:
+                        all_threads[current_tid]["stack"].append(clean_line)
+
+            if "BINDER TRANSACTIONS" in line: in_binder = True; continue
+            if in_binder and "BINDER" in line and ":" not in line and "TRANSACTIONS" not in line: in_binder = False
+            if in_binder:
+                out_m = DIAG_PATTERNS['OUTGOING'].search(line)
+                if out_m and out_m.group(1) == phone_pid and out_m.group(2) == main_tid:
+                    matched_tx.append({"to_pid": out_m.group(3), "to_tid": out_m.group(4), "code": out_m.group(5)})
+
+        # 루프 종료 후 마지막으로 수집 중이던 ANR 닫기
+        if current_anr:
+            finalize_current_anr()
+
+        return anr_list # 💡 이제 여러 개의 ANR이 담긴 리스트를 반환합니다.
 
 class BatteryParser(BaseParser):
     def analyze(self, lines):

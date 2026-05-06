@@ -581,27 +581,65 @@ def render_crash_analyzer(report_data):
     st.subheader("💥 시스템 크래시 및 FATAL 에러 분석")
 
     crash_data = report_data.get("crash_context", [])
+    anr_data_list = report_data.get("anr_context", [])
 
-    if not crash_data:
+    # 💡 과거 딕셔너리 포맷과의 호환성을 위한 방어 코드
+    if isinstance(anr_data_list, dict) and anr_data_list:
+        anr_data_list = [anr_data_list]
+
+    if not crash_data and not anr_data_list:
         st.success("💡 분석된 로그 내에 심각한 시스템 크래시나 FATAL 에러가 발견되지 않았습니다.")
         return
 
-    st.error(f"🚨 총 {len(crash_data)}건의 크래시/FATAL 에러가 감지되었습니다!")
+    if anr_data_list:
+        st.error(f"🚨 총 {len(anr_data_list)}건의 응답없음(ANR) 이벤트가 감지되었습니다!")
 
-    for i, crash in enumerate(crash_data):
-        # 타임스탬프와 프로세스명으로 아코디언(Expander) 제목 생성
-        ts = crash.get('timestamp', 'Time Unknown')
-        process = crash.get('process', 'Unknown Process')
-        crash_type = crash.get('crash_type', 'FATAL EXCEPTION')
+        for anr_data in anr_data_list:
+            anr_time = anr_data.get('time', 'Unknown Time')
+            anr_process = anr_data.get('process', 'Unknown Process')
+            anr_reason = anr_data.get('reason', 'Unknown Reason')
+            anr_pid = anr_data.get('process_info', {}).get('pid', 'Unknown')
 
-        with st.expander(f"[{ts}] {process} - {crash_type}"):
-            # 주변 로그(Time-Window Glue)가 수집되어 있다면 함께 출력
-            if 'cross_context_logs' in crash and crash['cross_context_logs']:
-                st.markdown("**주변 컨텍스트 로그 (크래시 전후):**")
-                st.code("\n".join(crash['cross_context_logs']), language='log')
-            elif 'raw_line' in crash:
-                st.markdown("**크래시 원문 로그:**")
-                st.code(crash['raw_line'], language='log')
+            with st.expander(f"🐌 [{anr_time}] ANR 발생 - {anr_process} (PID: {anr_pid})"):
+                st.markdown(f"**ANR 원인(Reason):** `{anr_reason}`")
+
+                lock_chain = anr_data.get('lock_chain', {})
+                if lock_chain and lock_chain.get('blocker_thread'):
+                    st.markdown("**⛔ 데드락(Lock) 병목 감지:**")
+                    st.warning(f"메인 스레드가 락(`{lock_chain['lock_address']}`)을 기다리는 중입니다. "
+                            f"(점유 스레드 TID: {lock_chain['blocker_thread']})")
+                    if lock_chain.get('blocker_stack'):
+                        st.markdown(f"**점유 스레드(TID: {lock_chain['blocker_thread']}) 콜스택:**")
+                        st.code("\n".join(lock_chain['blocker_stack']), language='java')
+
+                binder_txs = anr_data.get('active_binder_transactions', [])
+                if binder_txs:
+                    st.markdown("**🔗 대기 중인 Binder 트랜잭션 (Outgoing):**")
+                    for tx in binder_txs:
+                        st.info(f"Target PID: {tx['to_pid']}, TID: {tx['to_tid']} (Code: {tx['code']})")
+
+                main_stack = anr_data.get('main', {}).get('stack', [])
+                if main_stack:
+                    st.markdown("**메인 스레드 콜스택:**")
+                    st.code("\n".join(main_stack[:15]) + ("\n... (중략)" if len(main_stack) > 15 else ""), language='java')
+
+    if crash_data:
+        st.error(f"🚨 총 {len(crash_data)}건의 크래시/FATAL 에러가 감지되었습니다!")
+
+        for i, crash in enumerate(crash_data):
+            # 타임스탬프와 프로세스명으로 아코디언(Expander) 제목 생성
+            ts = crash.get('timestamp', 'Time Unknown')
+            process = crash.get('process', 'Unknown Process')
+            crash_type = crash.get('crash_type', 'FATAL EXCEPTION')
+
+            with st.expander(f"[{ts}] {process} - {crash_type}"):
+                # 주변 로그(Time-Window Glue)가 수집되어 있다면 함께 출력
+                if 'cross_context_logs' in crash and crash['cross_context_logs']:
+                    st.markdown("**주변 컨텍스트 로그 (크래시 전후):**")
+                    st.code("\n".join(crash['cross_context_logs']), language='log')
+                elif 'raw_line' in crash:
+                    st.markdown("**크래시 원문 로그:**")
+                    st.code(crash['raw_line'], language='log')
 
 def render_sat_at_analyzer(current_base=None):
     """독자 위성 모뎀(AT Command) 시퀀스 및 CREG 상태 렌더러"""

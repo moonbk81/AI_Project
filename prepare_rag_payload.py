@@ -135,7 +135,11 @@ class RagPayloadBuilder:
 
         # 3. ANR 방어
         if "anr_context" in report_data and report_data["anr_context"]:
-            add_to_payload(report_data["anr_context"], "ANR_Context")
+            anr_data = report_data["anr_context"]
+            if isinstance(anr_data, dict):
+                anr_data = [anr_data]
+            for anr_item in anr_data:
+                add_to_payload(anr_item, "ANR_Context")
 
         # 4. Crash 방어 로직 적용
         if "crash_context" in report_data:

@@ -4,7 +4,7 @@ import argparse
 from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser
 from parsers.diagnostic_parser import (
-    BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser, BatteryParser, RadioPowerParser
+    BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser, AnrParser, BatteryParser, RadioPowerParser
 )
 from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from parsers.ntn_processor import NtnProcessor
@@ -12,7 +12,6 @@ from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
 from parsers.sat_at_parser import SatAtProcessor
 from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
-
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -25,6 +24,7 @@ class LogOrchestrator:
         self.data_usage_parser = DataUsageParser()
         self.dns_parser = DnsParser()
         self.crash_parser = CrashParser(self._get_surrounding_context_logs)
+        self.anr_parser = AnrParser()
         self.battery_parser = BatteryParser()
         self.battery_thermal_parser = BatteryThermalAnalyzer(
             context_getter=self._get_surrounding_context_logs
@@ -82,6 +82,7 @@ class LogOrchestrator:
 
             result['telephony'] = self.tel_parser.analyze(lines)
             result['crash_context'] = self.crash_parser.analyze(lines)
+            result['anr_context'] = self.anr_parser.analyze(lines)
             result['radio_power'] = self.radio_power_parser.analyze(lines)
 
             result['network_timeseries'] = self.net_ts_analyzer.analyze(lines) # 또는 buckets['net_ts']

@@ -203,7 +203,12 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # 10. 💥 시스템 크래시 (FATAL EXCEPTION / ANR / Tombstone)
     # ==========================================
     crash_data = report_data.get("crash_context", [])
+    anr_data = report_data.get("anr_context", [])
+
+    kpi_report["10_system_crash_and_fatal_errors"] = {}
+    has_fatal_or_anr = False
     if crash_data:
+        has_fatal_or_anr = True
         kpi_report["10_system_crash_and_fatal_errors"] = {
             "total_crashes": len(crash_data),
             "crash_summaries": [
@@ -211,7 +216,21 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
                 for c in crash_data
             ]
         }
-    else:
+
+    if isinstance(anr_data, dict) and anr_data:
+        anr_data = [anr_data]
+
+    if anr_data:
+        has_fatal_or_anr = True
+        kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = [
+            {
+                "time": a.get("time"),
+                "process": a.get("process", "Unknown"),
+                "reason": a.get("reason", "Unknown ANR Reason")
+            } for a in anr_data
+        ]
+
+    if not has_fatal_or_anr:
         kpi_report["10_system_crash_and_fatal_errors"] = "시스템 크래시/FATAL 에러 발생 이력 없음 (안정적)"
 
     # ==========================================
@@ -448,7 +467,7 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
     """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력을 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     crashes = report_data.get("crash_context", [])
-    anr = report_data.get("anr_context", {})
+    anr = report_data.get("anr_context", [])
 
     crash_facts = []
     for c in crashes:
@@ -459,17 +478,21 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
         })
 
     anr_facts = []
-    if anr and isinstance(anr, dict) and anr.get("time"):
-        anr_facts.append({
-            "time": anr.get("time"),
-            "process": anr.get("process", "Unknown"),
-            "reason": anr.get("reason", "")
-        })
+    if isinstance(anr, dict):
+        anr = [anr] if anr else []
+
+    for a in anr:
+        if a.get("time"):
+            anr_facts.append({
+                "time": anr.get("time"),
+                "process": anr.get("process", "Unknown"),
+                "reason": anr.get("reason", "")
+            })
 
     return json.dumps({
         "crash_count": len(crashes),
         "crash_history": crash_facts,
-        "anr_count": 1 if anr_facts else 0,
+        "anr_count": len(anr_facts),
         "anr_history": anr_facts
     }, ensure_ascii=False)
 
