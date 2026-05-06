@@ -57,13 +57,22 @@ class TelephonyParser(BaseParser):
                 date_str, time_str = dt_match.group(1), dt_match.group(2)
                 d_ts = f"{date_str} {time_str}.000"
 
+                fallback_triggers = [
+                    "CODE_LOCAL_CALL_CS_RETRY_REQUIRED",
+                    "CODE_SIP_ALTERNATE_EMERGENCY_CALL",
+                    "CODE_LOCAL_NETWORK_NO_SERVICE",
+                    "380, ALTERNATIVE", "380, UNKNOWN", "381, ALTERNATIVE",
+                    "408, REQUEST TIMEOUT", "488, NOT ACCEPTABLE",
+                    "503, SERVICE UNAVAILABLE", "504, SERVER TIMEOUT"
+                ]
+
                 # (1) 380 에러 발생 -> 기존 IMS 끊고 CS 리다이얼 생성
-                if "CODE_LOCAL_CALL_CS_RETRY_REQUIRED" in clean_line or "380, ALTERNATIVE SERVICE" in clean_line:
+                if any(kw in clean_line.upper() for kw in fallback_triggers):
                     if dump_current_session:
                         dump_current_session["end_time"] = d_ts
                         dump_current_session["status"] = "FAIL (CS_FALLBACK)"
-                        dump_current_session["fail_reason"] = "380 Alternative Service"
-                        dump_current_session["logs"].append(f"[{d_ts}] IMS Call Failed by 380 -> Triggering CS Redial")
+                        dump_current_session["fail_reason"] = "Fallback Triggered (Alternative/Timeout/Error)"
+                        dump_current_session["logs"].append(f"[{d_ts}] IMS Call Failed -> Triggering CS Redial")
                         call_log_dumps.append(dump_current_session)
 
                     # 새로운 CS 리다이얼 세션 오픈
@@ -211,15 +220,16 @@ class TelephonyParser(BaseParser):
                     if TEL_PATTERNS['FAIL_EV'].search(clean_line) and ims_m:
                         current_session["status"], current_session["fail_reason"] = "FAIL", f"{ims_m.group(1)}: {ims_m.group(2)}"
 
-                    is_380_fallback = ("380" in clean_line and "INVITE" in clean_line and ("Alternative" in clean_line or "Unknown" in clean_line))
+                    fallback_sip_codes = ["380", "381", "408", "488", "503", "504"]
+                    is_fallback_text = ("INVITE" in clean_line and any(err in clean_line for err in ["380 ", "381 ", "Alternative", "Unknown Status"]))
 
-                    if ims_m or is_380_fallback:
-                        code = ims_m.group(1) if ims_m else "380"
+                    if ims_m or is_fallback_text:
+                        code = ims_m.group(1) if ims_m else "380/381"
                         reason = ims_m.group(2) if ims_m else "Alternative Service (Silent Redial)"
 
                         if code in ["501", "510"]:
                             current_session["status"], current_session["fail_reason"] = "SUCCESS", f"{code}: {reason}"
-                        elif code == "380":
+                        elif code in fallback_sip_codes or is_fallback_text:
                             current_session["status"] = "CS_FALLBACK"
                             current_session["fail_reason"] = f"{code}: {reason}"
                             current_session["end_time"] = ts
@@ -234,7 +244,7 @@ class TelephonyParser(BaseParser):
                                 "status": "Unknown",
                                 "is_user_reject": False,
                                 "fail_reason": "0",
-                                "logs": [f"==> [CS_FALLBACK_START]: Silent Redial Triggered by 380 Error", clean_line]
+                                "logs": [f"==> [CS_FALLBACK_START]: Silent Redial Triggered by {code}", clean_line]
                             }
                             continue
                         else:
