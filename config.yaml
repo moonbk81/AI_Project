@@ -25,6 +25,20 @@ routing_map:
       - Network_DNS_Issue
       - Network_Timeline_Stat
       - Data_Stall_Recovery
+  Internet_Stall:
+    desc: "인터넷이 멈춰요, 인터넷 먹통, 웹페이지가 안열림, 인터넷이 갑자기 안됨, 데이터는 켜져 있는데 인터넷 안됨, LTE/5G 표시 있는데 인터넷 안됨, 와이파이 연결됐는데 인터넷 안됨, 네트워크는 붙어 있는데 앱 접속 안됨, 데이터 스톨, data stall, validation failed, no internet, partial connectivity, captive portal, private DNS 실패, DNS timeout, TCP timeout, TLS handshake timeout, 라우팅 문제, default network 변경, 인터넷 복구 지연"
+    tools:
+      - get_internet_stall_analytics
+      - get_dns_latency_analytics
+      - get_data_stall_and_recovery_analytics
+      - get_network_oos_analytics
+    log_types:
+      - Internet_Stall_Analysis
+      - Network_DNS_Issue
+      - Network_Timeline_Stat
+      - Data_Stall_Recovery
+      - OOS_Event
+      - Signal_Level
   Battery_Thermal:
     desc: "배터리 광탈, 폰이 뜨거워요, 발열이 심해요, 전력 소모, 핫스팟 발열, 소모 전류, 온도가 높음"
     tools:
@@ -125,6 +139,34 @@ quick_prompts:
     - 주의: 단발적인 핑 지연을 심각한 장애로 비약하거나, 팩트에 없는 내용을 추측하여 섣불리 단말기나 기지국 결함으로 단정 짓지 마라.
     </분석 규칙>
 
+  internet_stall_analysis: |
+    당신은 Android Connectivity / RIL / Telephony / NetworkStack을 함께 분석하는 수석 엔지니어입니다. 제공된 'Internet Stall Fact'와 관련 도구 분석 팩트를 바탕으로 사용자가 체감한 인터넷 멈춤 현상을 분석하십시오.
+
+    <분석 규칙>
+    IF_규칙 1 (정상 상태 판별 - 최우선 적용):
+    만약 Internet Stall Fact에 stall_window_count가 0이고, DNS 이슈, validation 실패, data stall, data call fail/drop, TCP/TLS timeout, RF warning이 모두 0이라면 분석을 즉시 중단하고 다음 문장만 1줄로 출력하라.
+    "분석 구간 내 명시적인 인터넷 멈춤(Data Stall), DNS 실패, Validation 실패 또는 데이터콜 불안정 이력은 관찰되지 않았습니다."
+
+    IF_규칙 2 (장애 발생 시 서술):
+    Internet Stall Fact에 문제가 "확실하게 존재할 때만" 아래 지침에 따라 서술하라.
+    - 가장 위험도가 높은 stall window를 우선 분석하라.
+    - DNS 수치만 단독으로 보지 말고, Data Stall, Network Validation, Data Call, RF/OOS/Signal, TCP/TLS, Power/Idle 계층의 시간 상관관계를 함께 설명하라.
+    - parser가 제공한 root_cause_candidates와 highest_risk_windows를 우선 근거로 삼아 causal chain을 작성하라.
+    - DataCall 관련 이벤트가 원인 후보인 경우, 기존 DataCall Fact와 중복되더라도 사용자 체감 인터넷 장애 관점에서 재해석하라.
+    - RF/OOS/약전계가 동반된 경우, 망 환경 악화가 DNS/Validation/Data Stall로 이어졌는지 시간 순서로 설명하라.
+    - DNS/Private DNS만 관찰되고 RF/DataCall 변화가 없다면 DNS 계층 문제 가능성으로 제한해서 설명하라.
+    - TCP/TLS timeout만 관찰되면 서버 경로, 라우팅, 앱 연결 계층 문제 후보로 제한해서 설명하라.
+    - 주의: raw log 전체를 재해석하지 말고, 제공된 구조화 팩트의 KPI, root_cause_summary, highest_risk_windows에 기반해 분석하라.
+    </분석 규칙>
+
+    출력 형식:
+    1. 전체 요약
+    2. 가장 유력한 Root Cause
+    3. 근거 Timeline / Causal Chain
+    4. 계층별 분석(DNS, Validation, DataCall, RF, TCP/TLS, Power)
+    5. 엔지니어 소견
+    6. 권장 조치
+
   antenna_level_analysis: |
     당신은 무선 신호 품질을 분석하는 수석 엔지니어입니다. 제공된 팩트를 바탕으로 분석을 수행하십시오.
 
@@ -185,6 +227,15 @@ prompts:
       - [Network_DNS_Issue (긴급)]: 앱이 차단된 원인을 '이론'이 아닌 '팩트'로 말해라.
       - effective_policy가 BATTERY_SAVER라면 '절전 모드 때문'이라고 한 줄로 요약해라.
 
+    Internet_Stall_Analysis: |
+      - [Internet_Stall_Analysis (인터넷 멈춤 종합)]: 이 데이터는 DNS, Data Stall, Network Validation, DataCall, RF, TCP/TLS, Power 이벤트를 시간 상관관계로 묶은 상위 분석 결과다.
+      - 단순 DNS 지연 분석과 혼동하지 말고, stall_windows, root_cause_summary, highest_risk_windows를 중심으로 판단하라.
+      - primary_root_cause_candidate가 있으면 최우선 원인 후보로 삼되, highest_risk_windows의 related event 순서를 근거로 causal chain을 작성하라.
+      - DataCall 이벤트는 하위 계층 근거이며, Internet_Stall 분석에서는 사용자 체감 인터넷 장애에 어떤 영향을 줬는지 중심으로 설명하라.
+      - RF/OOS/Signal 이벤트가 DNS/Validation/Data Stall 근처에 있으면 무선 환경 악화 가능성을 우선 검토하라.
+      - DNS/Private DNS 이벤트만 있고 RF/DataCall/Validation 변화가 없다면 DNS 계층 문제로 제한해서 설명하라.
+      - TCP/TLS timeout 이벤트만 있으면 DNS 실패로 단정하지 말고 TCP/TLS 또는 서버 경로 문제 후보로 설명하라.
+
     Signal_Level: |
       - [Signal_Level]: Slot별 안테나 수신 레벨(0~5)의 시간대별 변화를 분석해라.
       - 수신 레벨이 0이나 1로 뚝 떨어지는 지점을 찾아내어 '음영/수신 저하 구간'으로 팩트만 보고해라.
@@ -232,4 +283,3 @@ satellite_prompts:
     3. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 단말에 정상적으로 위성 정책이 적용되어 있음을 의미합니다.
 
     [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
-

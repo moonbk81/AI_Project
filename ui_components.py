@@ -1028,3 +1028,234 @@ def render_integrated_rf_call_timeline(report_data):
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+def _load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _safe_time_series(df, time_col="time"):
+    if df.empty or time_col not in df.columns:
+        return df
+
+    current_year = datetime.datetime.now().year
+
+    def parse_time(value):
+        value = str(value).strip()
+        if len(value) > 5 and value[2] == "-" and value.count("-") == 1:
+            value = f"{current_year}-{value}"
+        return pd.to_datetime(value, errors="coerce")
+
+    df = df.copy()
+    df["time_dt"] = df[time_col].apply(parse_time)
+    return df.dropna(subset=["time_dt"]).sort_values("time_dt")
+
+def render_internet_stall_analyzer(current_base, result_dir="./result"):
+    """
+    인터넷 멈춤 전용 분석 UI.
+
+    필요 파일:
+    - ./result/<current_base>_internet_stall.json
+    """
+    st.subheader("🧊 인터넷 멈춤 / Data Stall 종합 분석")
+
+    if not current_base:
+        st.info("분석 대상 파일이 선택되지 않았습니다.")
+        return
+
+    path = os.path.join(result_dir, f"{current_base}_internet_stall.json")
+    data = _load_json(path, {})
+
+    if not data:
+        st.info(f"인터넷 멈춤 분석 결과가 없습니다. 예상 파일: `{path}`")
+        return
+
+    kpi = data.get("kpi", {}) or {}
+    root_summary = data.get("root_cause_summary", {}) or {}
+    windows = data.get("stall_windows", []) or []
+    timeline = data.get("timeline", []) or []
+
+    # ---------------------------------------------------------
+    # 1. 상단 KPI
+    # ---------------------------------------------------------
+    st.markdown("### 1) Health Summary")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Stall Window", kpi.get("stall_window_count", 0))
+    c2.metric("High Risk", kpi.get("high_risk_window_count", 0))
+    c3.metric("Primary Cause", kpi.get("primary_root_cause_candidate", "UNKNOWN"))
+    c4.metric("Timeline Events", kpi.get("total_timeline_events", 0))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("DNS 이슈", kpi.get("dns_issue_count", 0))
+    c6.metric("Validation Fail", kpi.get("validation_fail_count", 0))
+    c7.metric("Data Stall", kpi.get("data_stall_count", 0))
+    c8.metric("RF Warning", kpi.get("rf_warning_count", 0))
+
+    c9, c10, c11 = st.columns(3)
+    c9.metric("DataCall Fail/Drop", kpi.get("data_call_fail_or_drop_count", 0))
+    c10.metric("TCP/TLS Timeout", kpi.get("tcp_tls_timeout_count", 0))
+    c11.metric("Power/Idle Hint", kpi.get("power_idle_hint_count", 0))
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 2. Root Cause Summary
+    # ---------------------------------------------------------
+    st.markdown("### 2) Root Cause Candidate")
+
+    if root_summary:
+        root_rows = []
+        for category, info in root_summary.items():
+            confidence = info.get("confidence", {}) or {}
+            examples = info.get("examples", []) or []
+            root_rows.append({
+                "category": category,
+                "count": info.get("count", 0),
+                "high": confidence.get("high", 0),
+                "medium": confidence.get("medium", 0),
+                "low": confidence.get("low", 0),
+                "example_time": examples[0].get("time") if examples else "-",
+                "example_trigger": examples[0].get("trigger") if examples else "-"
+            })
+
+        root_df = pd.DataFrame(root_rows)
+        st.dataframe(root_df, use_container_width=True)
+
+        fig_root = px.bar(
+            root_df,
+            x="category",
+            y="count",
+            title="Root Cause Candidate 분포",
+            hover_data=["high", "medium", "low", "example_time", "example_trigger"]
+        )
+        st.plotly_chart(fig_root, use_container_width=True)
+    else:
+        st.info("Root cause candidate가 없습니다.")
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 3. Timeline
+    # ---------------------------------------------------------
+    st.markdown("### 3) 계층별 이벤트 Timeline")
+
+    timeline_df = pd.DataFrame(timeline)
+    if not timeline_df.empty:
+        timeline_df = _safe_time_series(timeline_df, "time")
+        if not timeline_df.empty:
+            if "severity" not in timeline_df.columns:
+                timeline_df["severity"] = "info"
+            if "layer" not in timeline_df.columns:
+                timeline_df["layer"] = "UNKNOWN"
+
+            fig = px.scatter(
+                timeline_df,
+                x="time_dt",
+                y="layer",
+                color="severity",
+                symbol="event_type",
+                hover_data=[col for col in ["time", "event_type", "reason", "net_id", "apn", "cid"] if col in timeline_df.columns],
+                title="인터넷 멈춤 관련 계층별 이벤트"
+            )
+            fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
+            st.plotly_chart(fig, use_container_width=True)
+
+            with st.expander("Raw Timeline Table", expanded=False):
+                display_cols = [c for c in ["time", "layer", "event_type", "severity", "reason", "net_id", "apn", "cid", "raw"] if c in timeline_df.columns]
+                st.dataframe(timeline_df[display_cols], use_container_width=True)
+        else:
+            st.warning("Timeline 시간 파싱에 실패했습니다.")
+    else:
+        st.info("표시할 timeline event가 없습니다.")
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 4. Stall Windows
+    # ---------------------------------------------------------
+    st.markdown("### 4) High Risk Stall Windows")
+
+    if windows:
+        window_rows = []
+        for idx, w in enumerate(windows):
+            candidates = w.get("root_cause_candidates", []) or []
+            primary = candidates[0] if candidates else {}
+            window_rows.append({
+                "idx": idx,
+                "center_time": w.get("center_time"),
+                "trigger": w.get("trigger"),
+                "severity_score": w.get("severity_score"),
+                "primary_category": primary.get("category", "UNKNOWN"),
+                "confidence": primary.get("confidence", "unknown"),
+                "layer_counts": json.dumps(w.get("layer_counts", {}), ensure_ascii=False)
+            })
+
+        window_df = pd.DataFrame(window_rows).sort_values("severity_score", ascending=False)
+        st.dataframe(window_df, use_container_width=True)
+
+        selected_idx = st.selectbox(
+            "상세 확인할 Stall Window",
+            window_df["idx"].tolist(),
+            format_func=lambda i: f"#{i} | {windows[i].get('center_time')} | {windows[i].get('trigger')}"
+        )
+
+        selected = windows[selected_idx]
+        st.markdown("**Root Cause Candidates**")
+        st.json(selected.get("root_cause_candidates", []))
+
+        related = selected.get("related_events", []) or []
+        related_df = pd.DataFrame(related)
+        if not related_df.empty:
+            related_df = _safe_time_series(related_df, "time")
+            display_cols = [c for c in ["time", "layer", "event_type", "severity", "reason", "apn", "cid", "raw"] if c in related_df.columns]
+            st.dataframe(related_df[display_cols], use_container_width=True)
+
+            with st.expander("Trigger 주변 Raw Context", expanded=False):
+                for e in related[:20]:
+                    st.markdown(f"**[{e.get('time')}] {e.get('layer')} / {e.get('event_type')}**")
+                    st.code(e.get("raw", ""), language="log")
+                    ctx = e.get("context_before", [])
+                    if ctx:
+                        st.caption("Context before")
+                        st.code("\n".join(ctx[-10:]), language="log")
+    else:
+        st.info("Stall window가 없습니다.")
+
+    st.divider()
+
+    # ---------------------------------------------------------
+    # 5. Layer tabs
+    # ---------------------------------------------------------
+    st.markdown("### 5) Layer별 상세")
+
+    if timeline_df.empty:
+        return
+
+    tab_dns, tab_datacall, tab_validation, tab_rf, tab_tcp, tab_power = st.tabs(
+        ["DNS", "DataCall/Stall", "Validation", "RF", "TCP/TLS", "Power"]
+    )
+
+    def render_layer(tab, layer_names):
+        with tab:
+            layer_df = timeline_df[timeline_df["layer"].isin(layer_names)].copy()
+            if layer_df.empty:
+                st.info("해당 layer 이벤트가 없습니다.")
+                return
+
+            count_df = layer_df["event_type"].value_counts().reset_index()
+            count_df.columns = ["event_type", "count"]
+
+            fig = px.bar(count_df, x="event_type", y="count", title=f"{'/'.join(layer_names)} 이벤트 분포")
+            st.plotly_chart(fig, use_container_width=True)
+
+            display_cols = [c for c in ["time", "event_type", "severity", "reason", "net_id", "apn", "cid", "raw"] if c in layer_df.columns]
+            st.dataframe(layer_df[display_cols], use_container_width=True)
+
+    render_layer(tab_dns, ["DNS"])
+    render_layer(tab_datacall, ["DATA_CALL", "DATA_STALL"])
+    render_layer(tab_validation, ["VALIDATION", "NETWORK", "ROUTING"])
+    render_layer(tab_rf, ["RF"])
+    render_layer(tab_tcp, ["TCP_TLS"])
+    render_layer(tab_power, ["POWER"])

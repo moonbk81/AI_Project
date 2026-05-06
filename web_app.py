@@ -317,11 +317,12 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
-tab_chat, tab_dash, tab_boot, tab_ntn = st.tabs([
+tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet = st.tabs([
     "💬 로그 분석 및 대화",
     "📊 전사 로그 통계 대시보드",
-    "📈 부팅 성능",
-    "🛰️ 위성 통신"])
+    "📈 부팅 성능/Crash+ANR",
+    "🛰️ 위성 통신",
+    "🌐 인터넷 멈춤"])
 
 # ==========================================
 # 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
@@ -489,9 +490,10 @@ with tab_chat:
     st.caption("💡 직접 질문하거나, 아래의 원클릭 분석 버튼을 사용해 완벽한 프롬프트를 전송하세요.")
     quick_prompt = None
 
-    # 버튼을 2x2 그리드로 배치
+    # 버튼을 3x3 그리드로 배치
     col_btn1, col_btn2, col_btn3 = st.columns(3)
     col_btn4, col_btn5, col_btn6 = st.columns(3)
+    col_btn7, col_btn8, col_btn9 = st.columns(3)
     with col_btn1:
         if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
             quick_prompt = QUICK_PROMPTS.get('call_drop')
@@ -510,6 +512,10 @@ with tab_chat:
     with col_btn6:
         if st.button("💬 VoLTE/SIP 상세 분석", use_container_width=True):
             quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
+
+    with col_btn7:
+        if st.button("🌐 인터넷 멈춤 종합 분석", use_container_width=True):
+            quick_prompt = QUICK_PROMPTS.get('internet_stall_analysis')
 
     st.divider()
 
@@ -1074,3 +1080,7 @@ with tab_ntn:
                         st.session_state.chat_history.append({"role": "user", "content": f"{sat_type} 위성망 심층 진단해 줘."})
                         st.session_state.chat_history.append({"role": "assistant", "content": final_text})
 
+
+with tab_internet:
+    current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else None
+    ui.render_internet_stall_analyzer(current_base)

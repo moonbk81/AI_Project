@@ -44,6 +44,7 @@ class RilRagChat:
             "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
             "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
             "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
+            "get_internet_stall_analytics": getattr(agent_tools, 'get_internet_stall_analytics', None),
         }
 
     def _load_config(self):
@@ -167,9 +168,22 @@ class RilRagChat:
                 selected_tools.update(self.routing_map["Radio_Power"].get("tools", []))
                 selected_log_types.update(self.routing_map["Radio_Power"].get("log_types", []))
 
-        # [DNS / Data Stall 오버라이드]
+        # [Internet Stall / DNS / Data Stall 오버라이드]
         if any(keyword in query_lower for keyword in [
-            "dns", "데이터", "인터넷", "패킷", "ping", "핑", "스톨", "먹통",
+            "인터넷", "먹통", "웹페이지",
+            "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고",
+            "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안",
+            "data stall", "스톨", "validation", "validation failed",
+            "no internet", "partial connectivity", "private dns",
+            "tcp timeout", "tls handshake", "라우팅", "default network",
+        ]):
+            selected_intents.add("Internet_Stall")
+            if "Internet_Stall" in self.routing_map:
+                selected_tools.update(self.routing_map["Internet_Stall"].get("tools", []))
+                selected_log_types.update(self.routing_map["Internet_Stall"].get("log_types", []))
+
+        if any(keyword in query_lower for keyword in [
+            "dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림",
         ]):
             selected_intents.add("DNS_Latency")
             if "DNS_Latency" in self.routing_map:

@@ -2,6 +2,7 @@ import os
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+from collections import Counter, defaultdict
 
 def _ensure_dict(value):
     if isinstance(value, str):
@@ -686,3 +687,109 @@ def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./r
         "total_stall_events": len(stall_events),
         "stall_and_recovery_facts": analysis
     }, ensure_ascii=False)
+
+def _load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """
+    인터넷 멈춤 전용 분석 결과를 LLM이 사용하기 좋은 JSON으로 요약합니다.
+
+    입력 파일:
+    - ./result/<base_name>_internet_stall.json
+    """
+    path = os.path.join(result_dir, f"{base_name}_internet_stall.json")
+    data = _load_json(path, {})
+
+    if not data:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "internet stall 분석 결과 파일이 없습니다.",
+            "expected_file": path
+        }, ensure_ascii=False)
+
+    kpi = data.get("kpi", {}) or {}
+    root_summary = data.get("root_cause_summary", {}) or {}
+    windows = data.get("stall_windows", []) or []
+
+    top_windows = sorted(
+        windows,
+        key=lambda w: w.get("severity_score", 0),
+        reverse=True
+    )[:5]
+
+    window_facts = []
+    for w in top_windows:
+        related = w.get("related_events", []) or []
+        layer_counts = w.get("layer_counts", {}) or {}
+
+        window_facts.append({
+            "center_time": w.get("center_time"),
+            "trigger": w.get("trigger"),
+            "severity_score": w.get("severity_score"),
+            "layer_counts": layer_counts,
+            "root_cause_candidates": w.get("root_cause_candidates", []),
+            "key_related_events": [
+                {
+                    "time": e.get("time"),
+                    "layer": e.get("layer"),
+                    "event_type": e.get("event_type"),
+                    "severity": e.get("severity"),
+                    "reason": e.get("reason")
+                }
+                for e in related[:20]
+            ]
+        })
+
+    return json.dumps({
+        "status": "OK",
+        "kpi": {
+            "stall_window_count": kpi.get("stall_window_count", 0),
+            "high_risk_window_count": kpi.get("high_risk_window_count", 0),
+            "primary_root_cause_candidate": kpi.get("primary_root_cause_candidate"),
+            "dns_issue_count": kpi.get("dns_issue_count", 0),
+            "validation_fail_count": kpi.get("validation_fail_count", 0),
+            "data_stall_count": kpi.get("data_stall_count", 0),
+            "data_call_fail_or_drop_count": kpi.get("data_call_fail_or_drop_count", 0),
+            "tcp_tls_timeout_count": kpi.get("tcp_tls_timeout_count", 0),
+            "rf_warning_count": kpi.get("rf_warning_count", 0),
+            "power_idle_hint_count": kpi.get("power_idle_hint_count", 0)
+        },
+        "root_cause_summary": root_summary,
+        "highest_risk_windows": window_facts
+    }, ensure_ascii=False)
+
+
+def get_internet_stall_kpi_for_integrated_report(base_name: str, result_dir: str = "./result") -> dict:
+    """
+    get_device_health_kpi()에 나중에 붙이기 쉬운 dict 형태 요약.
+    기존 agent_tools.py를 당장 수정하지 않고도 종합 리포트 확장 후보로 사용 가능.
+    """
+    raw = json.loads(get_internet_stall_analytics(base_name, result_dir))
+    if raw.get("status") != "OK":
+        return {
+            "status": "NO_DATA",
+            "summary": raw.get("message", "인터넷 멈춤 분석 데이터 없음")
+        }
+
+    kpi = raw.get("kpi", {})
+    return {
+        "status": "OK",
+        "summary": {
+            "stall_windows": kpi.get("stall_window_count", 0),
+            "high_risk_windows": kpi.get("high_risk_window_count", 0),
+            "primary_root_cause_candidate": kpi.get("primary_root_cause_candidate"),
+            "dns_issues": kpi.get("dns_issue_count", 0),
+            "validation_failures": kpi.get("validation_fail_count", 0),
+            "data_stalls": kpi.get("data_stall_count", 0),
+            "data_call_fail_or_drops": kpi.get("data_call_fail_or_drop_count", 0),
+            "rf_warnings": kpi.get("rf_warning_count", 0),
+            "tcp_tls_timeouts": kpi.get("tcp_tls_timeout_count", 0),
+            "power_idle_hints": kpi.get("power_idle_hint_count", 0)
+        },
+        "root_cause_summary": raw.get("root_cause_summary", {}),
+        "highest_risk_windows": raw.get("highest_risk_windows", [])
+    }

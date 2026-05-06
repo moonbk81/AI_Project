@@ -12,6 +12,7 @@ from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
 from parsers.sat_at_parser import SatAtProcessor
 from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
+from parsers.internet_stall_parser import InternetStallParser
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -33,6 +34,7 @@ class LogOrchestrator:
         self.net_ts_analyzer = NetworkTimeSeriesAnalyzer()
         self.ntn_processor = NtnProcessor(filename=self.base_name)
         self.datacall_parser = DataCallProcessor(context_getter=self._get_surrounding_context_logs)
+        self.internet_stall_parser = InternetStallParser()
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
         self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self._time_index = None
@@ -90,6 +92,10 @@ class LogOrchestrator:
             result['datacall_data'] = self.datacall_parser.analyze(lines)
             result['ims_sip_data'] = self.ims_sip_parser.analyze(lines)
             result['sat_at_data'] = self.sat_at_parser.analyze(lines)
+            result['internet_stall'] = self.internet_stall_parser.analyze(
+                lines,
+                data_call_events=result.get('datacall_data', []),
+                report_data=result)
 
             # 지표성 데이터 추가
             if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
@@ -107,6 +113,7 @@ class LogOrchestrator:
             self.sat_at_parser.save_ui_report("./result", self.base_name)
 
             self.ntn_processor.build_and_save_payloads("./payloads")
+            self.internet_stall_parser.save_ui_report("./result", self.base_name, result['internet_stall'])
 
             # 4. JSON 저장
             with open(output_path, "w", encoding="utf-8") as j:

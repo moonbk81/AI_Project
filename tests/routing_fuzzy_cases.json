@@ -6,7 +6,8 @@
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
       "get_radio_power_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
@@ -14,7 +15,8 @@
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
       "Radio_Power_Event",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -26,7 +28,8 @@
       "get_dns_latency_analytics",
       "get_crash_anr_analytics",
       "get_battery_thermal_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "Call_Session",
@@ -36,7 +39,8 @@
       "Crash_Event",
       "ANR_Context",
       "Battery_Drain_Report",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -47,7 +51,8 @@
       "get_dns_latency_analytics",
       "get_crash_anr_analytics",
       "get_radio_power_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
@@ -56,7 +61,8 @@
       "Network_DNS_Issue",
       "Crash_Event",
       "Radio_Power_Event",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -64,13 +70,20 @@
     "query": "가끔 먹통이 됩니다.",
     "acceptable_tools": [
       "get_crash_anr_analytics",
-      "get_network_oos_analytics"
+      "get_network_oos_analytics",
+      "get_internet_stall_analytics",
+      "get_dns_latency_analytics",
+      "get_data_stall_and_recovery_analytics"
     ],
     "acceptable_log_types": [
       "Crash_Event",
       "ANR_Context",
       "OOS_Event",
-      "Signal_Level"
+      "Signal_Level",
+      "Internet_Stall_Analysis",
+      "Network_DNS_Issue",
+      "Network_Timeline_Stat",
+      "Data_Stall_Recovery"
     ]
   },
   {
@@ -79,14 +92,16 @@
     "acceptable_tools": [
       "get_dns_latency_analytics",
       "get_network_oos_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "Network_DNS_Issue",
       "Network_Timeline_Stat",
       "OOS_Event",
       "Signal_Level",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -96,7 +111,8 @@
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
       "get_cs_call_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
@@ -104,7 +120,8 @@
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
       "Call_Session",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -114,7 +131,8 @@
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
       "get_radio_power_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "OOS_Event",
@@ -122,7 +140,8 @@
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
       "Radio_Power_Event",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   },
   {
@@ -132,7 +151,8 @@
       "get_cs_call_analytics",
       "get_network_oos_analytics",
       "get_dns_latency_analytics",
-      "get_data_stall_and_recovery_analytics"
+      "get_data_stall_and_recovery_analytics",
+      "get_internet_stall_analytics"
     ],
     "acceptable_log_types": [
       "Call_Session",
@@ -140,7 +160,8 @@
       "Signal_Level",
       "Network_Timeline_Stat",
       "Network_DNS_Issue",
-      "Data_Stall_Recovery"
+      "Data_Stall_Recovery",
+      "Internet_Stall_Analysis"
     ]
   }
 ]
