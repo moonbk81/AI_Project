@@ -298,6 +298,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             })
 
         kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = anr_events
+
     if has_fatal_or_anr and "anr_events" in kpi_report["10_system_crash_and_fatal_errors"]:
         anr_events = kpi_report["10_system_crash_and_fatal_errors"].get("anr_events", [])
         kpi_report["10_system_crash_and_fatal_errors"]["anr_summary"] = {
