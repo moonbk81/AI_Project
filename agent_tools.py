@@ -54,8 +54,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # ==========================================
     # 2. 📞 통화 이력 및 상태
     # ==========================================
-    telephony_data = report_data.get("telephony", {})
-    sessions = telephony_data.get("sessions", [])
+    sessions = report_data.get("call_sessions", [])
     call_drops = []
 
     if sessions:
@@ -396,7 +395,7 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
     correlated = []
 
     # 1. OOS 타임라인 교차 검증
-    oos_events = report_data.get("telephony", {}).get("network_history", [])
+    oos_events = report_data.get("oos_events", [])
     for oos in oos_events:
         oos_time = str(oos.get("time", ""))[:14]
         if oos_time:
@@ -433,9 +432,12 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
 def get_cs_call_analytics(base_name: str, result_dir: str = "./result") -> str:
     """CS 통화의 릴리즈 코드를 파싱하고 장애 시 무선 환경(RF)을 교차 검증합니다."""
     report_data = _load_report_json(base_name, result_dir)
-    sessions = report_data.get("telephony", {}).get("sessions", [])
+    sessions = report_data.get("call_sessions", [])
 
     cs_sessions = [s for s in sessions if s.get("type") == "CS"]
+
+    if not cs_sessions:
+        return json.dumps({"status": "NO_DATA", "message": "cs 통화 이력이 없습니다."}, ensure_ascii=False)
 
     analysis = []
     for s in cs_sessions:
@@ -462,8 +464,11 @@ def get_ps_ims_call_analytics(base_name: str, result_dir: str = "./result") -> s
     """PS Call 세션과 SIP 에러를 통합 추출하고, 무선 환경(RF)과 교차 검증합니다."""
     report_data = _load_report_json(base_name, result_dir)
 
-    sessions = report_data.get("telephony", {}).get("sessions", [])
+    sessions = report_data.get("call_sessions", [])
     ps_sessions = [s for s in sessions if "PS" in s.get("type", "")]
+
+    if not ps_sessions:
+        return json.dumps({"status": "NO_DATA", "message": "PS(VoLTE) 통화 이력이 없습니다."}, ensure_ascii=False)
 
     ps_analysis = []
     for s in ps_sessions:
@@ -499,7 +504,7 @@ def get_ps_ims_call_analytics(base_name: str, result_dir: str = "./result") -> s
 def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> str:
     """망 이탈(OOS) 시점과 후보 원인(Root Cause Candidate)을 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
-    oos_history = report_data.get("telephony", {}).get("network_history", [])
+    oos_history = report_data.get("oos_events", [])
 
     oos_facts = []
     for oos in oos_history:

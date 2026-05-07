@@ -2,7 +2,7 @@ import os
 import json
 import argparse
 from datetime import datetime, timedelta
-from parsers.telephony_parser import TelephonyParser
+from parsers.telephony_parser import TelephonyParser, OosParser
 from parsers.diagnostic_parser import (
     BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser, AnrParser, BatteryParser, RadioPowerParser
 )
@@ -20,6 +20,7 @@ class LogOrchestrator:
         self.base_name = os.path.splitext(os.path.basename(file_path))[0]
 
         self.tel_parser = TelephonyParser(self._get_surrounding_context_logs)
+        self.oos_parser = OosParser(self._get_surrounding_context_logs)
         self.boot_parser = BootParser()
         self.signal_parser = SignalParser()
         self.data_usage_parser = DataUsageParser()
@@ -82,7 +83,8 @@ class LogOrchestrator:
 
             result = {}
 
-            result['telephony'] = self.tel_parser.analyze(lines)
+            result['call_sessions'] = self.tel_parser.analyze(lines)
+            result['oos_events'] = self.oos_parser.analyze(lines)
             result['crash_context'] = self.crash_parser.analyze(lines)
             result['anr_context'] = self.anr_parser.analyze(lines)
             result['radio_power'] = self.radio_power_parser.analyze(lines)

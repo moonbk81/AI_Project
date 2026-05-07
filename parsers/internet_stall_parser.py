@@ -253,7 +253,7 @@ class InternetStallParser(BaseParser):
     def _convert_rf_events(self, report_data):
         converted = []
 
-        network_history = report_data.get("telephony", {}).get("network_history", [])
+        network_history = report_data.get("oos_events", [])
         for e in network_history:
             if not isinstance(e, dict):
                 continue
