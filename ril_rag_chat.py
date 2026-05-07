@@ -29,8 +29,8 @@ class RilRagChat:
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
-        # 3. LLM 로드 (Gemma-2b)
-        self.llm_model_name = 'gemma2:9b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+        # 3. LLM 로드 (Gemma3-4b)
+        self.llm_model_name = 'gemma3:4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
@@ -431,9 +431,14 @@ class RilRagChat:
         """Ollama API를 통해 실제 LLM 추론을 수행합니다."""
         import ollama
         try:
-            res = ollama.chat(model=self.llm_model_name, messages=[
-                {'role': 'user', 'content': prompt}
-            ])
+            res = ollama.chat(
+                model=self.llm_model_name,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={
+                    'num_ctx': 32768, # max 128K
+                    'temperature': 0.1
+                }
+            )
             return res['message']['content']
         except Exception as e:
             return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
