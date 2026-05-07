@@ -970,7 +970,7 @@ def render_integrated_rf_call_timeline(report_data):
     ))
 
     # 2. 통화 세션 데이터 (배경 하이라이트)
-    sessions = report_data.get("telephony", {}).get("sessions", [])
+    sessions = report_data.get("call_sessions", [])
     for s in sessions:
         try:
             start_dt = pd.to_datetime(f"{current_year}-{s.get('start_time')[:14]}", format='%Y-%m-%d %H:%M:%S')

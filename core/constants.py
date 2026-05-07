@@ -10,8 +10,8 @@ RE_TAG = re.compile(r'[VDIWE]\s+([a-zA-Z0-9_\-]+)\s*(?=:)', re.I)
 # Telephony (Call / OOS) 정규식
 # ==========================================
 TEL_PATTERNS = {
-    'CS_START': re.compile(r'RILJ\s+:\s+\[\d+\]>\s(?:DIAL)|RILJ\s+:\s+\[UNSL\]<\sUNSOL_CALL_RING', re.I),
-    'PS_START': re.compile(r'IPF.*>\s*(?:createCallProfile)|IPF.*onIncomingCall', re.I),
+    'CS_START': re.compile(r'(?:RILJ\s+:\s+)?\[\d+\]>\s(?:DIAL|EMERGENCY_DIAL)|(?:RILJ\s+:\s+)?\[UNSL\]<\sUNSOL_CALL_RING|(?:RILJ\s+:\s+)?\<\s*GET_CURRENT_CALLS\s*\{[^}]*INCOMING', re.I),
+    'PS_START': re.compile(r'(?:IPF|IPCT).*>\s*(?:createCallProfile)|(?:IPF|IPCT).*onIncomingCall', re.I),
     'CONN_ID': re.compile(r'(?:ImsPhoneConnection|ImsPhoneCallTracker).*telecomCallID:\s*([^\s,]+)', re.I),
     'END_EV': re.compile(r'\[IPCN(\d*)\]>\s*close|\<\s*LAST_CALL_FAIL_CAUSE', re.I),
     'FAIL_EV': re.compile(r'(onCallStartFailed|onCallHoldFailed|onCallResumeFailed)', re.I),

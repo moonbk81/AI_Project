@@ -115,23 +115,13 @@ class RagPayloadBuilder:
             for rp in report_data["radio_power"]:
                 add_to_payload(rp, "Radio_Power_Event")
 
-        if "telephony" in report_data:
-            # 1. Call Drop 방어 로직 적용
-            sessions = report_data["telephony"].get("sessions", [])
-            error_sessions = [s for s in sessions if "FAIL" in s.get("status", "") or "DROP" in s.get("status", "")]
-            if not error_sessions:
-                add_clean_state("Call_Session", "분석 구간 내 명시적인 Call Drop(호 절단) 이력이 없습니다.")
-            else:
-                for session in sessions:
-                    add_to_payload(session, "Call_Session")
+        if "call_sessions" in report_data and report_data["call_sessions"]:
+            for session in report_data["call_sessions"]:
+                add_to_payload(session, "Call_Session")
 
-            # 2. OOS (망 이탈) 방어 로직 적용
-            oos_events = report_data["telephony"].get("network_history", [])
-            if not oos_events:
-                add_clean_state("OOS_Event", "분석 구간 내 망 이탈(OOS) 이력이 없으며 IN_SERVICE를 유지했습니다.")
-            else:
-                for oos in oos_events:
-                    add_to_payload(oos, "OOS_Event")
+        if "oos_events" in report_data and report_data["oos_events"]:
+            for oos in report_data["oos_events"]:
+                add_to_payload(oos, "OOS_Event")
 
         # 3. ANR 방어
         if "anr_context" in report_data and report_data["anr_context"]:
