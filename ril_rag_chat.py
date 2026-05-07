@@ -50,12 +50,15 @@ class RilRagChat:
     def _load_config(self):
         try:
             self.routing_map = ROUTING_MAP
-            self.system_role_prompt = SYSTEM_PROMPTS
+            self.system_role_prompt = SYSTEM_PROMPTS.get(
+                "main_engineer_role",
+                "당신은 Android RIL/Telephony 로그 분석 전문가입니다."
+            )
             self.prompts = PROMPTS
         except Exception as e:
             self.routing_map = {}
             self.system_role_prompt = "시스템 프롬프트를 불러올 수 없습니다."
-            self.rompts = {}
+            self.prompts = {}
 
     def _get_semantic_routing(self, query):
         """config.yaml의 설정을 기반으로 지능형 라우팅 수행"""

@@ -89,9 +89,10 @@ class TelephonyParser(BaseParser):
                     }
 
                 # (2) 통화 연결 (ACTIVE 상태 감지)
-                elif dump_current_session and ",ACTIVE," in clean_line:
+                elif dump_current_session and dump_current_session["type"] == "CS" and ",ACTIVE," in clean_line:
                     dump_current_session["status"] = "SUCCESS"
-                    dump_current_session["logs"].append(f"[{d_ts}] Call Active: {clean_line}")
+                    dump_current_session["call_state"] = "ACTIVE"
+                    dump_current_session["logs"].append(f"[{d_ts}] CS Call Active: {clean_line}")
 
                 # 💡 (3) [핵심 수정] 통화 종료 판단 로직 (CS와 PS 엄격 분리 및 방어)
                 elif dump_current_session and (
@@ -99,8 +100,12 @@ class TelephonyParser(BaseParser):
                     (dump_current_session["type"] != "CS" and any(kw in clean_line for kw in ["> terminate", "> close", "> HANGUP", "< GET_CURRENT_CALLS {}"]) and "redialToCs" not in clean_line)
                 ):
                     dump_current_session["end_time"] = d_ts
-                    if dump_current_session["status"] == "DIALING":
-                        dump_current_session["status"] = "CALL DROP" # 연결 전 끊김
+                    if dump_current_session["type"] == "CS":
+                        if dump_current_session["status"] == "DIALING":
+                            dump_current_session["status"] = "CALL DROP"
+                    else:
+                        if dump_current_session["status"] == "IMS_INITIATED":
+                            dump_current_session["status"] = "ENDED"
                     dump_current_session["logs"].append(f"[{d_ts}] Call Ended: {clean_line}")
                     call_log_dumps.append(dump_current_session)
                     dump_current_session = None
@@ -114,11 +119,20 @@ class TelephonyParser(BaseParser):
                         "start_time": d_ts,
                         "end_time": None,
                         "id": "RESTORED_" + call_type[:2],
-                        "status": "DIALING",
+                        "status": "IMS_INITIATED" if call_type == "PS(VoLTE)" else "DIALING",
                         "is_user_reject": False,
                         "fail_reason": "0",
                         "logs": [f"[{d_ts}] Call Initiated", clean_line]
                     }
+
+                elif dump_current_session and dump_current_session["type"] == "PS(VoLTE)" and any(
+                    kw in clean_line for kw in [
+                        "onCallStarted",
+                        "callSessionStarted"
+                    ]
+                ):
+                    dump_current_session["status"] = "SUCCESS"
+                    dump_current_session["logs"].append(f"[{d_ts}] IMS Call Connected: {clean_line}")
 
                 continue
 

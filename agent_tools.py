@@ -362,19 +362,35 @@ def _load_report_json(base_name: str, result_dir: str = "./result") -> dict:
     with open(report_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+def _parse_android_time(time_str: str):
+    if not time_str:
+        return None
+
+    s = str(time_str).strip()
+    current_year = datetime.now().year
+
+    for fmt in [
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%m-%d %H:%M:%S.%f",
+        "%m-%d %H:%M:%S",
+    ]:
+        try:
+            if fmt.startswith("%m"):
+                return datetime.strptime(f"{current_year}-{s}", f"%Y-{fmt}")
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+
+    return None
+
 # ==========================================
 # 🛠️ [신규 추가] 메모리 기반 타임라인 교차 검증 헬퍼
 # ==========================================
 def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: int = 2) -> list:
     """에러 발생 시간 기준 ±window_sec 내의 망 이탈(OOS) 및 신호 급감(Level 0~1) 이력을 탐색합니다."""
-    if not target_time_str:
-        return []
-
-    current_year = datetime.now().year
-    try:
-        clean_time = target_time_str[:14]
-        target_dt = datetime.strptime(f"{current_year}-{clean_time}", "%Y-%m-%d %H:%M:%S")
-    except:
+    target_dt = _parse_android_time(target_time_str)
+    if target_dt is None:
         return ["시간 파싱 불가"]
 
     correlated = []
@@ -385,27 +401,32 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
         oos_time = str(oos.get("time", ""))[:14]
         if oos_time:
             try:
-                oos_dt = datetime.strptime(f"{current_year}-{oos_time}", "%Y-%m-%d %H:%M:%S")
+                oos_dt = _parse_android_time(oos.get("time", ""))
+                if oos_dt is None:
+                    continue
+
                 diff = abs((oos_dt - target_dt).total_seconds())
                 if diff <= window_sec:
                     v_reg = str(oos.get("voice_reg", ""))
                     d_reg = str(oos.get("data_reg", ""))
-                    if "1" in v_reg or "1" in d_reg or "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg:
+                    if v_reg.strip() == "1" or d_reg.strip() == "1" or "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg:
                         correlated.append(f"[OOS 동반] 망 이탈 발생 (시간차: {diff}초)")
             except: pass
 
     # 2. Signal 타임라인 교차 검증
     signal_events = report_data.get("signal_level_history", [])
     for sig in signal_events:
-        sig_time = str(sig.get("time", ""))[:14]
-        sig_level = str(sig.get("level", sig.get("max_level", "")))
-        if sig_time and sig_level in ["0", "1"]:
-            try:
-                sig_dt = datetime.strptime(f"{current_year}-{sig_time}", "%Y-%m-%d %H:%M:%S")
-                diff = abs((sig_dt - target_dt).total_seconds())
-                if diff <= window_sec:
-                    correlated.append(f"[약전계 진입] Level {sig_level} (시간차: {diff}초)")
-            except: pass
+        sig_dt = _parse_android_time(sig.get("time", ""))
+        if sig_dt is None:
+            continue
+
+        sig_level = str(sig.get("level", sig.get("max_level", ""))).strip()
+        if sig_level not in ["0", "1"]:
+            continnue
+
+        diff = abs((sig_dt - target_dt).total_seconds())
+        if diff <= window_sec:
+            correlated.append(f"[약전계 진입] Level {sig_level} (시간차: {diff}초)")
 
     return correlated if correlated else ["명시적인 무선 환경(RF) 악화 동반 안됨"]
 

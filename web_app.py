@@ -280,8 +280,17 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             orchestrator = LogOrchestrator(target_log_path)
 
             report_path = f"./result/{base_name}_report.json"
-            orchestrator.run_batch(report_path)
+            success = orchestrator.run_batch(report_path)
             progress_bar.progress(50)
+
+            if success is False:
+                raise RuntimeError("LogOrchestrator 분석 실패")
+
+            if not os.path.exists(report_path):
+                raise FileNotFoundError(f"report 파일이 생성되지 않았씁니다: {report_path}")
+
+            if os.path.getsize(report_path) == 0:
+                raise RuntimeError(f"report 파일이 비어 있습니다: {report_path}")
 
             # 5. RAG 페이로드 생성 및 적재
             st.write("2️⃣ RAG 지식 조각 생성 및 DB 임베딩 중...")
