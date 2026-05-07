@@ -93,7 +93,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # ==========================================
     # 4. 🚨 망 이탈(OOS) 및 신호(Signal)
     # ==========================================
-    oos_history = telephony_data.get("network_history", [])
+    oos_history = report_data.get("oos_events", [])
     signal_history = report_data.get("signal_level_history", [])
 
     avg_signal = "N/A"
