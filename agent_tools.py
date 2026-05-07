@@ -422,7 +422,7 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
 
         sig_level = str(sig.get("level", sig.get("max_level", ""))).strip()
         if sig_level not in ["0", "1"]:
-            continnue
+            continue
 
         diff = abs((sig_dt - target_dt).total_seconds())
         if diff <= window_sec:

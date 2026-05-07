@@ -295,9 +295,11 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             # 5. RAG 페이로드 생성 및 적재
             st.write("2️⃣ RAG 지식 조각 생성 및 DB 임베딩 중...")
             builder = RagPayloadBuilder(report_path)
-            builder.build_payload(f"{base_name}_payload.json")
+            payload_name = f"{base_name}_payload.json"
+            builder.build_payload(payload_name)
 
-            ai_engine.ingest_folder("./payloads")
+            payload_path = os.path.join("./payloads", payload_name)
+            ai_engine.ingest_file(payload_path, force=True)
             progress_bar.progress(100)
 
             status.update(label="✅ 분석 완료! 이제 대화와 대시보드를 확인하세요.", state="complete", expanded=False)

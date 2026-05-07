@@ -13,6 +13,116 @@ except Exception:
 
 
 class InternetStallParser(BaseParser):
+    def _should_inspect_line(self, line):
+        """정규식 검사 전에 명백히 무관한 라인을 빠르게 제외합니다."""
+        return any(marker in line for marker in (
+            "dns", "DNS", "Dns", "resolv", "PrivateDns", "DoT", "netd",
+            "NetworkMonitor", "ConnectivityService", "DefaultNetwork", "NetworkAgent",
+            "NetworkCapabilities", "LinkProperties", "CaptivePortal", "validation",
+            "VALIDATED", "NO_INTERNET", "PARTIAL_CONNECTIVITY",
+            "data stall", "DataStall", "onDataStallAlarm", "Suspecting data stall",
+            "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "SocketTimeout",
+            "connect timed out", "connection timed out", "TLS handshake", "SSLException",
+            "No route to host", "Network is unreachable",
+            "DeviceIdleController", "doze", "idle", "AppStandby", "PowerManager",
+            "wakelock", "screen off", "screen_on", "RadioPower", "RADIO_POWER",
+        ))
+
+    def _is_data_stall_manager_noise(self, line):
+        """DataStallRecoveryManager 초기화/내부 메시지는 실제 stall/recovery 이벤트가 아니므로 제외합니다."""
+        noise_markers = (
+            "DataStallRecoveryManager created",
+            "createDataStallRecoveryRandomOffsetsMillis",
+            "Randomization disabled",
+            "target=com.android.internal.telephony.data.DataStallRecoveryManager",
+            "DataStallRecoveryManager async=false",
+            "Manager created.",
+            "Manager async=false",
+            "RandomOffsetsMillis(): Randomization disabled.",
+        )
+        return any(marker in line for marker in noise_markers)
+
+    def _compact_event_for_output(self, event, keep_context=False):
+        """JSON 결과가 과도하게 커지지 않도록 이벤트 저장 크기를 줄입니다."""
+        compact = {
+            "time": event.get("time"),
+            "layer": event.get("layer"),
+            "event_type": event.get("event_type"),
+            "severity": event.get("severity"),
+            "reason": event.get("reason"),
+            "raw": event.get("raw"),
+            "net_id": event.get("net_id"),
+            "package": event.get("package"),
+            "cid": event.get("cid"),
+            "apn": event.get("apn"),
+            "network": event.get("network"),
+            "protocol": event.get("protocol"),
+            "latency_ms": event.get("latency_ms"),
+            "slot": event.get("slot"),
+            "rat": event.get("rat"),
+        }
+        compact = {k: v for k, v in compact.items() if v not in (None, "")}
+
+        if keep_context:
+            context_before = event.get("context_before") or []
+            context_after = event.get("context_after") or []
+            compact["context_before"] = context_before[-5:]
+            compact["context_after"] = context_after[:5]
+
+        return compact
+
+    def _compact_stall_windows_for_output(self, stall_windows, max_windows=80, max_events_per_window=30):
+        """핵심 window와 대표 이벤트만 저장해 UI/JSON 크기를 제한합니다."""
+        if not stall_windows:
+            return []
+
+        sorted_windows = sorted(
+            stall_windows,
+            key=lambda w: w.get("severity_score", 0),
+            reverse=True,
+        )
+
+        compact_windows = []
+        for window in sorted_windows[:max_windows]:
+            related_events = window.get("related_events") or []
+            important_events = []
+            representative_info_events = []
+            seen_info_types = set()
+
+            for event in related_events:
+                severity = event.get("severity")
+                event_type = event.get("event_type")
+                layer = event.get("layer")
+
+                if severity in ("warning", "error", "critical") or layer in ("DNS", "VALIDATION", "DATA_STALL", "TCP_TLS", "RF", "DATA_CALL"):
+                    important_events.append(event)
+                    continue
+
+                if event_type not in seen_info_types:
+                    seen_info_types.add(event_type)
+                    representative_info_events.append(event)
+
+            selected_events = (important_events + representative_info_events)[:max_events_per_window]
+
+            compact_windows.append({
+                "center_time": window.get("center_time"),
+                "trigger": window.get("trigger"),
+                "trigger_reason": window.get("trigger_reason"),
+                "severity_score": window.get("severity_score"),
+                "layer_counts": window.get("layer_counts"),
+                "root_cause_candidates": window.get("root_cause_candidates"),
+                "related_events": [
+                    self._compact_event_for_output(
+                        event,
+                        keep_context=event.get("severity") in ("warning", "error", "critical")
+                    )
+                    for event in selected_events
+                ],
+                "related_event_total_count": len(related_events),
+                "related_event_saved_count": len(selected_events),
+            })
+
+        return compact_windows
     """
     인터넷 멈춤/끊김 체감 현상을 계층별로 분석하는 독립 parser.
 
@@ -85,7 +195,11 @@ class InternetStallParser(BaseParser):
         recent_context = deque(maxlen=80)
 
         for line in lines:
-            clean = self.clean_line(line)
+            raw_line = str(line)
+            if not self._should_inspect_line(raw_line):
+                continue
+
+            clean = self.clean_line(raw_line)
             if not clean:
                 continue
 
@@ -93,7 +207,7 @@ class InternetStallParser(BaseParser):
             if ts:
                 event = self._classify_line(clean, ts)
                 if event:
-                    event["context_before"] = list(recent_context)[-20:]
+                    event["context_before"] = list(recent_context)[-8:]
                     timeline.append(event)
 
             recent_context.append(clean)
@@ -117,8 +231,10 @@ class InternetStallParser(BaseParser):
             "schema_version": "internet_stall_v1",
             "kpi": kpi,
             "root_cause_summary": root_summary,
-            "stall_windows": stall_windows,
-            "timeline": timeline[-2000:]
+            "stall_windows": self._compact_stall_windows_for_output(stall_windows),
+            "timeline": [self._compact_event_for_output(event) for event in timeline[-300:]],
+            "timeline_total_count": len(timeline),
+            "stall_window_total_count": len(stall_windows),
         }
 
     def save_ui_report(self, output_dir="./result", base_name="", analysis=None):
@@ -133,6 +249,9 @@ class InternetStallParser(BaseParser):
         return m.group(1) if m else None
 
     def _classify_line(self, line, ts):
+        if self._is_data_stall_manager_noise(line):
+            return None
+
         layer = None
         event_type = None
         severity = "info"
@@ -217,6 +336,9 @@ class InternetStallParser(BaseParser):
             if not time_value:
                 continue
 
+            raw_payload = e.get("raw_payload") or json.dumps(e, ensure_ascii=False)
+            if self._is_data_stall_manager_noise(str(raw_payload)):
+                continue
             severity = "info"
             layer = "DATA_CALL"
             mapped_type = event_type
@@ -246,7 +368,7 @@ class InternetStallParser(BaseParser):
                 "network": e.get("network"),
                 "protocol": e.get("protocol"),
                 "latency_ms": e.get("latency_ms"),
-                "raw": e.get("raw_payload") or json.dumps(e, ensure_ascii=False)
+                "raw": raw_payload
             })
         return converted
 

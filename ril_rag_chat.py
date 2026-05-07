@@ -31,6 +31,8 @@ class RilRagChat:
 
         # 3. LLM 로드 (Gemma3-4b)
         self.llm_model_name = 'gemma3:4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+        if device == "mps":
+            self.llm_model_name = 'gemma3:12b'
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
@@ -220,6 +222,64 @@ class RilRagChat:
             "scores": routing_scores,
             "top_matches": top_matches,
         }
+
+    def ingest_file(self, file_path, force=False):
+        if not os.path.exists(file_path):
+            print(f"❌ payload 파일 없음: {file_path}")
+            return
+
+        filename = os.path.basename(file_path)
+        base_id = os.path.splitext(filename)[0]
+
+        if force:
+            old = self.collection.get(
+                where={"source_file": filename},
+                include=[]
+            )
+            if old and old.get("ids"):
+                self.collection.delete(ids=old["ids"])
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not data:
+            print(f"⚠️ 비어있는 payload: {filename}")
+            return
+
+        MAX_DOC_CHARS = 4000
+        MAX_META_CHARS = 5000
+
+        docs, metas = [], []
+        for item in data:
+            docs.append(str(item["document"])[:MAX_DOC_CHARS])
+
+            meta = item.get("metadata", {}).copy()
+            meta["source_file"] = filename
+
+            for k, v in list(meta.items()):
+                if isinstance(v, str) and len(v) > MAX_META_CHARS:
+                    meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
+
+            metas.append(meta)
+
+        ids = [f"{base_id}_{i}" for i in range(len(data))]
+
+        embeddings = self.embed_model.encode(
+            docs,
+            batch_size=32,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        ).tolist()
+
+        self.collection.add(
+            ids=ids,
+            documents=docs,
+            metadatas=metas,
+            embeddings=embeddings,
+        )
+
+        print(f"✅ {filename} 단일 파일 재적재 완료: {len(docs)} docs")
 
     def ingest_folder(self, folder_path="./payloads"):
         """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
@@ -430,12 +490,15 @@ class RilRagChat:
     def _call_llm(self, prompt: str) -> str:
         """Ollama API를 통해 실제 LLM 추론을 수행합니다."""
         import ollama
+        context_size = 32768  # Gemma3-4b의 최대 컨텍스트 크기
+        if self.llm_model_name == 'gemma3:12b':
+            context_size = 65536
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={
-                    'num_ctx': 32768, # max 128K
+                    'num_ctx': context_size,
                     'temperature': 0.1
                 }
             )

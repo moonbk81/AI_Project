@@ -66,40 +66,181 @@ class LogOrchestrator:
 
         return cross_context_logs[-max_lines:] if len(cross_context_logs) > max_lines else cross_context_logs
 
+    def _add_context_window(self, buckets, bucket_name, lines, idx, window=80):
+        """이벤트성 로그는 핵심 라인 주변 context를 함께 포함합니다."""
+        start = max(0, idx - window)
+        end = min(len(lines), idx + window + 1)
+        buckets[bucket_name].extend(lines[start:end])
+
+    def _build_analysis_buckets(self, lines):
+        """
+        parser마다 전체 dump를 반복 순회하지 않도록 1회 스캔으로 후보 라인 버킷을 만듭니다.
+        call/oos parser는 상태 흐름 누락 위험이 있어 run_batch에서 계속 전체 lines를 사용합니다.
+        """
+        buckets = {
+            'boot': [],
+            'signal': [],
+            'dns': [],
+            'usage': [],
+            'net_ts': [],
+            'crash': [],
+            'anr': [],
+            'radio_power': [],
+            'battery': [],
+            'battery_thermal': [],
+            'ntn': [],
+            'datacall': [],
+            'ims_sip': [],
+            'sat_at': [],
+            'internet_stall': [],
+        }
+
+        crash_keywords = [
+            "FATAL EXCEPTION", "Fatal signal", "AndroidRuntime", "am_crash",
+            "force close", "Tombstone written to", "Build fingerprint:", "Abort message:",
+        ]
+        anr_keywords = [
+            "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
+            "Broadcast of Intent", "executing service", "traces.txt", "CPU usage from",
+        ]
+        radio_power_keywords = [
+            "setRadioPower", "setRadioPowerForReason", "RADIO_POWER", "RIL_REQUEST_RADIO_POWER",
+            "RADIO_OFF", "RADIO_ON", "airplane_mode_on", "AIRPLANE_MODE",
+        ]
+        battery_keywords = [
+            "Battery", "battery", "batterystats", "BatteryService", "HealthInfo",
+            "level=", "plugged=", "temperature=", "voltage=",
+        ]
+        thermal_context_keywords = [
+            "ThermalEvent", "ThermalService", "ThermalManager", "thermalservice",
+            "overheat", "throttling", "cooling device", "CoolingDevice",
+        ]
+        thermal_line_keywords = [
+            "temperature mValue", "skin-therm", "battery-therm", "sec-battery",
+            "WakeLock", "Wakelock", "wakelock held", "wake_lock",
+        ]
+        ntn_keywords = [
+            "NTN", "ntn", "satellite", "Satellite", "NonTerrestrial", "non-terrestrial",
+        ]
+        datacall_keywords = [
+            "DataCall", "data call", "SetupDataCall", "SETUP_DATA_CALL", "DEACTIVATE_DATA_CALL",
+            "DcTracker", "DataNetwork", "TelephonyNetworkFactory", "ApnContext",
+        ]
+        ims_sip_keywords = [
+            "SIP/2.0", "REGISTER sip:", "INVITE sip:", "BYE sip:", "CANCEL sip:",
+            "P-CSCF", "ImsReasonInfo", "ImsPhoneConnection", "ImsCallSession",
+            "createCallProfile", "onCallStarted", "onCallStartFailed",
+        ]
+        sat_at_keywords = [
+            "AT+", "AT^", "AT$", "> AT", "< AT",
+            "+CEREG", "+CREG", "+CGREG", "+COPS", "+CSQ",
+        ]
+        internet_stall_context_keywords = [
+            "Data Stall", "data stall", "validation failed",
+            "PARTIAL_CONNECTIVITY", "NO_INTERNET", "EVENT_NETWORK_TESTED",
+            "default network changed", "network lost",
+        ]
+        internet_stall_line_keywords = [
+            "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
+        ]
+
+        for idx, line in enumerate(lines):
+            if line.startswith("!@Boot"):
+                buckets['boot'].append(line)
+
+            if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
+                buckets['signal'].append(line)
+
+            if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested"]):
+                buckets['usage'].append(line)
+
+            if "DNS Requested" in line:
+                buckets['dns'].append(line)
+
+            if any(k in line for k in ["NetId", "DnsEvent", "TcpStats", "NetworkMonitor", "ConnectivityService"]):
+                buckets['net_ts'].append(line)
+
+            if any(k in line for k in crash_keywords):
+                self._add_context_window(buckets, 'crash', lines, idx, window=80)
+
+            if any(k in line for k in anr_keywords):
+                self._add_context_window(buckets, 'anr', lines, idx, window=180)
+
+            if any(k in line for k in radio_power_keywords):
+                self._add_context_window(buckets, 'radio_power', lines, idx, window=40)
+
+            if any(k in line for k in battery_keywords):
+                buckets['battery'].append(line)
+                buckets['battery_thermal'].append(line)
+
+            if any(k in line for k in thermal_context_keywords):
+                self._add_context_window(buckets, 'battery_thermal', lines, idx, window=8)
+            elif any(k in line for k in thermal_line_keywords):
+                buckets['battery_thermal'].append(line)
+
+            if any(k in line for k in ntn_keywords):
+                buckets['ntn'].append(line)
+
+            if any(k in line for k in datacall_keywords):
+                self._add_context_window(buckets, 'datacall', lines, idx, window=60)
+                buckets['internet_stall'].append(line)
+
+            if any(k in line for k in ims_sip_keywords):
+                self._add_context_window(buckets, 'ims_sip', lines, idx, window=30)
+
+            if any(k in line for k in sat_at_keywords):
+                buckets['sat_at'].append(line)
+
+            if any(k in line for k in internet_stall_context_keywords):
+                self._add_context_window(buckets, 'internet_stall', lines, idx, window=10)
+            elif any(k in line for k in internet_stall_line_keywords):
+                buckets['internet_stall'].append(line)
+
+        for name, bucket_lines in buckets.items():
+            seen = set()
+            deduped = []
+            for bucket_line in bucket_lines:
+                if bucket_line not in seen:
+                    seen.add(bucket_line)
+                    deduped.append(bucket_line)
+            buckets[name] = deduped
+
+        print(
+            "📊 [PreFilter] "
+            + ", ".join(f"{name}={len(bucket_lines)}" for name, bucket_lines in buckets.items())
+        )
+        return buckets
+
     def run_batch(self, output_path):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
 
-            # 1. 버킷팅 (성능 최적화용)
-            buckets = {'boot': [], 'signal': [], 'dns': [], 'usage': [], 'net_ts': []}
-            for line in lines:
-                if line.startswith("!@Boot"): buckets['boot'].append(line)
-                elif "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line: buckets['signal'].append(line)
-                if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested"]): buckets['usage'].append(line)
-                if "DNS Requested" in line: buckets['dns'].append(line)
-                if any(k in line for k in ["NetId", "DnsEvent", "TcpStats"]): buckets['net_ts'].append(line)
+            # 1. 1회 스캔 기반 parser별 후보 라인 버킷 생성
+            buckets = self._build_analysis_buckets(lines)
 
             result = {}
 
             result['call_sessions'] = self.tel_parser.analyze(lines)
             result['oos_events'] = self.oos_parser.analyze(lines)
-            result['crash_context'] = self.crash_parser.analyze(lines)
-            result['anr_context'] = self.anr_parser.analyze(lines)
-            result['radio_power'] = self.radio_power_parser.analyze(lines)
+            result['crash_context'] = self.crash_parser.analyze(buckets['crash'])
+            result['anr_context'] = self.anr_parser.analyze(buckets['anr'])
+            result['radio_power'] = self.radio_power_parser.analyze(buckets['radio_power'])
 
-            result['network_timeseries'] = self.net_ts_analyzer.analyze(lines) # 또는 buckets['net_ts']
-            result['ntn_data'] = self.ntn_processor.analyze(lines)
+            # section/state 기반 parser는 후보 라인만 주면 누락 위험이 커서 full lines를 유지합니다.
+            result['network_timeseries'] = self.net_ts_analyzer.analyze(lines)
+            result['ntn_data'] = self.ntn_processor.analyze(buckets['ntn'])
             result['datacall_data'] = self.datacall_parser.analyze(lines)
-            result['ims_sip_data'] = self.ims_sip_parser.analyze(lines)
-            result['sat_at_data'] = self.sat_at_parser.analyze(lines)
+            result['ims_sip_data'] = self.ims_sip_parser.analyze(buckets['ims_sip'])
+            result['sat_at_data'] = self.sat_at_parser.analyze(buckets['sat_at'])
             result['internet_stall'] = self.internet_stall_parser.analyze(
                 lines,
                 data_call_events=result.get('datacall_data', []),
                 report_data=result)
 
             # 지표성 데이터 추가
+            # battery 계열은 dump section 전체를 읽는 경우가 있어 full lines를 유지합니다.
             if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
             if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res

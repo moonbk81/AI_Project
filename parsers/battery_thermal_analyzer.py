@@ -14,6 +14,11 @@ class BatteryThermalAnalyzer(BaseParser):
         self.re_app_id = re.compile(r'App ID:\s*(\d+)', re.I)
         self.re_package = re.compile(r'Package:\s*([a-zA-Z0-9_.]+)', re.I)
 
+        # 성능 최적화: 전체 dump를 받더라도 관심 없는 라인은 clean_line/regex 검사 자체를 건너뜁니다.
+        self.uid_marker_keywords = ("App ID:", "Package:")
+        self.thermal_marker_keywords = ("Temperature", "CurrentValue")
+        self.wakelock_marker_keywords = ("Wake lock",)
+
     def analyze(self, lines):
         thermals = {}
         wakelocks = []
@@ -21,16 +26,26 @@ class BatteryThermalAnalyzer(BaseParser):
         current_app_id = None
 
         for line in lines:
-            clean_line = self.clean_line(line)
+            raw_line = str(line)
+
+            # 대부분의 dump 라인은 배터리/써멀 분석과 무관하므로 빠르게 skip합니다.
+            has_uid_marker = any(marker in raw_line for marker in self.uid_marker_keywords)
+            has_thermal_marker = any(marker in raw_line for marker in self.thermal_marker_keywords)
+            has_wakelock_marker = any(marker in raw_line for marker in self.wakelock_marker_keywords)
+
+            if not (has_uid_marker or has_thermal_marker or has_wakelock_marker):
+                continue
+
+            clean_line = self.clean_line(raw_line)
             # ==========================================
             # 1. 패키지명 <-> UID(App ID) 매핑 수집
             # ==========================================
-            if "App ID:" in clean_line:
+            if has_uid_marker and "App ID:" in clean_line:
                 m_app_id = self.re_app_id.search(clean_line)
                 if m_app_id:
                     current_app_id = m_app_id.group(1)
 
-            if "Package:" in clean_line and current_app_id:
+            if has_uid_marker and "Package:" in clean_line and current_app_id:
                 m_package = self.re_package.search(clean_line)
                 if m_package:
                     uid_map[current_app_id] = m_package.group(1)
@@ -39,7 +54,7 @@ class BatteryThermalAnalyzer(BaseParser):
             # ==========================================
             # 2. 써멀(발열) 분석
             # ==========================================
-            if "Temperature" in clean_line or "CurrentValue" in clean_line:
+            if has_thermal_marker:
 
                 # 1순위: 신형 포맷 매칭 시도
                 m_new = self.re_thermal_new.search(clean_line)
@@ -57,7 +72,7 @@ class BatteryThermalAnalyzer(BaseParser):
             # ==========================================
             # 3. 웨이크락(배터리 점유) 분석 및 UID 매핑
             # ==========================================
-            if "Wake lock" in clean_line or "times" in clean_line:
+            if has_wakelock_marker:
                 m = self.re_wakelock.search(clean_line)
                 if m:
                     raw_app = m.group(1) # 예: '10123' 또는 'u0a123' 또는 '*alarm*'
