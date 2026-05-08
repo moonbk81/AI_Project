@@ -4,7 +4,8 @@ import argparse
 from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser, OosParser
 from parsers.diagnostic_parser import (
-    BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser, AnrParser, BatteryParser, RadioPowerParser
+    BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser,
+    AnrParser, BatteryParser, RadioPowerParser, NitzParser
 )
 from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from parsers.ntn_processor import NtnProcessor
@@ -31,6 +32,7 @@ class LogOrchestrator:
         self.battery_thermal_parser = BatteryThermalAnalyzer(
             context_getter=self._get_surrounding_context_logs
         )
+        self.nitz_parser = NitzParser()
         self.radio_power_parser = RadioPowerParser(self._get_surrounding_context_logs)
         self.net_ts_analyzer = NetworkTimeSeriesAnalyzer()
         self.ntn_processor = NtnProcessor(filename=self.base_name)
@@ -93,6 +95,7 @@ class LogOrchestrator:
             'ims_sip': [],
             'sat_at': [],
             'internet_stall': [],
+            'nitz': [],
         }
 
         crash_keywords = [
@@ -142,6 +145,9 @@ class LogOrchestrator:
         ]
         internet_stall_line_keywords = [
             "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
+        ]
+        nitz_line_keywords = [
+            "nitz_status"
         ]
 
         for idx, line in enumerate(lines):
@@ -196,6 +202,9 @@ class LogOrchestrator:
             elif any(k in line for k in internet_stall_line_keywords):
                 buckets['internet_stall'].append(line)
 
+            if "nitz_status" in line:
+                buckets['nitz'].append(line)
+
         for name, bucket_lines in buckets.items():
             seen = set()
             deduped = []
@@ -224,6 +233,7 @@ class LogOrchestrator:
 
             result['call_sessions'] = self.tel_parser.analyze(lines)
             result['oos_events'] = self.oos_parser.analyze(lines)
+            result['nitz_history'] = self.nitz_parser.analyze(buckets['nitz'])
             result['crash_context'] = self.crash_parser.analyze(buckets['crash'])
             result['anr_context'] = self.anr_parser.analyze(buckets['anr'])
             result['radio_power'] = self.radio_power_parser.analyze(buckets['radio_power'])

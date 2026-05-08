@@ -503,3 +503,49 @@ class RadioPowerParser(BaseParser):
                 result['cross_context_logs'] = self.get_context_fn(lines, err_time)
             results.append(result)
         return results
+
+class NitzParser(BaseParser):
+    def analyze(self, lines):
+        nitz_history = []
+
+        # 정규식: NITZ: 26/05/03, 12:04:33-20,01 또는 nitz=26/05/03,12:04:33-20,01 패턴 캡처
+        nitz_re = re.compile(r'(?:NITZ|nitz=)\s*(\d{2}/\d{2}/\d{2}[ ,]+\d{2}:\d{2}:\d{2}[-+]\d{2},\d{2})', re.I)
+
+        for line in lines:
+            clean_line = self.clean_line(line)
+            match = nitz_re.search(clean_line)
+
+            if match:
+                log_time = "Unknown"
+                if ts_m := RE_TIME.search(line):
+                    log_time = ts_m.group(0)
+
+                nitz_str = match.group(1).replace(" ", "") # 공백 제거하여 규격화
+
+                # NITZ 문자열 분석 (예: 26/05/03,12:04:33-20,01)
+                try:
+                    parts = nitz_str.split('-') if '-' in nitz_str else nitz_str.split('+')
+                    sign = '-' if '-' in nitz_str else '+'
+
+                    tz_dst = parts[1].split(',')
+                    tz_quarter = int(tz_dst[0])
+                    dst_flag = tz_dst[1]
+
+                    # 15분 단위 타임존을 시간으로 변환
+                    tz_hours = (tz_quarter * 15) / 60.0
+                    tz_desc = f"UTC{sign}{tz_hours:g}시간"
+
+                    dst_desc = "적용(+1h)" if dst_flag != "00" else "미적용"
+
+                except Exception:
+                    tz_desc = "Unknown"
+                    dst_desc = "Unknown"
+
+                nitz_history.append({
+                    "log_time": log_time,
+                    "nitz_raw": nitz_str,
+                    "timezone": tz_desc,
+                    "dst_status": dst_desc
+                })
+
+        return nitz_history

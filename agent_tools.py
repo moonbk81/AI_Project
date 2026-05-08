@@ -27,7 +27,9 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         "7_dns_network_issues": {},
         "8_ims_sip_transactions": {},
         "9_ril_sip_correlation": [],
-        "10_system_crash_and_fatal_errors": {}
+        "10_system_crash_and_fatal_errors": {},
+        "11_satellite_modem_status": {},
+        "12_time_and_tniz_updates": []
     }
 
     # ==========================================
@@ -351,6 +353,10 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
                 "sms_tx_fails": sat_metrics.get("sms_tx_fail", 0),
                 "critical_errors_detected": critical_sat_errors if critical_sat_errors else "없음 (해당 기간 내 Call/SMS 정상 처리됨)"
             }
+
+    nitz_data = report_data.get("nitz_history", [])
+    if nitz_data:
+        kpi_report["12_time_and_tniz_updates"] = nitz_data
 
     return json.dumps(kpi_report, indent=4, ensure_ascii=False)
 

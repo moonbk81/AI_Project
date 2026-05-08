@@ -1259,3 +1259,78 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
     render_layer(tab_rf, ["RF"])
     render_layer(tab_tcp, ["TCP_TLS"])
     render_layer(tab_power, ["POWER"])
+
+def render_nitz_timeline(nitz_data):
+    """NITZ 타임존 변경 이력을 멋진 대시보드 형태로 렌더링합니다."""
+    if not nitz_data:
+        st.info("🕒 NITZ(타임존) 수신 이력이 관찰되지 않았습니다.")
+        return
+
+    st.markdown("### 🌍 NITZ 타임존 변동 타임라인")
+
+    df = pd.DataFrame(nitz_data)
+
+    # 그래프를 그리기 위해 "UTC-5시간" 문자열에서 숫자(-5)만 추출
+    try:
+        df['offset_num'] = df['timezone'].str.extract(r'UTC([+-]?\d+\.?\d*)').astype(float)
+    except Exception:
+        df['offset_num'] = 0.0
+
+    # 1. 🌟 상단 요약 카드 (Metrics)
+    st.markdown("##### 📌 타임존 요약")
+    col1, col2, col3 = st.columns(3)
+
+    first_tz = df.iloc[0]['timezone']
+    last_tz = df.iloc[-1]['timezone']
+    flip_count = len(df) - 1
+
+    with col1:
+        st.metric(label="최초 진입 타임존", value=first_tz)
+    with col2:
+        # 타임존이 바뀌었으면 화살표와 함께 변경점 표시
+        delta_str = "유지됨" if first_tz == last_tz else "변경됨!"
+        st.metric(label="최종 안착 타임존", value=last_tz, delta=delta_str, delta_color="off" if first_tz == last_tz else "inverse")
+    with col3:
+        st.metric(label="타임존 변경(Ping-Pong) 횟수", value=f"{flip_count} 회",
+                  delta="불안정" if flip_count > 2 else "안정", delta_color="inverse" if flip_count > 2 else "normal")
+
+    st.divider()
+
+    # 2. 📈 타임존 핑퐁 시각화 차트 (Step Chart)
+    # line_shape='hv'를 주면 대각선이 아닌 계단형태로 꺾여서, 디지털 상태 전이를 보여주기에 최적입니다.
+    fig = px.line(
+        df,
+        x='log_time',
+        y='offset_num',
+        line_shape='hv',
+        markers=True,
+        title="시간대(UTC Offset) 변동 추이",
+        labels={'log_time': '디바이스 로그 시간', 'offset_num': 'UTC 시차 (시간)'},
+        color_discrete_sequence=['#FF4B4B']  # Streamlit 기본 테마에 어울리는 붉은색
+    )
+
+    # Y축 간격을 1시간 단위로 딱 떨어지게 설정
+    fig.update_yaxes(dtick=1)
+
+    # 배경을 투명하게 하고 그리드라인 추가해서 사이버틱하게 꾸미기
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 3. 📋 상세 데이터 테이블
+    with st.expander("🔍 NITZ 수신 Raw Data 보기"):
+        st.dataframe(
+            df[['log_time', 'timezone', 'dst_status', 'nitz_raw']],
+            use_container_width=True,
+            column_config={
+                "log_time": "수신 시간",
+                "timezone": "적용 타임존",
+                "dst_status": "썸머타임(DST)",
+                "nitz_raw": "NITZ 원문"
+            }
+        )
+

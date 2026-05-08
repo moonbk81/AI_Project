@@ -331,7 +331,7 @@ if "current_file" not in st.session_state: st.session_state.current_file = None
 tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet = st.tabs([
     "💬 로그 분석 및 대화",
     "📊 전사 로그 통계 대시보드",
-    "📈 부팅 성능/Crash+ANR",
+    "📈 부팅/Crash/ANR/NITZ",
     "🛰️ 위성 통신",
     "🌐 인터넷 멈춤"])
 
@@ -1011,6 +1011,9 @@ with tab_boot:
 
             st.divider()
             ui.render_crash_analyzer(report_data)
+
+            st.divider()
+            ui.render_nitz_timeline(report_data.get("nitz_histroy", []))
         else:
             st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
     else:
