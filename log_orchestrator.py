@@ -146,9 +146,6 @@ class LogOrchestrator:
         internet_stall_line_keywords = [
             "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
         ]
-        nitz_line_keywords = [
-            "nitz_status"
-        ]
 
         for idx, line in enumerate(lines):
             if line.startswith("!@Boot"):

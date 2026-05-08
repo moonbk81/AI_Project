@@ -508,42 +508,42 @@ class NitzParser(BaseParser):
     def analyze(self, lines):
         nitz_history = []
 
-        # 정규식: NITZ: 26/05/03, 12:04:33-20,01 또는 nitz=26/05/03,12:04:33-20,01 패턴 캡처
-        nitz_re = re.compile(r'(?:NITZ|nitz=)\s*(\d{2}/\d{2}/\d{2}[ ,]+\d{2}:\d{2}:\d{2}[-+]\d{2},\d{2})', re.I)
+        # 1. Date 추출용: "Date: 2026-03-26 11:20:40"
+        date_re = re.compile(r'Date:\s*([\d-]+\s[\d:]+)')
+
+        # 2. NITZ 핵심 추출용: "NITZ: 26/03/26,10:00:14+04,00"
+        # 그룹1(날짜/시간): 26/03/26,10:00:14
+        # 그룹2(타임존): +04
+        # 그룹3(DST): 00
+        nitz_re = re.compile(r'NITZ:\s*(\d{2}/\d{2}/\d{2},\d{2}:\d{2}:\d{2})([-+]\d{1,3}),(\d{1,2})')
 
         for line in lines:
-            clean_line = self.clean_line(line)
-            match = nitz_re.search(clean_line)
+            date_m = date_re.search(line)
+            nitz_m = nitz_re.search(line)
 
-            if match:
-                log_time = "Unknown"
-                if ts_m := RE_TIME.search(line):
-                    log_time = ts_m.group(0)
+            if nitz_m:
+                log_time = date_m.group(1) if date_m else "Unknown"
 
-                nitz_str = match.group(1).replace(" ", "") # 공백 제거하여 규격화
+                nitz_time_str = nitz_m.group(1) # 예: 26/03/26,10:00:14
+                tz_str = nitz_m.group(2)        # 예: +04
+                dst_str = nitz_m.group(3)       # 예: 00
 
-                # NITZ 문자열 분석 (예: 26/05/03,12:04:33-20,01)
                 try:
-                    parts = nitz_str.split('-') if '-' in nitz_str else nitz_str.split('+')
-                    sign = '-' if '-' in nitz_str else '+'
+                    tz_val = int(tz_str)
+                    # 3GPP 표준: 타임존은 15분(Quarter Hour) 단위입니다.
+                    # (+04 * 15분) / 60 = +1.0 시간 (UTC+1)
+                    tz_hours = (tz_val * 15) / 60.0
 
-                    tz_dst = parts[1].split(',')
-                    tz_quarter = int(tz_dst[0])
-                    dst_flag = tz_dst[1]
-
-                    # 15분 단위 타임존을 시간으로 변환
-                    tz_hours = (tz_quarter * 15) / 60.0
+                    sign = "+" if tz_val >= 0 else ""
                     tz_desc = f"UTC{sign}{tz_hours:g}시간"
-
-                    dst_desc = "적용(+1h)" if dst_flag != "00" else "미적용"
-
+                    dst_desc = "적용(+1h)" if dst_str != "00" else "미적용"
                 except Exception:
                     tz_desc = "Unknown"
                     dst_desc = "Unknown"
 
                 nitz_history.append({
                     "log_time": log_time,
-                    "nitz_raw": nitz_str,
+                    "nitz_raw": nitz_m.group(0), # "NITZ: 26/03/26,10:00:14+04,00"
                     "timezone": tz_desc,
                     "dst_status": dst_desc
                 })

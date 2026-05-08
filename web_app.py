@@ -1013,7 +1013,7 @@ with tab_boot:
             ui.render_crash_analyzer(report_data)
 
             st.divider()
-            ui.render_nitz_timeline(report_data.get("nitz_histroy", []))
+            ui.render_nitz_timeline(report_data.get("nitz_history", []))
         else:
             st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
     else:
