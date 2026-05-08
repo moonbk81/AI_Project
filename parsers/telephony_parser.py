@@ -113,14 +113,26 @@ class TelephonyParser(BaseParser):
                 # 💡 CS Reason 파싱
                 cs_m = TEL_PATTERNS['CS_REASON'].search(payload)
                 if cs_m:
-                    current_call["status"] = "CALL DROP" if cs_m.group(1) in ['34', '41', '42', '44', '49', '58', '65535'] else "SUCCESS"
+                    is_drop = cs_m.group(1) in ['34', '41', '42', '44', '49', '58', '65535']
+                    if not is_drop and current_call["status"] == "DIALING" and cs_m.group(1) == "16":
+                        current_call["status"] = "CANCELED"
+                    else:
+                        current_call["status"] = "CALL DROP" if is_drop else "SUCCESS"
+
                     reason_desc = CALL_FAIL_REASON_MAP.get(cs_m.group(1), f"Code:{cs_m.group(1)}")
                     current_call["fail_reason"] = reason_desc
 
                 is_end = TEL_PATTERNS['END_EV'].search(payload)
                 if is_end:
                     current_call["end_time"] = ts
-                    if current_call["status"] == "DIALING": current_call["status"] = "CALL DROP"
+                    if current_call["status"] == "DIALING":
+                        reason = current_call.get("fail_reason")
+                        if any(code in reason for code in ["510", "501", "16(", "Normal"]):
+                            current_call["status"] = "CANCELED"
+                        elif reason != "0" and "Fallback" not in reason:
+                            current_call["status"] = "FAIL"
+                        else:
+                            current_call["status"] = "CALL DROP"
                     session_list.append(current_call)
                     current_call = None
 
