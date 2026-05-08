@@ -509,12 +509,25 @@ def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> s
 
     oos_facts = []
     for oos in oos_history:
+        radio_power_context = _check_radio_power_correlation(
+            oos.get("time"),
+            report_data,
+            window_sec=15
+        )
+
+        inferred_reason = oos.get("root_cause_candidate")
+
+        if radio_power_context.get("is_user_radio_power_related"):
+            inferred_reason = radio_power_context.get("classification")
+
         oos_facts.append({
             "time": oos.get("time"),
             "event": oos.get("event_type"),
             "slot": oos.get("slotId"),
             "reject_cause": oos.get("rej_cause"),
-            "inferred_reason": oos.get("root_cause_candidate")
+            "inferred_reason": inferred_reason,
+            "original_oos_reason": oos.get("root_cause_candiate"),
+            "radio_power_context": radio_power_context
         })
 
     return json.dumps({
@@ -731,6 +744,8 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
     path = os.path.join(result_dir, f"{base_name}_internet_stall.json")
     data = _load_json(path, {})
 
+    report_data = _load_report_json(base_name, result_dir)
+
     if not data:
         return json.dumps({
             "status": "NO_DATA",
@@ -750,15 +765,21 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
 
     window_facts = []
     for w in top_windows:
+        center_time = w.get("center_time")
+        radio_power_context = _check_radio_power_correlation(
+            center_time, report_data, window_sec=30
+        )
         related = w.get("related_events", []) or []
         layer_counts = w.get("layer_counts", {}) or {}
 
         window_facts.append({
-            "center_time": w.get("center_time"),
+            "center_time": center_time,
             "trigger": w.get("trigger"),
             "severity_score": w.get("severity_score"),
             "layer_counts": layer_counts,
             "root_cause_candidates": w.get("root_cause_candidates", []),
+            "radio_power_context": radio_power_context,
+            "user_action_hint": radio_power_context.get("is_user_radio_power_related", False),
             "key_related_events": [
                 {
                     "time": e.get("time"),
@@ -771,6 +792,10 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
             ]
         })
 
+    radio_power_related_windows = [
+        w for w in window_facts
+        if w.get("user_action_hint")
+    ]
     return json.dumps({
         "status": "OK",
         "kpi": {
@@ -785,6 +810,12 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
             "rf_warning_count": kpi.get("rf_warning_count", 0),
             "power_idle_hint_count": kpi.get("power_idle_hint_count", 0)
         },
+        "radio_power_interpretation": (
+            "일부 Internet Stall 구간은 비행기 모드 또는 Radio Power OFF와 시간적으로 연관되어"
+            "사용자 동작/Radio OFF 영향 가능성을 우선 검토해야 함"
+            if radio_power_related_windows
+            else "Internet Stall 구간 근처에서 명확한 Radio Power OFF/비행기 모드 흔적은 확인되지 않음"
+        ),
         "root_cause_summary": root_summary,
         "highest_risk_windows": window_facts
     }, ensure_ascii=False)
@@ -819,4 +850,85 @@ def get_internet_stall_kpi_for_integrated_report(base_name: str, result_dir: str
         },
         "root_cause_summary": raw.get("root_cause_summary", {}),
         "highest_risk_windows": raw.get("highest_risk_windows", [])
+    }
+
+def _check_radio_power_correlation(target_time_str: str, report_data: dict, window_sec: int = 10) -> dict:
+    target_dt = _parse_android_time(target_time_str)
+    if target_dt is None:
+        return {
+            "is_user_radio_power_related": False,
+            "reason": "시간 파싱 불가",
+            "nearby_radio_power_events": []
+        }
+
+    radio_events = report_data.get("radio_power", [])
+    nearby = []
+
+    for ev in radio_events:
+        ev_dt = _parse_android_time(ev.get("time", ""))
+        if ev_dt is None:
+            continue
+
+        diff = (ev_dt - target_dt).total_seconds()
+        if abs(diff) <= window_sec:
+            raw = str(ev.get("raw_request", ""))
+            reason = str(ev.get("reason", ev.get("power_reason", "")))
+            state = str(ev.get("state", ev.get("power_state", "")))
+
+            # raw_request 기반 fallback
+            if not state:
+                if "RADIO_POWER" in raw:
+                    state = "ON" if " 1" in raw else "OFF"
+
+            user_trigger_keywords = [
+                "airplane",
+                "AIRPLANE_MODE",
+                "airplane_mode_on",
+                "USER",
+                "setRadioPowerForReason"
+            ]
+
+            is_user_trigger = any(k in raw for k in user_trigger_keywords) or any(k in reason for k in user_trigger_keywords)
+
+            nearby.append({
+                "time": ev.get("time"),
+                "time_diff_sec": diff,
+                "state": state,
+                "reason": reason,
+                "raw_request": raw,
+                "is_user_trigger_candidate": is_user_trigger
+            })
+
+    off_events = [
+        e for e in nearby
+        if e.get("state") == "OFF"
+        or "OFF" in str(e.get("raw_request", ""))
+        or " 0" in str(e.get("raw_request", ""))
+    ]
+
+    airplane_events = [
+        e for e in nearby
+        if "airplane" in str(e.get("raw_request", "")).lower()
+        or "airplane" in str(e.get("reason", "")).lower()
+        or "AIRPLANE_MODE" in str(e.get("raw_request", ""))
+    ]
+
+    if airplane_events:
+        classification = "USER_AIRPLANE_MODE_RELATED"
+        message = "OOS 시점 근처에 비행기 모드/사용자 Radio OFF 흔적이 있어, 망 품질 문제보다 사용자 동작 가능성이 높음"
+    elif off_events:
+        classification = "RADIO_POWER_OFF_RELATED"
+        message = "OOS 시점 근처에 Radio Power OFF가 있어, 망 이탈 원인 판단 시 Radio OFF를 우선 고려해야 함"
+    else:
+        classification = "NO_RADIO_POWER_CORRELATION"
+        message = "OOS 시점 근처에 Radio Power OFF/비행기 모드 흔적 없음"
+
+    return {
+        "is_user_radio_power_related": classification in [
+            "USER_AIRPLANE_MODE_RELATED",
+            "RADIO_POWER_OFF_RELATED"
+        ],
+        "classification": classification,
+        "reason": message,
+        "nearby_radio_power_events": nearby
     }

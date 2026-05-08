@@ -43,9 +43,16 @@ class TelephonyParser(BaseParser):
 
             if is_cs or is_ps:
                 if current_call: session_list.append(current_call)
+                call_type = "CS" if is_cs else "PS(VoLTE)"
                 current_call = {
-                    "type": "CS" if is_cs else "PS(VoLTE)", "slot": slot_id, "start_time": ts, "end_time": None,
-                    "id": "Unknown", "status": "DIALING", "is_user_reject": False, "fail_reason": "0",
+                    "type": call_type,
+                    "slot": slot_id,
+                    "start_time": ts,
+                    "end_time": None,
+                    "id": "Unknown",
+                    "status": "DIALING" if call_type == "CS" else "IMS_INITIATED",
+                    "is_user_reject": False,
+                    "fail_reason": "0",
                     "logs": [f"[{ts}] START: {payload}"]
                 }
                 return current_call
@@ -94,7 +101,7 @@ class TelephonyParser(BaseParser):
                     # 1. 일반적인 fail_reason 할당 (CS 리다이얼이 아니어도 모두 할당)
                     current_call["fail_reason"] = f"{code}: {reason}"
                     if code not in ["501", "510"] and any(kw in payload for kw in ["StartFailed", "reject", "FAIL"]):
-                        if current_call["status"] == "DIALING":
+                        if current_call["status"] == "IMS_INITIATED":
                             current_call["status"] = "FAIL"
 
                     # 2. 380 등 Fallback 인 경우 즉시 분리 후 CS 세션 생성
@@ -125,8 +132,9 @@ class TelephonyParser(BaseParser):
                 is_end = TEL_PATTERNS['END_EV'].search(payload)
                 if is_end:
                     current_call["end_time"] = ts
-                    if current_call["status"] == "DIALING":
-                        reason = current_call.get("fail_reason")
+                    if current_call["status"] in ["DIALING", "IMS_INITIATED"]:
+                        reason = current_call.get("fail_reason", "0")
+
                         if any(code in reason for code in ["510", "501", "16(", "Normal"]):
                             current_call["status"] = "CANCELED"
                         elif reason != "0" and "Fallback" not in reason:

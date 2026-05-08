@@ -271,6 +271,8 @@ prompts:
       - RF/OOS/Signal 이벤트가 DNS/Validation/Data Stall 근처에 있으면 무선 환경 악화 가능성을 우선 검토하라.
       - DNS/Private DNS 이벤트만 있고 RF/DataCall/Validation 변화가 없다면 DNS 계층 문제로 제한해서 설명하라.
       - TCP/TLS timeout 이벤트만 있으면 DNS 실패로 단정하지 말고 TCP/TLS 또는 서버 경로 문제 후보로 설명하라.
+      - Internet Stall 분석 시 radio_power_context 또는 radio_power_interpretation 이 존재하면, 비행기 모드/Radio Power OFF에 의한 사용자 동작 가능성을 반드시 먼저 언급하라.
+      - 단, 이 근거가 없을 때만 RF/DNS/TCP 원인으로 판단하라.
 
     Signal_Level: |
       - [Signal_Level]: Slot별 안테나 수신 레벨(0~5)의 시간대별 변화를 분석해라.

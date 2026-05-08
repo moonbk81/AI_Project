@@ -169,7 +169,10 @@ class AnrParser(BaseParser):
         anr_list = []
         current_anr = None
 
-        anr_start_re = re.compile(r'ActivityManager:\s+ANR in\s+(\S+)')
+        anr_start_re = re.compile(
+            r'(?:ActivityManager:\s)?ANR in\s+(\S+)|Application is not responding:\s+(\S+)',
+            re.I
+        )
         anr_reason_re = re.compile(r'ActivityManager:\s+Reason:\s+(.+)')
         cmd_line_re = re.compile(r'Cmd line:\s+(.+)')
 
@@ -261,6 +264,7 @@ class AnrParser(BaseParser):
                     lock_info["owner_tid"], {}
                 ).get("stack")
 
+            trace_level = "TRACE_INCLUDED" if len(main_stack) > 0 else "EVENT_ONLY"
             current_anr.update({
                 "process_info": {
                     "name": current_anr.get("process"),
@@ -271,6 +275,8 @@ class AnrParser(BaseParser):
                     "stack": main_stack
                 },
                 "analysis_summary": {
+                    "is_confirmed_anr": True,
+                    "evidence_level": trace_level,
                     "has_lock_contention": lock_info is not None,
                     "has_active_binder": len(matched_tx) > 0,
                     "has_main_stack": len(main_stack) > 0,
