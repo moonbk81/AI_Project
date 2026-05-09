@@ -2,19 +2,22 @@ import argparse
 import csv
 import json
 import os
+import sys
 import time
 from datetime import datetime
 from typing import Any, Dict, List
 
-from ril_rag_chat import RilRagChat
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+from ril_rag_chat import RilRagChat
 
 DEFAULT_MODELS = [
     "llama3.1:8b",
     "qwen2.5:7b",
     "gemma2:9b",
 ]
-
 
 TEST_CASES = [
     {

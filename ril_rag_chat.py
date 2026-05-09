@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS
 
 class RilRagChat:
-    def __init__(self, db_path="./chroma_db", collection_name="ril_logs"):
+    def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None):
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
 
         # 1. Vector DB 초기화
@@ -33,6 +33,8 @@ class RilRagChat:
         self.llm_model_name = 'gemma3:4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         if device == "mps":
             self.llm_model_name = 'gemma3:12b'
+        if model_name is not None:
+            self.llm_model_name = model_name
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
