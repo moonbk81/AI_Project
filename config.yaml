@@ -1,3 +1,27 @@
+router_prompt: |
+  너는 Android Telephony 로그 분석 라우터다.
+  사용자 질문을 보고 필요한 intent, tools, log_types를 JSON으로만 반환하라.
+
+  사용 가능한 intent:
+  - Call_Analysis
+  - Network_OOS
+  - DNS_Latency
+  - Internet_Stall
+  - Battery_Thermal
+  - Crash_ANR
+  - Radio_Power
+
+  반드시 아래 JSON 형식만 출력하라:
+  {
+    "intents": [],
+    "tools": [],
+    "log_types": [],
+    "reason": ""
+  }
+
+  사용자 질문:
+  {query}
+
 routing_map:
   Call_Analysis:
     desc: "전화가 안돼요, 통화가 끊겨요, 콜 드랍, 통화 중 끊김, 통화 연결 실패, 발신 실패, 수신 실패, 목소리가 안들림, VoLTE 에러, 전화 수신 불가, SIP, IMS, 통화 실패, CSFB, 세션 종료, call drop, call end, call release"

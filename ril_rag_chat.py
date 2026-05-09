@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS
 
 class RilRagChat:
-    def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None):
+    def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
 
         # 1. Vector DB 초기화
@@ -35,6 +35,7 @@ class RilRagChat:
             self.llm_model_name = 'gemma3:12b'
         if model_name is not None:
             self.llm_model_name = model_name
+        self.routing_mode = routing_mode
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
@@ -366,7 +367,7 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None, chat_history=None, top_k=15, health_kpi=None):
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=15, health_kpi=None, is_bench=False):
         """Semantic Router 기반의 Plan -> Act -> Retrieve -> Reason 파이프라인"""
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
 
@@ -377,7 +378,15 @@ class RilRagChat:
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         # [STAGE 2: Semantic Intent Routing]
-        routing_result = self._get_semantic_routing(search_query)
+        # routing_result = self._get_semantic_routing(search_query)
+
+        if self.routing_mode == "llm":
+            routing_result = self._get_llm_routing(search_query)
+        elif self.routing_mode == "hybrid":
+            routing_result = self._get_hybrid_routing(search_query)
+        else:
+            routing_result = self._get_semantic_routing(search_query)
+
         selected_tools = routing_result.get("tools", [])
         target_log_types = routing_result.get("log_types", [])
 
@@ -433,7 +442,7 @@ class RilRagChat:
             f"사용자 질문: {user_query}"
         )
 
-        answer = self._call_llm(prompt)
+        answer = self._call_llm(prompt, is_bench=is_bench)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
         meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
@@ -489,12 +498,14 @@ class RilRagChat:
 
         return "\n\n".join(formatted)
 
-    def _call_llm(self, prompt: str) -> str:
+    def _call_llm(self, prompt: str, is_bench=False) -> str:
         """Ollama API를 통해 실제 LLM 추론을 수행합니다."""
         import ollama
-        context_size = 32768  # Gemma3-4b의 최대 컨텍스트 크기
+        context_size = 16384  # Gemma3-4b의 최대 컨텍스트 크기
         if self.llm_model_name == 'gemma3:12b':
-            context_size = 65536
+            context_size = 32768
+        if is_bench == True:
+            context_size = 8192
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
@@ -543,3 +554,109 @@ class RilRagChat:
         except Exception as e:
             print(f"❌ 지식 저장 실패: {e}")
             return False
+
+    def _extract_json_object(self, text: str) -> dict:
+        if not text:
+            raise ValueError("empty LLM routing response")
+
+        text = text.strip()
+
+        # ```json ... ``` 제거
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"^```\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+        # 첫 번째 { ... } 블록만 추출
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON object found in response: {text[:300]}")
+
+        return json.loads(match.group(0))
+
+
+    def _get_llm_routing(self, query: str) -> dict:
+        allowed_tools = set()
+        allowed_log_types = set()
+        allowed_intents = set(self.routing_map.keys())
+
+        for intent, data in self.routing_map.items():
+            allowed_tools.update(data.get("tools", []))
+            allowed_log_types.update(data.get("log_types", []))
+
+        prompt = f"""
+    너는 Android Telephony 로그 분석 라우터다.
+
+    사용자 질문을 보고 필요한 intent/tools/log_types를 JSON으로만 반환하라.
+
+    사용 가능한 intent:
+    {sorted(list(allowed_intents))}
+
+    사용 가능한 tools:
+    {sorted(list(allowed_tools))}
+
+    사용 가능한 log_types:
+    {sorted(list(allowed_log_types))}
+
+    반드시 JSON만 출력:
+    {{
+    "intents": [],
+    "tools": [],
+    "log_types": [],
+    "reason": ""
+    }}
+
+    사용자 질문:
+    {query}
+    """
+
+        try:
+            res = ollama.chat(
+                model=self.llm_model_name,
+                messages=[{"role": "user", "content": prompt}],
+                format="json",
+                options={
+                    "num_ctx": 4096,
+                    "temperature": 0.0,
+                },
+            )
+
+            content = res["message"]["content"].strip()
+            parsed = self._extract_json_object(content)
+
+            return {
+                "intents": sorted(list(set(parsed.get("intents", [])) & allowed_intents)),
+                "tools": sorted(list(set(parsed.get("tools", [])) & allowed_tools)),
+                "log_types": sorted(list(set(parsed.get("log_types", [])) & allowed_log_types)),
+                "reason": parsed.get("reason", ""),
+                "raw": content,
+            }
+
+        except Exception as e:
+            return {
+                "intents": [],
+                "tools": [],
+                "log_types": [],
+                "reason": f"LLM routing failed: {e}",
+                "raw": content if "content" in locals() else "",
+            }
+
+    def _get_hybrid_routing(self, query: str) -> dict:
+        semantic = self._get_semantic_routing(query)
+        llm_route = self._get_llm_routing(query)
+
+        merged_intents = set(semantic.get("intents", []))
+        merged_tools = set(semantic.get("tools", []))
+        merged_log_types = set(semantic.get("log_types", []))
+
+        merged_intents.update(llm_route.get("intents", []))
+        merged_tools.update(llm_route.get("tools", []))
+        merged_log_types.update(llm_route.get("log_types", []))
+
+        return {
+            "intents": sorted(merged_intents),
+            "tools": sorted(merged_tools),
+            "log_types": sorted(merged_log_types),
+            "semantic_routing": semantic,
+            "llm_routing": llm_route,
+            "routing_mode": "hybrid",
+        }
