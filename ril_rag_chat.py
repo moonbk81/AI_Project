@@ -575,6 +575,8 @@ class RilRagChat:
 
 
     def _get_llm_routing(self, query: str) -> dict:
+        import ollama
+
         allowed_tools = set()
         allowed_log_types = set()
         allowed_intents = set(self.routing_map.keys())
