@@ -232,4 +232,4 @@ chroma_db/
 .streamlit/
 test_reports/
 bge-m3-offline/
-benchmark_result/
+benchmark_results/
