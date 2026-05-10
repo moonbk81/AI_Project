@@ -278,6 +278,7 @@ def run_benchmark(
     output_dir: str,
     repeat: int,
     stop_model_each_round: bool,
+    routing_mode: str,
 ):
     os.makedirs(output_dir, exist_ok=True)
 
@@ -296,7 +297,7 @@ def run_benchmark(
         print(f"CONTEXT: {context_size}")
         print("==============================")
 
-        rag = RilRagChat(model_name=model, routing_mode="llm")
+        rag = RilRagChat(model_name=model, routing_mode=routing_mode)
         maybe_set_context(rag, model, context_size)
 
         try:
@@ -520,6 +521,13 @@ def main():
     )
 
     parser.add_argument(
+        "--routing-mode",
+        default="llm",
+        choices=["semantic", "llm", "hybrid"],
+        help="테스트할 라우팅 모드 (semantic, llm, hybrid)",
+    )
+
+    parser.add_argument(
         "--payload-dir",
         default="./payloads",
         help="payload json 폴더",
@@ -568,6 +576,7 @@ def main():
         output_dir=args.output_dir,
         repeat=args.repeat,
         stop_model_each_round=not args.no_stop,
+        routing_mode=args.routing_mode,
     )
 
 if __name__ == "__main__":

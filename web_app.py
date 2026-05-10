@@ -167,7 +167,7 @@ def render_chat_interface(key_suffix="main", show_input=True):
                             fig = px.pie(df_signal, names='Level', values='Value',
                                          title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
                             unique_key = generate_unique_key(f"chart_{key_suffix}_{msg_idx}_{i}", str(fig.to_json()[:100]))
-                            st.plotly_chart(fig, use_container_width=True, key=unique_key)
+                            st.plotly_chart(fig, width="stretch", key=unique_key)
 
                     if meta.get('log_type') == 'OOS_Event':
                         v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
@@ -418,7 +418,7 @@ with st.sidebar:
         index=current_mode_idx
     )
 
-    if st.button("🚀 설정 적용 및 엔진 로드", use_container_width=True):
+    if st.button("🚀 설정 적용 및 엔진 로드", width="stretch"):
         # 값이 실제로 변경되었을 때만 업데이트 및 리로드 유도
         if (st.session_state['active_model'] != ui_model) or \
            (st.session_state['active_routing_mode'] != ui_mode):
@@ -485,7 +485,7 @@ with st.sidebar:
         st.success(f"활성 파일: `{st.session_state.current_file}`")
 
     # 2. DB 초기화 버튼 (매번 폴더 지울 필요 없음)
-    if st.button("🗑️ 전체 DB 초기화", use_container_width=True, help="Vector DB의 모든 지식을 삭제합니다."):
+    if st.button("🗑️ 전체 DB 초기화", width="stretch", help="Vector DB의 모든 지식을 삭제합니다."):
         if engine.reset_db():
             # 🚨 [신규 추가] 물리적으로 남아있는 캐시 폴더들도 싹 날리고 새로 빈 폴더를 만들어 줍니다.
             import shutil
@@ -509,7 +509,7 @@ with st.sidebar:
         with col1: start_time = st.text_input("시작 (예: 04-12 14:00:00)")
         with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
 
-    if st.button("🚀 분석 및 DB 적재 시작", use_container_width=True, type="primary"):
+    if st.button("🚀 분석 및 DB 적재 시작", width="stretch", type="primary"):
         if not uploaded_files:  # 단일 객체가 아닌 빈 리스트인지 검사
             st.error("❌ 먼저 파일을 하나 이상 업로드해주세요.")
         elif use_slicing and (not start_time or not end_time):
@@ -555,7 +555,7 @@ with st.sidebar:
         # [C] 심각도 선택 추가
         severity = st.radio("🚩 이슈 중요도", ["Critical", "Major", "Minor", "Info"], index=3, horizontal=True)
 
-        if st.button("💾 DB에 지식 영구 박제", use_container_width=True):
+        if st.button("💾 DB에 지식 영구 박제", width="stretch"):
             if feedback.strip():
                 # 카테고리에 따른 ID 필터링 (Total_Report일 경우 전체 ID 선택)
                 if target_type == "Total_Report":
@@ -611,26 +611,26 @@ with tab_chat:
     col_btn4, col_btn5, col_btn6 = st.columns(3)
     col_btn7, col_btn8, col_btn9 = st.columns(3)
     with col_btn1:
-        if st.button("📞 통화 끊김(Drop) 분석", use_container_width=True):
+        if st.button("📞 통화 끊김(Drop) 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('call_drop')
     with col_btn2:
-        if st.button("🌐 데이터 네트워크 이상 분석", use_container_width=True):
+        if st.button("🌐 데이터 네트워크 이상 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('data_network_issue')
     with col_btn3:
-        if st.button("🔋 배터리/크래시 분석", use_container_width=True):
+        if st.button("🔋 배터리/크래시 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('battery_crash')
     with col_btn4:
-        if st.button("🚫 망 등록(Reg) 및 OOS 분석", use_container_width=True):
+        if st.button("🚫 망 등록(Reg) 및 OOS 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('network_oos')
     with col_btn5:
-        if st.button("📶 안테나(Signal) 레벨 분석", use_container_width=True):
+        if st.button("📶 안테나(Signal) 레벨 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('antenna_level_analysis')
     with col_btn6:
-        if st.button("💬 VoLTE/SIP 상세 분석", use_container_width=True):
+        if st.button("💬 VoLTE/SIP 상세 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
 
     with col_btn7:
-        if st.button("🌐 인터넷 멈춤 종합 분석", use_container_width=True):
+        if st.button("🌐 인터넷 멈춤 종합 분석", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('internet_stall_analysis')
 
     st.divider()
@@ -756,7 +756,7 @@ with tab_dash:
                     st.subheader("🚩 에러 유형별 분포 (Log Type)")
                     if 'log_type' in df.columns:
                         fig1 = px.pie(df, names='log_type', hole=0.4)
-                        st.plotly_chart(fig1, use_container_width=True)
+                        st.plotly_chart(fig1, width="stretch")
                     else:
                         st.info("Log Type 데이터가 없습니다.")
 
@@ -766,7 +766,7 @@ with tab_dash:
                         file_counts = df['source_file'].value_counts().reset_index()
                         file_counts.columns = ['source_file', 'count']
                         fig2 = px.bar(file_counts, x='count', y='source_file', orientation='h')
-                        st.plotly_chart(fig2, use_container_width=True)
+                        st.plotly_chart(fig2, width="stretch")
                     else:
                         st.info("파일 이름 데이터가 없습니다.")
 
@@ -797,7 +797,7 @@ with tab_dash:
                         fig.add_trace(go.Scatter(x=data_df['time'], y=data_df['total_mb'], name="Data Usage(MB)", fill='tozeroy'))
 
                         fig.update_layout(title="통합 로그 타임라인 분석", xaxis_title="시간", yaxis_title="상태/값")
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                     # ==========================================
                     # 📊 1. 핵심 지표 카드 변수 계산 (df에서 데이터 추출)
@@ -858,7 +858,7 @@ with tab_dash:
                     if 'known_solution' in df.columns:
                         solution_df = df.dropna(subset=['known_solution'])[['source_file', 'log_type', 'known_solution']]
                         if not solution_df.empty:
-                            st.dataframe(solution_df, use_container_width=True)
+                            st.dataframe(solution_df, width="stretch")
                         else:
                             st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
                     else:
@@ -916,13 +916,13 @@ with tab_dash:
                             c1, c2 = st.columns([1, 2.5])
                             with c1:
                                 st.markdown(f"**📡 [{selected_app}] 망별 요약**")
-                                st.dataframe(rat_summary, hide_index=True, use_container_width=True)
+                                st.dataframe(rat_summary, hide_index=True, width="stretch")
 
                             with c2:
                                 st.markdown(f"**📑 상세 사용 로그**")
                                 display_cols = ['time', 'rat', 'total_mb', 'rx_bytes', 'tx_bytes']
                                 actual_cols = [c for c in display_cols if c in target_app_df.columns]
-                                st.dataframe(target_app_df[actual_cols], hide_index=True, use_container_width=True)
+                                st.dataframe(target_app_df[actual_cols], hide_index=True, width="stretch")
                         else:
                             st.info("데이터 사용량 기록이 없습니다.")
                     else:
@@ -970,7 +970,7 @@ with tab_dash:
                     # 🤖 AI 종합 기술 진단 리포트 (Powered by Gemma2 9B)
                     # ==========================================
                     st.subheader("🤖 AI 종합 기술 진단 리포트")
-                    if st.button("📝 전체 로그 종합 분석 리포트 생성", use_container_width=True):
+                    if st.button("📝 전체 로그 종합 분석 리포트 생성", width="stretch"):
                         with st.spinner("모든 로그의 상관관계를 분석하여 전문 리포트를 작성 중입니다..."):
 
                             actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
@@ -1099,7 +1099,7 @@ with tab_boot:
                             labels={'Delta_ms': '지연 시간(ms)', 'Event': '이벤트 명'}
                         )
                         fig_boot.update_layout(yaxis={'categoryorder':'total ascending'}, height=450)
-                        st.plotly_chart(fig_boot, use_container_width=True)
+                        st.plotly_chart(fig_boot, width="stretch")
                 else:
                     st.info("Delta_ms (구간 지연) 데이터가 존재하지 않아 병목 차트를 그릴 수 없습니다.")
 
@@ -1110,7 +1110,7 @@ with tab_boot:
                     else:
                         df_full = df_boot
 
-                    st.dataframe(df_full, use_container_width=True)
+                    st.dataframe(df_full, width="stretch")
             else:
                 st.warning("분석 리포트 내에 부팅 이벤트 데이터가 없습니다. 로그가 `!@Boot` 포맷을 포함하고 있는지 확인하세요.")
 
@@ -1180,7 +1180,7 @@ with tab_ntn:
 
         st.divider()
         if sat_type:
-            if st.button(f"🛰️ {sat_type} 위성망 심층 진단", use_container_width=True):
+            if st.button(f"🛰️ {sat_type} 위성망 심층 진단", width="stretch"):
                 with st.spinner(f"{sat_type} 위성 데이터를 분석 중입니다..."):
                     health_kpi_json = get_device_health_kpi(current_base)
                     # 🚨 [하드코딩 제거] YAML에서 템플릿을 꺼내고, JSON 팩트를 동적으로 꽂아 넣습니다.

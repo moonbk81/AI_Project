@@ -71,11 +71,11 @@ def render_dns_analysis_chart(df):
 
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.plotly_chart(fig_dns_corr, use_container_width=True)
+                st.plotly_chart(fig_dns_corr, width="stretch")
             with c2:
                 st.markdown("**📊 상세 에러 매트릭스**")
                 pivot_df = error_dns_df.pivot_table(index='app_name', columns='return_code', aggfunc='size', fill_value=0)
-                st.dataframe(pivot_df, use_container_width=True)
+                st.dataframe(pivot_df, width="stretch")
         else:
             st.success("🎉 분석된 로그 내에 DNS 차단/실패 기록이 없습니다. (모두 정상)")
     else:
@@ -99,7 +99,7 @@ def render_battery_thermal_chart(df):
                 color='times', color_continuous_scale='Blues'
             )
             fig_wl.update_layout(xaxis_tickangle=-45, height=400)
-            st.plotly_chart(fig_wl, use_container_width=True)
+            st.plotly_chart(fig_wl, width="stretch")
         else:
             st.info("Wakelock 기록이 없습니다.")
 
@@ -115,7 +115,7 @@ def render_battery_thermal_chart(df):
             )
             fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="발열 경계선 (40°C)")
             fig_th.update_layout(xaxis_tickangle=-45, height=400)
-            st.plotly_chart(fig_th, use_container_width=True)
+            st.plotly_chart(fig_th, width="stretch")
         else:
             st.info("발열(Thermal) 기록이 없습니다.")
 
@@ -133,12 +133,12 @@ def render_call_history_summary(df):
                 st.markdown("**📊 통화 상태(Status) 비율**")
                 if 'status' in call_df.columns:
                     fig_call = px.pie(call_df, names='status', hole=0.4, title="전체 Call 성공/실패 분포")
-                    st.plotly_chart(fig_call, use_container_width=True)
+                    st.plotly_chart(fig_call, width="stretch")
                 else:
                     st.info("상태(status) 데이터가 없습니다.")
             with col_table:
                 st.markdown(f"**📋 전체 통화 이력 (총 {len(clean_call_df)}건)**")
-                st.dataframe(clean_call_df, use_container_width=True, height=400)
+                st.dataframe(clean_call_df, width="stretch", height=400)
         else:
             st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
 
@@ -175,7 +175,7 @@ def render_signal_level_timeline(df):
                 fig_sig_dash.update_yaxes(range=[-0.5, 5.5], dtick=1, title_text="안테나 칸", showgrid=True, gridcolor='rgba(128,128,128,0.2)')
                 fig_sig_dash.update_layout(hovermode="x unified")
                 fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                st.plotly_chart(fig_sig_dash, use_container_width=True)
+                st.plotly_chart(fig_sig_dash, width="stretch")
             else:
                 st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
         else:
@@ -193,7 +193,7 @@ def render_data_usage_profiling(df):
                 app_df = du_df.groupby('app_name')['total_mb'].sum().reset_index().sort_values(by='total_mb', ascending=False).head(10)
                 fig_app = px.pie(app_df, values='total_mb', names='app_name', hole=0.4, title='📱 앱별 데이터 사용량 Top 10 (MB)')
                 fig_app.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_app, use_container_width=True)
+                st.plotly_chart(fig_app, width="stretch")
             with col_du2:
                 rat_df = du_df.groupby('rat')['total_mb'].sum().reset_index()
                 fig_rat = px.pie(
@@ -201,7 +201,7 @@ def render_data_usage_profiling(df):
                     color_discrete_map={'LTE':'#1f77b4', '5G (NR)':'#ff7f0e', 'Unknown (망 통합 합산)':'#7f7f7f'}
                 )
                 fig_rat.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_rat, use_container_width=True)
+                st.plotly_chart(fig_rat, width="stretch")
         else:
             st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
 
@@ -217,13 +217,13 @@ def render_network_timeseries_and_dns(df):
             with col_dns1:
                 st.markdown("**🚫 DNS 차단/실패 사유**")
                 fig_dns = px.pie(dns_df, names='suspected_reason', hole=0.4)
-                st.plotly_chart(fig_dns, use_container_width=True)
+                st.plotly_chart(fig_dns, width="stretch")
             with col_dns2:
                 st.markdown("**📦 패키지별 DNS 이슈 발생 건수**")
                 pkg_counts = dns_df['package'].value_counts().reset_index()
                 pkg_counts.columns = ['package', 'count']
                 fig_pkg = px.bar(pkg_counts, x='count', y='package', orientation='h')
-                st.plotly_chart(fig_pkg, use_container_width=True)
+                st.plotly_chart(fig_pkg, width="stretch")
         else:
             st.info("적재된 DNS 이슈 데이터가 없습니다.")
 
@@ -263,7 +263,7 @@ def render_network_timeseries_and_dns(df):
             )
             fig_ts.update_xaxes(tickformat="%m-%d\n%H:%M:%S", title="발생 시간")
             fig_ts.update_layout(yaxis_title="수치")
-            st.plotly_chart(fig_ts, use_container_width=True)
+            st.plotly_chart(fig_ts, width="stretch")
         else:
             st.info("시계열 그래프를 그릴 수 있는 상세 지표가 DB에 없습니다. 로그를 다시 분석해 주세요.")
 
@@ -374,7 +374,7 @@ def render_ntn_advanced_fw_analyzer(current_base):
         fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
         order = ['RADIO_POWER', 'PLMN_MATCH', 'HYSTERESIS_ICON_ON', 'NTN_MODE_NOTIFY']
         fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("표시할 타임라인 이벤트가 없습니다.")
 
@@ -385,7 +385,7 @@ def render_ntn_advanced_fw_analyzer(current_base):
     display_cols = [col for col in ['time', 'event_type', 'power_state', 'ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'data_policy'] if col in clean_df.columns]
 
     final_table_df = clean_df[display_cols].fillna("-")
-    st.dataframe(final_table_df, use_container_width=True)
+    st.dataframe(final_table_df, width="stretch")
 
 def render_data_call_analyzer(data):
     """RIL SETUP_DATA_CALL (데이터 호) 분석 렌더러"""
@@ -454,13 +454,13 @@ def render_data_call_analyzer(data):
             labels={'req_time_dt': '시간', 'apn': '대상 APN'}
         )
         fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
-        st.plotly_chart(fig, use_container_width=True, key="datacall_scatter_chart")
+        st.plotly_chart(fig, width="stretch", key="datacall_scatter_chart")
     else:
         st.info("차트에 표시할 이벤트가 없습니다.")
 
     # 상세 로그 추적 테이블
     st.markdown("**📋 데이터 호 트랜잭션 상세 내역**")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width="stretch")
 
 def render_ims_sip_flow(current_base=None):
     """VoLTE/IMS SIP Call Flow (사다리 차트) 시각화"""
@@ -567,14 +567,14 @@ def render_ims_sip_flow(current_base=None):
         plot_bgcolor='white', hovermode=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # ---------------------------------------------------------
     # 📋 상세 로그 테이블
     # ---------------------------------------------------------
     st.markdown("**📋 SIP 메시지 트랜잭션 상세**")
     display_cols = ['time', 'direction', 'msg_type', 'method_code', 'tid', 'cseq', 'raw_log']
-    st.dataframe(sip_df[display_cols], use_container_width=True)
+    st.dataframe(sip_df[display_cols], width="stretch")
 
 def render_crash_analyzer(report_data):
     """시스템 크래시 및 FATAL 에러 분석 UI"""
@@ -689,7 +689,7 @@ def render_crash_analyzer(report_data):
                             "raw": tx.get('raw', '')
                         })
 
-                    st.dataframe(pd.DataFrame(binder_rows), use_container_width=True)
+                    st.dataframe(pd.DataFrame(binder_rows), width="stretch")
 
                 main_stack = anr_data.get('main', {}).get('stack', [])
                 if main_stack:
@@ -764,7 +764,7 @@ def render_sat_at_analyzer(current_base=None):
         fig_reg.update_traces(line_shape='hv', line_color='#E64A19', marker=dict(size=8))
         fig_reg.update_yaxes(categoryorder='array', categoryarray=["Deregistered (0)", "Searching", "Registered (1)"])
         fig_reg.update_layout(height=250, margin=dict(t=20, b=20))
-        st.plotly_chart(fig_reg, use_container_width=True)
+        st.plotly_chart(fig_reg, width="stretch")
         st.divider()
 
        # ==========================================
@@ -815,7 +815,7 @@ def render_sat_at_analyzer(current_base=None):
             yaxis=dict(showticklabels=False, range=[0, len(flow)+1], showgrid=False, zeroline=False),
             height=max(400, len(flow) * 35), margin=dict(l=150, r=50, t=60, b=20), plot_bgcolor="white"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 def render_service_state_timeline(df):
     """일반 셀룰러 망의 서비스 상태(Service State) 변경 타임라인을 렌더링합니다."""
@@ -930,7 +930,7 @@ def render_service_state_timeline(df):
     chart_height = max(300, 200 * clean_df['Slot'].nunique())
     fig.update_layout(height=chart_height, hovermode="x unified", margin=dict(t=50, b=20))
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 def render_integrated_rf_call_timeline(report_data):
     """
@@ -1027,7 +1027,7 @@ def render_integrated_rf_call_timeline(report_data):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 def _load_json(path, default):
     if not os.path.exists(path):
@@ -1121,7 +1121,7 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
             })
 
         root_df = pd.DataFrame(root_rows)
-        st.dataframe(root_df, use_container_width=True)
+        st.dataframe(root_df, width="stretch")
 
         fig_root = px.bar(
             root_df,
@@ -1130,7 +1130,7 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
             title="Root Cause Candidate 분포",
             hover_data=["high", "medium", "low", "example_time", "example_trigger"]
         )
-        st.plotly_chart(fig_root, use_container_width=True)
+        st.plotly_chart(fig_root, width="stretch")
     else:
         st.info("Root cause candidate가 없습니다.")
 
@@ -1160,11 +1160,11 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
                 title="인터넷 멈춤 관련 계층별 이벤트"
             )
             fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             with st.expander("Raw Timeline Table", expanded=False):
                 display_cols = [c for c in ["time", "layer", "event_type", "severity", "reason", "net_id", "apn", "cid", "raw"] if c in timeline_df.columns]
-                st.dataframe(timeline_df[display_cols], use_container_width=True)
+                st.dataframe(timeline_df[display_cols], width="stretch")
         else:
             st.warning("Timeline 시간 파싱에 실패했습니다.")
     else:
@@ -1193,7 +1193,7 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
             })
 
         window_df = pd.DataFrame(window_rows).sort_values("severity_score", ascending=False)
-        st.dataframe(window_df, use_container_width=True)
+        st.dataframe(window_df, width="stretch")
 
         selected_idx = st.selectbox(
             "상세 확인할 Stall Window",
@@ -1210,7 +1210,7 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
         if not related_df.empty:
             related_df = _safe_time_series(related_df, "time")
             display_cols = [c for c in ["time", "layer", "event_type", "severity", "reason", "apn", "cid", "raw"] if c in related_df.columns]
-            st.dataframe(related_df[display_cols], use_container_width=True)
+            st.dataframe(related_df[display_cols], width="stretch")
 
             with st.expander("Trigger 주변 Raw Context", expanded=False):
                 for e in related[:20]:
@@ -1248,10 +1248,10 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
             count_df.columns = ["event_type", "count"]
 
             fig = px.bar(count_df, x="event_type", y="count", title=f"{'/'.join(layer_names)} 이벤트 분포")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             display_cols = [c for c in ["time", "event_type", "severity", "reason", "net_id", "apn", "cid", "raw"] if c in layer_df.columns]
-            st.dataframe(layer_df[display_cols], use_container_width=True)
+            st.dataframe(layer_df[display_cols], width="stretch")
 
     render_layer(tab_dns, ["DNS"])
     render_layer(tab_datacall, ["DATA_CALL", "DATA_STALL"])
@@ -1319,13 +1319,13 @@ def render_nitz_timeline(nitz_data):
         yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # 3. 📋 상세 데이터 테이블
     with st.expander("🔍 NITZ 수신 Raw Data 보기"):
         st.dataframe(
             df[['log_time', 'timezone', 'dst_status', 'nitz_raw']],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "log_time": "수신 시간",
                 "timezone": "적용 타임존",
