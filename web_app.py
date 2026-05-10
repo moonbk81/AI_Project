@@ -14,6 +14,7 @@ import ui_components as ui
 from ril_rag_chat import RilRagChat
 from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
+from benchmark_ui import render_benchmark_dashboard
 
 from agent_tools import get_device_health_kpi
 
@@ -328,12 +329,13 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
-tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet = st.tabs([
+tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark = st.tabs([
     "💬 로그 분석 및 대화",
     "📊 전사 로그 통계 대시보드",
     "📈 부팅/Crash/ANR/NITZ",
     "🛰️ 위성 통신",
-    "🌐 인터넷 멈춤"])
+    "🌐 인터넷 멈춤",
+    "⚡ 모델 벤치마크"])
 
 # ==========================================
 # 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
@@ -1098,3 +1100,7 @@ with tab_ntn:
 with tab_internet:
     current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else None
     ui.render_internet_stall_analyzer(current_base)
+
+with tab_benchmark:
+    render_benchmark_dashboard()
+    st.divider()

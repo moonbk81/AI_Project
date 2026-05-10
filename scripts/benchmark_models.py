@@ -16,16 +16,17 @@ if PROJECT_ROOT not in sys.path:
 
 from ril_rag_chat import RilRagChat
 
-
 DEFAULT_MODELS = [
-    "gemma2:2b",
-    "gemma3:4b",
+    "gemma2:9b",
+    "gemma3:12b",
     "qwen2.5-coder:7b",
 ]
 
 MODEL_CONTEXTS = {
     "gemma2:2b": 8192,
+    "gemma2:9b": 8192,
     "gemma3:4b": 8192,
+    "gemma3:12b": 8192,
     "qwen2.5-coder:7b": 8192,
 }
 
