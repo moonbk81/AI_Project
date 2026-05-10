@@ -1,3 +1,4 @@
+import datetime
 import os
 import streamlit as st
 import json
@@ -6,6 +7,7 @@ import pandas as pd
 import plotly.express as px
 import re
 import hashlib
+import torch
 from core.config import QUICK_PROMPTS, SATELLITE_PROMPTS
 
 import ui_components as ui
@@ -14,7 +16,7 @@ import ui_components as ui
 from ril_rag_chat import RilRagChat
 from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
-from benchmark_ui import render_benchmark_dashboard
+from benchmark_ui import render_benchmark_dashboard, get_installed_ollama_models
 
 from agent_tools import get_device_health_kpi
 
@@ -79,13 +81,37 @@ def generate_unique_key(prefix, data_string):
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wide")
 
-@st.cache_resource(show_spinner=False)
-def get_ai_engine():
-    """[핵심] 엔진을 매번 새로 만들지 않고 딱 한 번만 로드하여 메모리에 상주 (속도 극대화)"""
-    return RilRagChat()
+# 1. 초기값 설정 (앱 최상단)
+if 'active_model' not in st.session_state:
+    # 하드웨어 감지 로직 (ril_rag_chat.py와 동일한 기준)
+    is_mac_mps = torch.backends.mps.is_available()
 
+    # 맥(MPS)이면 gemma3:12b, 그 외(CUDA/CPU)는 gemma3:4b를 기본값으로 설정
+    default_model = "gemma3:12b" if is_mac_mps else "gemma3:4b"
+
+    st.session_state['active_model'] = default_model
+
+if 'active_routing_mode' not in st.session_state:
+    # 기본 라우팅 모드는 여전히 가장 가벼운 semantic으로 유지
+    st.session_state['active_routing_mode'] = "semantic"
+
+if 'last_loaded_at' not in st.session_state:
+    st.session_state['last_loaded_at'] = "초기 로딩 대기 중"
+
+@st.cache_resource(show_spinner=False)
+def load_rag_engine(model_name, routing_mode):
+    """설정된 파라미터로 RilRagChat 엔진을 생성하고 캐싱합니다."""
+    return RilRagChat(
+        model_name=model_name,
+        routing_mode=routing_mode
+    )
+
+# 사이드바에서 선택된 값으로 엔진 로드
 try:
-    engine = get_ai_engine()
+    engine = load_rag_engine(
+        st.session_state.get('active_model'),
+        st.session_state.get('active_routing_mode')
+    )
 except Exception as e:
     st.error(f"엔진 초기화 실패. 터미널에서 ollama가 실행 중인지 확인하세요.\n에러: {e}")
     st.stop()
@@ -341,9 +367,86 @@ tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark = st.tabs([
 # 3. 사이드바: 파일 업로드 & 슬라이싱 옵션
 # ==========================================
 with st.sidebar:
+    # 🎨 [핵심] 사이드바 여백을 강제로 줄이는 커스텀 CSS 주입
+    st.markdown("""
+        <style>
+            /* 라디오 버튼, 셀렉트박스 등 위젯 하단 여백 축소 */
+            [data-testid="stSidebar"] .stSelectbox,
+            [data-testid="stSidebar"] .stRadio {
+                margin-bottom: -15px;
+            }
+            /* 구분선(Divider) 위아래 여백 축소 */
+            [data-testid="stSidebar"] hr {
+                margin-top: 10px;
+                margin-bottom: 10px;
+            }
+            /* st.info 박스 안의 텍스트 줄간격 축소 */
+            [data-testid="stSidebar"] .stAlert p {
+                line-height: 1.4;
+                margin-bottom: 0px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    st.title("⚙️ RIL RAG 분석 도구 설정")
+    st.header("⚙️ 분석 엔진 설정")
+    st.divider()
+
+    # 1. 모델 선택 (Ollama 리스트 활용)
+    available_models = get_installed_ollama_models()
+    if available_models is None:
+        available_models = ["gemma2:9b", "gemma3:12b", "qwen2.5-coder:7b"]
+
+    # 1. 현재 Active 상태의 값이 리스트의 몇 번째 인덱스인지 찾기
+    try:
+        current_model_idx = available_models.index(st.session_state['active_model'])
+    except ValueError:
+        current_model_idx = 0  # 리스트에 없는 예외 상황 방어용
+
+    ui_model = st.selectbox(
+        "🤖 모델 선택",
+        options=available_models,
+        index=current_model_idx
+    )
+    routing_options = ["semantic", "llm", "hybrid"]
+    try:
+        current_mode_idx = routing_options.index(st.session_state['active_routing_mode'])
+    except ValueError:
+        current_mode_idx = 0
+    ui_mode = st.radio(
+        "🛤️ 라우팅 모드",
+        options=routing_options,
+        index=current_mode_idx
+    )
+
+    if st.button("🚀 설정 적용 및 엔진 로드", use_container_width=True):
+        # 값이 실제로 변경되었을 때만 업데이트 및 리로드 유도
+        if (st.session_state['active_model'] != ui_model) or \
+           (st.session_state['active_routing_mode'] != ui_mode):
+
+            st.session_state['active_model'] = ui_model
+            st.session_state['active_routing_mode'] = ui_mode
+
+            # 마지막 로딩 시간 기록
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state['last_loaded_at'] = now
+            st.toast(f"✅ 엔진 설정이 업데이트 되었습니다!\n({ui_model} / {ui_mode})")
+            st.rerun() # UI 즉시 새로고침
+        else:
+            st.info("변경 사항이 없습니다.")
+
+    st.divider()
+
+    # 4. 현재 활성화된 정보 표시
+    st.markdown("### 📡 현재 활성 상태")
+    st.info(
+        f"**Model:** `{st.session_state['active_model']}`  \n"
+        f"**Mode:** `{st.session_state['active_routing_mode']}`  \n"
+        f"**Loaded:** `{st.session_state['last_loaded_at']}`"
+    )
+
+    st.divider()
+
     st.header("⚙️ 1-Click 자동 분석 파이프라인")
-    # ✅ 여기서 엔진의 LLM 모델명과 임베딩 디바이스를 깔끔하게 출력
-    st.info(f"🧠 활성 LLM: **{engine.llm_model_name}**\n\n⚡ 임베딩: **{str(engine.embed_model.device).upper()}**")
     uploaded_files = st.file_uploader(
         "📁 원시 로그 파일 업로드 (여러 개 동시 선택 가능)",
         type=['txt', 'log', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10'],
