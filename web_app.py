@@ -7,6 +7,8 @@ import plotly.express as px
 import re
 import hashlib
 import torch
+import warnings
+
 from core.config import QUICK_PROMPTS, SATELLITE_PROMPTS
 from datetime import datetime
 
@@ -77,6 +79,8 @@ def merge_log_files(file_paths, output_path):
 def generate_unique_key(prefix, data_string):
     hash_obj = hashlib.md5(data_string.encode('utf-8')).hexdigest()[:8]
     return f"{prefix}_{hash_obj}"
+
+warnings.filterwarnings("ignore")
 
 # 1. 페이지 기본 설정
 st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wide")
@@ -331,6 +335,7 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
 
             status.update(label="✅ 분석 완료! 이제 대화와 대시보드를 확인하세요.", state="complete", expanded=False)
             st.session_state.current_file = f"{base_name}_payload.json"
+            st.session_state.messages = []
             st.rerun()
 
         except Exception as e:
@@ -476,6 +481,7 @@ with st.sidebar:
             if st.session_state.current_file != selected_file:
                 st.session_state.current_file = selected_file
                 st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
+                st.session_state.messages = []
                 st.rerun()
     else:
         st.info("DB가 비어 있습니다. 로그를 먼저 업로드하세요.")

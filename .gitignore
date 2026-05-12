@@ -233,3 +233,4 @@ chroma_db/
 test_reports/
 bge-m3-offline/
 benchmark_results/
+eval_logs/

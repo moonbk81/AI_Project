@@ -234,6 +234,24 @@ class RagPayloadBuilder:
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         battery_thermal = report_data.get("battery_thermal_stats", {})
+
+        # ==========================================
+        # 🚨 VoLTE/IMS SIP 메시지 페이로드 변환 (추가된 부분)
+        # ==========================================
+        if "ims_sip_data" in report_data:
+            for sip in report_data["ims_sip_data"]:
+                # 1. 공통 메타데이터 자동 추출 함수 태우기
+                meta = self._extract_metadata(sip, "IMS_SIP_Message")
+
+                # 2. UI의 [참고 로그] 탭에 원본 로그가 예쁘게 찍히도록 'raw_logs' 규격 맞춰주기
+                if "raw_log" in sip:
+                    meta["raw_logs"] = json.dumps([sip["raw_log"]], ensure_ascii=False)
+
+                # 3. 앞서 ImsSipProcessor에서 예쁘게 1줄로 요약해 둔 'document'를 그대로 본문으로 사용
+                text_content = sip.get("document", self._build_markdown_doc(sip, "IMS_SIP_Message"))
+
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         # ==========================================
         # 🚨 배터리 발열(Thermal) 기록 페이로드 변환
         # ==========================================

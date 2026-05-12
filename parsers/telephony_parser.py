@@ -233,7 +233,10 @@ class TelephonyParser(BaseParser):
             if in_call_log:
                 m = dump_time_re.search(clean_line)
                 if m:
-                    ts = f"{m.group(1)} {m.group(2)}.000"
+                    time_part = m.group(2)
+                    if '.' not in time_part:
+                        time_part += ".000"
+                    ts = f"{m.group(1)} {time_part}"
                     parts = clean_line.split(" - ", 1)
                     payload = parts[1] if len(parts) > 1 else clean_line
                     process_cs_multi_payload(ts, payload, dump_sessions, active_dump_calls, slot_id=current_dump_slot)

@@ -3,6 +3,7 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
+from functools import lru_cache
 
 def _ensure_dict(value):
     if isinstance(value, str):
@@ -368,6 +369,10 @@ def _load_report_json(base_name: str, result_dir: str = "./result") -> dict:
     with open(report_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+# ==========================================
+# 🛠️ [최적화 완료] 시간 파싱 연산 최소화 (캐싱 도입)
+# ==========================================
+@lru_cache(maxsize=2048)
 def _parse_android_time(time_str: str):
     if not time_str:
         return None
@@ -391,7 +396,7 @@ def _parse_android_time(time_str: str):
     return None
 
 # ==========================================
-# 🛠️ [신규 추가] 메모리 기반 타임라인 교차 검증 헬퍼
+# 🛠️ [다이어트 완료] 메모리 기반 타임라인 교차 검증 헬퍼
 # ==========================================
 def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: int = 2) -> list:
     """에러 발생 시간 기준 ±window_sec 내의 망 이탈(OOS) 및 신호 급감(Level 0~1) 이력을 탐색합니다."""
@@ -401,33 +406,40 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
 
     correlated = []
 
-    # 1. OOS 타임라인 교차 검증
+    # 1. OOS 타임라인 교차 검증 (다이어트: 상태 문자열 먼저 필터링)
     oos_events = report_data.get("oos_events", [])
     for oos in oos_events:
-        oos_time = str(oos.get("time", ""))[:14]
-        if oos_time:
-            try:
-                oos_dt = _parse_android_time(oos.get("time", ""))
-                if oos_dt is None:
-                    continue
+        v_reg = str(oos.get("voice_reg", ""))
+        d_reg = str(oos.get("data_reg", ""))
 
-                diff = abs((oos_dt - target_dt).total_seconds())
-                if diff <= window_sec:
-                    v_reg = str(oos.get("voice_reg", ""))
-                    d_reg = str(oos.get("data_reg", ""))
-                    if v_reg.strip() == "1" or d_reg.strip() == "1" or "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg:
-                        correlated.append(f"[OOS 동반] 망 이탈 발생 (시간차: {diff}초)")
-            except: pass
-
-    # 2. Signal 타임라인 교차 검증
-    signal_events = report_data.get("signal_level_history", [])
-    for sig in signal_events:
-        sig_dt = _parse_android_time(sig.get("time", ""))
-        if sig_dt is None:
+        # 🔥 [최적화] OOS 상태가 아닌 정상 로그는 시간 파싱도 하지 않고 즉시 스킵
+        is_oos = (v_reg.strip() == "1" or d_reg.strip() == "1" or
+                  "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg)
+        if not is_oos:
             continue
 
+        # 상태가 OOS일 때만 무거운 시간 파싱 진행
+        oos_time_str = oos.get("time", "")
+        if oos_time_str:
+            oos_dt = _parse_android_time(oos_time_str)
+            if oos_dt is None:
+                continue
+
+            diff = abs((oos_dt - target_dt).total_seconds())
+            if diff <= window_sec:
+                correlated.append(f"[OOS 동반] 망 이탈 발생 (시간차: {diff}초)")
+
+    # 2. Signal 타임라인 교차 검증 (다이어트: 레벨 0, 1 먼저 필터링)
+    signal_events = report_data.get("signal_level_history", [])
+    for sig in signal_events:
         sig_level = str(sig.get("level", sig.get("max_level", ""))).strip()
+
+        # 🔥 [최적화] 레벨 0, 1이 아니면 시간 파싱 자체를 스킵
         if sig_level not in ["0", "1"]:
+            continue
+
+        sig_dt = _parse_android_time(sig.get("time", ""))
+        if sig_dt is None:
             continue
 
         diff = abs((sig_dt - target_dt).total_seconds())

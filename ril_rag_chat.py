@@ -251,36 +251,54 @@ class RilRagChat:
 
         MAX_DOC_CHARS = 4000
         MAX_META_CHARS = 5000
+        BATCH_SIZE = 100
+        import gc
 
-        docs, metas = [], []
-        for item in data:
+        docs, metas, ids = [], [], []
+        for i, item in enumerate(data):
+            # 1. 텍스트 길이 제한
             docs.append(str(item["document"])[:MAX_DOC_CHARS])
 
+            # 2. 메타데이터 정리
             meta = item.get("metadata", {}).copy()
             meta["source_file"] = filename
-
             for k, v in list(meta.items()):
                 if isinstance(v, str) and len(v) > MAX_META_CHARS:
-                    meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
-
+                    meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED]"
             metas.append(meta)
+            ids.append(f"{base_id}_{i}")
 
-        ids = [f"{base_id}_{i}" for i in range(len(data))]
+        print(f"🔄 '{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
 
-        embeddings = self.embed_model.encode(
-            docs,
-            batch_size=32,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        ).tolist()
+        # 3. 배치 단위 루프 (메모리 다이어트 핵심 구간)
+        for i in range(0, len(docs), BATCH_SIZE):
+            batch_docs = docs[i : i + BATCH_SIZE]
+            batch_metas = metas[i : i + BATCH_SIZE]
+            batch_ids = ids[i : i + BATCH_SIZE]
 
-        self.collection.add(
-            ids=ids,
-            documents=docs,
-            metadatas=metas,
-            embeddings=embeddings,
-        )
+            # 해당 배치만큼만 임베딩 수행
+            batch_embeddings = self.embed_model.encode(
+                batch_docs,
+                batch_size=32,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            ).tolist()
+
+            # DB 적재
+            self.collection.add(
+                ids=batch_ids,
+                documents=batch_docs,
+                metadatas=batch_metas,
+                embeddings=batch_embeddings,
+            )
+
+            # 🔥 메모리 즉시 반환
+            del batch_embeddings
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available():
+                torch.mps.empty_cache()
 
         print(f"✅ {filename} 단일 파일 재적재 완료: {len(docs)} docs")
 
@@ -353,16 +371,35 @@ class RilRagChat:
             ids = [f"{base_id}_{i}" for i in range(len(data))]
 
             print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식, 강력한 길이 제한 적용됨)")
-            # embeddings = self.embed_model.encode(documents).tolist()
-            embeddings = self.embed_model.encode(safe_documents, batch_size=32).tolist()
+
             BATCH_SIZE = 100
+            import gc
+
             for i in range(0, len(safe_documents), BATCH_SIZE):
+                batch_docs = safe_documents[i:i+BATCH_SIZE]
+                batch_metas = safe_documents[i:i+BATCH_SIZE]
+                batch_ids = ids[i:i+BATCH_SIZE]
+
+                batch_embeddings = self.embed_model.encode(
+                    batch_docs,
+                    batch_size=32,
+                    convert_to_numpy=True
+                ).tolist()
+
                 self.collection.add(
-                    embeddings=embeddings[i:i+BATCH_SIZE],
-                    documents=safe_documents[i:i+BATCH_SIZE],
-                    metadatas=safe_metadatas[i:i+BATCH_SIZE],
-                    ids=ids[i:i+BATCH_SIZE]
+                    embeddings=batch_embeddings,
+                    documents=batch_docs,
+                    metadatas=batch_metas,
+                    ids=batch_ids
                 )
+
+                del batch_embeddings
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                elif torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+
             total_docs += len(safe_documents)
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
@@ -447,6 +484,13 @@ class RilRagChat:
         doc_ids = results['ids'][0] if results and results.get('ids') else []
         meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
 
+        try:
+            combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
+            from tools.eval_logger import log_rag_for_evaluation
+            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer)
+        except Exception as e:
+            print(f"평가 로깅 중 에러 발생 (분석에는 영향 없음): {e}")
+
         return answer, doc_ids, meta_list
 
     def get_all_files(self):
@@ -514,10 +558,17 @@ class RilRagChat:
                 messages=[{'role': 'user', 'content': prompt}],
                 options={
                     'num_ctx': context_size,
-                    'temperature': 0.1
+                    'temperature': 0.1,
+                    'num_predict': 1024,
+                    'repeat_penaly': 1.15,
+                    'stop': ['<unused', '<|im_end|>', '<eos>']
                 }
             )
-            return res['message']['content']
+            content = res['message']['content'].strip()
+
+            if content.startswith('<unused'):
+                return "분석 결과 생성 중 모델이 일찍 종료되었습니다. (Context 가 부족할 수 있습니다.)"
+            return content
         except Exception as e:
             return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
 

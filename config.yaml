@@ -269,6 +269,7 @@ prompts:
       - 🚨 [다중 통화(Multi-call) 주의]: 2개 이상의 콜이 겹치는 다중 통화(Call Waiting 등) 상황을 주의하라. 전체 로그를 뭉뚱그려 보지 말고 반드시 `[ImsCall objId:XXXX]` 또는 `Telecom Call ID` 단위로 각 콜의 생애주기를 독립적으로 분리해서 추적하라.
       - CMC 기능인 `onCallStartFailed` 에러를 순수 IMS 통화 실패로 오탐하지 마라.
       - 통화 종료 시 `ImsReasonInfo`를 확인하여 전화를 끊은 주체가 상대방(510 CODE_USER_TERMINATED_BY_REMOTE)인지 사용자 거절(501/200 CODE_USER_TERMINATED)인지 명확히 구분하라.
+      - [위성 예외]: 현재 SpaceX 위성망 접속 중에는 Call 이 지원되지 않으므로, 이 구간의 통화 실패를 치명적 결함으로 분류하지 마십시오.
 
     OOS_Event: |
       - [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.
@@ -349,6 +350,12 @@ satellite_prompts:
     3. 제공된 JSON의 수치나 영문 상태값은 문장 안에 자연스럽게 녹여서 해설하십시오. (예: "단말의 등록 이력을 보면 HOME 망에 안정적으로 진입한 이후, 사용자의 명시적인 조작에 의해 정상적으로 등록 해제되었습니다.")
 
   SpaceX: |
+    [위성 통신(SpaceX) 분석 특이사항]
+    1. [Call 지원 불가]: SpaceX(Direct-to-Cell) 망은 현재 음성 통화(Call)를 지원하지 않습니다.
+    2. [TN 부재 상황]: 단말이 SpaceX 위성망을 잡았다는 것은 주변에 지상망(TN)이 전혀 없는 고립 상황임을 의미합니다.
+    3. [분석 규칙]: SpaceX 망 연결 전/후에 발생한 Call Drop 이나 발신 실패는 "망 불량"이 아니라 "서비스 미지원에 따른 정상적인 동작"으로 간주하십시오.
+    4. [상관 관계 배제]: SpaceX 상태와 Call Drop 간의 인과관계를 억지로 연결하여 장애 보고서를 작성하지 마십시오.
+
     [위성 통신 팩트 데이터 강제 주입]
     아래 JSON 데이터 중 '6_ntn_satellite' 항목은 안드로이드 프레임워크 레벨의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력입니다.
     (주의: 이 로그는 Tiantong 위성이 아니므로 arfcn, AT Command 관련 지표는 존재하지 않습니다.)
