@@ -485,9 +485,11 @@ def get_ps_ims_call_analytics(base_name: str, result_dir: str = "./result") -> s
         rf_context = _check_rf_correlation(target_time, report_data) if "FAIL" in status or "DROP" in status else []
 
         ps_analysis.append({
+            "call_id": s.get("id", ""),
             "time": s.get("start_time"),
             "status": status,
             "fail_reason": s.get("fail_reason", ""),
+            "lifecycle_events": s.get("logs", []),
             "rf_correlation": rf_context
         })
 

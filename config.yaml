@@ -1,3 +1,6 @@
+# ==========================================
+# 1. 라우터 설정 (Router & Map)
+# ==========================================
 router_prompt: |
   너는 Android Telephony 로그 분석 라우터다.
   사용자 질문을 보고 필요한 intent, tools, log_types를 JSON으로만 반환하라.
@@ -40,8 +43,7 @@ routing_map:
       - OOS_Event
       - Signal_Level
   DNS_Latency:
-    desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, 네트워크 지연, 핑 튀김,
-      패킷 로스, 데이터 느림, 앱 차단, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
+    desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
     tools:
       - get_dns_latency_analytics
       - get_data_stall_and_recovery_analytics
@@ -123,6 +125,11 @@ quick_prompts:
     - Release Cause나 SIP 에러만 단독으로 보지 말고, Drop 직전의 RF/OOS/Signal 상태와 시간 상관관계를 함께 분석하라.
     - SIP 4xx/5xx 에러가 존재하더라도 이후 재시도나 재발신이 성공했다면 일시적 장애 가능성도 함께 설명하라.
     - Drop 이후 Recovery(재발신 성공, IMS 재등록 성공, Service 복구 여부)를 반드시 확인하라.
+
+    IF_규칙 3 (다중 통화 및 식별자 고립 분석 - 중요):
+    - 로그 내에 여러 통화가 겹치는 다중 통화(Call Waiting 등) 상황이 있을 수 있다. 반드시 `[ImsCall objId:XXXX]` 또는 `Telecom Call ID` 기준으로 각 통화의 생애주기(수신->응답/거절->종료)를 철저히 분리해서 분석하라.
+    - CMC(Call & Message Continuity) 관련 `onCallStartFailed` 등의 노이즈성 에러를 순수 IMS 통화 실패로 오인하지 마라.
+    - `ImsReasonInfo`를 확인하여 전화를 끊은 주체가 상대방(CODE_USER_TERMINATED_BY_REMOTE)인지 사용자(CODE_USER_TERMINATED, USER_DECLINE)인지 정확히 구분하라.
 
   network_oos: |
     당신은 통신 로그를 분석하는 수석 엔지니어입니다. 제공된 'Network/OOS Fact' 데이터를 바탕으로 분석을 수행하십시오.
@@ -259,6 +266,9 @@ prompts:
       - FAIL/DROP이 있더라도 이후 재발신 성공, IMS 재등록 성공, Service 복구 여부를 함께 확인하라.
       - OOS/Signal 급감과 시간 상관관계가 없으면 RF 원인으로 단정하지 마라.
       - CS Call과 PS/IMS Call을 혼동하지 말고, CS release cause와 SIP response를 분리해서 설명하라.
+      - 🚨 [다중 통화(Multi-call) 주의]: 2개 이상의 콜이 겹치는 다중 통화(Call Waiting 등) 상황을 주의하라. 전체 로그를 뭉뚱그려 보지 말고 반드시 `[ImsCall objId:XXXX]` 또는 `Telecom Call ID` 단위로 각 콜의 생애주기를 독립적으로 분리해서 추적하라.
+      - CMC 기능인 `onCallStartFailed` 에러를 순수 IMS 통화 실패로 오탐하지 마라.
+      - 통화 종료 시 `ImsReasonInfo`를 확인하여 전화를 끊은 주체가 상대방(510 CODE_USER_TERMINATED_BY_REMOTE)인지 사용자 거절(501/200 CODE_USER_TERMINATED)인지 명확히 구분하라.
 
     OOS_Event: |
       - [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.
@@ -349,7 +359,8 @@ satellite_prompts:
 
     [🚨 엄격한 도메인 분석 규칙 🚨]
     1. [Starlink Hysteresis 타이머 로직의 이해]: LEO(저궤도 위성) 네트워크 특성상 위성 간 핸드오버가 매우 잦습니다. PLMN이 매칭된 상태에서 'is_hysteresis'가 활성화되었다면, 이는 연결 실패가 아니라 "핸드오버로 인한 일시적인 통신 음영 구간이며, 타이머 내에서는 위성망 접속 유지(Connected) 상태로 간주"해야 합니다.
-    2. [상태 전이 분석]: 단순히 이벤트 발생 횟수(예: 229회)를 지적하는 것은 아마추어 같습니다. PLMN 매칭 → Hysteresis 진입 → 복구 로 이어지는 시퀀스를 분석하여, 단말이 일시적 단절을 극복하고 위성망 Camp-on을 성공적으로 유지했는지 서술하십시오.
+    2. [상태 전이 분석]: 단순히 이벤트 발생 횟수(예: 229회) 지적하는 것은 아마추어 같습니다. PLMN 매칭 → Hysteresis 진입 → 복구 로 이어지는 시퀀스를 분석하여, 단말이 일시적 단절을 극복하고 위성망 Camp-on을 성공적으로 유지했는지 서술하십시오.
     3. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 단말에 정상적으로 위성 정책이 적용되어 있음을 의미합니다.
 
     [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
+

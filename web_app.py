@@ -1,4 +1,3 @@
-import datetime
 import os
 import streamlit as st
 import json
@@ -9,6 +8,7 @@ import re
 import hashlib
 import torch
 from core.config import QUICK_PROMPTS, SATELLITE_PROMPTS
+from datetime import datetime
 
 import ui_components as ui
 

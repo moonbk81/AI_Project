@@ -504,6 +504,8 @@ class RilRagChat:
         context_size = 16384  # Gemma3-4b의 최대 컨텍스트 크기
         if self.llm_model_name == 'gemma3:12b':
             context_size = 32768
+        elif self.llm_model_name == 'qwen2.5-coder:7b':
+            context_size = 4096
         if is_bench == True:
             context_size = 8192
         try:
