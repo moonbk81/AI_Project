@@ -1282,7 +1282,12 @@ def render_nitz_timeline(nitz_data):
 
     first_tz = df.iloc[0]['timezone']
     last_tz = df.iloc[-1]['timezone']
-    flip_count = len(df) - 1
+
+    if not df.empty and 'timezone' in df.columns:
+        flip_count = (df['timezone'] != df['timezone'].shift()).sum() - 1
+        flip_count = max(0, int(flip_count))
+    else:
+        flip_count = 0
 
     with col1:
         st.metric(label="최초 진입 타임존", value=first_tz)
