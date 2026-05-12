@@ -9,12 +9,38 @@ class TelephonyParser(BaseParser):
         super().__init__(context_getter)
         self.pre_context = deque(maxlen=50)
 
+    def _extract_timestamp(self, line: str) -> str:
+        # 1) 2025-05-03T07:04:35.388 / 2025-05-03 07:04:35.388
+        m = re.search(
+            r'\d{4}-(\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})(?:\.(\d{3}))?',
+            line
+        )
+        if m:
+            ms = m.group(3) or "000"
+            return f"{m.group(1)} {m.group(2)}.{ms}"
+
+        # 2) 05-03 07:04:35.388 / 05-03 07:04:35
+        m = re.search(
+            r'(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\.(\d{3}))?',
+            line
+        )
+        if m:
+            ms = m.group(3) or "000"
+            return f"{m.group(1)} {m.group(2)}.{ms}"
+
+        # 3) Connection History 스타일: (05-03) ... (07:04:35)
+        date_m = re.search(r'\((\d{2}-\d{2})\)', line)
+        time_m = re.search(r'\((\d{2}:\d{2}:\d{2})\)', line)
+        if date_m and time_m:
+            return f"{date_m.group(1)} {time_m.group(1)}.000"
+
+        return "UnknownTime"
+
     # 💡 [신규 추가] IMS/PS Call 전담 파서 (objId 기반 멀티콜 지원)
     def _parse_ims_multi_calls(self, lines):
         calls = defaultdict(list)
         obj_to_tc = {}  # 💡 [추가] objId와 TC@ 매핑을 저장할 딕셔너리
 
-        time_re = re.compile(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})')
         obj_re = re.compile(r'objId:(\d+)')
         tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)') # 💡 [추가] TC 정규식
 
@@ -47,8 +73,7 @@ class TelephonyParser(BaseParser):
             if not detected_event:
                 continue
 
-            time_match = time_re.search(line)
-            timestamp = time_match.group(1) if time_match else "UnknownTime"
+            timestamp = self._extract_timestamp(line)
 
             reason = ""
             if "Terminated" in detected_event or "reject" in detected_event or "Failed" in detected_event:
