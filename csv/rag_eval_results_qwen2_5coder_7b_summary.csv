@@ -1,0 +1,2 @@
+﻿records,error_count,avg_answer_relevance,avg_context_relevance,avg_groundedness,avg_rca_quality,avg_temporal_reasoning,avg_hallucination_risk,avg_overall_score
+15,0,0.733,0.733,0.733,0.733,0.733,0.067,0.733

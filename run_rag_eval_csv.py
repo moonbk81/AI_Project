@@ -14,7 +14,14 @@ Example:
   python run_rag_eval_csv.py \
     --log-file eval_logs/rag_eval_dataset.jsonl \
     --judge-model ollama/gemma3:4b \
-    --output rag_eval_results.csv
+    --output rag_eval_results_gemma3_4b.csv \
+    --summary-output rag_eval_results_gemma3_4b_summary.csv
+
+    python run_rag_eval_csv.py \
+      --log-file eval_logs/rag_eval_dataset.jsonl \
+      --judge-model ollama/qwen2.5-coder:7b \
+      --output rag_eval_results_qwen2_5coder_7b.csv \
+      --summary-output rag_eval_results_qwen2_5coder_7b_summary.csv
 """
 
 from __future__ import annotations

@@ -50,6 +50,8 @@ class RilRagChat:
             "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
             "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
             "get_internet_stall_analytics": getattr(agent_tools, 'get_internet_stall_analytics', None),
+            "get_ntn_spacex_analytics": getattr(agent_tools, 'get_ntn_spacex_analytics', None),
+            "get_tiantong_satellite_analytics": getattr(agent_tools, 'get_tiantong_satellite_analytics', None)
         }
 
     def _load_config(self):
@@ -207,6 +209,20 @@ class RilRagChat:
             if "Crash_ANR" in self.routing_map:
                 selected_tools.update(self.routing_map["Crash_ANR"].get("tools", []))
                 selected_log_types.update(self.routing_map["Crash_ANR"].get("log_types", []))
+
+        # [SpaceX 오버라이드]
+        if any(keyword in query_lower for keyword in ["spacex", "starlink", "ntn", "스페이스엑스"]):
+            selected_intents.add("NTN_SpaceX")
+            if "NTN_SpaceX" in self.routing_map:
+                selected_tools.update(self.routing_map["NTN_SpaceX"].get("tools", []))
+                selected_log_types.update(self.routing_map["NTN_SpaceX"].get("log_types", []))
+
+        # [Tiantong 오버라이드]
+        if any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
+            selected_intents.add("Tiantong_Satellite")
+            if "Tiantong_Satellite" in self.routing_map:
+                selected_tools.update(self.routing_map["Tiantong_Satellite"].get("tools", []))
+                selected_log_types.update(self.routing_map["Tiantong_Satellite"].get("log_types", []))
 
         # 8. Top 점수 로그용 정리
         top_matches = [
@@ -404,7 +420,34 @@ class RilRagChat:
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def ask(self, user_query, current_file=None, chat_history=None, top_k=15, health_kpi=None, is_bench=False):
+    # ---------------------------------------------------------
+    # 💡 [신규 추가] 페르소나 및 로그 가이드라인 추출 헬퍼 함수
+    # ---------------------------------------------------------
+    def _get_domain_specific_guideline(self, query, intents, target_log_types):
+        guidelines = []
+        query_lower = query.lower()
+
+        # 1. SpaceX 전용 지침 (키워드에서 '위성' 삭제)
+        if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
+            spacex_rule = self.prompts.get('SpaceX', "")
+            if spacex_rule:
+                guidelines.append(f"### [🚨 위성 통신 특수 규칙 - SpaceX]\n{spacex_rule}")
+
+        # 2. Tiantong 전용 지침 (명확한 전용 키워드 사용)
+        elif any(k in query_lower for k in ["tiantong", "티엔통", "천통", "at command"]):
+            tiantong_rule = self.prompts.get('Tiantong', "")
+            if tiantong_rule:
+                guidelines.append(f"### [🚨 위성 통신 특수 규칙 - Tiantong]\n{tiantong_rule}")
+
+        # 3. 그 외 일반적인 위성 언급 시 기본 페르소나만 유지
+        else:
+            base_p = self.prompts.get('base_persona', "")
+            if base_p:
+                guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
+
+        return "\n\n".join(guidelines)
+
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=8, health_kpi=None, is_bench=False):
         """Semantic Router 기반의 Plan -> Act -> Retrieve -> Reason 파이프라인"""
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
 
@@ -415,8 +458,6 @@ class RilRagChat:
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         # [STAGE 2: Semantic Intent Routing]
-        # routing_result = self._get_semantic_routing(search_query)
-
         if self.routing_mode == "llm":
             routing_result = self._get_llm_routing(search_query)
         elif self.routing_mode == "hybrid":
@@ -426,6 +467,9 @@ class RilRagChat:
 
         selected_tools = routing_result.get("tools", [])
         target_log_types = routing_result.get("log_types", [])
+        intents = routing_result.get("intents", [])
+
+        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, target_log_types)
 
         # [STAGE 3: Act - Tool Execution]
         tool_facts_list = []
@@ -474,6 +518,7 @@ class RilRagChat:
 
         prompt = (
             f"{self.system_role_prompt}\n\n"
+            f"{domain_guidelines}\n\n"
             f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n"
             f"=== [검색된 관련 로그] ===\n{formatted_logs}\n\n"
             f"사용자 질문: {user_query}"
@@ -487,7 +532,12 @@ class RilRagChat:
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
             from tools.eval_logger import log_rag_for_evaluation
-            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer)
+            log_rag_for_evaluation(
+                query=user_query,
+                context=combined_context,
+                answer=answer,
+                guideline=domain_guidelines
+            )
         except Exception as e:
             print(f"평가 로깅 중 에러 발생 (분석에는 영향 없음): {e}")
 

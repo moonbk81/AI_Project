@@ -84,6 +84,20 @@ routing_map:
       - get_radio_power_analytics
     log_types:
       - Radio_Power_Event
+  NTN_SpaceX:
+    desc: "SpaceX, Starlink, 스페이스엑스, 스타링크, 비지상망, NTN 로밍, 위성망"
+    tools:
+      - get_ntn_spacex_analytics
+    log_types:
+      - NTN_Policy
+      - Signal_Level
+  Tiantong_Satellite:
+    desc: "Tiantong, 티엔통, 천통, 위성 모뎀, AT Command, 위성 전화, 위성 통화, 위성 발신"
+    tools:
+      - get_tiantong_satellite_analytics
+    log_types:
+      - Satellite_AT_Command
+      - Signal_Level
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)
@@ -231,6 +245,7 @@ quick_prompts:
     - 잦은 신호 변동 이력과 실제 장애 발생 시간의 일치 여부를 대조하여 인과관계를 보고하라.
     - 약전계가 존재하더라도 실제 OOS, Call Drop, Data Stall이 동반되지 않았다면 서비스 영향은 제한적이었다고 판단하라.
     - Signal Level 변화만으로 네트워크 장애를 단정하지 마라.
+    - SpaceX 위성 연결 시 LEO 위성과 Direct 연결이기 때문에, 안테나 레벨은 보통 낮게 유지되는 것을 염두해라.
 
   volte_sip_analysis: |
     당신은 IMS/SIP 프로토콜을 분석하는 수석 엔지니어입니다. 제공된 팩트를 바탕으로 분석을 수행하십시오.
@@ -332,17 +347,14 @@ prompts:
 # ==========================================
 satellite_prompts:
   Tiantong: |
-    [위성 통신(NTN) 팩트 데이터 강제 주입]
-    아래 JSON 데이터 중 '11_satellite_modem_status' 항목은 위성 모뎀과 AP 간의 AT Command 통신을 분석한 결과입니다.
+    [위성 통신(Tiantong) 분석 지침]
+    15년 차 수석 엔지니어의 관점에서 아래 제공되는 Tiantong 위성 모뎀 제어(AT Command) 팩트와 검색 로그를 바탕으로 상태를 진단하십시오.
 
-    {health_kpi_json}
-
-    위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 위성 통신 상태를 진단해.
-
-    [🚨 엄격한 답변 규칙 🚨]
-    1. [Tiantong 위성 라이프사이클의 이해]: 중국 위성은 사용자의 Pointing UI 조작에 의해 수동으로 On/Off 됩니다. 만약 'is_intentional_power_off'가 true 라면, 'registration_history_flow'가 'NOT_REG_OR_SEARCHING'으로 끝나더라도 이는 연결 불안정이 아니라 "사용자 의도에 의한 정상적인 서비스 종료"입니다.
-    2. [In-Service 구간 분석]: 분석의 핵심은 위성이 켜져 있던 시간 동안 정상적으로 서비스가 되었는지 여부입니다. 'call_drops_and_fails'와 'sms_tx_fails'가 모두 0이라면, "사용자가 위성을 켠 시간 동안 음성과 문자가 완벽하게 정상 처리되었다"고 평가해야 합니다.
-    3. [핵심 에러 도출]: 'critical_errors_detected'에 기록된 내역이 있을 경우에만 이를 Root Cause로 삼아 해설할 것.
+    [🚨 엄격한 도메인 분석 규칙 🚨]
+    1. [Call/SMS 정상 지원]: Tiantong 위성은 음성 통화(CS Call)와 SMS, 2.8K 데이터 서비스를 모두 지원합니다. 따라서 이 구간에서의 Call Drop이나 발신 실패는 정상 동작이 아니며, AT Command 로그나 신호(RSSI/SNR) 상태를 바탕으로 장애 원인을 분석해야 합니다.
+    2. [사용자 의도적 종료 판별]: 로그에 'SAT_SET_POWER, state: OFF' 또는 'AT+CFUN=0' (혹은 4)가 관찰된다면, 이는 모뎀 연결 불안정이 아니라 "사용자의 명시적인 조작(Pointing UI 등)에 의한 정상적인 위성 모뎀 전원 OFF"로 판정하십시오.
+    3. [AT Command 및 CMUX 분석]: 통화 연결이나 데이터 서비스 진입 중 발생한 장애는 AT+CGATT, PDP context 설정 등 모뎀과 AP 간의 AT Command 시퀀스 내 'ERROR' 응답을 핵심 원인(Root Cause)으로 삼으십시오.
+    4. [In-Service 구간 중심 평가]: 모뎀이 켜져 있는 동안의 'call_drops_and_fails'와 'sms_tx_fails' 수치를 최우선으로 확인하여, 해당 위성 연결 세션이 성공적이었는지 평가하십시오.
 
     [✍️ 답변 스타일 및 톤앤매너 (매우 중요) 🚨]
     1. 단순한 속성-값 나열식 요약을 절대 금지합니다. (예: "위성 모뎀 상태: is_intentional_power_off: true" -> 이런 기계적인 출력 금지)
@@ -350,24 +362,17 @@ satellite_prompts:
     3. 제공된 JSON의 수치나 영문 상태값은 문장 안에 자연스럽게 녹여서 해설하십시오. (예: "단말의 등록 이력을 보면 HOME 망에 안정적으로 진입한 이후, 사용자의 명시적인 조작에 의해 정상적으로 등록 해제되었습니다.")
 
   SpaceX: |
-    [위성 통신(SpaceX) 분석 특이사항]
-    1. [Call 지원 불가]: SpaceX(Direct-to-Cell) 망은 현재 음성 통화(Call)를 지원하지 않습니다.
-    2. [TN 부재 상황]: 단말이 SpaceX 위성망을 잡았다는 것은 주변에 지상망(TN)이 전혀 없는 고립 상황임을 의미합니다.
-    3. [분석 규칙]: SpaceX 망 연결 전/후에 발생한 Call Drop 이나 발신 실패는 "망 불량"이 아니라 "서비스 미지원에 따른 정상적인 동작"으로 간주하십시오.
-    4. [상관 관계 배제]: SpaceX 상태와 Call Drop 간의 인과관계를 억지로 연결하여 장애 보고서를 작성하지 마십시오.
+    [위성 통신 팩트 데이터]
+    아래는 단말의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력 팩트입니다.
 
-    [위성 통신 팩트 데이터 강제 주입]
-    아래 JSON 데이터 중 '6_ntn_satellite' 항목은 안드로이드 프레임워크 레벨의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력입니다.
-    (주의: 이 로그는 Tiantong 위성이 아니므로 arfcn, AT Command 관련 지표는 존재하지 않습니다.)
-
-    {health_kpi_json}
-
-    위 팩트를 바탕으로 15년 차 수석 엔지니어의 관점에서 위성 로밍 상태를 진단해.
+    위 팩트를 바탕으로 15년 차 수석 엔지니어의 관점에서 위성 로밍 상태를 진단하십시오.
 
     [🚨 엄격한 도메인 분석 규칙 🚨]
-    1. [Starlink Hysteresis 타이머 로직의 이해]: LEO(저궤도 위성) 네트워크 특성상 위성 간 핸드오버가 매우 잦습니다. PLMN이 매칭된 상태에서 'is_hysteresis'가 활성화되었다면, 이는 연결 실패가 아니라 "핸드오버로 인한 일시적인 통신 음영 구간이며, 타이머 내에서는 위성망 접속 유지(Connected) 상태로 간주"해야 합니다.
-    2. [상태 전이 분석]: 단순히 이벤트 발생 횟수(예: 229회) 지적하는 것은 아마추어 같습니다. PLMN 매칭 → Hysteresis 진입 → 복구 로 이어지는 시퀀스를 분석하여, 단말이 일시적 단절을 극복하고 위성망 Camp-on을 성공적으로 유지했는지 서술하십시오.
-    3. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 단말에 정상적으로 위성 정책이 적용되어 있음을 의미합니다.
+    1. [Call 지원 불가]: SpaceX 망은 데이터/문자 전용이며 음성 통화(Call)를 지원하지 않습니다. 이 구간의 Call Drop은 망 결함이 아니라 서비스 미지원에 따른 정상 동작입니다.
+    2. [TN 부재 상황]: SpaceX 위성망 접속은 주변에 지상망(TN)이 전혀 없는 절대 음영 지역임을 의미합니다.
+    3. [Starlink Hysteresis]: LEO 특성상 위성 간 핸드오버가 잦습니다. PLMN 매칭 후 'is_hysteresis' 활성화는 연결 실패가 아닌 핸드오버를 위한 일시적 음영(Camp-on 유지) 상태입니다.
+    4. [데이터 정책]: DATA_POLICY가 'Restricted (SOS)' 등으로 유지되는 것은 정상적인 위성 정책 적용 상태입니다.
+    5. [상관관계 금지]: 통화 실패 원인을 무리하게 SpaceX 상태와 엮어서 분석하지 마십시오.
 
     [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
 
