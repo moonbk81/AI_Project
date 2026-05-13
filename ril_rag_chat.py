@@ -469,6 +469,10 @@ class RilRagChat:
         target_log_types = routing_result.get("log_types", [])
         intents = routing_result.get("intents", [])
 
+        if "Tiantong_Satellite" in intents:
+            selected_tools = ["get_tiantong_satellite_analytics"]
+            target_log_types = ["Satellite_AT_Command"]
+
         domain_guidelines = self._get_domain_specific_guideline(search_query, intents, target_log_types)
 
         # [STAGE 3: Act - Tool Execution]

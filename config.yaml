@@ -350,6 +350,11 @@ satellite_prompts:
     [위성 통신(Tiantong) 분석 지침]
     15년 차 수석 엔지니어의 관점에서 아래 제공되는 Tiantong 위성 모뎀 제어(AT Command) 팩트와 검색 로그를 바탕으로 상태를 진단하십시오.
 
+    [🚨 Tiantong 위성 통신(rild3) 분석 특수 규칙 🚨]
+    1. [Legacy Modem OFF 원칙]: Tiantong 위성 모뎀이 On 상태(rild3, satellite_rilj 로그가 발생하는 시점)일 때는, 기존 단말의 Legacy Modem(Qualcomm/S.LSI)은 Power OFF 된 상태입니다.
+    2. [레거시 지표 무시]: 따라서 위성이 켜져 있는 해당 시간대에는 Data Stall, DNS Timeout, OOS 등 일반 네트워크 분석 지표를 절대 참조하지 마십시오. 해당 지표들은 모뎀이 꺼져 있어 발생하는 무의미한 노이즈입니다.
+    3. [AT Command 중심 분석]: 오직 'rild3' 로그 태그에서 확인되는 위성 모뎀과의 AT Command 송수신 이력 및 전용 신호 상태만으로 통화/연결 상태를 진단하십시오
+
     [🚨 엄격한 도메인 분석 규칙 🚨]
     1. [Call/SMS 정상 지원]: Tiantong 위성은 음성 통화(CS Call)와 SMS, 2.8K 데이터 서비스를 모두 지원합니다. 따라서 이 구간에서의 Call Drop이나 발신 실패는 정상 동작이 아니며, AT Command 로그나 신호(RSSI/SNR) 상태를 바탕으로 장애 원인을 분석해야 합니다.
     2. [사용자 의도적 종료 판별]: 로그에 'SAT_SET_POWER, state: OFF' 또는 'AT+CFUN=0' (혹은 4)가 관찰된다면, 이는 모뎀 연결 불안정이 아니라 "사용자의 명시적인 조작(Pointing UI 등)에 의한 정상적인 위성 모뎀 전원 OFF"로 판정하십시오.

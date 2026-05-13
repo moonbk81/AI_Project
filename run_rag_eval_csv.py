@@ -45,8 +45,8 @@ except ImportError as e:
 
 
 DEFAULT_LOG_FILE = "eval_logs/rag_eval_dataset.jsonl"
-DEFAULT_OUTPUT = "rag_eval_results.csv"
-DEFAULT_SUMMARY = "rag_eval_summary.csv"
+DEFAULT_OUTPUT = "csv/rag_eval_results.csv"
+DEFAULT_SUMMARY = "csv/rag_eval_summary.csv"
 DEFAULT_JUDGE_MODEL = "ollama/gemma3:4b"
 DEFAULT_OLLAMA_BASE = "http://localhost:11434"
 
