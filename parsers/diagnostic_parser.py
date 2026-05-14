@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from collections import deque
 from parsers.base import BaseParser
 from core.constants import DIAG_PATTERNS, RE_TIME, RADIO_POWER_ERRORS
@@ -54,41 +55,74 @@ class DataUsageParser(BaseParser):
     def analyze(self, lines):
         usage_by_key, uid_map = {}, {}
         current_app_id_in_log = None
-        current_key = None  # 🚨 [핵심 픽스] 루프 진입 전 반드시 초기화!
+        current_key = None  # (uid_val, rat_val) 임시 저장용
 
         for line in lines:
             line_stripped = self.clean_line(line)
+
+            # 1. UID 매핑 로직 (기존과 동일)
             if "NetdEventListenerService" in line_stripped or "DNS Requested by" in line_stripped:
                 m_pkg = re.search(r'DNS Requested by\s+\d+,\s*(\d+)\(([^)]+)\)', line_stripped)
                 if m_pkg: uid_map[m_pkg.group(1)] = m_pkg.group(2)
 
-            if m_app_id := re.search(r'App ID:\s*(\d+)', line_stripped): current_app_id_in_log = m_app_id.group(1)
+            if m_app_id := re.search(r'App ID:\s*(\d+)', line_stripped):
+                current_app_id_in_log = m_app_id.group(1)
+
             if (m_package := re.search(r'Package:\s*([a-zA-Z0-9_.]+)', line_stripped)) and current_app_id_in_log:
                 uid_map[current_app_id_in_log] = m_package.group(1)
                 current_app_id_in_log = None
 
+            # 🚨 [신규 추가] 수석님이 찾으신 완벽한 pkg 리스트 긁어오기!
+            if line_stripped.startswith("pkg,"):
+                # 정규식: pkg,(패키지명),(UID)
+                m_pkg_csv = re.match(r'^pkg,([^,]+),(\d+)', line_stripped)
+                if m_pkg_csv:
+                    pkg_name = m_pkg_csv.group(1)
+                    uid_val = m_pkg_csv.group(2)
+                    uid_map[uid_val] = pkg_name
+
+            # 2. Network Identity 블록 진입 시 UID와 RAT만 임시 저장
             if "transports={0}" in line_stripped and "metered=true" in line_stripped:
-                m_uid, m_rat = re.search(r'uid=(-\d+|\d+)', line_stripped), re.search(r'ratType=(-\d+|\d+)', line_stripped)
+                m_uid = re.search(r'uid=(-\d+|\d+)', line_stripped)
+                m_rat = re.search(r'ratType=(-\d+|\d+)', line_stripped)
                 if m_uid and m_rat:
                     uid_val, rat_val = m_uid.group(1), m_rat.group(1)
                     if uid_val == "-1": continue
+                    # 시간에 상관없이 일단 공통 속성만 저장
                     current_key = (uid_val, RAT_TYPE_MAP.get(rat_val, f"RAT_{rat_val}"))
-                    if current_key not in usage_by_key: usage_by_key[current_key] = {"rx_bytes": 0, "tx_bytes": 0}
                 continue
 
-            # 이제 current_key가 None이라도 안전하게 넘어갑니다
+            # 3. 🚨 [핵심 수정] st=(타임스탬프)를 읽어서 시간대별로 쪼개기
             if current_key and line_stripped.startswith("st="):
                 m_bytes = DIAG_PATTERNS['NETSTAT_BYTES'].search(line_stripped)
-                if m_bytes:
-                    usage_by_key[current_key]["rx_bytes"] += int(m_bytes.group(1))
-                    usage_by_key[current_key]["tx_bytes"] += int(m_bytes.group(2))
+                m_st = re.search(r'st=(\d+)', line_stripped) # 시작 시간 추출
 
+                if m_bytes and m_st:
+                    # Unix Timestamp 변환 (초 단위)
+                    st_timestamp = int(m_st.group(1))
+                    if len(str(st_timestamp)) > 11:
+                        st_timestamp /= 1000.0 # 밀리초인 경우 방어 로직
+
+                    # '2025-07-20 14:00:00' 형태로 변환
+                    bucket_time_str = datetime.fromtimestamp(st_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    uid_val, rat_val = current_key
+                    # 시간(bucket_time_str)까지 포함된 새로운 풀-키 생성
+                    full_key = (uid_val, rat_val, bucket_time_str)
+
+                    if full_key not in usage_by_key:
+                        usage_by_key[full_key] = {"rx_bytes": 0, "tx_bytes": 0}
+
+                    usage_by_key[full_key]["rx_bytes"] += int(m_bytes.group(1))
+                    usage_by_key[full_key]["tx_bytes"] += int(m_bytes.group(2))
+
+        # 4. 결과 조립
         report_data = []
-        for (uid, rat), data in usage_by_key.items():
+        for (uid, rat, bucket_time), data in usage_by_key.items():
             total_bytes = data["rx_bytes"] + data["tx_bytes"]
             if total_bytes > 0:
                 app_name = {"-5": "모바일 핫스팟 (Tethering)", "-4": "삭제된 앱 (Removed)", "1000": "Android System (OS)", "0": "OS Kernel (Root)"}.get(uid, uid_map.get(uid, f"App_UID_{uid}"))
                 report_data.append({
+                    "time": bucket_time,  # 🚨 JSON에 시간 필드 추가 완료!
                     "uid": uid,
                     "app_name": app_name,
                     "rat": rat,
@@ -96,7 +130,9 @@ class DataUsageParser(BaseParser):
                     "rx_mb": round(data["rx_bytes"] / (1024 * 1024), 2),
                     "tx_mb": round(data["tx_bytes"] / (1024 * 1024), 2)
                 })
-        return sorted(report_data, key=lambda x: x["total_mb"], reverse=True)
+
+        # 시간순으로 정렬하되, 같은 시간이면 데이터 많이 쓴 순서로 정렬
+        return sorted(report_data, key=lambda x: (x["time"], -x["total_mb"]))
 
 class DnsParser(BaseParser):
     def analyze(self, lines):

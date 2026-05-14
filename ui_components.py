@@ -181,19 +181,25 @@ def render_signal_level_timeline(df):
         else:
             st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
 
+
 def render_data_usage_profiling(df):
-    """셀룰러 데이터 사용량 프로파일링 차트 렌더링"""
+    """셀룰러 데이터 사용량 프로파일링 차트 렌더링 (파이 차트 + 시계열 차트)"""
     st.subheader("📊 셀룰러 데이터 사용량 프로파일링")
+
     if 'log_type' in df.columns:
         du_df = df[df['log_type'] == 'Data_Usage'].copy()
+
         if not du_df.empty:
             du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
+
+            # --- 1. 기존 파이 차트 2개 (상단 나란히 배치) ---
             col_du1, col_du2 = st.columns(2)
             with col_du1:
                 app_df = du_df.groupby('app_name')['total_mb'].sum().reset_index().sort_values(by='total_mb', ascending=False).head(10)
-                fig_app = px.pie(app_df, values='total_mb', names='app_name', hole=0.4, title='📱 앱별 데이터 사용량 Top 10 (MB)')
+                fig_app = px.pie(app_df, values='total_mb', names='app_name', hole=0.4, title='📱 앱별 누적 데이터 사용량 Top 10 (MB)')
                 fig_app.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_app, width="stretch")
+                st.plotly_chart(fig_app, use_container_width=True)
+
             with col_du2:
                 rat_df = du_df.groupby('rat')['total_mb'].sum().reset_index()
                 fig_rat = px.pie(
@@ -201,9 +207,72 @@ def render_data_usage_profiling(df):
                     color_discrete_map={'LTE':'#1f77b4', '5G (NR)':'#ff7f0e', 'Unknown (망 통합 합산)':'#7f7f7f'}
                 )
                 fig_rat.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_rat, width="stretch")
+                st.plotly_chart(fig_rat, use_container_width=True)
+
+            # --- 2. 신규 추가: 시간대별 트래픽 추이 차트 (하단 풀사이즈) ---
+            if 'time' in du_df.columns:
+                st.divider() # 위아래 차트를 분리하는 깔끔한 선
+                st.markdown("##### ⏳ 시간대별 앱 트래픽 폭주 추이 (Stacked)")
+
+                # 시간축 정렬 및 파싱
+                du_df['time_dt'] = pd.to_datetime(du_df['time'], errors='coerce')
+                time_df = du_df.dropna(subset=['time_dt']).sort_values('time_dt')
+
+                if not time_df.empty:
+                    fig_time = px.bar(
+                        time_df,
+                        x='time_dt',
+                        y='total_mb',
+                        color='app_name',
+                        labels={'time_dt': '로그 시간', 'total_mb': '사용량 (MB)', 'app_name': '앱 이름'},
+                        barmode='stack'
+                    )
+                    fig_time.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+                        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+                        # 앱이 많을 경우 범례가 차트를 찌그러뜨리지 않도록 하단으로 내림
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.4, xanchor="center", x=0.5)
+                    )
+                    fig_time.update_traces(marker_line_width=0) # 막대 사이 테두리 제거 (더 깔끔함)
+
+                    st.plotly_chart(fig_time, use_container_width=True)
+                else:
+                    st.info("💡 파싱된 시간 정보가 없어 시계열 차트를 표시할 수 없습니다.")
         else:
             st.info("현재 분석 대상 로그에 데이터 사용량(Netstats) 기록이 없습니다.")
+
+def render_data_usage_timeline(df):
+    """시간대별 앱 데이터 사용 추이를 누적 막대 그래프로 시각화합니다."""
+    data_df = df[df['log_type'] == 'Data_Usage'].copy()
+    if data_df.empty:
+        return
+
+    # 시간 데이터 파싱 및 정렬
+    data_df['time_dt'] = pd.to_datetime(data_df['time'], errors='coerce')
+    data_df = data_df.dropna(subset=['time_dt']).sort_values('time_dt')
+    data_df['total_mb'] = pd.to_numeric(data_df['total_mb'], errors='coerce').fillna(0)
+
+    st.markdown("##### ⏳ 시간대별 데이터 트래픽 추이")
+
+    # 누적 막대 그래프 생성 (barmode='stack')
+    fig = px.bar(
+        data_df,
+        x='time_dt',
+        y='total_mb',
+        color='app_name',
+        title="시간대별 앱 데이터 사용량 (MB)",
+        labels={'time_dt': '시간', 'total_mb': '사용량 (MB)', 'app_name': '앱 이름'},
+        barmode='stack'
+    )
+
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 def render_network_timeseries_and_dns(df):
     """DNS 에러 통계 및 네트워크 시계열 분석 차트 렌더링 (시간 정렬 버그 픽스)"""
@@ -1261,81 +1330,53 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
     render_layer(tab_power, ["POWER"])
 
 def render_nitz_timeline(nitz_data):
-    """NITZ 타임존 변경 이력을 멋진 대시보드 형태로 렌더링합니다."""
     if not nitz_data:
-        st.info("🕒 NITZ(타임존) 수신 이력이 관찰되지 않았습니다.")
+        st.info("🕒 NITZ 수신 이력이 없습니다.")
         return
 
-    st.markdown("### 🌍 NITZ 타임존 변동 타임라인")
-
+    st.markdown("### 🌍 NITZ 타임존 변동 분석")
     df = pd.DataFrame(nitz_data)
 
-    # 그래프를 그리기 위해 "UTC-5시간" 문자열에서 숫자(-5)만 추출
-    try:
-        df['offset_num'] = df['timezone'].str.extract(r'UTC([+-]?\d+\.?\d*)').astype(float)
-    except Exception:
-        df['offset_num'] = 0.0
+    # 1. 시간 파싱 (이미 연도가 있으므로 바로 변환)
+    df['log_time_dt'] = pd.to_datetime(df['log_time'], errors='coerce')
+    df = df.dropna(subset=['log_time_dt']).sort_values('log_time_dt')
 
-    # 1. 🌟 상단 요약 카드 (Metrics)
-    st.markdown("##### 📌 타임존 요약")
-    col1, col2, col3 = st.columns(3)
+    # 2. 🚨 [노이즈 제거] 5초 이내에 발생하는 중복/튀는 데이터 무시
+    # 9월 15일처럼 초단위로 튀는 데이터는 분석용 '유의미한 변화'에서 제외합니다.
+    df['offset_num'] = df['timezone'].str.extract(r'UTC([+-]?\d+)').astype(float).fillna(0.0)
 
-    first_tz = df.iloc[0]['timezone']
-    last_tz = df.iloc[-1]['timezone']
+    # 실제 값이 바뀐 지점 추출
+    df_changes = df[df['timezone'] != df['timezone'].shift()].copy()
 
-    if not df.empty and 'timezone' in df.columns:
-        flip_count = (df['timezone'] != df['timezone'].shift()).sum() - 1
-        flip_count = max(0, int(flip_count))
+    # 3. 유지 시간 계산 (최소 10분 이상 유지되지 않은 변화는 노이즈로 간주)
+    if len(df_changes) > 1:
+        df_changes['duration_sec'] = df_changes['log_time_dt'].diff().shift(-1).dt.total_seconds().fillna(601)
+        significant_changes = df_changes[df_changes['duration_sec'] > 600].copy() # 10분 필터
     else:
-        flip_count = 0
+        significant_changes = df_changes
 
-    with col1:
-        st.metric(label="최초 진입 타임존", value=first_tz)
-    with col2:
-        # 타임존이 바뀌었으면 화살표와 함께 변경점 표시
-        delta_str = "유지됨" if first_tz == last_tz else "변경됨!"
-        st.metric(label="최종 안착 타임존", value=last_tz, delta=delta_str, delta_color="off" if first_tz == last_tz else "inverse")
+    # 4. 판정 로직 (전체 기간 대비 밀도)
+    duration_days = (df['log_time_dt'].max() - df['log_time_dt'].min()).days
+    duration_days = max(1, duration_days)
+
+    # 유의미한 변경 횟수 (핑퐁 제외)
+    flip_count = max(0, len(significant_changes) - 1)
+
+    # 진짜 핑퐁 판정: 1시간 이내에 3번 이상 '유의미하게' 바뀌었는가?
+    is_unstable = False
+    if len(significant_changes) >= 3:
+        significant_changes['rapid_check'] = significant_changes['log_time_dt'].diff(periods=2).dt.total_seconds()
+        if not significant_changes[significant_changes['rapid_check'].abs() < 3600].empty:
+            is_unstable = True
+
+    # 5. 요약 대시보드
+    col1, col2, col3 = st.columns(3)
+    with col1: st.metric("최초", df['timezone'].iloc[0])
+    with col2: st.metric("최종", df['timezone'].iloc[-1], delta="변경됨" if flip_count > 0 else "유지됨")
     with col3:
-        st.metric(label="타임존 변경(Ping-Pong) 횟수", value=f"{flip_count} 회",
-                  delta="불안정" if flip_count > 2 else "안정", delta_color="inverse" if flip_count > 2 else "normal")
+        status = "불안정 (핑퐁)" if is_unstable else "안정 (장기 이동)" if duration_days > 30 else "안정"
+        st.metric("변경 횟수", f"{flip_count} 회", delta=status, delta_color="inverse" if is_unstable else "normal")
 
-    st.divider()
-
-    # 2. 📈 타임존 핑퐁 시각화 차트 (Step Chart)
-    # line_shape='hv'를 주면 대각선이 아닌 계단형태로 꺾여서, 디지털 상태 전이를 보여주기에 최적입니다.
-    fig = px.line(
-        df,
-        x='log_time',
-        y='offset_num',
-        line_shape='hv',
-        markers=True,
-        title="시간대(UTC Offset) 변동 추이",
-        labels={'log_time': '디바이스 로그 시간', 'offset_num': 'UTC 시차 (시간)'},
-        color_discrete_sequence=['#FF4B4B']  # Streamlit 기본 테마에 어울리는 붉은색
-    )
-
-    # Y축 간격을 1시간 단위로 딱 떨어지게 설정
-    fig.update_yaxes(dtick=1)
-
-    # 배경을 투명하게 하고 그리드라인 추가해서 사이버틱하게 꾸미기
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-    )
-
-    st.plotly_chart(fig, width="stretch")
-
-    # 3. 📋 상세 데이터 테이블
-    with st.expander("🔍 NITZ 수신 Raw Data 보기"):
-        st.dataframe(
-            df[['log_time', 'timezone', 'dst_status', 'nitz_raw']],
-            width="stretch",
-            column_config={
-                "log_time": "수신 시간",
-                "timezone": "적용 타임존",
-                "dst_status": "썸머타임(DST)",
-                "nitz_raw": "NITZ 원문"
-            }
-        )
-
+    # 6. 차트 렌더링
+    fig = px.line(df, x='log_time_dt', y='offset_num', line_shape='hv', markers=True)
+    st.plotly_chart(fig, use_container_width=True)

@@ -51,7 +51,8 @@ class RilRagChat:
             "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
             "get_internet_stall_analytics": getattr(agent_tools, 'get_internet_stall_analytics', None),
             "get_ntn_spacex_analytics": getattr(agent_tools, 'get_ntn_spacex_analytics', None),
-            "get_tiantong_satellite_analytics": getattr(agent_tools, 'get_tiantong_satellite_analytics', None)
+            "get_tiantong_satellite_analytics": getattr(agent_tools, 'get_tiantong_satellite_analytics', None),
+            "get_recent_data_usage_analytics": getattr(agent_tools, 'get_recent_data_usage_analytics', None)
         }
 
     def _load_config(self):

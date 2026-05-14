@@ -58,6 +58,7 @@ routing_map:
       - get_dns_latency_analytics
       - get_data_stall_and_recovery_analytics
       - get_network_oos_analytics
+      - get_recent_data_usage_analytics
     log_types:
       - Internet_Stall_Analysis
       - Network_DNS_Issue
@@ -98,6 +99,12 @@ routing_map:
     log_types:
       - Satellite_AT_Command
       - Signal_Level
+  Data_Usage_Analysis:
+    desc: "데이터 사용량, 데이터 소모, 트래픽 폭주, 어떤 앱이 데이터 많이 썼는지, 백그라운드 데이터, 셀룰러 데이터 사용, 과금, 과도한 트래픽, 최근 데이터 사용 앱, 데이터 누가 썼어, data usage, rx_bytes, tx_bytes"
+    tools:
+      - get_recent_data_usage_analytics
+    log_types:
+      - Data_Usage
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)

@@ -999,3 +999,64 @@ def get_tiantong_satellite_analytics(base_name: str, result_dir: str = "./result
             "critical_errors_detected": critical_errors if critical_errors else "없음 (Call/SMS 정상 처리됨)"
         }
     }, ensure_ascii=False)
+
+def get_recent_data_usage_analytics(base_name: str, hours: int = 3, result_dir: str = "./result") -> str:
+    """최근 N시간 동안의 앱별 데이터 사용량을 합산하여 상위 앱을 추출합니다."""
+    report_data = _load_report_json(base_name, result_dir)
+    usage_stats = report_data.get("data_usage_stats", [])
+
+    if not usage_stats:
+        return json.dumps({"error": "데이터 사용량 기록이 없습니다."}, ensure_ascii=False)
+
+    parsed_entries = []
+
+    # 1. 시간 파싱 (연도 포함 여부에 유연하게 대응)
+    for stat in usage_stats:
+        time_str = stat.get("time")
+        if not time_str:
+            continue
+        try:
+            if len(time_str) > 15: # 예: 2025-07-20 04:28:08
+                dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            else:                  # 예: 07-20 04:28:08
+                dt = datetime.strptime(time_str, "%m-%d %H:%M:%S")
+            parsed_entries.append({"dt": dt, "stat": stat})
+        except ValueError:
+            continue
+
+    if not parsed_entries:
+        return json.dumps({"error": "시간을 파싱할 수 있는 데이터가 없습니다."}, ensure_ascii=False)
+
+    # 2. 🚨 [핵심] 현재 시간이 아닌 '로그 내 가장 마지막 시간'을 앵커로 잡음
+    latest_time = max(entry["dt"] for entry in parsed_entries)
+    threshold_time = latest_time - timedelta(hours=hours)
+
+    # 3. N시간 이내 데이터 필터링 및 앱별 합산
+    app_usage = {}
+    for entry in parsed_entries:
+        if entry["dt"] >= threshold_time:
+            app_name = entry["stat"].get("app_name", "Unknown")
+            try:
+                mb = float(entry["stat"].get("total_mb", 0.0))
+            except ValueError:
+                mb = 0.0
+
+            app_usage[app_name] = app_usage.get(app_name, 0.0) + mb
+
+    # 4. 사용량(MB) 내림차순 정렬
+    sorted_usage = sorted(app_usage.items(), key=lambda x: x[1], reverse=True)
+
+    usage_facts = []
+    for app, mb in sorted_usage:
+        if mb > 0.0:  # 사용량이 0인 앱은 제외
+            usage_facts.append({
+                "app_name": app,
+                "total_mb_used": round(mb, 2)
+            })
+
+    # LLM이 읽기 좋게 JSON으로 리턴
+    return json.dumps({
+        "analysis_window_hours": hours,
+        "latest_log_time": latest_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "recent_top_consuming_apps": usage_facts
+    }, ensure_ascii=False)

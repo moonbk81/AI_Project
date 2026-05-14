@@ -154,7 +154,7 @@ class LogOrchestrator:
             if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
                 buckets['signal'].append(line)
 
-            if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested"]):
+            if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested", "pkg,"]):
                 buckets['usage'].append(line)
 
             if "DNS Requested" in line:

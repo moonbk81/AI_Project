@@ -955,6 +955,8 @@ with tab_dash:
 
                     st.divider()
                     ui.render_data_usage_profiling(df)
+                    st.divider()
+                    ui.render_data_usage_timeline(df)
 
                     # 🚨 [신규 추가] 대시보드에 SIP 사다리 차트 노출
                     st.divider()

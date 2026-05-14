@@ -204,13 +204,17 @@ class RagPayloadBuilder:
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Data_Usage",
+                    "time": usage.get("time", "시간 미상"),  # 🚨 [추가] 메타데이터에 시간(time) 필드 삽입
                     "app_name": usage.get("app_name", "Unknown"),
                     "rat": usage.get("rat", "Unknown"),
                     "total_mb": usage.get("total_mb", 0.0),
                     "rx_mb": usage.get("rx_mb", 0.0),
                     "tx_mb": usage.get("tx_mb", 0.0)
                 }
-                text_content = f"데이터 사용량 기록: {meta['app_name']} 앱이 {meta['rat']} 망에서 총 {meta['total_mb']} MB의 셀룰러 데이터를 사용했습니다. (다운로드: {meta['rx_mb']} MB, 업로드: {meta['tx_mb']} MB)"
+
+                # 🚨 [수정] LLM이 시간대 흐름을 파악할 수 있도록 텍스트 맨 앞에 [시간] 추가
+                text_content = f"[{meta['time']}] 데이터 사용량 기록: {meta['app_name']} 앱이 {meta['rat']} 망에서 총 {meta['total_mb']} MB의 셀룰러 데이터를 사용했습니다. (다운로드: {meta['rx_mb']} MB, 업로드: {meta['tx_mb']} MB)"
+
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================

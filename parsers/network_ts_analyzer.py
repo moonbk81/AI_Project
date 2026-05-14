@@ -32,24 +32,34 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
             r'tcp\s+avg_loss=(\d+(?:\.\d+)?)%', re.I
         )
 
-        # 3. 차단 원인 추적 설정값
-
     def analyze(self, lines):
         in_stats = False
         dns_issues = []
         uid_block_map = {} # UID별 상세 차단 원인 저장소
+        uid_map = {}       # 🚨 신규: UID별 실제 패키지명 매핑 딕셔너리
+
         # 시계열 분석을 위해 시간(Time)을 키로 사용하는 딕셔너리
         timeline = defaultdict(lambda: {"net_stats": []})
 
         current_netid = None
         private_dns_status = {}
 
-        # 1단계: UID별 blocked_state 정보 사전 수집
+        # 1단계: UID별 blocked_state 및 패키지명 정보 사전 수집
         for line in lines:
             clean_line = self.clean_line(line)
+
+            # (A) 차단 정책 수집
             uid_m = self.re_uid_state.search(clean_line)
             if uid_m:
                 uid_block_map[uid_m.group('uid')] = uid_m.group('effective')
+
+            # 🚨 (B) 신규: pkg 리스트에서 실제 패키지 이름 긁어오기
+            if clean_line.startswith("pkg,"):
+                m_pkg_csv = re.match(r'^pkg,([^,]+),(\d+)', clean_line)
+                if m_pkg_csv:
+                    pkg_name = m_pkg_csv.group(1)
+                    uid_val = m_pkg_csv.group(2)
+                    uid_map[uid_val] = pkg_name
 
         # 2단계: 메인 분석 루프
         for line in lines:
@@ -74,7 +84,6 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                 # DoT configuration 세션 붕괴 감지
                 if "status{fail}" in clean_line:
                     private_dns_status[current_netid]["fail_count"] += 1
-                    # IPv4 / IPv6 주소 추출
                     ip_m = re.search(r'([a-fA-F0-9:]+|\d+\.\d+\.\d+\.\d+)\s+name', clean_line)
                     if ip_m:
                         private_dns_status[current_netid]["failed_ips"].append(ip_m.group(1))
@@ -86,14 +95,21 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                 dns_m = self.re_dns_event.search(clean_line)
                 if dns_m:
                     net_id, uid, pkg, res_code, res_str, blocked = dns_m.groups()
+
                     if "FAIL" in res_str or "NODATA" in res_str or blocked.lower() == 'true':
-                        # 수집된 UID 상태 매핑
                         effective_policy = uid_block_map.get(uid, "SYSTEM_POLICY")
+
+                        # 🚨 신규: 1단계에서 수집한 실제 앱 이름으로 치환
+                        # 로그 원본의 pkg 값이 없거나 단순 숫자일 경우 uid_map에서 찾아옵니다.
+                        real_pkg = uid_map.get(uid, pkg)
+                        if real_pkg.isdigit(): # 매핑 실패 시 식별을 위해 App_UID 붙여줌
+                            real_pkg = f"App_UID_{real_pkg}"
+
                         dns_issues.append({
                             "time": clean_line[:18],
                             "net_id": net_id,
                             "uid": uid,
-                            "package": pkg,
+                            "package": real_pkg, # 치환된 패키지명 사용
                             "result": res_str,
                             "is_blocked": blocked.lower() == 'true',
                             "suspected_reason": f"Blocked by {effective_policy}" if blocked.lower() == 'true' else "Network Timeout/Fail",
