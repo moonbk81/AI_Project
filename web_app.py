@@ -223,7 +223,8 @@ def render_chat_interface(key_suffix="main", show_input=True):
                 with st.spinner("분석 중..."):
                     current_target = st.session_state.get("current_file", None)
                     # 이전 대화 맥락 5개 유지하여 질문
-                    answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:])
+                    clean_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-5:]]
+                    answer, ids, metas = engine.ask(prompt, current_file=current_target, chat_history=clean_history)
 
                     # (여기에 ref_text 조립 로직 추가 - 기존 코드와 동일)
                     ref_text = ""

@@ -295,7 +295,7 @@ class RilRagChat:
             # 해당 배치만큼만 임베딩 수행
             batch_embeddings = self.embed_model.encode(
                 batch_docs,
-                batch_size=32,
+                batch_size=16,
                 convert_to_numpy=True,
                 normalize_embeddings=True,
             ).tolist()
@@ -398,7 +398,7 @@ class RilRagChat:
 
                 batch_embeddings = self.embed_model.encode(
                     batch_docs,
-                    batch_size=32,
+                    batch_size=16,
                     convert_to_numpy=True
                 ).tolist()
 
@@ -417,6 +417,8 @@ class RilRagChat:
                     torch.mps.empty_cache()
 
             total_docs += len(safe_documents)
+            del raw_documents, raw_metadatas, safe_documents, safe_metadatas, ids
+            gc.collect()
 
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 

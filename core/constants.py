@@ -52,8 +52,8 @@ DIAG_PATTERNS = {
     'LOCK_HELD': re.compile(r'waiting to lock <(.*?)>.*?held by thread (\d+)', re.I),
     'ANR_TRACES': re.compile(r'VM TRACES AT LAST ANR', re.I),
     'OUTGOING': re.compile(r'outgoing transaction (\d+):(\d+) to (\d+):(\d+) code (\d+)', re.I),
-    'FATAL_APP': re.compile(r'FATAL EXCEPTION:\s+main', re.I),
-    'FATAL_SYS': re.compile(r'FATAL EXCEPTION IN PROCESS:\s+main', re.I),
+    'FATAL_APP': re.compile(r'FATAL EXCEPTION:\s+(\w+)', re.I),
+    'FATAL_SYS': re.compile(r'FATAL EXCEPTION IN PROCESS:\s+(\w+)', re.I),
     'PROC_PHONE': re.compile(r'Process:\s+com\.android\.phone', re.I),
     'STACK_LINE': re.compile(r'^\s*(at\s+|Caused\s+by:)', re.I)
 }
