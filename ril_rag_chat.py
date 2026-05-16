@@ -8,7 +8,7 @@ import re
 import agent_tools
 
 from sentence_transformers import SentenceTransformer
-from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS
+from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
@@ -414,25 +414,20 @@ class RilRagChat:
     def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
         """Ollama API를 호출하고 최종 답변과 생각 과정(Thinking)을 분리하여 반환합니다."""
         import ollama
-        context_size = 16384
-        if 'gemma3:12b' in self.llm_model_name or 'gemma4' in self.llm_model_name:
-            context_size = 32768
-        elif self.llm_model_name == 'qwen2.5-coder:7b':
-            context_size = 4096
+        cfg = self.model_config_registry.get(
+            self.llm_model_name,
+            self.model_config_registry.get("default")
+        ).copy() # 원본 데이터 보호를 위해 copy() 사용
+
+        # 벤치마크 테스트 등 특수 상황에 대한 유연한 덮어쓰기(Override) 로직 유지
         if is_bench:
-            context_size = 8192
+            cfg["num_ctx"] = 8192
 
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
                 messages=[{'role': 'user', 'content': prompt}],
-                options={
-                    'num_ctx': context_size,
-                    'temperature': 0.1,
-                    'num_predict': 2048,
-                    'repeat_penalty': 1.15,
-                    'stop': ['<unused', '<|im_end|>', '<eos>']
-                }
+                options=cfg
             )
 
             raw_content = res['message'].get('content', '').strip()
