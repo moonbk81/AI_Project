@@ -29,10 +29,9 @@ class RilRagChat:
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
-        # 3. LLM 로드 (Gemma3-4b)
-        self.llm_model_name = 'gemma3:4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
-        if device == "mps":
-            self.llm_model_name = 'gemma3:12b'
+        # 3. LLM 로드 (Gemma4-e4b 적용)
+        self.llm_model_name = 'gemma4:e4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+
         if model_name is not None:
             self.llm_model_name = model_name
         self.routing_mode = routing_mode
@@ -45,7 +44,7 @@ class RilRagChat:
             "get_ps_ims_call_analytics": agent_tools.get_ps_ims_call_analytics,
             "get_network_oos_analytics": agent_tools.get_network_oos_analytics,
             "get_dns_latency_analytics": agent_tools.get_dns_latency_analytics,
-            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None), # 없는 함수 방어 로직
+            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None),
             "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
             "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
             "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
@@ -69,14 +68,11 @@ class RilRagChat:
             self.prompts = {}
 
     def _get_semantic_routing(self, query):
-        """config.yaml의 설정을 기반으로 지능형 라우팅 수행"""
         chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
         if not chunks:
             chunks = [query]
 
-        # 1. 각 카테고리별로 청크들과 비교하여 '최고 점수'를 계산
         category_scores = []
-
         for category, data in self.routing_map.items():
             intent_vec = self.embed_model.encode(data["desc"])
             max_sim = 0.0
@@ -86,13 +82,10 @@ class RilRagChat:
                 sim = np.dot(chunk_vec, intent_vec) / (
                     np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec)
                 )
-
                 if sim > max_sim:
                     max_sim = sim
-
             category_scores.append((category, float(max_sim), data))
 
-        # 2. 점수(max_sim)가 높은 순서대로 내림차순 정렬
         category_scores.sort(key=lambda x: x[1], reverse=True)
 
         selected_tools = set()
@@ -102,166 +95,90 @@ class RilRagChat:
         threshold = 0.52
         multi_threshold = 0.50
 
-        # 점수 로그 저장용
-        routing_scores = {
-            category: float(score)
-            for category, score, _ in category_scores
-        }
+        routing_scores = {category: float(score) for category, score, _ in category_scores}
 
         if not category_scores:
-            print("⚠️ [Fallback] routing_map이 비어 있어 범용 기본 로그를 조회합니다.")
             selected_intents.add("Fallback_General")
-            selected_tools.update([
-                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
-            ])
-            selected_log_types.update([
-                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
-            ])
-
-            return {
-                "intents": list(selected_intents), "tools": list(selected_tools), "log_types": list(selected_log_types), "scores": routing_scores, "top_matches": [],
-            }
+            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
+            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
+            return {"intents": list(selected_intents), "tools": list(selected_tools), "log_types": list(selected_log_types), "scores": routing_scores, "top_matches": []}
 
         top1_cat, top1_score, top1_data = category_scores[0]
-        print(f"\n[Semantic Router] 🥇 Top-1 의도: {top1_cat} (유사도: {top1_score:.3f})")
-
-        # 3. Top-1 점수가 낮으면 fallback
-        # 기존처럼 여기서 바로 return 하지 말고, selected_*에 기본값을 넣고 마지막 dict return으로 보낸다.
         if top1_score < threshold:
-            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그(통화/망/타임라인)만 조회합니다.")
-
             selected_intents.add("Fallback_General")
-            selected_tools.update([
-                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
-            ])
-            selected_log_types.update([
-                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
-            ])
-
+            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
+            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
         else:
-            # 4. 1등 의도 채택
             selected_intents.add(top1_cat)
             selected_tools.update(top1_data["tools"])
             selected_log_types.update(top1_data["log_types"])
 
-            # 5. Top-2 복합 의도 병합
             if len(category_scores) > 1:
                 top2_cat, top2_score, top2_data = category_scores[1]
-
                 if top2_score >= multi_threshold:
-                    print(f"🔗 [Multi-Intent] 🥈 Top-2 복합 의도 병합: {top2_cat} (유사도: {top2_score:.3f})")
                     selected_intents.add(top2_cat)
                     selected_tools.update(top2_data["tools"])
                     selected_log_types.update(top2_data["log_types"])
 
-        # 6. 혹시 selected가 비어 있으면 fallback
         if not selected_tools and not selected_log_types:
-            print("⚠️ [Fallback] 명확한 의도를 찾지 못해 범용 기본 로그를 조회합니다.")
-
             selected_intents.add("Fallback_General")
-            selected_tools.update([
-                "get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics",
-            ])
-            selected_log_types.update([
-                "Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue",
-            ])
+            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
+            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
 
-                # 7. 키워드 override
         query_lower = query.lower()
-
-        # [Radio Power 오버라이드]
-        if any(keyword in query_lower for keyword in [
-            "비행기 모드", "airplane mode", "flight mode",
-            "radio power", "모뎀 전원", "라디오 파워",
-        ]):
+        if any(keyword in query_lower for keyword in ["비행기 모드", "airplane mode", "flight mode", "radio power", "모뎀 전원", "라디오 파워"]):
             selected_intents.add("Radio_Power")
             if "Radio_Power" in self.routing_map:
                 selected_tools.update(self.routing_map["Radio_Power"].get("tools", []))
                 selected_log_types.update(self.routing_map["Radio_Power"].get("log_types", []))
 
-        # [Internet Stall / DNS / Data Stall 오버라이드]
-        if any(keyword in query_lower for keyword in [
-            "인터넷", "먹통", "웹페이지",
-            "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고",
-            "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안",
-            "data stall", "스톨", "validation", "validation failed",
-            "no internet", "partial connectivity", "private dns",
-            "tcp timeout", "tls handshake", "라우팅", "default network",
-        ]):
+        if any(keyword in query_lower for keyword in ["인터넷", "먹통", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network"]):
             selected_intents.add("Internet_Stall")
             if "Internet_Stall" in self.routing_map:
                 selected_tools.update(self.routing_map["Internet_Stall"].get("tools", []))
                 selected_log_types.update(self.routing_map["Internet_Stall"].get("log_types", []))
 
-        if any(keyword in query_lower for keyword in [
-            "dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림",
-        ]):
+        if any(keyword in query_lower for keyword in ["dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림"]):
             selected_intents.add("DNS_Latency")
             if "DNS_Latency" in self.routing_map:
-                # 하드코딩 대신 config.yaml(routing_map)의 배열을 그대로 가져와서 붙임!
                 selected_tools.update(self.routing_map["DNS_Latency"].get("tools", []))
                 selected_log_types.update(self.routing_map["DNS_Latency"].get("log_types", []))
 
-        if any(keyword in query_lower for keyword in [
-            "anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding",
-            "fatal exception", "watchdog", "프리징", "먹통",
-        ]):
+        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "먹통"]):
             selected_intents.add("Crash_ANR")
             if "Crash_ANR" in self.routing_map:
                 selected_tools.update(self.routing_map["Crash_ANR"].get("tools", []))
                 selected_log_types.update(self.routing_map["Crash_ANR"].get("log_types", []))
 
-        # [SpaceX 오버라이드]
         if any(keyword in query_lower for keyword in ["spacex", "starlink", "ntn", "스페이스엑스"]):
             selected_intents.add("NTN_SpaceX")
             if "NTN_SpaceX" in self.routing_map:
                 selected_tools.update(self.routing_map["NTN_SpaceX"].get("tools", []))
                 selected_log_types.update(self.routing_map["NTN_SpaceX"].get("log_types", []))
 
-        # [Tiantong 오버라이드]
         if any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
             selected_intents.add("Tiantong_Satellite")
             if "Tiantong_Satellite" in self.routing_map:
                 selected_tools.update(self.routing_map["Tiantong_Satellite"].get("tools", []))
                 selected_log_types.update(self.routing_map["Tiantong_Satellite"].get("log_types", []))
 
-        # 8. Top 점수 로그용 정리
-        top_matches = [
-            {
-                "intent": category,
-                "score": float(score),
-            }
-            for category, score, _ in category_scores[:3]
-        ]
-
-        # 9. 이제 tuple이 아니라 dict로 반환
-        return {
-            "intents": sorted(list(selected_intents)),
-            "tools": sorted(list(selected_tools)),
-            "log_types": sorted(list(selected_log_types)),
-            "scores": routing_scores,
-            "top_matches": top_matches,
-        }
+        top_matches = [{"intent": category, "score": float(score)} for category, score, _ in category_scores[:3]]
+        return {"intents": sorted(list(selected_intents)), "tools": sorted(list(selected_tools)), "log_types": sorted(list(selected_log_types)), "scores": routing_scores, "top_matches": top_matches}
 
     def ingest_file(self, file_path, force=False):
         if not os.path.exists(file_path):
             print(f"❌ payload 파일 없음: {file_path}")
             return
-
         filename = os.path.basename(file_path)
         base_id = os.path.splitext(filename)[0]
 
         if force:
-            old = self.collection.get(
-                where={"source_file": filename},
-                include=[]
-            )
+            old = self.collection.get(where={"source_file": filename}, include=[])
             if old and old.get("ids"):
                 self.collection.delete(ids=old["ids"])
 
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         if not data:
             print(f"⚠️ 비어있는 payload: {filename}")
             return
@@ -273,10 +190,7 @@ class RilRagChat:
 
         docs, metas, ids = [], [], []
         for i, item in enumerate(data):
-            # 1. 텍스트 길이 제한
             docs.append(str(item["document"])[:MAX_DOC_CHARS])
-
-            # 2. 메타데이터 정리
             meta = item.get("metadata", {}).copy()
             meta["source_file"] = filename
             for k, v in list(meta.items()):
@@ -286,41 +200,19 @@ class RilRagChat:
             ids.append(f"{base_id}_{i}")
 
         print(f"🔄 '{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
-
-        # 3. 배치 단위 루프 (메모리 다이어트 핵심 구간)
         for i in range(0, len(docs), BATCH_SIZE):
             batch_docs = docs[i : i + BATCH_SIZE]
             batch_metas = metas[i : i + BATCH_SIZE]
             batch_ids = ids[i : i + BATCH_SIZE]
-
-            # 해당 배치만큼만 임베딩 수행
-            batch_embeddings = self.embed_model.encode(
-                batch_docs,
-                batch_size=16,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-            ).tolist()
-
-            # DB 적재
-            self.collection.add(
-                ids=batch_ids,
-                documents=batch_docs,
-                metadatas=batch_metas,
-                embeddings=batch_embeddings,
-            )
-
-            # 🔥 메모리 즉시 반환
+            batch_embeddings = self.embed_model.encode(batch_docs, batch_size=16, convert_to_numpy=True, normalize_embeddings=True).tolist()
+            self.collection.add(ids=batch_ids, documents=batch_docs, metadatas=batch_metas, embeddings=batch_embeddings)
             del batch_embeddings
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            elif torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available(): torch.mps.empty_cache()
         print(f"✅ {filename} 단일 파일 재적재 완료: {len(docs)} docs")
 
     def ingest_folder(self, folder_path="./payloads"):
-        """payloads 폴더 내의 새로운 JSON 파일만 선별하여 적재합니다."""
         if not os.path.exists(folder_path):
             os.makedirs(folder_path, exist_ok=True)
             print(f"📂 '{folder_path}' 폴더가 생성되었습니다. 분석된 JSON 파일을 넣어주세요.")
@@ -331,7 +223,6 @@ class RilRagChat:
             print(f"⚠️ '{folder_path}' 폴더에 적재할 데이터가 없습니다.")
             return
 
-        # DB에서 이미 처리된 파일 목록(source_file) 조회
         existing_data = self.collection.get(include=["metadatas"])
         processed_files = set()
         if existing_data and existing_data["metadatas"]:
@@ -339,23 +230,18 @@ class RilRagChat:
                 if meta and "source_file" in meta:
                     processed_files.add(meta["source_file"])
 
-        # 신규 파일만 필터링
         new_files = [f for f in json_files if os.path.basename(f) not in processed_files]
-
         if not new_files:
             print("✨ 모든 파일이 이미 최신 상태입니다. (추가 적재 없음)")
             return
 
         print(f"📦 총 {len(new_files)}개의 새로운 로그 파일을 발견했습니다. 적재 시작...")
-
         total_docs = 0
         for file_path in new_files:
             filename = os.path.basename(file_path)
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-
-            if not data:
-                continue
+            if not data: continue
 
             base_id = os.path.splitext(filename)[0]
             raw_documents = [item["document"] for item in data]
@@ -363,110 +249,66 @@ class RilRagChat:
 
             safe_documents = []
             safe_metadatas = []
-
-            # ==========================================
-            # 🚨 [최종 방어막] MPS 메모리 폭발 & DB 용량 초과 완벽 차단
-            # ==========================================
-            MAX_DOC_CHARS = 4000  # 약 1000 토큰 (BGE-M3 최적 효율 및 MPS 메모리 안전선)
-            MAX_META_CHARS = 5000 # 메타데이터(원본 로그) 길이 제한 (ChromaDB SQLite 보호)
+            MAX_DOC_CHARS = 4000
+            MAX_META_CHARS = 5000
 
             for doc, meta in zip(raw_documents, raw_metadatas):
-                # 1. 문서 길이 자르기 (O(N^2) 어텐션 메모리 폭발 완벽 차단)
                 safe_documents.append(str(doc)[:MAX_DOC_CHARS])
-
-                # 2. 메타데이터 안전 처리
                 safe_meta = meta.copy() if meta else {}
                 safe_meta['source_file'] = filename
-
-                # 메타데이터 안의 텍스트(예: cross_context_logs)가 너무 길면 무조건 자름
                 for k, v in safe_meta.items():
                     if isinstance(v, str) and len(v) > MAX_META_CHARS:
                         safe_meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
-
                 safe_metadatas.append(safe_meta)
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
-
-            print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식, 강력한 길이 제한 적용됨)")
+            print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
 
             BATCH_SIZE = 100
             import gc
-
             for i in range(0, len(safe_documents), BATCH_SIZE):
                 batch_docs = safe_documents[i:i+BATCH_SIZE]
-                batch_metas = safe_documents[i:i+BATCH_SIZE]
+                batch_metas = safe_metadatas[i:i+BATCH_SIZE]
                 batch_ids = ids[i:i+BATCH_SIZE]
-
-                batch_embeddings = self.embed_model.encode(
-                    batch_docs,
-                    batch_size=16,
-                    convert_to_numpy=True
-                ).tolist()
-
-                self.collection.add(
-                    embeddings=batch_embeddings,
-                    documents=batch_docs,
-                    metadatas=batch_metas,
-                    ids=batch_ids
-                )
-
+                batch_embeddings = self.embed_model.encode(batch_docs, batch_size=16, convert_to_numpy=True).tolist()
+                self.collection.add(embeddings=batch_embeddings, documents=batch_docs, metadatas=batch_metas, ids=batch_ids)
                 del batch_embeddings
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                elif torch.backends.mps.is_available():
-                    torch.mps.empty_cache()
+                if torch.cuda.is_available(): torch.cuda.empty_cache()
+                elif torch.backends.mps.is_available(): torch.mps.empty_cache()
 
             total_docs += len(safe_documents)
             del raw_documents, raw_metadatas, safe_documents, safe_metadatas, ids
             gc.collect()
-
         print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    # ---------------------------------------------------------
-    # 💡 [신규 추가] 페르소나 및 로그 가이드라인 추출 헬퍼 함수
-    # ---------------------------------------------------------
     def _get_domain_specific_guideline(self, query, intents, target_log_types):
         guidelines = []
         query_lower = query.lower()
 
-        # 1. SpaceX 전용 지침 (키워드에서 '위성' 삭제)
         if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
             spacex_rule = self.prompts.get('SpaceX', "")
-            if spacex_rule:
-                guidelines.append(f"### [🚨 위성 통신 특수 규칙 - SpaceX]\n{spacex_rule}")
-
-        # 2. Tiantong 전용 지침 (명확한 전용 키워드 사용)
+            if spacex_rule: guidelines.append(f"### [🚨 위성 통신 특수 규칙 - SpaceX]\n{spacex_rule}")
         elif any(k in query_lower for k in ["tiantong", "티엔통", "천통", "at command"]):
             tiantong_rule = self.prompts.get('Tiantong', "")
-            if tiantong_rule:
-                guidelines.append(f"### [🚨 위성 통신 특수 규칙 - Tiantong]\n{tiantong_rule}")
-
-        # 3. 그 외 일반적인 위성 언급 시 기본 페르소나만 유지
+            if tiantong_rule: guidelines.append(f"### [🚨 위성 통신 특수 규칙 - Tiantong]\n{tiantong_rule}")
         else:
             base_p = self.prompts.get('base_persona', "")
-            if base_p:
-                guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
+            if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
 
         return "\n\n".join(guidelines)
 
     def ask(self, user_query, current_file=None, chat_history=None, top_k=8, health_kpi=None, is_bench=False):
-        """Semantic Router 기반의 Plan -> Act -> Retrieve -> Reason 파이프라인"""
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
 
-        # [STAGE 1: Search Query Augmentation]
         search_query = user_query
         if len(user_query) < 15 and chat_history:
             last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
-        # [STAGE 2: Semantic Intent Routing]
-        if self.routing_mode == "llm":
-            routing_result = self._get_llm_routing(search_query)
-        elif self.routing_mode == "hybrid":
-            routing_result = self._get_hybrid_routing(search_query)
-        else:
-            routing_result = self._get_semantic_routing(search_query)
+        if self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
+        elif self.routing_mode == "hybrid": routing_result = self._get_hybrid_routing(search_query)
+        else: routing_result = self._get_semantic_routing(search_query)
 
         selected_tools = routing_result.get("tools", [])
         target_log_types = routing_result.get("log_types", [])
@@ -478,40 +320,28 @@ class RilRagChat:
 
         domain_guidelines = self._get_domain_specific_guideline(search_query, intents, target_log_types)
 
-        # [STAGE 3: Act - Tool Execution]
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
                 tool_fn = self.tool_registry.get(tool_name)
                 if tool_fn:
-                    try:
-                        tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
-                    except Exception as e:
-                        print(f"Tool 실행 에러 ({tool_name}): {e}")
-                else:
-                    print(f"⚠️ 경고: {tool_name} 함수가 agent_tools에 구현되지 않았습니다.")
+                    try: tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
+                    except Exception as e: print(f"Tool 실행 에러 ({tool_name}): {e}")
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
 
-        # 🚨 [버그 수정 2] health_kpi를 LLM 프롬프트용 팩트에 합체!
         if health_kpi:
             tool_facts = f"=== [단말 전반 KPI 상태] ===\n{health_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
-        # [STAGE 4: Retrieve - Vector DB Filtered Search]
         conditions = []
-        if current_file:
-            conditions.append({"source_file": current_file})
+        if current_file: conditions.append({"source_file": current_file})
         if target_log_types:
-            if len(target_log_types) == 1:
-                conditions.append({"log_type": target_log_types[0]})
-            else:
-                conditions.append({"log_type": {"$in": target_log_types}})
+            if len(target_log_types) == 1: conditions.append({"log_type": target_log_types[0]})
+            else: conditions.append({"log_type": {"$in": target_log_types}})
 
         where_filter = None
-        if len(conditions) == 1:
-            where_filter = conditions[0]
-        elif len(conditions) > 1:
-            where_filter = {"$and": conditions}
+        if len(conditions) == 1: where_filter = conditions[0]
+        elif len(conditions) > 1: where_filter = {"$and": conditions}
 
         query_embedding = self.embed_model.encode(search_query).tolist()
         results = self.collection.query(
@@ -520,7 +350,6 @@ class RilRagChat:
             where=where_filter
         )
 
-        # [STAGE 5: Reason - Prompt Construction & LLM Inference]
         formatted_logs = self._format_results(results)
 
         prompt = (
@@ -531,7 +360,8 @@ class RilRagChat:
             f"사용자 질문: {user_query}"
         )
 
-        answer = self._call_llm(prompt, is_bench=is_bench)
+        # 🚨 [추가] 튜플 반환으로 생각 과정(Thinking) 함께 받기
+        answer, thinking = self._call_llm(prompt, is_bench=is_bench)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
         meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
@@ -539,76 +369,59 @@ class RilRagChat:
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
             from tools.eval_logger import log_rag_for_evaluation
-            log_rag_for_evaluation(
-                query=user_query,
-                context=combined_context,
-                answer=answer,
-                guideline=domain_guidelines
-            )
-        except Exception as e:
-            print(f"평가 로깅 중 에러 발생 (분석에는 영향 없음): {e}")
+            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines)
+        except Exception: pass
 
-        return answer, doc_ids, meta_list
+        # 🚨 [추가] UI 전달을 위해 4번째 인자로 thinking 반환
+        return answer, doc_ids, meta_list, thinking
 
     def get_all_files(self):
-        """DB에 적재된 모든 유니크한 파일 목록을 반환합니다."""
         results = self.collection.get(include=["metadatas"])
-        if not results or not results["metadatas"]:
-            return []
-        # 메타데이터에서 source_file 이름만 추출하여 중복 제거
+        if not results or not results["metadatas"]: return []
         files = set(m["source_file"] for m in results["metadatas"] if m and "source_file" in m)
         return sorted(list(files))
 
     def reset_db(self):
         try:
             results = self.collection.get()
-
-            # 🚨 [수정] ids 리스트가 존재하고, 비어있지 않을 때만 삭제 실행
             if results and results.get("ids"):
                 self.collection.delete(ids=results["ids"])
                 print("[DEBUG] DB 초기화 완료: 기존 데이터 삭제됨")
             else:
                 print("[DEBUG] DB가 이미 비어있어 삭제를 건너뜁니다.")
-
             return True
-
         except Exception as e:
             print(f"[ERROR] DB 초기화 중 오류 발생: {e}")
             return False
 
     def _format_results(self, results) -> str:
-        """Vector DB 검색 결과를 LLM이 읽기 쉬운 구조로 포맷팅합니다."""
         if not results or not results.get('documents') or not results['documents'][0]:
             return "관련된 로그를 DB에서 찾지 못했습니다."
-
         formatted = []
         for i, (doc, meta) in enumerate(zip(results['documents'][0], results['metadatas'][0])):
             clean_meta = {k: v for k, v in meta.items() if not k.startswith("raw_") and k != "source_file"}
             snippet = "(DB에 원본 로그가 없습니다)"
-
             raw_data = meta.get("raw_logs", meta.get("raw_context", "[]"))
             try:
                 raw_list = json.loads(raw_data) if isinstance(raw_data, str) else []
                 real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
-                if real_logs:
-                    snippet = "\n".join(real_logs[-5:]) # 핵심 스니펫 5줄만 제공
-            except:
-                pass
-
+                if real_logs: snippet = "\n".join(real_logs[-5:])
+            except: pass
             formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n메타정보: {clean_meta}\n요약: {doc}\n원본 로그 스니펫:\n{snippet}")
-
         return "\n\n".join(formatted)
 
-    def _call_llm(self, prompt: str, is_bench=False) -> str:
-        """Ollama API를 통해 실제 LLM 추론을 수행합니다."""
+    # 🚨 [핵심 수정] Gemma4/DeepSeek 대응 및 빈 답변 파싱
+    def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
+        """Ollama API를 호출하고 최종 답변과 생각 과정(Thinking)을 분리하여 반환합니다."""
         import ollama
-        context_size = 16384  # Gemma3-4b의 최대 컨텍스트 크기
-        if self.llm_model_name == 'gemma3:12b':
+        context_size = 16384
+        if 'gemma3:12b' in self.llm_model_name or 'gemma4' in self.llm_model_name:
             context_size = 32768
         elif self.llm_model_name == 'qwen2.5-coder:7b':
             context_size = 4096
-        if is_bench == True:
+        if is_bench:
             context_size = 8192
+
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
@@ -616,49 +429,48 @@ class RilRagChat:
                 options={
                     'num_ctx': context_size,
                     'temperature': 0.1,
-                    'num_predict': 1024,
-                    'repeat_penaly': 1.15,
+                    'num_predict': 2048,
+                    'repeat_penalty': 1.15,
                     'stop': ['<unused', '<|im_end|>', '<eos>']
                 }
             )
-            content = res['message']['content'].strip()
 
-            if content.startswith('<unused'):
-                return "분석 결과 생성 중 모델이 일찍 종료되었습니다. (Context 가 부족할 수 있습니다.)"
-            return content
+            raw_content = res['message'].get('content', '').strip()
+
+            # 🚨 [수정됨] 최신 Ollama API의 네이티브 'reasoning' 필드 우선 확인
+            thinking = res['message'].get('reasoning', '')
+            clean_content = raw_content
+
+            # 네이티브 필드가 비어있다면 기존처럼 텍스트 내 태그 정규식 파싱
+            if not thinking:
+                think_match = re.search(r'<think>(.*?)</think>', raw_content, flags=re.DOTALL | re.IGNORECASE)
+                if think_match:
+                    thinking = think_match.group(1).strip()
+                    clean_content = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                else:
+                    channel_match = re.search(r'<\|channel>thought(.*?)(<channel\|>|<\/|\|>|$)', raw_content, flags=re.DOTALL)
+                    if channel_match:
+                        thinking = channel_match.group(1).strip()
+                        clean_content = re.sub(r'<\|channel>thought.*?<channel\|>', '', raw_content, flags=re.DOTALL).strip()
+
+            if clean_content.startswith('<unused'):
+                clean_content = "분석 결과 생성 중 모델이 일찍 종료되었습니다. (Context 가 부족할 수 있습니다.)"
+
+            if not clean_content and thinking:
+                clean_content = "분석 과정(Thinking)은 완료되었으나, 최종 답변이 비어있습니다. AI의 생각 과정을 참고해주세요."
+
+            return clean_content, thinking
+
         except Exception as e:
-            return f"LLM 추론 중 에러가 발생했습니다: {str(e)}"
+            return f"LLM 추론 중 에러가 발생했습니다: {str(e)}", ""
 
     def save_knowledge(self, target_ids, feedback, severity="Normal", **kwargs):
-        """
-        웹 UI에서 전달받은 파라미터(대상 로그 ID, 엔지니어 코멘트, 심각도)를
-        사내 지식 베이스(ChromaDB)에 영구 저장합니다.
-        """
         try:
             import uuid
             doc_id = str(uuid.uuid4())
-
-            # target_ids가 리스트일 경우 문자열로 합쳐서 저장
-            if isinstance(target_ids, list):
-                target_ids_str = ",".join(target_ids)
-            else:
-                target_ids_str = str(target_ids)
-
-            # 메타데이터: UI에서 넘어온 severity와 타겟 로그 ID를 모두 보존
-            metadata = {
-                "target_ids": target_ids_str,
-                "solution": feedback,
-                "severity": severity,
-                "type": "expert_knowledge"
-            }
-
-            # 지식 베이스 전용 컬렉션에 적재 (텍스트 본문은 엔지니어 피드백)
-            self.knowledge_collection.add(
-                documents=[feedback],
-                metadatas=[metadata],
-                ids=[doc_id]
-            )
-
+            target_ids_str = ",".join(target_ids) if isinstance(target_ids, list) else str(target_ids)
+            metadata = {"target_ids": target_ids_str, "solution": feedback, "severity": severity, "type": "expert_knowledge"}
+            self.knowledge_collection.add(documents=[feedback], metadatas=[metadata], ids=[doc_id])
             print(f"💾 [Knowledge Save] 지식 DB 박제 완료! (ID: {doc_id}, Severity: {severity})")
             return True
         except Exception as e:
@@ -666,27 +478,17 @@ class RilRagChat:
             return False
 
     def _extract_json_object(self, text: str) -> dict:
-        if not text:
-            raise ValueError("empty LLM routing response")
-
+        if not text: raise ValueError("empty LLM routing response")
         text = text.strip()
-
-        # ```json ... ``` 제거
         text = re.sub(r"^```json\s*", "", text)
         text = re.sub(r"^```\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
-
-        # 첫 번째 { ... } 블록만 추출
         match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            raise ValueError(f"No JSON object found in response: {text[:300]}")
-
+        if not match: raise ValueError(f"No JSON object found in response: {text[:300]}")
         return json.loads(match.group(0))
-
 
     def _get_llm_routing(self, query: str) -> dict:
         import ollama
-
         allowed_tools = set()
         allowed_log_types = set()
         allowed_intents = set(self.routing_map.keys())
@@ -697,44 +499,26 @@ class RilRagChat:
 
         prompt = f"""
     너는 Android Telephony 로그 분석 라우터다.
-
     사용자 질문을 보고 필요한 intent/tools/log_types를 JSON으로만 반환하라.
-
-    사용 가능한 intent:
-    {sorted(list(allowed_intents))}
-
-    사용 가능한 tools:
-    {sorted(list(allowed_tools))}
-
-    사용 가능한 log_types:
-    {sorted(list(allowed_log_types))}
-
-    반드시 JSON만 출력:
-    {{
-    "intents": [],
-    "tools": [],
-    "log_types": [],
-    "reason": ""
-    }}
-
-    사용자 질문:
-    {query}
+    사용 가능한 intent: {sorted(list(allowed_intents))}
+    사용 가능한 tools: {sorted(list(allowed_tools))}
+    사용 가능한 log_types: {sorted(list(allowed_log_types))}
+    반드시 JSON만 출력: {{"intents": [], "tools": [], "log_types": [], "reason": ""}}
+    사용자 질문: {query}
     """
-
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
                 messages=[{"role": "user", "content": prompt}],
                 format="json",
-                options={
-                    "num_ctx": 4096,
-                    "temperature": 0.0,
-                },
+                options={"num_ctx": 4096, "temperature": 0.0},
             )
-
             content = res["message"]["content"].strip()
-            parsed = self._extract_json_object(content)
 
+            # JSON 포맷에서도 <think> 태그가 나올 경우 방어
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
+
+            parsed = self._extract_json_object(content)
             return {
                 "intents": sorted(list(set(parsed.get("intents", [])) & allowed_intents)),
                 "tools": sorted(list(set(parsed.get("tools", [])) & allowed_tools)),
@@ -742,33 +526,19 @@ class RilRagChat:
                 "reason": parsed.get("reason", ""),
                 "raw": content,
             }
-
         except Exception as e:
-            return {
-                "intents": [],
-                "tools": [],
-                "log_types": [],
-                "reason": f"LLM routing failed: {e}",
-                "raw": content if "content" in locals() else "",
-            }
+            return {"intents": [], "tools": [], "log_types": [], "reason": f"LLM routing failed: {e}", "raw": content if "content" in locals() else ""}
 
     def _get_hybrid_routing(self, query: str) -> dict:
         semantic = self._get_semantic_routing(query)
         llm_route = self._get_llm_routing(query)
-
         merged_intents = set(semantic.get("intents", []))
         merged_tools = set(semantic.get("tools", []))
         merged_log_types = set(semantic.get("log_types", []))
-
         merged_intents.update(llm_route.get("intents", []))
         merged_tools.update(llm_route.get("tools", []))
         merged_log_types.update(llm_route.get("log_types", []))
-
         return {
-            "intents": sorted(merged_intents),
-            "tools": sorted(merged_tools),
-            "log_types": sorted(merged_log_types),
-            "semantic_routing": semantic,
-            "llm_routing": llm_route,
-            "routing_mode": "hybrid",
+            "intents": sorted(merged_intents), "tools": sorted(merged_tools), "log_types": sorted(merged_log_types),
+            "semantic_routing": semantic, "llm_routing": llm_route, "routing_mode": "hybrid",
         }
