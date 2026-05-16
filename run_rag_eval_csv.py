@@ -13,15 +13,15 @@ Input JSONL schema per line:
 Example:
   python run_rag_eval_csv.py \
     --log-file eval_logs/rag_eval_dataset.jsonl \
-    --judge-model ollama/gemma3:4b \
-    --output rag_eval_results_gemma3_4b.csv \
-    --summary-output rag_eval_results_gemma3_4b_summary.csv
+    --judge-model ollama/gemma3:12b \
+    --output rag_eval_results_gemma3_12b.csv \
+    --summary-output rag_eval_results_gemma3_12b_summary.csv
 
     python run_rag_eval_csv.py \
       --log-file eval_logs/rag_eval_dataset.jsonl \
-      --judge-model ollama/qwen2.5-coder:7b \
-      --output rag_eval_results_qwen2_5coder_7b.csv \
-      --summary-output rag_eval_results_qwen2_5coder_7b_summary.csv
+      --judge-model ollama/gemma3:12b \
+      --output rag_eval_results_gemma3_12b.csv \
+      --summary-output rag_eval_results_gemma3_12b_summary.csv
 """
 
 from __future__ import annotations
@@ -47,7 +47,8 @@ except ImportError as e:
 DEFAULT_LOG_FILE = "eval_logs/rag_eval_dataset.jsonl"
 DEFAULT_OUTPUT = "csv/rag_eval_results.csv"
 DEFAULT_SUMMARY = "csv/rag_eval_summary.csv"
-DEFAULT_JUDGE_MODEL = "ollama/gemma3:4b"
+# 🚨 [변경] 기본 평가 모델을 Gemma 3 12B로 승급
+DEFAULT_JUDGE_MODEL = "ollama/gemma3:12b"
 DEFAULT_OLLAMA_BASE = "http://localhost:11434"
 
 
@@ -88,7 +89,6 @@ def load_eval_logs(log_file: str) -> List[Dict[str, Any]]:
             if not line:
                 continue
             try:
-                # data = json.loads(line)
                 data = extract_json_object(line)
                 for key in [
                     "answer_relevance",
@@ -127,9 +127,16 @@ def load_eval_logs(log_file: str) -> List[Dict[str, Any]]:
 
 def extract_json(text: str) -> Dict[str, Any]:
     text = (text or "").strip()
+
+    # 🚨 [추가] Gemma 4 / DeepSeek 등 추론 모델이 JSON 응답 전후에
+    # <think> 태그나 추론 과정을 삽입할 경우를 대비한 강력한 방어 로직
+    text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|channel>thought.*?(?:<channel\|>|<\/|\|>|$)', '', text, flags=re.DOTALL)
+
     text = re.sub(r"^```json\s*", "", text)
     text = re.sub(r"^```\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
+
     m = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not m:
         raise ValueError(f"No JSON object found in judge response: {text[:300]}")
@@ -140,6 +147,11 @@ def extract_json_object(text: str) -> dict:
     import re
 
     text = (text or "").strip()
+
+    # 🚨 [추가] 데이터 로드 시에도 추론 태그 사전 차단
+    text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|channel>thought.*?(?:<channel\|>|<\/|\|>|$)', '', text, flags=re.DOTALL)
+
     match = re.search(r"\{.*\}", text, re.DOTALL)
 
     if not match:
@@ -289,7 +301,7 @@ Return ONLY valid JSON in the following format:
         model=model,
         messages=[{"role": "user", "content": prompt}],
         api_base=ollama_base,
-        temperature=0,
+        temperature=0.0, # 🚨 평가자의 일관성을 위해 온도는 0.0 유지
         timeout=timeout,
         format="json",
     )
@@ -351,10 +363,14 @@ def evaluate(
             "temporal_reasoning": safe_float(scores.get("temporal_reasoning")),
             "hallucination_risk": safe_float(scores.get("hallucination_risk")),
             "overall_score": safe_float(scores.get("overall_score")),
-            "comment": scores.get("comment", ""),
+            "comment": scores.get("reason", scores.get("comment", "")), # JSON 반환 규격 통일
             "error": error,
             "judge_raw": judge_raw,
         })
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    os.makedirs(os.path.dirname(summary_output), exist_ok=True)
 
     fieldnames = list(result_rows[0].keys()) if result_rows else []
     with open(output, "w", newline="", encoding="utf-8-sig") as f:

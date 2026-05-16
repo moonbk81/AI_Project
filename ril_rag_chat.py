@@ -62,10 +62,20 @@ class RilRagChat:
                 "당신은 Android RIL/Telephony 로그 분석 전문가입니다."
             )
             self.prompts = PROMPTS
+            self.model_config_registry = MODEL_CONFIG
         except Exception as e:
             self.routing_map = {}
             self.system_role_prompt = "시스템 프롬프트를 불러올 수 없습니다."
             self.prompts = {}
+            self.model_config_registry = {
+                "default": {
+                    "num_ctx": 16384,
+                    "num_predict": 2048,
+                    "temperature": 0.1,
+                    "repeat_penalty": 1.15,
+                    "stop": ["<eos>"]
+                }
+            }
 
     def _get_semantic_routing(self, query):
         chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
@@ -422,12 +432,14 @@ class RilRagChat:
         # 벤치마크 테스트 등 특수 상황에 대한 유연한 덮어쓰기(Override) 로직 유지
         if is_bench:
             cfg["num_ctx"] = 8192
-
+        is_think = False
+        if self.llm_model_name.startswith("gemma4"): is_think = True
         try:
             res = ollama.chat(
                 model=self.llm_model_name,
                 messages=[{'role': 'user', 'content': prompt}],
-                options=cfg
+                options=cfg,
+                think=is_think
             )
 
             raw_content = res['message'].get('content', '').strip()
