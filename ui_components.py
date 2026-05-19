@@ -650,15 +650,36 @@ def render_crash_analyzer(report_data):
     st.subheader("💥 시스템 크래시 및 FATAL 에러 분석")
 
     crash_data = report_data.get("crash_context", [])
+    native_crash_data = report_data.get("native_crash_context", [])
     anr_data_list = report_data.get("anr_context", [])
 
     # 💡 과거 딕셔너리 포맷과의 호환성을 위한 방어 코드
     if isinstance(anr_data_list, dict) and anr_data_list:
         anr_data_list = [anr_data_list]
 
-    if not crash_data and not anr_data_list:
-        st.success("💡 분석된 로그 내에 심각한 시스템 크래시나 FATAL 에러가 발견되지 않았습니다.")
+    if not crash_data and not anr_data_list and not native_crash_data:
+        st.success("💡 분석된 로그 내에 심각한 크래시(Native 포함)나 FATAL 에러가 발견되지 않았습니다.")
         return
+
+    if native_crash_data:
+        st.error(f"☠️ 총 {len(native_crash_data)}건의 Native C/C++ 크래시가 감지되었습니다!")
+        for n_crash in native_crash_data:
+            ts = n_crash.get('timestamp', 'Time Unknown')
+            process = n_crash.get('process', 'Unknown')
+            signal = n_crash.get('signal', 'Unknown')
+
+            with st.expander(f"☠️ [{ts}] {process} - NATIVE CRASH (Signal: {signal})"):
+                st.markdown(f"**Abort Message:** `{n_crash.get('abort_message', 'none')}`")
+
+                callstack = n_crash.get('callstack', [])
+                if callstack:
+                    st.markdown("**🧵 Native Callstack:**")
+                    stack_df = pd.DataFrame(callstack)
+                    st.dataframe(stack_df, hide_index=True, width="stretch")
+
+                if 'cross_context_logs' in n_crash and n_crash['cross_context_logs']:
+                    st.markdown("**🧩 주변 컨텍스트 로그:**")
+                    st.code("\n".join(n_crash['cross_context_logs']), language='log')
 
     if anr_data_list:
         st.error(f"🚨 총 {len(anr_data_list)}건의 응답없음(ANR) 이벤트가 감지되었습니다!")

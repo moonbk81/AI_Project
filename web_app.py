@@ -66,7 +66,7 @@ st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wid
 
 if 'active_model' not in st.session_state:
     is_mac_mps = torch.backends.mps.is_available()
-    default_model = "gemma4:e4b" # ✅ 기본 모델 변경
+    default_model = "batiai/gemma4-e2b:q4" if torch.cuda.is_available() else "gemma4:e4b" # ✅ 기본 모델 변경
     st.session_state['active_model'] = default_model
 
 if 'active_routing_mode' not in st.session_state:

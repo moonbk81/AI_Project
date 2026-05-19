@@ -52,15 +52,21 @@ class SignalParser(BaseParser):
         return history
 
 class DataUsageParser(BaseParser):
-    def analyze(self, lines):
-        usage_by_key, uid_map = {}, {}
+    def analyze(self, lines, global_uid_map=None):
+        # 🚨 [신규] 외부(Orchestrator)에서 만든 완벽한 매핑 테이블 가져오기
+        if global_uid_map is None:
+            global_uid_map = {}
+
+        usage_by_key = {}
+        # 전달받은 전역 맵을 베이스로 깔고 시작
+        uid_map = global_uid_map.copy()
         current_app_id_in_log = None
-        current_key = None  # (uid_val, rat_val) 임시 저장용
+        current_key = None
 
         for line in lines:
             line_stripped = self.clean_line(line)
 
-            # 1. UID 매핑 로직 (기존과 동일)
+            # 1. 기존 UID 수집 로직 (혹시 누락된 최신 앱이 있을까봐 보조용으로 유지)
             if "NetdEventListenerService" in line_stripped or "DNS Requested by" in line_stripped:
                 m_pkg = re.search(r'DNS Requested by\s+\d+,\s*(\d+)\(([^)]+)\)', line_stripped)
                 if m_pkg: uid_map[m_pkg.group(1)] = m_pkg.group(2)
@@ -72,41 +78,33 @@ class DataUsageParser(BaseParser):
                 uid_map[current_app_id_in_log] = m_package.group(1)
                 current_app_id_in_log = None
 
-            # 🚨 [신규 추가] 수석님이 찾으신 완벽한 pkg 리스트 긁어오기!
             if line_stripped.startswith("pkg,"):
-                # 정규식: pkg,(패키지명),(UID)
                 m_pkg_csv = re.match(r'^pkg,([^,]+),(\d+)', line_stripped)
                 if m_pkg_csv:
-                    pkg_name = m_pkg_csv.group(1)
-                    uid_val = m_pkg_csv.group(2)
-                    uid_map[uid_val] = pkg_name
+                    uid_map[m_pkg_csv.group(2)] = m_pkg_csv.group(1)
 
-            # 2. Network Identity 블록 진입 시 UID와 RAT만 임시 저장
+            # 2. Network Identity 블록 진입 시 UID와 RAT 임시 저장
             if "transports={0}" in line_stripped and "metered=true" in line_stripped:
                 m_uid = re.search(r'uid=(-\d+|\d+)', line_stripped)
                 m_rat = re.search(r'ratType=(-\d+|\d+)', line_stripped)
                 if m_uid and m_rat:
                     uid_val, rat_val = m_uid.group(1), m_rat.group(1)
                     if uid_val == "-1": continue
-                    # 시간에 상관없이 일단 공통 속성만 저장
                     current_key = (uid_val, RAT_TYPE_MAP.get(rat_val, f"RAT_{rat_val}"))
                 continue
 
-            # 3. 🚨 [핵심 수정] st=(타임스탬프)를 읽어서 시간대별로 쪼개기
+            # 3. 시간대별 데이터 쪼개기
             if current_key and line_stripped.startswith("st="):
                 m_bytes = DIAG_PATTERNS['NETSTAT_BYTES'].search(line_stripped)
-                m_st = re.search(r'st=(\d+)', line_stripped) # 시작 시간 추출
+                m_st = re.search(r'st=(\d+)', line_stripped)
 
                 if m_bytes and m_st:
-                    # Unix Timestamp 변환 (초 단위)
                     st_timestamp = int(m_st.group(1))
                     if len(str(st_timestamp)) > 11:
-                        st_timestamp /= 1000.0 # 밀리초인 경우 방어 로직
+                        st_timestamp /= 1000.0
 
-                    # '2025-07-20 14:00:00' 형태로 변환
                     bucket_time_str = datetime.fromtimestamp(st_timestamp).strftime('%Y-%m-%d %H:%M:%S')
                     uid_val, rat_val = current_key
-                    # 시간(bucket_time_str)까지 포함된 새로운 풀-키 생성
                     full_key = (uid_val, rat_val, bucket_time_str)
 
                     if full_key not in usage_by_key:
@@ -120,9 +118,10 @@ class DataUsageParser(BaseParser):
         for (uid, rat, bucket_time), data in usage_by_key.items():
             total_bytes = data["rx_bytes"] + data["tx_bytes"]
             if total_bytes > 0:
+                # 🚨 [핵심] 이제 uid_map에는 [PACKAGE INFO]에서 가져온 완벽한 앱 이름이 들어있습니다.
                 app_name = {"-5": "모바일 핫스팟 (Tethering)", "-4": "삭제된 앱 (Removed)", "1000": "Android System (OS)", "0": "OS Kernel (Root)"}.get(uid, uid_map.get(uid, f"App_UID_{uid}"))
                 report_data.append({
-                    "time": bucket_time,  # 🚨 JSON에 시간 필드 추가 완료!
+                    "time": bucket_time,
                     "uid": uid,
                     "app_name": app_name,
                     "rat": rat,
@@ -131,17 +130,23 @@ class DataUsageParser(BaseParser):
                     "tx_mb": round(data["tx_bytes"] / (1024 * 1024), 2)
                 })
 
-        # 시간순으로 정렬하되, 같은 시간이면 데이터 많이 쓴 순서로 정렬
         return sorted(report_data, key=lambda x: (x["time"], -x["total_mb"]))
 
 class DnsParser(BaseParser):
-    def analyze(self, lines):
+    def analyze(self, lines, global_uid_map=None):
+        if global_uid_map is None:
+            global_uid_map = {}
+
         dns_events = []
         for line in lines:
             if "DNS Requested by" in line:
                 m = DIAG_PATTERNS['DNS_FULL'].search(line)
                 if m:
-                    time_str, uid, app_name, rest = m.group('time'), m.group('uid'), m.group('app_name'), m.group('rest')
+                    time_str, uid, orig_app_name, rest = m.group('time'), m.group('uid'), m.group('app_name'), m.group('rest')
+
+                    # 🚨 [핵심 수정] global_uid_map에 완벽한 이름이 있으면 그걸 쓰고, 없으면 기존 로그에서 뽑은 이름 유지
+                    app_name = global_uid_map.get(uid, orig_app_name)
+
                     if "SUCCESS" in rest.upper(): return_code = "SUCCESS"
                     else:
                         rc_match = re.search(r',\s*(\d+)\(([^)]+)\)', rest)
@@ -150,13 +155,14 @@ class DnsParser(BaseParser):
                             return_code = "SUCCESS" if raw_code == "0" else f"{status_text} (Code:{raw_code})".strip()
                             if "isBlocked=true" in rest: return_code = f"BLOCKED (Code:{raw_code})"
                         else: return_code = "UNKNOWN"
+
                     dns_events.append({
                         "time": time_str,
                         "uid": uid,
-                        "app_name": app_name,
+                        "app_name": app_name, # <-- 이제 깔끔한 패키지명이 들어갑니다.
                         "return_code": return_code,
                         "raw_info": rest.strip()
-                        })
+                    })
         return dns_events
 
 class CrashParser(BaseParser):

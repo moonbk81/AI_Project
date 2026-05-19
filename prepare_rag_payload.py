@@ -142,6 +142,14 @@ class RagPayloadBuilder:
         else:
             add_clean_state("Crash_Event", "분석 구간 내 치명적인 Crash 이력이 발견되지 않았습니다.")
 
+        if "native_crash_context" in report_data and report_data["native_crash_context"]:
+            for native_crash in report_data["native_crash_context"]:
+                # 콜스택을 LLM이 읽기 쉬운 문자열로 변환하여 메타데이터에 주입
+                stack_str = "\n".join([f"#{c['frame_level']} {c['library']} ({c['function']})" for c in native_crash.get('callstack', [])])
+                native_crash['raw_stack'] = stack_str
+                add_to_payload(native_crash, "Native_Crash_Event")
+
+
         # 배터리 통계 (기존 로직 유지)
         if "battery_stats" in report_data:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")

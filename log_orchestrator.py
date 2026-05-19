@@ -1,6 +1,8 @@
 import os
 import json
 import argparse
+import re
+
 from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser, OosParser
 from parsers.diagnostic_parser import (
@@ -14,6 +16,7 @@ from parsers.ims_sip_processor import ImsSipProcessor
 from parsers.sat_at_parser import SatAtProcessor
 from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
 from parsers.internet_stall_parser import InternetStallParser
+from parsers.native_crash_parser import NativeCrashParser
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -40,6 +43,7 @@ class LogOrchestrator:
         self.internet_stall_parser = InternetStallParser()
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
         self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
+        self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -96,6 +100,7 @@ class LogOrchestrator:
             'sat_at': [],
             'internet_stall': [],
             'nitz': [],
+            'native_crash': [],
         }
 
         crash_keywords = [
@@ -146,6 +151,9 @@ class LogOrchestrator:
         internet_stall_line_keywords = [
             "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
         ]
+        native_crash_keywords = ["Fatal signal", "Abort mesage:", "backtrace:"]
+
+        in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
 
         for idx, line in enumerate(lines):
             if line.startswith("!@Boot"):
@@ -202,6 +210,9 @@ class LogOrchestrator:
             if "nitz_status" in line:
                 buckets['nitz'].append(line)
 
+            if any(k in line for k in native_crash_keywords):
+                self._add_context_window(buckets, 'native_crash', lines, idx, window=60)
+
         for name, bucket_lines in buckets.items():
             seen = set()
             deduped = []
@@ -223,6 +234,27 @@ class LogOrchestrator:
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
 
+            # ==========================================
+            # 🚨 1. [PACKAGE INFO]에서 전역 UID 매핑 테이블(정답지) 추출
+            # ==========================================
+            global_uid_map = {}
+            in_package_info = False
+            pkg_pattern = re.compile(r"\[UID\]\s*(\d+),\s*\[PackageName\]\s*([^,\s]+)")
+
+            for line in lines:
+                if "[PACKAGE INFO]" in line:
+                    in_package_info = True
+                    continue
+
+                if in_package_info:
+                    # 블록이 끝나면 플래그 끄기
+                    if not line.strip() or (line.startswith("[") and "UID" not in line and "INIDEX" not in line):
+                        in_package_info = False
+                    else:
+                        match = pkg_pattern.search(line)
+                        if match:
+                            global_uid_map[match.group(1)] = match.group(2).strip()
+
             # 1. 1회 스캔 기반 parser별 후보 라인 버킷 생성
             buckets = self._build_analysis_buckets(lines)
 
@@ -232,6 +264,7 @@ class LogOrchestrator:
             result['oos_events'] = self.oos_parser.analyze(lines)
             result['nitz_history'] = self.nitz_parser.analyze(buckets['nitz'])
             result['crash_context'] = self.crash_parser.analyze(buckets['crash'])
+            result['native_crash_context'] = self.native_crash_parser.analyze(buckets['native_crash'])
             result['anr_context'] = self.anr_parser.analyze(buckets['anr'])
             result['radio_power'] = self.radio_power_parser.analyze(buckets['radio_power'])
 
@@ -251,8 +284,8 @@ class LogOrchestrator:
             if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
             if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
-            if net_usage := self.data_usage_parser.analyze(buckets['usage']): result['data_usage_stats'] = net_usage
-            if dns_res := self.dns_parser.analyze(buckets['dns']): result['dns_queries'] = dns_res
+            if net_usage := self.data_usage_parser.analyze(buckets['usage'], global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage
+            if dns_res := self.dns_parser.analyze(buckets['dns'], global_uid_map=global_uid_map): result['dns_queries'] = dns_res
             if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
                 result["battery_thermal_stats"] = battery_thermal_res
 

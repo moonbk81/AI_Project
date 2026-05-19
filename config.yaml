@@ -73,12 +73,13 @@ routing_map:
     log_types:
       - Battery_Drain_Report
   Crash_ANR:
-    desc: "앱 강제종료, 앱 크래시, ANR, 응답 없음, 응답 없음 팝업, 앱 응답 없음, 폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, 시스템 리부팅, watchdog reset, fatal exception"
+    desc: "앱 강제종료, 앱 크래시, ANR, 응답 없음, 응답 없음 팝업, 앱 응답 없음, 폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, 시스템 리부팅, watchdog reset, fatal exception, native crash, 네이티브 크래시, C++ 에러, 톰스톤, tombstone, Fatal signal, SIGSEGV, SIGABRT, RIL 죽음, 통신데몬 죽음"
     tools:
       - get_crash_anr_analytics
     log_types:
       - Crash_Event
       - ANR_Context
+      - Native_Crash_Event
   Radio_Power:
     desc: "모뎀 전원 꺼짐, 비행기 모드, 비행기 모드 전환, 비행기 모드 해제, 비행기 모드 ON, 비행기 모드 OFF, 비행기 모드 이후 네트워크 안됨, 비행기 모드 해제 후 데이터 안됨, 비행기 모드 해제 후 망 복구 실패, airplane mode, airplane mode off, radio power, radio power on, radio power off, modem power off, 전원 제어, 위성 모뎀 끄기, Power OFF"
     tools:
@@ -173,22 +174,20 @@ quick_prompts:
   battery_crash: |
     당신은 단말 안정성을 분석하는 수석 엔지니어입니다.
     반드시 Battery_Thermal과 Crash_ANR 두 영역을 모두 조회하고,
-    Crash/ANR Fact 와 ANR_Context를 우선 확인하십시오.
+    Crash/ANR Fact 와 ANR_Context, Native_Crash_Event를 우선 확인하십시오.
 
     <분석 규칙>
     IF_규칙 1 (정상 상태 판별 - 최우선 적용):
-    - Crash/ANR 발생 여부를 먼저 판단하라.
-    - ANR_Context 또는 Crash_Event 가 1건 이상 있으면 절대 "ANR 없음" 이라고 말하지 마라.
+    - Crash/ANR/Native Crash 발생 여부를 먼저 판단하라.
+    - ANR_Context, Crash_Event, Native_Crash_Event 중 1건 이상 있으면 절대 "에러 없음" 이라고 말하지 마라.
     - 그 다음 Battery/Thermal/Wakelock 이상 여부를 분석하라.
 
     IF_규칙 2 (장애 발생 시 서술):
     팩트 데이터에 문제가 "확실하게 존재할 때만" 아래 지침에 따라 서술하라.
-    - Crash/ANR이 발생한 경우: 팩트의 콜스택을 기반으로 Telephony/RIL 프레임워크와의 연관성만 객관적으로 서술하라.
+    - Java 단 Crash/ANR이 발생한 경우: 팩트의 콜스택을 기반으로 프레임워크와의 연관성을 객관적으로 서술하라.
+    - Native Crash(C/C++)가 발생한 경우: 'Fatal signal' 유형(예: SIGSEGV, SIGABRT)과 'Abort Message'를 명시하고, 콜스택을 분석하여 에러를 유발한 벤더 라이브러리(.so)와 함수명을 정확히 짚어내라.
     - 배터리/발열 문제가 있는 경우: 팩트에 기록된 앱 이름이나 잦은 망 탐색(OOS) 기록을 원인으로 지목하여 인과관계를 서술하라.
-    - 주의: 팩트에 없는 하드웨어 결함을 임의로 추측하거나 지어내지 마라.
-    - Crash/ANR 발생 직전의 CPU, Binder, system_server, wakelock 상태를 함께 고려하라.
-    - 배터리 소모가 큰 경우, RF 탐색(OOS), IMS 재등록, Data retry loop 등의 반복 재시도 패턴과의 상관관계를 우선 확인하라.
-    - 단순 foreground 사용량 증가와 비정상 drain을 혼동하지 마라.
+    - Crash/ANR/Native Crash 발생 직전의 CPU, Binder, 시스템 로그, 주변 컨텍스트 상태를 함께 고려하여 근본 원인을 유추하라.
 
   data_network_issue: |
     당신은 데이터 통신 품질(DNS 지연 및 데이터 스톨)을 분석하는 수석 엔지니어입니다. 제공된 팩트들을 바탕으로 분석을 수행하십시오.
@@ -348,6 +347,13 @@ prompts:
       - 4xx 계열은 단말/인증/설정/가입자 상태 가능성을, 5xx 계열은 IMS 서버/망 계열 가능성을 우선 고려하라.
       - SIP 에러가 있어도 최종적으로 200 OK 또는 정상 BYE/정상 종료가 확인되면 치명 장애로 과장하지 마라.
       - REGISTER 실패와 INVITE 실패를 분리해서 설명하고, IMS 등록 상태가 통화 실패에 선행했는지 확인하라.
+
+    Native_Crash_Event: |
+      - [Native_Crash_Event (C/C++ 치명 오류)]: 안드로이드 시스템이나 벤더 라이브러리(.so) 단에서 발생한 치명적인 Native 에러다.
+      - 'signal' 유형(예: SIGSEGV, SIGABRT)과 'abort_message'를 최우선으로 확인하여 에러의 성격(예: 메모리 참조 오류, Mutex 파괴 등)을 파악하라.
+      - 콜스택(raw_stack)을 분석할 때, 운영체제 기본 라이브러리(libc.so 등)의 에러 처리 함수보다 실제 비즈니스 로직이 담긴 벤더 라이브러리(예: libsec-ril.so)의 함수를 원인으로 지목하라.
+      - Native Crash는 해당 프로세스(예: rild)를 즉시 종료시키므로, 이 에러 전후로 발생한 OOS, Call Drop, 데이터 통신 단절 등의 서비스 영향과 반드시 연관 지어 설명하라.
+      - 벤더 라이브러리의 보안이나 구현 세부 사항을 추측하여 지어내지 말고, 추출된 함수명과 메시지 자체에 집중하라.
 
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿

@@ -206,19 +206,30 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # 10. 💥 시스템 크래시 (FATAL EXCEPTION / ANR / Tombstone)
     # ==========================================
     crash_data = report_data.get("crash_context", [])
+    native_crash_data = report_data.get("native_crash_context", [])
     anr_data = report_data.get("anr_context", [])
 
     kpi_report["10_system_crash_and_fatal_errors"] = {}
     has_fatal_or_anr = False
+    crash_summaries = []
+
     if crash_data:
         has_fatal_or_anr = True
-        kpi_report["10_system_crash_and_fatal_errors"] = {
-            "total_crashes": len(crash_data),
-            "crash_summaries": [
-                f"[{c.get('timestamp', 'Unknown Time')}] Process: {c.get('process', 'Unknown')} | Type: {c.get('crash_type', 'FATAL')}"
-                for c in crash_data
-            ]
-        }
+        crash_summaries.extend([
+            f"[{c.get('timestamp', 'Unknown Time')}] Process: {c.get('process', 'Unknown')} | Type: {c.get('crash_type', 'FATAL')}"
+            for c in crash_data
+        ])
+
+    if native_crash_data:
+        has_fatal_or_anr = True
+        crash_summaries.extend([
+            f"[{n.get('timestamp', 'Unknown Time')}] Process: {n.get('process', 'Unknown')} | Type: NATIVE_CRASH (Signal: {n.get('signal', 'Unknown')})"
+            for n in native_crash_data
+        ])
+
+    if crash_summaries:
+        kpi_report["10_system_crash_and_fatal_errors"]["total_crashes"] = len(crash_summaries)
+        kpi_report["10_system_crash_and_fatal_errors"]["crash_summaries"] = crash_summaries
 
     if isinstance(anr_data, dict) and anr_data:
         anr_data = [anr_data]
@@ -535,9 +546,17 @@ def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> s
             window_sec=15
         )
 
+        native_crash_context = _check_native_crash_correlation(
+            oos.get("time"),
+            report_data,
+            window_sec=10
+        )
+
         inferred_reason = oos.get("root_cause_candidate")
 
-        if radio_power_context.get("is_user_radio_power_related"):
+        if native_crash_context.get("is_rild_crash_related"):
+            inferred_reason = "RILD_CRASH_RESET"
+        elif radio_power_context.get("is_user_radio_power_related"):
             inferred_reason = radio_power_context.get("classification")
 
         oos_facts.append({
@@ -547,7 +566,8 @@ def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> s
             "reject_cause": oos.get("rej_cause"),
             "inferred_reason": inferred_reason,
             "original_oos_reason": oos.get("root_cause_candiate"),
-            "radio_power_context": radio_power_context
+            "radio_power_context": radio_power_context,
+            "native_crash_context": native_crash_context
         })
 
     return json.dumps({
@@ -603,10 +623,44 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
         "top_wakelocks": top_wakelocks
     }, ensure_ascii=False)
 
+def _check_native_crash_correlation(target_time_str: str, report_data: dict, window_sec: int = 10) -> dict:
+    """OOS 발생 시점 기준 직전 window_sec 내에 rild 데몬의 크래시가 있었는지 검증합니다."""
+    target_dt = _parse_android_time(target_time_str)
+    if target_dt is None:
+        return {"is_rild_crash_related": False, "message": "시간 파싱 불가"}
+
+    native_crashes = report_data.get("native_crash_context", [])
+
+    for crash in native_crashes:
+        crash_time_str = crash.get("time", "")
+        if not crash_time_str:
+            continue
+
+        crash_dt = _parse_android_time(crash_time_str)
+        if crash_dt is None:
+            continue
+
+        # 크래시가 먼저 터지고 수 초 내에 OOS로그가 찍히므로 시간차 계산 (OOS시간 - 크래시시간)
+        diff = (target_dt - crash_dt).total_seconds()
+
+        # rild 데몬이 OOS 발생 전 0~10초 사이에 죽은 이력이 있는지 확인
+        if 0 <= diff <= window_sec and crash.get("process") == "rild":
+            return {
+                "is_rild_crash_related": True,
+                "crash_time": crash_time_str,
+                "process": crash.get("process"),
+                "signal": crash.get("signal"),
+                "abort_message": crash.get("abort_message"),
+                "message": f"💥 [RILD 크래시 연계] OOS 발생 {diff}초 전 rild 데몬 Native Crash 감지 (데몬 리셋으로 인한 OOS)"
+            }
+
+    return {"is_rild_crash_related": False, "message": "주변 시간대 rild Native Crash 흔적 없음"}
+
 def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str:
     """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력과 ANR 원인 분석 힌트를 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     crashes = report_data.get("crash_context", [])
+    native_crashes = report_data.get("native_crash_context", [])
     anr = report_data.get("anr_context", [])
 
     crash_facts = []
@@ -615,6 +669,20 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
             "time": c.get("timestamp"),
             "process": c.get("process"),
             "type": c.get("crash_type")
+        })
+
+    native_crash_facts = []
+    for n in native_crashes:
+        native_crash_facts.append({
+            "time": n.get("timestamp"),
+            "process": n.get("process"),
+            "type": "NATIVE_CRASH",
+            "signal": n.get("signal"),
+            "abort_message": n.get("abort_message"),
+            "top_callstack": [
+                f"#{c['frame_level']} {c['library']} ({c['function']})"
+                for c in n.get("callstack", [])
+            ][:5]
         })
 
     if isinstance(anr, dict):
@@ -683,6 +751,8 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
     return json.dumps({
         "crash_count": len(crashes),
         "crash_history": crash_facts,
+        "native_crash_count": len(native_crashes), # 신규 추가
+        "native_crash_history": native_crash_facts, # 신규 추가
         "anr_count": len(anr_facts),
         "anr_history": anr_facts
     }, ensure_ascii=False)
