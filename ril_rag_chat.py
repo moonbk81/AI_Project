@@ -7,6 +7,7 @@ import numpy as np
 import re
 import agent_tools
 
+from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
 
@@ -380,7 +381,7 @@ class RilRagChat:
 
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-            from tools.eval_logger import log_rag_for_evaluation
+
             log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines)
         except Exception: pass
 

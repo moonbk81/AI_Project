@@ -36,8 +36,8 @@ TEST_CASES = [
         "category": "Crash_ANR",
         "query": "Crash/ANR 발생 여부를 분석하고, 발생했다면 원인 후보와 근거 로그를 정리해줘.",
         "expected_tools": ["get_crash_anr_analytics"],
-        "expected_log_types": ["Crash_Event", "ANR_Context"],
-        "must_include_any": ["ANR", "Crash", "크래시", "응답 없음"],
+        "expected_log_types": ["Crash_Event", "ANR_Context", "Native_Crash_Event"], # ✨ Native_Crash_Event 추가
+        "must_include_any": ["ANR", "Crash", "크래시", "응답 없음", "Native"],
         "must_not_include": ["근거 없이", "추정됩니다만", "모뎀 로그가 필요"],
     },
     {
@@ -49,10 +49,11 @@ TEST_CASES = [
             "get_radio_power_analytics",
         ],
         "expected_log_types": [
-            "Internet_Stall",
+            "Internet_Stall_Analysis", # ✨ Internet_Stall -> Internet_Stall_Analysis 로 수정 (YAML과 동일하게)
             "Radio_Power_Event",
             "Data_Stall_Recovery",
             "Network_DNS_Issue",
+            "Network_Timeline_Stat" # ✨ YAML에 묶여있는 타임라인 추가
         ],
         "must_include_any": ["Internet", "Stall", "Radio", "Power", "비행기"],
         "must_not_include": ["모뎀 로그가 필요", "확인 불가"],
@@ -65,7 +66,7 @@ TEST_CASES = [
             "get_network_oos_analytics",
             "get_radio_power_analytics",
         ],
-        "expected_log_types": ["OOS_Event", "Radio_Power_Event"],
+        "expected_log_types": ["OOS_Event", "Radio_Power_Event", "Signal_Level"], # ✨ Signal_Level 추가
         "must_include_any": ["OOS", "OUT_OF_SERVICE", "Radio", "Power", "비행기"],
         "must_not_include": ["모뎀 로그가 필요"],
     },
@@ -79,9 +80,9 @@ TEST_CASES = [
         ],
         "expected_log_types": [
             "Battery_Drain_Report",
-            "Thermal_Stats",
             "Crash_Event",
             "ANR_Context",
+            "Native_Crash_Event" # ✨ Thermal_Stats 제거(YAML에 없음) 및 Native_Crash_Event 추가
         ],
         "must_include_any": ["Battery", "Thermal", "Crash", "ANR", "배터리", "발열"],
         "must_not_include": ["모뎀 로그가 필요"],
@@ -111,7 +112,6 @@ TEST_CASES = [
     },
 ]
 
-
 def normalize_answer(answer: Any) -> str:
     if answer is None:
         return ""
@@ -124,10 +124,8 @@ def normalize_answer(answer: Any) -> str:
     except Exception:
         return str(answer)
 
-
 def safe_set(values: Optional[List[str]]) -> Set[str]:
     return set(values or [])
-
 
 def calculate_set_metrics(expected: List[str], actual: List[str]) -> Dict[str, Any]:
     expected_set = safe_set(expected)
@@ -160,7 +158,6 @@ def calculate_set_metrics(expected: List[str], actual: List[str]) -> Dict[str, A
         "missing": missing,
         "extra": extra,
     }
-
 
 def simple_answer_score(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
     answer_lower = answer.lower()
