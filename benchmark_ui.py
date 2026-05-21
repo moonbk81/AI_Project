@@ -215,3 +215,97 @@ def render_benchmark_dashboard():
             .highlight_null(color='#E5E7E9')
 
         st.dataframe(styled_detail_df, width="stretch")
+
+    # ==========================================
+    # 🚀 신규 기능: 로컬 LLM RAG 자동 평가(Judge) UI
+    # ==========================================
+    st.write("---")
+    st.subheader("⚖️ 오프라인 RAG 성능 평가 (LLM-as-a-judge)")
+
+    # 1. 평가 대상이 될 JSONL 데이터셋 목록 조회
+    eval_log_dir = "./eval_logs"
+    jsonl_files = glob.glob(os.path.join(eval_log_dir, "rag_eval_dataset_*.jsonl"))
+
+    if not jsonl_files:
+        st.info("💡 벤치마크를 수행하면 모델별 RAG 평가 데이터셋(*.jsonl)이 여기에 표시됩니다.")
+    else:
+        # 사용자가 보기 편하게 파일명만 추출
+        file_options = {os.path.basename(f): f for f in jsonl_files}
+        selected_jsonl_name = st.selectbox("📂 평가할 모델 데이터셋 선택", list(file_options.keys()))
+        selected_jsonl_path = file_options[selected_jsonl_name]
+
+        # 모델명 동적 추출 (rag_eval_dataset_model_name.jsonl -> model_name)
+        match = re.search(r"rag_eval_dataset_(.*?)\.jsonl", selected_jsonl_name)
+        model_tag = match.group(1) if match else "evaluated"
+
+        # 판정(Judge)에 사용할 모델 선택
+        st.markdown("**심사위원 모델 설정 (Ollama)**")
+        judge_model = st.selectbox(
+            "🤖 채점을 진행할 대형 모델 선택 (추천: 12B 이상)",
+            ["ollama/gemma3:12b", "ollama/qwen2.5-coder:7b", "ollama/gemma4-e2b:q4"],
+            index=0
+        )
+
+        eval_col1, eval_col2 = st.columns([1, 4])
+        with eval_col1:
+            # ✨ 핵심: UI에서 평가 스크립트를 직접 실행하는 버튼
+            run_eval_btn = st.button("🔥 RAG 자동 채점 시작", type="primary", use_container_width=True)
+
+        # 출력 파일 경로 정의
+        output_csv = f"./benchmark_results/rag_eval_details_{model_tag}.csv"
+        summary_csv = f"./benchmark_results/rag_eval_summary_{model_tag}.csv"
+
+        if run_eval_btn:
+            with st.spinner("🤖 심사위원 모델이 답변의 충실성 및 관련성을 채점 중입니다... (시간이 소요될 수 있습니다)"):
+                try:
+                    # cmd 명령어 조립 및 실행
+                    cmd = [
+                        "python", "run_rag_eval_csv.py",
+                        "--log-file", selected_jsonl_path,
+                        "--judge-model", judge_model,
+                        "--output", output_csv,
+                        "--summary-output", summary_csv
+                    ]
+
+                    # 실시간 subprocess 실행
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    st.success(f"🎉 RAG 평가 완료! 결과가 저장되었습니다.\n- 상세: {output_csv}\n- 요약: {summary_csv}")
+
+                except subprocess.CalledProcessError as e:
+                    st.error(f"❌ 평가 스크립트 실행 중 오류가 발생했습니다.\n{e.stderr}")
+                except Exception as ex:
+                    st.error(f"❌ 알 수 없는 오류 발생: {str(ex)}")
+
+        # ==========================================
+        # 📊 채점 결과 실시간 시각화 대시보드
+        # ==========================================
+        if os.path.exists(summary_csv) and os.path.exists(output_csv):
+            st.write("#### 📈 RAG 평가 결과 레포트")
+
+            # 1. 요약 정보 요약 카드(Metrics) 표시
+            try:
+                df_sum = pd.read_csv(summary_csv)
+                if not df_sum.empty:
+                    m_cols = st.columns(len(df_sum.columns))
+                    for i, col_name in enumerate(df_sum.columns):
+                        val = df_sum.iloc[0][col_name]
+                        # 수치형 데이터는 예쁘게 포맷팅
+                        if isinstance(val, (int, float)):
+                            m_cols[i].metric(label=col_name.replace("avg_", "평균 ").upper(), value=f"{val:.3f}")
+                        else:
+                            m_cols[i].metric(label=col_name, value=str(val))
+            except Exception as e:
+                st.warning("요약 데이터를 불러오지 못했습니다.")
+
+            # 2. 세부 채점 내역 리스트 (Drill-down)
+            with st.expander("🔍 질문별 세부 채점 점수 및 생성 답변 보기"):
+                try:
+                    df_detail = pd.read_csv(output_csv)
+                    # 주요 점수 컬럼 하이라이트팅하여 데이터프레임 출력
+                    score_cols = [c for c in df_detail.columns if 'score' in c or 'faithfulness' in c or 'answer_relevance' in c]
+                    st.dataframe(
+                        df_detail.style.background_gradient(subset=score_cols, cmap="YlGn"),
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"상세 파일 로드 실패: {e}")
