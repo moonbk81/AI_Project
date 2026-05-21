@@ -2,12 +2,19 @@ import json
 import os
 from datetime import datetime
 
-def log_rag_for_evaluation(query: str, context: str, answer: str, guideline: str = "", log_dir: str = "./eval_logs"):
+def log_rag_for_evaluation(query: str, context: str, answer: str, guideline: str = "", log_dir: str = "./eval_logs", model_name: str = None):
     """
     TruLens 오프라인 평가를 위해 RAG 파이프라인의 I/O를 JSONL 포맷으로 저장합니다.
     """
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "rag_eval_dataset.jsonl")
+    # ✨ 모델명에 포함된 슬래시(/)나 콜론(:)을 언더스코어(_)로 치환하여 안전한 파일명 생성
+    if model_name:
+        safe_model_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', model_name)
+        file_name = f"rag_eval_dataset_{safe_model_name}.jsonl"
+    else:
+        file_name = "rag_eval_dataset.jsonl"
+
+    log_file = os.path.join(log_dir, file_name)
 
     combined_context = context
     if guideline and guideline.strip():
@@ -15,6 +22,7 @@ def log_rag_for_evaluation(query: str, context: str, answer: str, guideline: str
 
     log_entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "model": model_name,
         "query": query,
         "context": combined_context,
         "answer": answer

@@ -216,14 +216,14 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     if crash_data:
         has_fatal_or_anr = True
         crash_summaries.extend([
-            f"[{c.get('timestamp', 'Unknown Time')}] Process: {c.get('process', 'Unknown')} | Type: {c.get('crash_type', 'FATAL')}"
+            f"[{c.get('time', 'Unknown Time')}] Process: {c.get('process', 'Unknown')} | Type: {c.get('crash_type', 'FATAL')}"
             for c in crash_data
         ])
 
     if native_crash_data:
         has_fatal_or_anr = True
         crash_summaries.extend([
-            f"[{n.get('timestamp', 'Unknown Time')}] Process: {n.get('process', 'Unknown')} | Type: NATIVE_CRASH (Signal: {n.get('signal', 'Unknown')})"
+            f"[{n.get('time', 'Unknown Time')}] Process: {n.get('process', 'Unknown')} | Type: NATIVE_CRASH (Signal: {n.get('signal', 'Unknown')})"
             for n in native_crash_data
         ])
 

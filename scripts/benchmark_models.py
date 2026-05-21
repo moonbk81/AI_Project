@@ -162,8 +162,10 @@ def calculate_set_metrics(expected: List[str], actual: List[str]) -> Dict[str, A
 def simple_answer_score(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
     answer_lower = answer.lower()
 
+    must_include = case.get("must_include_any", [])
+
     include_hits = [
-        kw for kw in case.get("must_include_any", [])
+        kw for kw in must_include
         if kw.lower() in answer_lower
     ]
 
@@ -172,15 +174,19 @@ def simple_answer_score(answer: str, case: Dict[str, Any]) -> Dict[str, Any]:
         if kw.lower() in answer_lower
     ]
 
-    include_score = 1 if include_hits else 0
-    forbidden_penalty = len(forbidden_hits)
+    if must_include:
+        include_score = len(include_hits) / len(must_include)
+    else:
+        include_score = 1.0
+
+    forbidden_penalty = len(forbidden_hits) * 0.2
 
     hallucination_candidate = bool(forbidden_hits)
 
-    auto_score = max(0, include_score - forbidden_penalty)
+    auto_score = max(0.0, include_score - forbidden_penalty)
 
     return {
-        "auto_score": auto_score,
+        "auto_score": round(auto_score, 2),
         "include_hits": include_hits,
         "forbidden_hits": forbidden_hits,
         "hallucination_candidate": hallucination_candidate,

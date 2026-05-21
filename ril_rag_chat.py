@@ -382,7 +382,7 @@ class RilRagChat:
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
 
-            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines)
+            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines, model_name=self.llm_model_name)
         except Exception: pass
 
         # 🚨 [추가] UI 전달을 위해 4번째 인자로 thinking 반환
