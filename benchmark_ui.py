@@ -70,7 +70,7 @@ def render_benchmark_dashboard():
         else:
             # -u 옵션을 추가하여 파이썬 print 버퍼링을 강제로 끄고 즉시 출력되게 함
             cmd = [
-                sys.executable, "-u", "scripts/benchmark_models.py",
+                sys.executable, "-u", "-X", "utf8", "scripts/benchmark_models.py",
                 "--models"
             ] + selected_models + [
                 "--files", active_payload_file,
