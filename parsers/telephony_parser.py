@@ -36,13 +36,14 @@ class TelephonyParser(BaseParser):
 
         return "UnknownTime"
 
-    # 💡 [신규 추가] IMS/PS Call 전담 파서 (objId 기반 멀티콜 지원)
+    # 💡 IMS/PS Call 전담 파서 (objId 기반 멀티콜 지원)
     def _parse_ims_multi_calls(self, lines):
         calls = defaultdict(list)
-        obj_to_tc = {}  # 💡 [추가] objId와 TC@ 매핑을 저장할 딕셔너리
+        obj_to_tc = {}
+        pending_events = [] # 💡 objId가 없는 로그(onIncomingCall 등)를 잠시 담아둘 버퍼 추가
 
         obj_re = re.compile(r'objId:(\d+)')
-        tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)') # 💡 [추가] TC 정규식
+        tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)')
 
         event_keywords = [
             'onIncomingCall', 'takeCall', 'accept', 'reject',
@@ -50,19 +51,46 @@ class TelephonyParser(BaseParser):
         ]
 
         for line in lines:
-            if "[IPCT]" not in line and "[IPCN]" not in line:
+            if "[IPCT" not in line and "[IPCN" not in line:
                 continue
+
+            detected_event = None
+            for keyword in event_keywords:
+                if keyword in line:
+                    detected_event = keyword
+                    break
+
+            if not detected_event:
+                continue
+
+            timestamp = self._extract_timestamp(line)
+            # 원본 로그 형태로 가공
+            event_str = f"[{timestamp}] {line.split(' - ', 1)[-1].strip()}"
 
             obj_match = obj_re.search(line)
             if not obj_match:
+                # 🚨 objId가 없으면 버리지 않고 버퍼에 임시 저장합니다.
+                pending_events.append(event_str)
                 continue
 
             obj_id = obj_match.group(1)
 
-            # 💡 [핵심] 같은 라인에 TC@가 찍혀있다면 objId의 짝꿍으로 저장해둠
             tc_match = tc_id_re.search(line)
             if tc_match:
                 obj_to_tc[obj_id] = tc_match.group(1)
+
+            # 💡 드디어 objId가 있는 로그를 만났습니다!
+            # 버퍼에 쌓여있던 이전 로그(onIncomingCall 등)들을 이 objId 세션에 전부 털어 넣습니다.
+            if pending_events:
+                # 중복 방지를 위해 확인 후 추가
+                for p_event in pending_events:
+                    if not calls[obj_id] or calls[obj_id][-1] != p_event:
+                        calls[obj_id].append(p_event)
+                pending_events = [] # 털어 넣은 후 버퍼 초기화
+
+            # 현재 라인 추가
+            if not calls[obj_id] or calls[obj_id][-1] != event_str:
+                calls[obj_id].append(event_str)
 
             detected_event = None
             for keyword in event_keywords:
@@ -81,30 +109,34 @@ class TelephonyParser(BaseParser):
                 if reason_match:
                     reason = f" [{reason_match.group(1).strip()}]"
 
-            event_str = f"{timestamp} : {detected_event}{reason}"
+            event_str = f"[{timestamp}] {line.split(' - ', 1)[-1].strip()}"
 
-            if not calls[obj_id] or not calls[obj_id][-1].endswith(f"{detected_event}{reason}"):
+            if not calls[obj_id] or calls[obj_id][-1] != event_str:
                 calls[obj_id].append(event_str)
 
         multi_calls_list = []
         for obj_id, events in calls.items():
-            start_time = events[0].split(" : ")[0] if events else "Unknown"
-            end_time = events[-1].split(" : ")[0] if events else "Unknown"
+            # 💡 대괄호 ']' 를 기준으로 자르고, 앞에 있는 '[' 를 제거하여 순수 시간만 추출합니다.
+            start_time = events[0].split("]")[0].replace("[", "") if events else "Unknown"
+            end_time = events[-1].split("]")[0].replace("[", "") if events else "Unknown"
+
+            # 💡 [추가] 이벤트 목록에 USER_DECLINE이 하나라도 있으면 사용자가 수신 거절한 것으로 판단
+            is_user_reject = any("USER_DECLINE" in e for e in events)
 
             status = "SUCCESS"
             if "Terminated" in events[-1] or "reject" in events[-1] or "Failed" in events[-1]:
                  status = "FAIL" if "CODE_USER" not in events[-1] and "USER_DECLINE" not in events[-1] else "NORMAL_RELEASE"
 
-            # 💡 [추가] 찾은 TC@ 아이디가 있으면 objId와 함께 예쁘게 표시
             tc_id = obj_to_tc.get(obj_id)
             display_id = f"{tc_id} (objId:{obj_id})" if tc_id else f"objId:{obj_id}"
 
             multi_calls_list.append({
                 "type": "PS(VoLTE)",
-                "id": display_id,  # 👈 여기에 반영됩니다.
+                "id": display_id,
                 "start_time": start_time,
                 "end_time": end_time,
                 "status": status,
+                "is_user_reject": is_user_reject,  # 👈 CS와 구조를 맞추기 위해 추가
                 "fail_reason": events[-1] if status == "FAIL" else "0",
                 "logs": events
             })
@@ -135,8 +167,13 @@ class TelephonyParser(BaseParser):
                 return int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2])
             except: return 0
 
-        # 💡 [변경점] process_payload는 이제 순수하게 CS Call(또는 예외적인 Call)만 처리합니다.
+        # 💡 process_cs_multi_payload는 이제 순수하게 CS Call(또는 예외적인 Call)만 처리합니다.
         def process_cs_multi_payload(ts, payload, completed_list, active_list, slot_id="Unknown"):
+
+            # 🚨 [추가된 방어 로직 1] IMS/PS(VoLTE) 관련 로그는 CS 로직에서 아예 무시하도록 차단합니다.
+            if "[IPCT" in payload or "[IPCN" in payload:
+                return
+
             is_cs = TEL_PATTERNS['CS_START'].search(payload)
             tc_match = tc_id_re.search(payload)
             id_m = TEL_PATTERNS['CONN_ID'].search(payload)
@@ -202,7 +239,9 @@ class TelephonyParser(BaseParser):
                 reason_desc = CALL_FAIL_REASON_MAP.get(cs_m.group(1), f"Code:{cs_m.group(1)}")
                 target_call["fail_reason"] = reason_desc
 
-            is_end = TEL_PATTERNS['END_EV'].search(payload)
+            # 🚨 [추가된 방어 로직 2] 기존 END_EV 패턴에 더해, 명시적으로 빈 객체 {} 도 통화 종료로 처리합니다.
+            is_end = TEL_PATTERNS['END_EV'].search(payload) or re.search(r'\<\s*(?:GET_CURRENT_CALLS\s*)?\{\}', payload, re.I)
+
             if is_end:
                 target_call["end_time"] = ts
                 if target_call["status"] == "DIALING":
@@ -216,7 +255,7 @@ class TelephonyParser(BaseParser):
                 completed_list.append(target_call)
                 active_list.remove(target_call)
 
-        # --- 로그 라인 순회 (기존과 동일하지만 함수 호출부 변경) ---
+        # --- 로그 라인 순회 ---
         for line in lines:
             clean_line = line.strip()
 
@@ -254,7 +293,6 @@ class TelephonyParser(BaseParser):
             if in_radio and any(kw in clean_line for kw in ["was the duration", "--------- beginning of main", "--------- beginning of system"]):
                 in_radio = False; continue
 
-            # 💡 [변경점] 새로운 process_cs_multi_payload 함수 호출
             if in_call_log:
                 m = dump_time_re.search(clean_line)
                 if m:
@@ -282,22 +320,34 @@ class TelephonyParser(BaseParser):
 
         merged_sessions = dump_sessions if dump_sessions else radio_sessions
 
+        dump_sessions.extend(active_dump_calls)
+        radio_sessions.extend(active_radio_calls)
+
+        merged_sessions = dump_sessions if dump_sessions else radio_sessions
+
+        # 💡 [순서 변경 1] PS 콜을 가장 먼저 파싱해서 전체 세션 목록에 합칩니다.
+        ps_sessions = self._parse_ims_multi_calls(lines)
+        merged_sessions.extend(ps_sessions)
+
+        # 💡 [순서 변경 2] 합쳐진 전체 세션(CS+PS)을 돌면서 시간 차이(5초 이내)를 이용해 TC ID를 찾아 묶어줍니다.
         for session in merged_sessions:
             if "TC@" not in session["id"]:
                 s_sec = time_to_sec(session["start_time"])
                 for ch in conn_histories:
                     if abs(s_sec - ch["start_sec"]) <= 5:
-                        session["id"] = ch["tc_id"]
+                        # PS 콜은 기존 objId를 남겨두고 앞에 TC@를 붙여 가독성을 높입니다.
+                        if "objId:" in session["id"]:
+                            session["id"] = f"{ch['tc_id']} ({session['id']})"
+                        else:
+                            session["id"] = ch["tc_id"]
+
                         session["logs"].append(f"==> [BOUND from Connection History]: {ch['raw_log']}")
                         break
 
+        # 마지막으로 로그 중복 제거 및 시간순 정렬
         for session in merged_sessions:
             session["logs"] = sorted(list(set(session["logs"])))
         merged_sessions.sort(key=lambda x: x["start_time"])
-
-        # 💡 [핵심] 독립적으로 파싱한 IMS/PS Call 정보들을 가져와서 CS 리스트와 병합
-        ps_sessions = self._parse_ims_multi_calls(lines)
-        merged_sessions.extend(ps_sessions)
 
         return merged_sessions
 
@@ -382,4 +432,3 @@ class OosParser(BaseParser):
             self.pre_context.append(clean_line)
 
         return oos_history
-

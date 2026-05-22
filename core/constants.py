@@ -13,7 +13,7 @@ TEL_PATTERNS = {
     'CS_START': re.compile(r'(?:RILJ\s+:\s+)?\[\d+\]>\s(?:DIAL|EMERGENCY_DIAL)|(?:RILJ\s+:\s+)?\[UNSL\]<\sUNSOL_CALL_RING|(?:RILJ\s+:\s+)?\<\s*GET_CURRENT_CALLS\s*\{[^}]*INCOMING', re.I),
     'PS_START': re.compile(r'(?:IPF|IPCT).*>\s*(?:createCallProfile)|(?:IPF|IPCT).*onIncomingCall', re.I),
     'CONN_ID': re.compile(r'(?:ImsPhoneConnection|ImsPhoneCallTracker).*telecomCallID:\s*([^\s,]+)', re.I),
-    'END_EV': re.compile(r'\[IPCN(\d*)\]>\s*close|\<\s*LAST_CALL_FAIL_CAUSE', re.I),
+    'END_EV': re.compile(r'\[IPCN(\d*)\]>\s*close|\<\s*LAST_CALL_FAIL_CAUSE|\<\s*(?:GET_CURRENT_CALLS\s*)?\{\}', re.I),
     'FAIL_EV': re.compile(r'(onCallStartFailed|onCallHoldFailed|onCallResumeFailed)', re.I),
     'REJECT_EV': re.compile(r'IPF.*>\s*reject\s*\{reason:\s*(\w+)', re.I),
     'SST_POLL': re.compile(r'Poll ServiceState done', re.I),

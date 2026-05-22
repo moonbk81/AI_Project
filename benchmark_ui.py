@@ -243,7 +243,7 @@ def render_benchmark_dashboard():
         st.markdown("**심사위원 모델 설정 (Ollama)**")
         judge_model = st.selectbox(
             "🤖 채점을 진행할 대형 모델 선택 (추천: 12B 이상)",
-            ["ollama/gemma3:12b", "ollama/qwen2.5-coder:7b", "ollama/gemma4-e2b:q4"],
+            ["ollama/gemma3:12b", "ollama/qwen2.5-coder:7b", "ollama/gemma4:e4b", "ollama/qwen3.5:9b"],
             index=0
         )
 
