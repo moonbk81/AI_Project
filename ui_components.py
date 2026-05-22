@@ -143,44 +143,46 @@ def render_call_history_summary(df):
             st.info("현재 DB에 적재된 통화(Call_Session) 로그가 없습니다.")
 
 def render_signal_level_timeline(df):
-    """RAT별 안테나 수신 레벨 타임라인 렌더링"""
-    st.subheader("📶 RAT별 안테나 수신 레벨 타임라인")
+    st.subheader("📶 RAT별 안테나 수신 레벨 및 상세 품질 타임라인")
+
+    # Signal_Level 타입의 로그만 필터링
     if 'log_type' in df.columns:
         sig_df = df[df['log_type'] == 'Signal_Level'].copy()
+
         if not sig_df.empty:
-            if 'level' not in sig_df.columns and 'max_level' in sig_df.columns:
-                sig_df['level'] = sig_df['max_level']
-            if 'rat' not in sig_df.columns:
-                sig_df['rat'] = 'Unknown'
-            if 'level' in sig_df.columns:
-                sig_df['Level'] = pd.to_numeric(sig_df['level'], errors='coerce')
-                sig_df = sig_df[(sig_df['Level'] >= 0) & (sig_df['Level'] <= 5)]
+            # 1. 시각화 데이터 준비
+            sig_df['Level'] = pd.to_numeric(sig_df.get('level', 0), errors='coerce')
 
-                current_year = datetime.datetime.now().year
-                sig_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + sig_df['time'], format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
+            # 💡 툴팁 생성: 현재 스키마(details_LTE 등)를 직접 참조
+            def create_hover_text(row):
+                info = []
+                # 컬럼명에 'details_'가 포함된 것을 찾아 내용을 표시
+                for col in [c for c in row.index if c.startswith('details_')]:
+                    val = row[col]
+                    if pd.notna(val) and str(val) != "None":
+                        rat_name = col.replace('details_', '')
+                        info.append(f"<b>{rat_name}</b>: {val}")
+                return "<br>".join(info)
 
-                sig_df['Slot'] = "Slot " + sig_df['slot'].astype(str)
-                sig_df['RAT'] = sig_df['rat'].astype(str)
-                sig_df = sig_df.sort_values(by=["time_dt", "Slot", "RAT"])
+            sig_df['hover_detail'] = sig_df.apply(create_hover_text, axis=1)
 
-                fig_sig_dash = px.line(
-                    sig_df, x='time_dt', y='Level', color='RAT', facet_row='Slot',
-                    line_shape='hv', markers=len(sig_df) < 50,
-                    title=f"전체 시간대별 통신망(RAT) 안테나 수신 변화 (총 {len(sig_df):,}건 데이터)",
-                    labels={"Level": "안테나 칸 수", "time_dt": "시간", "Slot": "유심 슬롯", "RAT": "통신망"},
-                    hover_data=['raw_info'], height=600
-                )
-                fig_sig_dash.update_traces(line=dict(width=1.5), opacity=0.85)
-                fig_sig_dash.update_xaxes(nticks=15, tickangle=-45, showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-                fig_sig_dash.update_yaxes(range=[-0.5, 5.5], dtick=1, title_text="안테나 칸", showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-                fig_sig_dash.update_layout(hovermode="x unified")
-                fig_sig_dash.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
-                st.plotly_chart(fig_sig_dash, width="stretch")
-            else:
-                st.warning("안테나 데이터를 찾았지만, 레벨(Level) 값을 읽을 수 없는 구형 포맷입니다.")
+            # 2. 타임라인 차트 렌더링
+            fig = px.line(
+                sig_df, x='time', y='Level', color='rat', facet_row='slot',
+                line_shape='hv', markers=True,
+                title="통신망(RAT) 수신 레벨 변화",
+                hover_data={'hover_detail': True, 'raw_info': True} # 💡 상세 정보 추가
+            )
+
+            # 툴팁 템플릿 최적화
+            fig.update_traces(
+                hovertemplate="<b>%{customdata[0]}</b><br>Level: %{y}<br>Details:<br>%{customdata[1]}<extra></extra>",
+                customdata=sig_df[['rat', 'hover_detail']].values
+            )
+
+            st.plotly_chart(fig, width="stretch")
         else:
-            st.info("현재 분석 대상 로그에 안테나(Signal_Level) 데이터가 없습니다.")
-
+            st.info("안테나(Signal_Level) 데이터가 없습니다.")
 
 def render_data_usage_profiling(df):
     """셀룰러 데이터 사용량 프로파일링 차트 렌더링 (파이 차트 + 시계열 차트)"""
