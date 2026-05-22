@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 
 def log_rag_for_evaluation(query: str, context: str, answer: str, guideline: str = "", log_dir: str = "./eval_logs", model_name: str = None):

@@ -25,6 +25,13 @@ SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 # core/config.py 파일 맨 아래에 추가
 
 MODEL_CONFIG = {
+    "qwen3.5:9b": {
+        "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
+        "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
+        "temperature": 0.1,
+        "repeat_penalty": 1.15,
+        "stop": ["<unused", "<|im_end|>", "<eos>"]
+    },
     "gemma4:e4b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
