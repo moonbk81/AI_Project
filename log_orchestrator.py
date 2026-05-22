@@ -159,7 +159,7 @@ class LogOrchestrator:
             if line.startswith("!@Boot"):
                 buckets['boot'].append(line)
 
-            if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
+            if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line or "NetworkSignalStrengthHandler" in line:
                 buckets['signal'].append(line)
 
             if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested", "pkg,"]):

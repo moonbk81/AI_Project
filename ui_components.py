@@ -1024,47 +1024,86 @@ def render_service_state_timeline(df):
 
 def render_integrated_rf_call_timeline(report_data):
     """
-    통화 세션(배경색), Signal Level(꺾은선), SIP 에러(마커)를
-    하나의 차트에 오버레이(Overlay)하여 교차 분석 타임라인을 제공합니다.
+    [수정 완료] 통화 세션(배경색), 상세 무선 신호 RSRP(꺾은선), SIP 에러(마커)를
+    하나의 차트에 오버레이(Overlay)하여 강력한 무선망 교차 분석 타임라인을 제공합니다.
     """
-    st.subheader("📊 [통합 타임라인] 통화 상태 & 무선 환경(RF) 교차 분석")
-    st.markdown("통화 구간(배경색) 내에서 발생한 **신호 급감(꺾은선)**과 **SIP 에러(빨간 마커)**의 상관관계를 시각적으로 확인합니다.")
+    st.subheader("📊 [통합 타임라인] 통화 상태 & 무선 환경(RSRP dBm) 교차 분석")
+    st.markdown("통화 구간(배경색) 내에서 발생한 **상세 신호 급감(RSRP 꺾은선)**과 **SIP 에러(빨간 마커)**의 상관관계를 시각적으로 확인합니다.")
 
-    # 1. 안테나 신호 데이터 (꺾은선)
+    # 1. 안테나 및 RSRP 신호 데이터 수집 (꺾은선)
     signal_history = report_data.get("signal_level_history", [])
     if not signal_history:
         st.info("신호 레벨(Signal Level) 이력이 없어 통합 차트를 생성할 수 없습니다.")
         return
 
     import datetime
+    import re
     current_year = datetime.datetime.now().year
 
-    sig_times, sig_levels = [], []
+    sig_times = []
+    rsrp_values = []
+    hover_texts = []
+
     for s in signal_history:
         t_str = str(s.get("time", ""))[:14]
         try:
             dt = pd.to_datetime(f"{current_year}-{t_str}", format='%Y-%m-%d %H:%M:%S')
-            sig_times.append(dt)
-            sig_levels.append(int(s.get("level", s.get("max_level", 0))))
-        except: pass
+
+            # 💡 파서에서 새로 추가된 details 버퍼 내부에서 RSRP 추출 시도 (LTE -> NR 순서)
+            details = s.get("details", {})
+            rsrp_str = "Unknown"
+            rat_type = s.get("rat", "LTE")
+
+            if "LTE" in details and details["LTE"].get("RSRP") != "Unknown":
+                rsrp_str = details["LTE"]["RSRP"]
+                rat_type = "LTE"
+            elif "NR" in details and details["NR"].get("RSRP") != "Unknown":
+                rsrp_str = details["NR"]["RSRP"]
+                rat_type = "NR"
+
+            # "-94 dBm" 에서 순수 숫자(-94)만 정규식으로 추출
+            if rsrp_str != "Unknown":
+                match = re.search(r'(-\d+)', rsrp_str)
+                if match:
+                    rsrp_val = int(match.group(1))
+                    sig_times.append(dt)
+                    rsrp_values.append(rsrp_val)
+
+                    # 💡 마우스 오버(Hover) 시 보여줄 풍부한 무선 환경 정보 조립
+                    sinr_str = details.get(rat_type, {}).get("SINR", "Unknown")
+                    rsrq_str = details.get(rat_type, {}).get("RSRQ", "Unknown")
+                    hover_texts.append(
+                        f"⏱️ **시간**: {s.get('time')}<br>"
+                        f"📶 **망 기술**: {rat_type} (Slot {s.get('slot', '0')})<br>"
+                        f"📊 **안테나**: {s.get('level')} 칸<br>"
+                        f"🔹 **RSRP**: {rsrp_str}<br>"
+                        f"🔹 **RSRQ**: {rsrq_str}<br>"
+                        f"🔹 **SINR**: {sinr_str}"
+                    )
+        except:
+            pass
 
     fig = go.Figure()
 
-    # 꺾은선 차트 추가
-    fig.add_trace(go.Scatter(
-        x=sig_times, y=sig_levels,
-        mode='lines+markers',
-        name='Signal Level',
-        line=dict(color='royalblue', width=2),
-        marker=dict(size=6, symbol='circle')
-    ))
+    # ✨ RSRP 꺾은선 차트 투고
+    if sig_times:
+        fig.add_trace(go.Scatter(
+            x=sig_times, y=rsrp_values,
+            mode='lines+markers',
+            name='RSRP (dBm)',
+            line=dict(color='#1f77b4', width=2.5),
+            marker=dict(size=6, symbol='circle'),
+            text=hover_texts,
+            hoverinfo='text'
+        ))
 
-    # 2. 통화 세션 데이터 (배경 하이라이트)
+    # ==========================================
+    # 2. 배경 하이라이트: Call Session (통화 구간 박스)
+    # ==========================================
     sessions = report_data.get("call_sessions", [])
     for s in sessions:
         try:
             start_dt = pd.to_datetime(f"{current_year}-{s.get('start_time')[:14]}", format='%Y-%m-%d %H:%M:%S')
-            # end_time이 없으면 시작 시간 + 5초로 임시 박스 생성
             end_time_str = s.get('end_time')
             if end_time_str:
                 end_dt = pd.to_datetime(f"{current_year}-{end_time_str[:14]}", format='%Y-%m-%d %H:%M:%S')
@@ -1073,47 +1112,70 @@ def render_integrated_rf_call_timeline(report_data):
 
             status = str(s.get("status", "")).upper()
             is_drop = "DROP" in status or "FAIL" in status
-            color = "rgba(255, 0, 0, 0.15)" if is_drop else "rgba(0, 255, 0, 0.15)"
-            label = "Call Drop 🚨" if is_drop else f"{s.get('type', 'CALL')} (정상)"
+
+            # 드랍 혹은 거절/정상 종료에 따른 직관적인 알파 채널 배경색 지정
+            color = "rgba(255, 0, 0, 0.12)" if is_drop else "rgba(0, 255, 0, 0.12)"
+            call_type = s.get("type", "CALL")
+            label = f"🚨 {call_type} Drop ({s.get('id')})" if is_drop else f"🟩 {call_type} 완료"
 
             fig.add_vrect(
                 x0=start_dt, x1=end_dt,
                 fillcolor=color, opacity=1,
-                layer="below", line_width=1, line_color="red" if is_drop else "green",
-                annotation_text=label, annotation_position="top left"
+                layer="below", line_width=1.5,
+                line_color="rgba(255,0,0,0.4)" if is_drop else "rgba(0,255,0,0.4)",
+                annotation_text=label, annotation_position="top left",
+                annotation_font=dict(size=11, color="red" if is_drop else "green")
             )
         except: pass
 
-    # 3. SIP 에러 데이터 (빨간색 X 마커)
+    # ==========================================
+    # 3. 마커 포인트: SIP 에러 데이터 (빨간색 X 표시)
+    # ==========================================
     sip_data = report_data.get("ims_sip_data", [])
-    sip_errors = [m for m in sip_data if m.get("is_error")]
-    if sip_errors:
-        err_times, err_texts = [], []
-        for e in sip_errors:
-            try:
-                dt = pd.to_datetime(f"{current_year}-{e.get('time')[:14]}", format='%Y-%m-%d %H:%M:%S')
-                err_times.append(dt)
-                err_texts.append(e.get("method_code", "SIP Error"))
-            except: pass
+    if sip_data:
+        sip_errors = [m for m in sip_data if m.get("is_error")]
+        if sip_errors:
+            err_times, err_texts = [], []
+            for e in sip_errors:
+                try:
+                    dt = pd.to_datetime(f"{current_year}-{e.get('time')[:14]}", format='%Y-%m-%d %H:%M:%S')
+                    err_times.append(dt)
+                    err_texts.append(f"{e.get('method_code', 'SIP Error')} ({e.get('direction', 'Tx')})")
+                except: pass
 
-        # 에러 마커는 보기 쉽게 y=0(바닥) 라인에 배치
-        fig.add_trace(go.Scatter(
-            x=err_times, y=[0]*len(err_times),
-            mode='markers+text',
-            name='SIP Error',
-            marker=dict(symbol='x', color='red', size=14, line=dict(width=2, color='darkred')),
-            text=err_texts,
-            textposition="top center",
-            textfont=dict(color='red', size=11)
-        ))
+            # 💡 에러 마커가 RSRP 선과 겹쳐서 엉망이 되지 않도록 최하단 바닥선(-135dBm)에 일렬 정렬 배치
+            if err_times:
+                fig.add_trace(go.Scatter(
+                    x=err_times, y=[-135] * len(err_times),
+                    mode='markers+text',
+                    name='SIP Error (4xx~6xx)',
+                    marker=dict(symbol='x', color='#d32f2f', size=11, line=dict(width=2)),
+                    text=err_texts,
+                    textposition="top center",
+                    textfont=dict(color='#d32f2f', size=10, weight='bold')
+                ))
 
-    # 차트 레이아웃 최적화
+    # ==========================================
+    # 4. 차트 레이아웃 최적화 (RSRP 스케일에 커스텀 맞춤)
+    # ==========================================
     fig.update_layout(
-        yaxis_title="안테나 신호 (Level 0~4)",
-        yaxis=dict(range=[-0.5, 4.5], tickmode='linear', tick0=0, dtick=1),
-        height=350,
+        yaxis_title="수신 신호 세기 (RSRP dBm)",
+        yaxis=dict(
+            range=[-145, -45], # 실무 무선망 분석용 dBm 유효 범위 고정
+            tickmode='linear',
+            dtick=10,
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.15)'
+        ),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.15)',
+            tickformat="%m-%d\n%H:%M:%S"
+        ),
+        height=480,
         hovermode="x unified",
-        margin=dict(l=0, r=0, t=40, b=0),
+        plot_bgcolor='white',
+        margin=dict(l=50, r=20, t=40, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 

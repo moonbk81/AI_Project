@@ -24,31 +24,109 @@ class BootParser(BaseParser):
 class SignalParser(BaseParser):
     def analyze(self, lines):
         history = []
+        raw_signals = [] # 💡 라디오 로그(상세 신호)를 담아둘 새로운 바구니
+
         for line in lines:
+            # 1️⃣ 세부 신호 정보(NetworkSignalStrengthHandler) 수집 -> raw_signals 바구니에 보관
+            if "NetworkSignalStrengthHandler - SignalStrength:" in line:
+                ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line)
+                if not ts_m: continue
+                ts = ts_m.group(0)
+
+                details = {}
+
+                # LTE 파싱 (L)
+                l_match = re.search(r'L:\(([^)]+)\)', line)
+                if l_match:
+                    vals = [v.strip() for v in l_match.group(1).split(',')]
+                    if len(vals) >= 4:
+                        rsrp = f"-{vals[1]} dBm" if vals[1] != "2147483647" else "Unknown"
+                        rsrq = f"-{vals[2]} dB" if vals[2] != "2147483647" else "Unknown"
+                        rssnr = f"{int(vals[3])/10.0} dB" if vals[3] != "2147483647" else "Unknown"
+                        details['LTE'] = {"RSRP": rsrp, "RSRQ": rsrq, "SINR": rssnr, "raw": f"L:({l_match.group(1)})"}
+
+                # NR 파싱 (N)
+                n_match = re.search(r'N:\(([^)]+)\)', line)
+                if n_match:
+                    vals = [v.strip() for v in n_match.group(1).split(',')]
+                    if len(vals) >= 3:
+                        rsrp = f"-{vals[0]} dBm" if vals[0] != "2147483647" else "Unknown"
+                        rsrq = f"-{vals[1]} dB" if vals[1] != "2147483647" else "Unknown"
+                        sinr = f"{int(vals[2])/10.0} dB" if vals[2] != "2147483647" else "Unknown"
+                        details['NR'] = {"RSRP": rsrp, "RSRQ": rsrq, "SINR": sinr, "raw": f"N:({n_match.group(1)})"}
+
+                # WCDMA 파싱 (W)
+                w_match = re.search(r'W:\(([^)]+)\)', line)
+                if w_match:
+                    vals = [v.strip() for v in w_match.group(1).split(',')]
+                    if len(vals) >= 4:
+                        rssi = vals[0] if vals[0] not in ["99", "255", "2147483647"] else "Unknown"
+                        rscp = vals[2] if vals[2] not in ["99", "255", "2147483647"] else "Unknown"
+                        ecno = vals[3] if vals[3] not in ["99", "255", "2147483647"] else "Unknown"
+                        details['WCDMA'] = {"RSSI": rssi, "RSCP": f"-{rscp} dBm" if rscp != "Unknown" else "Unknown", "EcNo": ecno, "raw": f"W:({w_match.group(1)})"}
+
+                # GSM 파싱 (G)
+                g_match = re.search(r'G:\(([^)]+)\)', line)
+                if g_match:
+                    vals = [v.strip() for v in g_match.group(1).split(',')]
+                    if len(vals) >= 2:
+                        rssi = vals[0] if vals[0] not in ["99", "255", "2147483647"] else "Unknown"
+                        details['GSM'] = {"RSSI": rssi, "raw": f"G:({g_match.group(1)})"}
+
+                if details:
+                    raw_signals.append({"time": ts, "details": details})
+
+            # 2️⃣ 레벨 변경 이벤트 수집 -> history 바구니에 보관 (이 시점엔 details를 빈칸으로 둠)
             if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:
                 m = DIAG_PATTERNS['SIGNAL_LEVEL'].search(line)
                 if m:
                     time_str, slot, info = m.group(1), m.group(2), m.group(3).strip()
+
                     if "no level" in info.lower():
                         history.append({
-                            "time": time_str,
-                            "slot": slot,
-                            "rat": "NO_SVC",
-                            "level": 0,
-                            "raw_info": info
-                            })
+                            "time": time_str, "slot": slot, "rat": "NO_SVC",
+                            "level": 0, "raw_info": info, "details": {}
+                        })
                     else:
                         for item in info.split():
                             if '=' in item:
                                 k, v = item.split('=')
                                 rat_name = k.replace('Level', '').upper()
                                 history.append({
-                                    "time": time_str,
-                                    "slot": slot,
-                                    "rat": rat_name,
-                                    "level": self.safe_to_int(v),
-                                    "raw_info": info
-                                    })
+                                    "time": time_str, "slot": slot, "rat": rat_name,
+                                    "level": self.safe_to_int(v), "raw_info": info, "details": {}
+                                })
+
+        # 3️⃣ [핵심] 파싱 종료 후 시간(Timestamp) 기반으로 결합하기 (Post-Processing)
+        def time_to_sec(ts):
+            try:
+                time_part = ts.split(" ")[1] if " " in ts else ts
+                h, m, s = time_part.split(":")
+                return int(h) * 3600 + int(m) * 60 + float(s)
+            except: return 0
+
+        # 라디오 신호 데이터를 시간 순으로 예쁘게 정렬
+        raw_signals.sort(key=lambda x: time_to_sec(x["time"]))
+
+        # 시스템 로그(history)의 시간에 맞춰 가장 가까운 라디오 신호 매핑
+        for event in history:
+            evt_sec = time_to_sec(event["time"])
+            best_details = {}
+
+            # 이벤트 발생 시점 기준 가장 가까운 과거(최대 5초 이내)의 상세 신호 찾기
+            for raw in reversed(raw_signals):
+                raw_sec = time_to_sec(raw["time"])
+                diff = evt_sec - raw_sec
+
+                if 0 <= diff <= 5.0:  # 5초 이내 발생한 최신 라디오 신호만 결합
+                    best_details = raw["details"]
+                    break
+                elif diff < 0:
+                    continue # 라디오 로그가 더 미래에 찍혔다면 스킵 (정렬되어 있으므로 계속 탐색)
+
+            if best_details:
+                event["details"] = best_details.copy()
+
         return history
 
 class DataUsageParser(BaseParser):

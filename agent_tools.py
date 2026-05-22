@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import pandas as pd
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
@@ -100,14 +101,42 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     signal_history = report_data.get("signal_level_history", [])
 
     avg_signal = "N/A"
+    worst_rsrp = None
+    worst_sinr = None
+
     if signal_history:
         levels = [float(s.get('level', 0)) for s in signal_history if 'level' in s]
         if levels:
             avg_signal = round(sum(levels) / len(levels), 1)
 
+        # 💡 [LLM 팩트 주입] 전체 로그 내에서 최악의 신호 상태(RSRP/SINR)를 탐색합니다.
+        for sig in signal_history:
+            details = sig.get("details", {})
+            for rat in ["LTE", "NR"]:
+                if rat in details:
+                    # RSRP 최저값 (절댓값이 클수록 안 좋으므로 min 사용)
+                    rsrp_str = details[rat].get("RSRP", "Unknown")
+                    if rsrp_str != "Unknown" and "dBm" in rsrp_str:
+                        try:
+                            val = int(rsrp_str.replace("dBm", "").strip())
+                            if worst_rsrp is None or val < worst_rsrp:
+                                worst_rsrp = val
+                        except: pass
+
+                    # SINR 최저값
+                    sinr_str = details[rat].get("SINR", "Unknown")
+                    if sinr_str != "Unknown" and "dB" in sinr_str:
+                        try:
+                            val = float(sinr_str.replace("dB", "").strip())
+                            if worst_sinr is None or val < worst_sinr:
+                                worst_sinr = val
+                        except: pass
+
     kpi_report["4_oos_and_signal"] = {
         "oos_occurrence_count": len(oos_history),
-        "average_signal_level": avg_signal
+        "average_signal_level": avg_signal,
+        "worst_rsrp_detected": f"{worst_rsrp} dBm" if worst_rsrp is not None else "데이터 없음",
+        "worst_sinr_detected": f"{worst_sinr} dB" if worst_sinr is not None else "데이터 없음"
     }
 
     # ==========================================
@@ -417,19 +446,17 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
 
     correlated = []
 
-    # 1. OOS 타임라인 교차 검증 (다이어트: 상태 문자열 먼저 필터링)
+    # 1. OOS 타임라인 교차 검증
     oos_events = report_data.get("oos_events", [])
     for oos in oos_events:
         v_reg = str(oos.get("voice_reg", ""))
         d_reg = str(oos.get("data_reg", ""))
 
-        # 🔥 [최적화] OOS 상태가 아닌 정상 로그는 시간 파싱도 하지 않고 즉시 스킵
         is_oos = (v_reg.strip() == "1" or d_reg.strip() == "1" or
                   "OUT_OF_SERVICE" in v_reg or "OUT_OF_SERVICE" in d_reg)
         if not is_oos:
             continue
 
-        # 상태가 OOS일 때만 무거운 시간 파싱 진행
         oos_time_str = oos.get("time", "")
         if oos_time_str:
             oos_dt = _parse_android_time(oos_time_str)
@@ -455,7 +482,17 @@ def _check_rf_correlation(target_time_str: str, report_data: dict, window_sec: i
 
         diff = abs((sig_dt - target_dt).total_seconds())
         if diff <= window_sec:
-            correlated.append(f"[약전계 진입] Level {sig_level} (시간차: {diff}초)")
+            # 💡 [LLM 팩트 주입] 약전계 발생 시 RSRP/SINR 수치를 AI에게 함께 전달합니다.
+            details = sig.get("details", {})
+            extra_info = ""
+            for rat in ["LTE", "NR"]:
+                if rat in details and details[rat].get("RSRP") != "Unknown":
+                    rsrp = details[rat].get("RSRP", "Unknown")
+                    sinr = details[rat].get("SINR", "Unknown")
+                    extra_info = f" (상세 측정값 -> RSRP: {rsrp}, SINR: {sinr})"
+                    break
+
+            correlated.append(f"[약전계 진입] 안테나 Level {sig_level}{extra_info} (시간차: {diff}초)")
 
     return correlated if correlated else ["명시적인 무선 환경(RF) 악화 동반 안됨"]
 
@@ -640,10 +677,8 @@ def _check_native_crash_correlation(target_time_str: str, report_data: dict, win
         if crash_dt is None:
             continue
 
-        # 크래시가 먼저 터지고 수 초 내에 OOS로그가 찍히므로 시간차 계산 (OOS시간 - 크래시시간)
         diff = (target_dt - crash_dt).total_seconds()
 
-        # rild 데몬이 OOS 발생 전 0~10초 사이에 죽은 이력이 있는지 확인
         if 0 <= diff <= window_sec and crash.get("process") == "rild":
             return {
                 "is_rild_crash_related": True,
@@ -751,8 +786,8 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
     return json.dumps({
         "crash_count": len(crashes),
         "crash_history": crash_facts,
-        "native_crash_count": len(native_crashes), # 신규 추가
-        "native_crash_history": native_crash_facts, # 신규 추가
+        "native_crash_count": len(native_crashes),
+        "native_crash_history": native_crash_facts,
         "anr_count": len(anr_facts),
         "anr_history": anr_facts
     }, ensure_ascii=False)
@@ -786,7 +821,6 @@ def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./r
     with open(datacall_path, 'r', encoding='utf-8') as f:
         dc_data = json.load(f)
 
-    # 파서가 추출한 'DATA_STALL_RECOVERY' 이벤트만 필터링
     stall_events = [d for d in dc_data if d.get('event_type') == 'DATA_STALL_RECOVERY']
 
     if not stall_events:
@@ -795,21 +829,18 @@ def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./r
             "message": "해당 구간 내 데이터 스톨(병목) 및 복구 이력 없음 (정상)"
         }, ensure_ascii=False)
 
-    # RF 환경(OOS/약전계) 교차 검증을 위해 메인 리포트도 로드
     report_data = _load_report_json(base_name, result_dir)
 
     analysis = []
     for event in stall_events:
         stall_time = event.get('req_time')
-
-        # 스톨 발생 시점 기준 ±5초 내외의 무선 환경 상태 확인 (어제 만든 함수 재활용!)
         rf_context = _check_rf_correlation(stall_time, report_data, window_sec=5)
 
         analysis.append({
             "time": stall_time,
             "action_status": event.get('status'),
             "action_description": event.get('cause'),
-            "rf_correlation": rf_context,  # AI가 인과관계를 파악할 핵심 키
+            "rf_correlation": rf_context,
             "raw_log": event.get('raw_payload')
         })
 
@@ -818,18 +849,9 @@ def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./r
         "stall_and_recovery_facts": analysis
     }, ensure_ascii=False)
 
-def _load_json(path, default):
-    if not os.path.exists(path):
-        return default
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
 def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -> str:
     """
     인터넷 멈춤 전용 분석 결과를 LLM이 사용하기 좋은 JSON으로 요약합니다.
-
-    입력 파일:
-    - ./result/<base_name>_internet_stall.json
     """
     path = os.path.join(result_dir, f"{base_name}_internet_stall.json")
     data = _load_json(path, {})
@@ -965,7 +987,6 @@ def _check_radio_power_correlation(target_time_str: str, report_data: dict, wind
             reason = str(ev.get("reason", ev.get("power_reason", "")))
             state = str(ev.get("state", ev.get("power_state", "")))
 
-            # raw_request 기반 fallback
             if not state:
                 if "RADIO_POWER" in raw:
                     state = "ON" if " 1" in raw else "OFF"
@@ -1054,7 +1075,6 @@ def get_tiantong_satellite_analytics(base_name: str, result_dir: str = "./result
     sat_metrics = sat_data.get("metrics", {})
     sat_flow = sat_data.get("call_flow", [])
 
-    # 핵심 에러만 추출
     critical_errors = [
         f"[{msg['time']}] {msg['desc']} (Raw: {msg.get('raw', '')})"
         for msg in sat_flow if "❌" in msg.get('desc', '') or "ERROR" in msg.get('raw', '')
@@ -1080,15 +1100,14 @@ def get_recent_data_usage_analytics(base_name: str, hours: int = 3, result_dir: 
 
     parsed_entries = []
 
-    # 1. 시간 파싱 (연도 포함 여부에 유연하게 대응)
     for stat in usage_stats:
         time_str = stat.get("time")
         if not time_str:
             continue
         try:
-            if len(time_str) > 15: # 예: 2025-07-20 04:28:08
+            if len(time_str) > 15:
                 dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-            else:                  # 예: 07-20 04:28:08
+            else:
                 dt = datetime.strptime(time_str, "%m-%d %H:%M:%S")
             parsed_entries.append({"dt": dt, "stat": stat})
         except ValueError:
@@ -1097,11 +1116,9 @@ def get_recent_data_usage_analytics(base_name: str, hours: int = 3, result_dir: 
     if not parsed_entries:
         return json.dumps({"error": "시간을 파싱할 수 있는 데이터가 없습니다."}, ensure_ascii=False)
 
-    # 2. 🚨 [핵심] 현재 시간이 아닌 '로그 내 가장 마지막 시간'을 앵커로 잡음
     latest_time = max(entry["dt"] for entry in parsed_entries)
     threshold_time = latest_time - timedelta(hours=hours)
 
-    # 3. N시간 이내 데이터 필터링 및 앱별 합산
     app_usage = {}
     for entry in parsed_entries:
         if entry["dt"] >= threshold_time:
@@ -1113,18 +1130,16 @@ def get_recent_data_usage_analytics(base_name: str, hours: int = 3, result_dir: 
 
             app_usage[app_name] = app_usage.get(app_name, 0.0) + mb
 
-    # 4. 사용량(MB) 내림차순 정렬
     sorted_usage = sorted(app_usage.items(), key=lambda x: x[1], reverse=True)
 
     usage_facts = []
     for app, mb in sorted_usage:
-        if mb > 0.0:  # 사용량이 0인 앱은 제외
+        if mb > 0.0:
             usage_facts.append({
                 "app_name": app,
                 "total_mb_used": round(mb, 2)
             })
 
-    # LLM이 읽기 좋게 JSON으로 리턴
     return json.dumps({
         "analysis_window_hours": hours,
         "latest_log_time": latest_time.strftime("%Y-%m-%d %H:%M:%S"),
