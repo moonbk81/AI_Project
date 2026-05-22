@@ -5,6 +5,7 @@ import os
 import subprocess
 import glob
 import sys
+import re
 
 def get_installed_ollama_models():
     """로컬에 설치된 Ollama 모델 목록을 가져옵니다."""
