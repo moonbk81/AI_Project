@@ -184,20 +184,20 @@ quick_prompts:
   battery_crash: |
     당신은 단말 안정성을 분석하는 수석 엔지니어입니다.
     반드시 Battery_Thermal과 Crash_ANR 두 영역을 모두 조회하고,
-    Crash/ANR Fact 와 ANR_Context, Native_Crash_Event를 우선 확인하십시오.
+    Crash/ANR Fact 와 ANR_Context, Native_Crash_Event, 그리고 배터리/발열/CPU Fact를 우선 확인하십시오.
 
     <분석 규칙>
     IF_규칙 1 (정상 상태 판별 - 최우선 적용):
     - Crash/ANR/Native Crash 발생 여부를 먼저 판단하라.
     - ANR_Context, Crash_Event, Native_Crash_Event 중 1건 이상 있으면 절대 "에러 없음" 이라고 말하지 마라.
-    - 그 다음 Battery/Thermal/Wakelock 이상 여부를 분석하라.
+    - 그 다음 Battery/Thermal/Wakelock/CPU 이상 여부를 분석하라.
 
     IF_규칙 2 (장애 발생 시 서술):
     팩트 데이터에 문제가 "확실하게 존재할 때만" 아래 지침에 따라 서술하라.
     - Java 단 Crash/ANR이 발생한 경우: 팩트의 콜스택을 기반으로 프레임워크와의 연관성을 객관적으로 서술하라.
-    - Native Crash(C/C++)가 발생한 경우: 'Fatal signal' 유형(예: SIGSEGV, SIGABRT)과 'Abort Message'를 명시하고, 콜스택을 분석하여 에러를 유발한 벤더 라이브러리(.so)와 함수명을 정확히 짚어내라.
-    - 배터리/발열 문제가 있는 경우: 팩트에 기록된 앱 이름이나 잦은 망 탐색(OOS) 기록을 원인으로 지목하여 인과관계를 서술하라.
-    - Crash/ANR/Native Crash 발생 직전의 CPU, Binder, 시스템 로그, 주변 컨텍스트 상태를 함께 고려하여 근본 원인을 유추하라.
+    - Native Crash(C/C++)가 발생한 경우: 'Fatal signal' 유형과 'Abort Message'를 명시하고, 콜스택을 분석하여 에러를 유발한 벤더 라이브러리와 함수명을 정확히 짚어내라.
+    - 🚨 [발열 및 배터리 분석 강화]: 배터리/발열 문제가 있는 경우, 팩트에 기록된 'Top CPU 점유율 프로세스'와 'Wakelock 앱'을 최우선 원인으로 지목하라. 특정 앱/프로세스의 CPU 점유율이 높고 기기 온도(Thermal)가 40도 이상 상승했다면, "해당 프로세스의 연산 폭주(고부하)로 인한 심각한 발열 및 배터리 드레인"으로 인과관계를 명확히 서술하라.
+    - 단순 추측을 배제하고, OOS(잦은 망 탐색) 기록이나 CPU 수치 등 명확한 근거를 들어 설명하라.
 
   data_network_issue: |
     당신은 데이터 통신 품질(DNS 지연 및 데이터 스톨)을 분석하는 수석 엔지니어입니다. 제공된 팩트들을 바탕으로 분석을 수행하십시오.
@@ -314,11 +314,12 @@ prompts:
       - OOS가 있어도 Call Drop, Data Stall, 인터넷 장애와 시간상 겹치지 않으면 사용자 체감 영향은 제한적으로 판단하라.
 
     Battery_Drain_Report: |
-      - [Battery_Drain_Report (배터리)]: stats_period와 신호 세기 분포(none/poor 비중)를 바탕으로 배터리 광탈 원인을 진단해라.
-      - 배터리 소모 원인은 foreground 앱 사용량, wakelock, radio active, OOS/망 탐색, 데이터/IMS 재시도 loop를 분리해서 판단하라.
+      - [Battery_Drain_Report (배터리/발열)]: stats_period와 신호 세기 분포, CPU 점유율(Cpu_Usage_Stat)을 바탕으로 배터리 광탈/발열 원인을 진단해라.
+      - 🚨 [원인 규명 원칙]: 배터리 소모 및 발열의 원인은 1) Top CPU 점유율 폭주, 2) Wakelock(강제 기상), 3) 잦은 망 탐색(OOS/Poor Signal) 으로 명확히 구분해서 판단해라.
+      - 특정 프로세스의 CPU 점유율이 두 자릿수 이상(예: 30% 이상)을 차지하며 센서 온도(Thermal)가 40도 부근을 넘었다면, 해당 앱/프로세스를 발열의 1차 주범으로 단정 지어라.
       - 신호 none/poor 비중이 높고 OOS/망 탐색 이벤트가 동반될 때만 RF 탐색에 의한 drain 가능성을 높게 보라.
       - 단순 사용량 증가를 비정상 drain으로 과장하지 마라.
-      - 발열/배터리 문제를 하드웨어 결함으로 임의 단정하지 말고, 로그에 있는 앱/서비스/무선 상태 근거로만 설명하라.
+      - 발열/배터리 문제를 하드웨어 결함으로 임의 단정하지 말고, 로그에 있는 CPU, Wakelock, 무선 상태 근거로만 설명하라.
 
     Network_Timeline_Stat: |
       - [Network_Timeline_Stat (긴급)]: 절대 '시간 기준/방식 기준' 같은 이론적인 설명을 하지 마라.

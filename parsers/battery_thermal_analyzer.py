@@ -109,3 +109,55 @@ class BatteryThermalAnalyzer(BaseParser):
             "thermal_stats": thermals,
             "wakelock_stats": wakelocks
         }
+
+class CpuUsageParser(BaseParser):
+    def analyze(self, lines):
+        cpu_stats = []
+        in_cpu_block = False
+
+        for line in lines:
+            line_str = line.strip()
+
+            # 1. 블록 시작 감지 (더 넓은 키워드 적용)
+            if "CPU usage from" in line_str or "dumpsys cpuinfo" in line_str:
+                in_cpu_block = True
+                continue
+
+            if in_cpu_block:
+                # 2. 블록 종료 조건 (빈 줄이거나 TOTAL/--- 라인)
+                if not line_str or line_str.startswith("TOTAL") or line_str.startswith("---"):
+                    if len(cpu_stats) > 0:
+                        break
+                    continue
+
+                # 3. 1차 시도: 정규식 추출 (PID 유무 상관없이 모두 캡처)
+                # 패턴 매칭 예: "66% 1404/system_server:"
+                m = re.search(r'^([0-9.]+)%\s+(?:[A-Za-z0-9_-]+)?(?:[0-9]+/)?([^:]+):', line_str)
+                pct, proc = None, None
+
+                if m:
+                    pct = float(m.group(1))
+                    proc = m.group(2).strip()
+                else:
+                    # 4. 2차 시도: 정규식이 실패하면 Split으로 강제 추출 (방어 로직)
+                    try:
+                        if '%' in line_str and ':' in line_str:
+                            parts = line_str.split('%', 1)
+                            pct = float(parts[0].strip())
+                            proc_part = parts[1].split(':')[0].strip()
+                            proc = proc_part.split('/')[-1] if '/' in proc_part else proc_part
+                    except:
+                        pass
+
+                # 5. 데이터 적재 (0.5% 이상 점유한 프로세스만 최대 10개 수집)
+                if pct is not None and proc and pct >= 0.5:
+                    cpu_stats.append({
+                        "process": proc,
+                        "cpu_percent": pct
+                    })
+
+                    if len(cpu_stats) >= 10:
+                        break
+
+        # 점유율(%) 기준 내림차순 정렬하여 반환
+        return sorted(cpu_stats, key=lambda x: x['cpu_percent'], reverse=True)

@@ -645,6 +645,7 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
 
     thermal_stats = battery_thermal_stats.get("thermal_stats", [])
     wakelock_stats = battery_thermal_stats.get("wakelock_stats", [])
+    cpu_stats = report_data.get("cpu_usage_stats", [])
 
     max_temp = 0
     if thermal_stats:
@@ -655,9 +656,13 @@ def get_battery_thermal_analytics(base_name: str, result_dir: str = "./result") 
         sorted_wl = sorted(wakelock_stats, key=lambda x: int(x.get("times", 0)), reverse=True)[:3]
         top_wakelocks = [{"app": wl.get("app_name"), "times": wl.get("times")} for wl in sorted_wl]
 
+    # 💡 Top 3 CPU 점유율 포맷팅
+    top_cpus = [{"process": c.get("process"), "percent": c.get("cpu_percent")} for c in cpu_stats[:3]]
+
     return json.dumps({
         "max_temperature_celsius": max_temp,
-        "top_wakelocks": top_wakelocks
+        "top_wakelocks": top_wakelocks,
+        "top_cpu_processes": top_cpus # 👈 LLM에게 CPU 정보 제공
     }, ensure_ascii=False)
 
 def _check_native_crash_correlation(target_time_str: str, report_data: dict, window_sec: int = 10) -> dict:

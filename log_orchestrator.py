@@ -15,6 +15,7 @@ from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
 from parsers.sat_at_parser import SatAtProcessor
 from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
+from parsers.battery_thermal_analyzer import CpuUsageParser
 from parsers.internet_stall_parser import InternetStallParser
 from parsers.native_crash_parser import NativeCrashParser
 
@@ -35,6 +36,7 @@ class LogOrchestrator:
         self.battery_thermal_parser = BatteryThermalAnalyzer(
             context_getter=self._get_surrounding_context_logs
         )
+        self.cpu_usage_parser = CpuUsageParser()
         self.nitz_parser = NitzParser()
         self.radio_power_parser = RadioPowerParser(self._get_surrounding_context_logs)
         self.net_ts_analyzer = NetworkTimeSeriesAnalyzer()
@@ -282,6 +284,7 @@ class LogOrchestrator:
             # 지표성 데이터 추가
             # battery 계열은 dump section 전체를 읽는 경우가 있어 full lines를 유지합니다.
             if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
+            if cpu_res := self.cpu_usage_parser.analyze(lines): result['cpu_usage_stats'] = cpu_res
             if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
             if net_usage := self.data_usage_parser.analyze(buckets['usage'], global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage

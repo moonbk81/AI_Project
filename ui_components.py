@@ -82,42 +82,76 @@ def render_dns_analysis_chart(df):
         st.warning("⚠️ DNS 로그 데이터가 없거나 컬럼을 추출하지 못했습니다.")
 
 def render_battery_thermal_chart(df):
-    """발열 및 Wakelock 분석 차트 렌더링"""
-    st.subheader("🔥 발열 및 배터리 드레인(Wakelock) 분석")
+    """발열, Wakelock 및 CPU 점유율 분석 차트 렌더링"""
+    st.subheader("🔥 발열, 배터리 드레인 및 CPU 점유율 분석")
 
     thermal_df = df[df['log_type'] == 'Thermal_Stat'].copy()
     wl_df = df[df['log_type'] == 'Wakelock_Stat'].copy()
+    cpu_df = df[df['log_type'] == 'Cpu_Usage_Stat'].copy()
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
+
+    # 💡 [핵심] 세 차트의 크기와 여백을 완벽하게 통일하는 설정
+    common_height = 420  # 전체 높이를 살짝 키움
+    common_margin = dict(l=10, r=10, t=30, b=130)  # 하단 여백(b)을 넉넉히 주어 글씨 때문에 막대가 찌그러지는 것을 방지
+
     with c1:
-        st.markdown("**🔋 Wakelock (잠들지 못하는 앱) Top 10**")
+        st.markdown("**🔋 Wakelock (기상 강제 호출)**")
         if not wl_df.empty:
             wl_df['times'] = pd.to_numeric(wl_df['times'], errors='coerce')
             fig_wl = px.bar(
-                wl_df, x='app_name', y='times', title="앱별 AP 기상 강제 호출 횟수",
-                hover_data=['duration'], labels={'app_name': '패키지명', 'times': '깨운 횟수', 'duration': '점유 시간'},
+                wl_df.head(10), x='app_name', y='times',
+                labels={'app_name': '패키지명', 'times': '깨운 횟수'},
                 color='times', color_continuous_scale='Blues'
             )
-            fig_wl.update_layout(xaxis_tickangle=-45, height=400)
-            st.plotly_chart(fig_wl, width="stretch")
+            fig_wl.update_layout(
+                xaxis_tickangle=-45, height=common_height, margin=common_margin,
+                coloraxis_showscale=False # 💡 공간만 차지하는 우측 컬러바 숨김
+            )
+            st.plotly_chart(fig_wl, use_container_width=True)
         else:
-            st.info("Wakelock 기록이 없습니다.")
+            st.info("Wakelock 기록 없음")
 
     with c2:
-        st.markdown("**🌡️ 기기 내부 주요 센서 발열(Thermal) 상태**")
+        st.markdown("**🌡️ 주요 센서 발열 (Thermal)**")
         if not thermal_df.empty:
             thermal_df['temperature'] = pd.to_numeric(thermal_df['temperature'], errors='coerce')
             thermal_df = thermal_df.dropna(subset=['temperature']).sort_values(by='temperature', ascending=False)
             fig_th = px.bar(
-                thermal_df, x='sensor', y='temperature', title="센서별 현재 온도 (°C)",
+                thermal_df.head(10), x='sensor', y='temperature',
                 color='temperature', color_continuous_scale=[(0, "green"), (0.5, "orange"), (1, "red")],
                 range_color=[30, 50], labels={'sensor': '센서명', 'temperature': '온도(°C)'}
             )
-            fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="발열 경계선 (40°C)")
-            fig_th.update_layout(xaxis_tickangle=-45, height=400)
-            st.plotly_chart(fig_th, width="stretch")
+            fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="발열 경계 (40°C)")
+            fig_th.update_layout(
+                xaxis_tickangle=-45, height=common_height, margin=common_margin,
+                coloraxis_showscale=False # 💡 공간만 차지하는 우측 컬러바 숨김
+            )
+            st.plotly_chart(fig_th, use_container_width=True)
         else:
-            st.info("발열(Thermal) 기록이 없습니다.")
+            st.info("발열(Thermal) 기록 없음")
+
+    with c3:
+        st.markdown("**💻 Top 10 CPU 점유율 (%)**")
+        if not cpu_df.empty:
+            cpu_df['cpu_percent'] = pd.to_numeric(cpu_df['cpu_percent'], errors='coerce')
+
+            # 프로세스명이 너무 길면 UI가 망가지므로 적당히 자르기 (15자 초과 시 ...)
+            cpu_df['process_label'] = cpu_df['process'].apply(lambda x: x[:18] + '...' if isinstance(x, str) and len(x) > 18 else x)
+
+            fig_cpu = px.bar(
+                cpu_df.head(10), x='process_label', y='cpu_percent',
+                labels={'process_label': '프로세스명', 'cpu_percent': '점유율(%)'},
+                color='cpu_percent', color_continuous_scale='Reds',
+                hover_data={'process': True}  # 마우스 올렸을 때는 전체 이름 다 보여주기
+            )
+            fig_cpu.update_layout(
+                xaxis_tickangle=-45, height=common_height, margin=common_margin,
+                coloraxis_showscale=False # 💡 공간만 차지하는 우측 컬러바 숨김
+            )
+            st.plotly_chart(fig_cpu, use_container_width=True)
+        else:
+            st.info("CPU 점유율 기록 없음")
 
 def render_call_history_summary(df):
     """전체 통화 세션 (Call History) 차트 및 표 렌더링"""

@@ -245,8 +245,6 @@ class RagPayloadBuilder:
 
                 rag_payload.append({"document": text_content, "metadata": meta})
 
-        battery_thermal = report_data.get("battery_thermal_stats", {})
-
         # ==========================================
         # 🚨 VoLTE/IMS SIP 메시지 페이로드 변환 (추가된 부분)
         # ==========================================
@@ -264,6 +262,7 @@ class RagPayloadBuilder:
 
                 rag_payload.append({"document": text_content, "metadata": meta})
 
+        battery_thermal = report_data.get("battery_thermal_stats", {})
         # ==========================================
         # 🚨 배터리 발열(Thermal) 기록 페이로드 변환
         # ==========================================
@@ -292,6 +291,23 @@ class RagPayloadBuilder:
                 }
                 text_content = f"Wakelock(배터리 점유) 기록: {meta['app_name']} 앱이 단말기가 잠들지 못하도록 {meta['times']}회 깨웠으며, 총 {meta['duration']} 동안 배터리를 강제 소모시켰습니다."
                 rag_payload.append({"document": text_content, "metadata": meta})
+
+        if "cpu_usage_stats" in report_data:
+            for cpu in report_data["cpu_usage_stats"]:
+                proc = cpu.get("process", "Unknown").lstrip("/")
+                pct = float(cpu.get("cpu_percent", 0.0))
+
+                # 💡 [핵심] 기존 규격(schema)과 완벽하게 동일한 구조로 포장
+                cpu_payload = {
+                    "document": f"[CPU 점유율] 프로세스명: {proc}, 점유율: {pct}%",
+                    "metadata": {
+                        "log_type": "Cpu_Usage_Stat",
+                        "process": proc,
+                        "cpu_percent": pct
+                    }
+                }
+
+                rag_payload.append(cpu_payload)
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
