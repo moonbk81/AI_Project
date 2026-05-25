@@ -158,7 +158,7 @@ class RilRagChat:
                 selected_tools.update(self.routing_map["DNS_Latency"].get("tools", []))
                 selected_log_types.update(self.routing_map["DNS_Latency"].get("log_types", []))
 
-        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "먹통"]):
+        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "먹통", "바인더", "binder", "transaction"]):
             selected_intents.add("Crash_ANR")
             if "Crash_ANR" in self.routing_map:
                 selected_tools.update(self.routing_map["Crash_ANR"].get("tools", []))
