@@ -673,30 +673,19 @@ class NitzParser(BaseParser):
 class BinderWarningParser(BaseParser):
     def analyze(self, lines):
         warnings = []
-        sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,]+)')
-        transaction_pattern = re.compile(r'Binder transaction to ([^\s]+).*?took (\d+)ms')
 
         for line in lines:
             line_str = line.strip()
 
-            # 1. Binder Thread Pool Exhaustion (스레드 고갈)
+            # 1. Thread Exhaustion / Starved (스레드 고갈 결과)
             if "binder thread pool" in line_str and ("is full" in line_str or "starved for" in line_str):
-                starved_match = re.search(r'starved for (\d+) ms', line_str)
+                starved_match = re.search(r'starved for (\d+)\s*ms', line_str)
                 if starved_match:
                     delay_ms = starved_match.group(1)
                     desc = f"Binder Thread Pool Starvation: 바인더 스레드가 고갈되어 처리 대기열에서 {delay_ms}ms(약 {round(int(delay_ms)/1000, 1)}초) 동안 치명적인 지연 발생"
-                elif "Binder transaction to" in line_str and "took" in line_str:
-                    m = transaction_pattern.search(line_str)
-                    if m:
-                        target, duration_ms = m.group(1), int(m.group(2))
-                        if duration_ms > 1000: # 1초 이상 지연만
-                            warnings.append({
-                                "time": line_str[:18].strip(),
-                                "type": "TRANSACTION_DELAY",
-                                "desc": f"[{target}] 향 바인더 호출이 {duration_ms}ms(약 {round(duration_ms/1000, 1)}초) 심각하게 지연됨 (스레드 고갈 주범)"
-                            })
                 else:
-                    desc = "Binder Thread Pool is full - 바인더 스레드 고갈로 인한 시스템 프리징(멈춤) 발생"
+                    desc = "Binder Thread Pool is full - 시스템 프리징(멈춤) 발생"
+
                 warnings.append({
                     "time": line_str[:18].strip(),
                     "type": "THREAD_EXHAUSTION",
@@ -704,16 +693,47 @@ class BinderWarningParser(BaseParser):
                     "raw": line_str
                 })
 
-            # 2. Binder Transaction Delay (심각한 응답 지연)
+            # 💡 2. TRANSACTION_DELAY (무적의 String Split 파서 적용)
+            elif "Binder transaction to" in line_str and "took" in line_str:
+                try:
+                    # 원문 예: "... Binder transaction to vendor.samsung... code 1598311760 took 3165ms. Data ..."
+                    # 대상 프로세스 이름 추출
+                    target_part = line_str.split("Binder transaction to ")[1]
+                    target = target_part.split()[0]
+
+                    # 지연 시간(ms) 추출 (숫자만 필터링하여 마침표나 공백 완벽 방어)
+                    took_part = line_str.split("took ")[1]
+                    duration_str = "".join(filter(str.isdigit, took_part.split("ms")[0]))
+                    duration_ms = int(duration_str)
+
+                    if duration_ms > 1000: # 1초 이상 지연 시에만 수집
+                        warnings.append({
+                            "time": line_str[:18].strip(),
+                            "type": "TRANSACTION_DELAY",
+                            "desc": f"[{target}] 향 바인더 호출이 {duration_ms}ms(약 {round(duration_ms/1000, 1)}초) 심각하게 지연됨 (스레드 고갈 주범)",
+                            "raw": line_str
+                        })
+                except Exception as e:
+                    # 파싱에 실패하더라도 화면에 무조건 띄워줍니다!
+                    warnings.append({
+                        "time": line_str[:18].strip(),
+                        "type": "TRANSACTION_DELAY",
+                        "desc": f"바인더 지연 감지 (상세 추출 실패): {line_str.split('libbinder')[1][:50]}...",
+                        "raw": line_str
+                    })
+
+            # 3. binder_sample (기존 프레임워크 샘플링 유지)
             elif "binder_sample" in line_str:
+                sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,]+)')
                 m = sample_pattern.search(line_str)
                 if m:
                     interface, code, duration_ms, pkg = m.group(1), m.group(2), int(m.group(3)), m.group(4)
-                    if duration_ms > 1000:  # 💡 1초(1000ms) 이상 지연된 치명적 바인더 콜만 수집
+                    if duration_ms > 1000:
                         warnings.append({
                             "time": line_str[:18].strip(),
                             "type": "BINDER_DELAY",
                             "desc": f"[{pkg}] 패키지의 {interface} 바인더 콜이 {duration_ms}ms 지연됨",
                             "raw": line_str
                         })
+
         return warnings
