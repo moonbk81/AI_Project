@@ -309,6 +309,22 @@ class RagPayloadBuilder:
 
                 rag_payload.append(cpu_payload)
 
+        # ==========================================
+        # 🚨 Binder Warning (스레드 고갈 및 지연) 페이로드 변환
+        # ==========================================
+        if "binder_warnings" in report_data:
+            for bw in report_data["binder_warnings"]:
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Binder_Warning",
+                    "time": bw.get("time", ""),
+                    "type": bw.get("type", ""),
+                    "desc": bw.get("desc", ""),
+                    "raw_info": bw.get("raw", "")
+                }
+                text_content = f"[바인더 통신 장애] 시간: {meta['time']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
         os.makedirs(payload_dir, exist_ok=True)

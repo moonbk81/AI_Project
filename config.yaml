@@ -80,6 +80,7 @@ routing_map:
       - Crash_Event
       - ANR_Context
       - Native_Crash_Event
+      - Binder_Warning
   Radio_Power:
     desc: "모뎀 전원 꺼짐, 비행기 모드, 비행기 모드 전환, 비행기 모드 해제, 비행기 모드 ON, 비행기 모드 OFF, 비행기 모드 이후 네트워크 안됨, 비행기 모드 해제 후 데이터 안됨, 비행기 모드 해제 후 망 복구 실패, airplane mode, airplane mode off, radio power, radio power on, radio power off, modem power off, 전원 제어, 위성 모뎀 끄기, Power OFF"
     tools:
@@ -194,10 +195,13 @@ quick_prompts:
 
     IF_규칙 2 (장애 발생 시 서술):
     팩트 데이터에 문제가 "확실하게 존재할 때만" 아래 지침에 따라 서술하라.
+    - 🚨 [바인더 페이로드 초과]: Java Crash 중 `TransactionTooLargeException`이 확인되면, "해당 앱이 인텐트(Intent)나 번들(Bundle)에 안드로이드 바인더 허용 용량(약 1MB)을 초과하는 너무 큰 데이터를 담아 전송하려다 강제 종료(Crash)되었다"고 명확히 원인을 지적하라.
+    - 🚨 [바인더 스레드 고갈 및 지연]: `THREAD_EXHAUSTION` 경고가 있다면, "system_server의 바인더 스레드(기본 15개)가 모두 고갈(Exhaustion)되어 추가적인 IPC 요청을 처리하지 못하고 시스템 전체가 멈추는(Freezing) 치명적 상태"였음을 강조하라. `BINDER_DELAY`가 동반되었다면 어느 패키지의 어떤 통신이 병목을 유발했는지 짚어내라.
     - Java 단 Crash/ANR이 발생한 경우: 팩트의 콜스택을 기반으로 프레임워크와의 연관성을 객관적으로 서술하라.
     - Native Crash(C/C++)가 발생한 경우: 'Fatal signal' 유형과 'Abort Message'를 명시하고, 콜스택을 분석하여 에러를 유발한 벤더 라이브러리와 함수명을 정확히 짚어내라.
     - 🚨 [발열 및 배터리 분석 강화]: 배터리/발열 문제가 있는 경우, 팩트에 기록된 'Top CPU 점유율 프로세스'와 'Wakelock 앱'을 최우선 원인으로 지목하라. 특정 앱/프로세스의 CPU 점유율이 높고 기기 온도(Thermal)가 40도 이상 상승했다면, "해당 프로세스의 연산 폭주(고부하)로 인한 심각한 발열 및 배터리 드레인"으로 인과관계를 명확히 서술하라.
     - 단순 추측을 배제하고, OOS(잦은 망 탐색) 기록이나 CPU 수치 등 명확한 근거를 들어 설명하라.
+    - 🚨 [바인더 연쇄 블로킹 추적]: ANR 팩트에 `has_active_binder: true` 이거나 `binder_analysis` 내역이 있다면, 해당 앱이 메인 스레드에서 어떤 타겟(to_pid, 예: system_server)으로 바인더 통신을 시도하다가 멈췄는지 반드시 지적하라. 타겟 프로세스 내의 Lock Contention(자원 경합)이나 스레드 고갈이 원인일 확률이 높다고 판단하라.
 
   data_network_issue: |
     당신은 데이터 통신 품질(DNS 지연 및 데이터 스톨)을 분석하는 수석 엔지니어입니다. 제공된 팩트들을 바탕으로 분석을 수행하십시오.
@@ -369,6 +373,15 @@ prompts:
       - 콜스택(raw_stack)을 분석할 때, 운영체제 기본 라이브러리(libc.so 등)의 에러 처리 함수보다 실제 비즈니스 로직이 담긴 벤더 라이브러리(예: libsec-ril.so)의 함수를 원인으로 지목하라.
       - Native Crash는 해당 프로세스(예: rild)를 즉시 종료시키므로, 이 에러 전후로 발생한 OOS, Call Drop, 데이터 통신 단절 등의 서비스 영향과 반드시 연관 지어 설명하라.
       - 벤더 라이브러리의 보안이나 구현 세부 사항을 추측하여 지어내지 말고, 추출된 함수명과 메시지 자체에 집중하라.
+
+    Crash_Event: |
+      - [Crash_Event (앱 강제종료)]: 에러 타입(예: NullPointerException, TransactionTooLargeException)을 명시해라.
+      - 특히 TransactionTooLargeException은 앱 자체의 데이터 전송 설계 오류(1MB 제한 초과)임을 지적해라.
+
+    Binder_Warning: |
+      - [Binder_Warning (바인더 IPC 에러)]: 안드로이드 시스템 안정성의 가장 치명적인 지표다.
+      - THREAD_EXHAUSTION이 감지되면 단말이 일시적으로 완전한 먹통(Freezing) 상태에 빠졌음을 의미하므로, 동시간대에 발생한 ANR이나 OOS(망 이탈)의 근본 원인으로 지목해라.
+      - BINDER_DELAY(1000ms 이상)가 감지되면, 특정 프로세스 간의 통신 병목이 시스템 성능 저하를 유발했음을 설명해라.
 
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿

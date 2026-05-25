@@ -342,6 +342,13 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
 
         kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = anr_events
 
+    binder_warnings = report_data.get("binder_warnings", [])
+    if binder_warnings:
+        has_fatal_or_anr = True
+        kpi_report["10_system_crash_and_fatal_errors"]["binder_warnings"] = [
+            f"[{b.get('time')}] {b.get('type')}: {b.get('desc')}" for b in binder_warnings
+        ]
+
     if has_fatal_or_anr and "anr_events" in kpi_report["10_system_crash_and_fatal_errors"]:
         anr_events = kpi_report["10_system_crash_and_fatal_errors"].get("anr_events", [])
         kpi_report["10_system_crash_and_fatal_errors"]["anr_summary"] = {
@@ -705,10 +712,15 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
 
     crash_facts = []
     for c in crashes:
+        # 크래시 로그(콜스택 등)에 TransactionTooLarge 문자열이 있는지 확인
+        raw_stack = str(c.get("stacktrace", "")).lower()
+        is_binder_too_large = "transactiontoolargeexception" in raw_stack
         crash_facts.append({
             "time": c.get("timestamp"),
             "process": c.get("process"),
-            "type": c.get("crash_type")
+            "type": c.get("crash_type"),
+            "binder_transaction_too_large": is_binder_too_large,
+            "exception_reason": c.get("exception_name", "Unknown")
         })
 
     native_crash_facts = []

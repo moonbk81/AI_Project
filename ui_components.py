@@ -688,14 +688,20 @@ def render_crash_analyzer(report_data):
     crash_data = report_data.get("crash_context", [])
     native_crash_data = report_data.get("native_crash_context", [])
     anr_data_list = report_data.get("anr_context", [])
+    binder_warnings = report_data.get("binder_warnings", [])
 
     # 💡 과거 딕셔너리 포맷과의 호환성을 위한 방어 코드
     if isinstance(anr_data_list, dict) and anr_data_list:
         anr_data_list = [anr_data_list]
 
-    if not crash_data and not anr_data_list and not native_crash_data:
+    if not crash_data and not anr_data_list and not native_crash_data and not binder_warnings:
         st.success("💡 분석된 로그 내에 심각한 크래시(Native 포함)나 FATAL 에러가 발견되지 않았습니다.")
         return
+
+    if binder_warnings:
+        st.warning(f"⚠️ 총 {len(binder_warnings)}건의 치명적인 Binder 통신 지연/고갈(Thread Exhaustion)이 감지되었습니다! (시스템 멈춤 원인)")
+        with st.expander("🔗 상세 Binder 경고 로그 보기"):
+            st.dataframe(pd.DataFrame(binder_warnings)[['time', 'type', 'desc']], width="stretch")
 
     if native_crash_data:
         st.error(f"☠️ 총 {len(native_crash_data)}건의 Native C/C++ 크래시가 감지되었습니다!")
@@ -833,6 +839,9 @@ def render_crash_analyzer(report_data):
             crash_type = crash.get('crash_type', 'FATAL EXCEPTION')
 
             with st.expander(f"[{ts}] {process} - {crash_type}"):
+                raw_logs_str = str(crash.get('cross_context_logs', crash.get('raw_line', ''))).lower()
+                if "transactiontoolargeexception" in raw_logs_str:
+                    st.error("🚨 **원인 진단:** 바인더 버퍼 용량 초과 (TransactionTooLargeException). 앱이 1MB 이상의 너무 큰 데이터를 인텐트(Intent)로 넘기려다 강제 종료되었습니다.")
                 # 주변 로그(Time-Window Glue)가 수집되어 있다면 함께 출력
                 if 'cross_context_logs' in crash and crash['cross_context_logs']:
                     st.markdown("**주변 컨텍스트 로그 (크래시 전후):**")

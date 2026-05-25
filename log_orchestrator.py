@@ -18,6 +18,7 @@ from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
 from parsers.battery_thermal_analyzer import CpuUsageParser
 from parsers.internet_stall_parser import InternetStallParser
 from parsers.native_crash_parser import NativeCrashParser
+from parsers.diagnostic_parser import BinderWarningParser
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -46,6 +47,7 @@ class LogOrchestrator:
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
         self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
+        self.binder_parser = BinderWarningParser()
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -103,6 +105,7 @@ class LogOrchestrator:
             'internet_stall': [],
             'nitz': [],
             'native_crash': [],
+            'binder': [],
         }
 
         crash_keywords = [
@@ -154,6 +157,7 @@ class LogOrchestrator:
             "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
         ]
         native_crash_keywords = ["Fatal signal", "Abort mesage:", "backtrace:"]
+        binder_keywords = ["binder thread pool", "binder_sample", "Binder transaction to"]
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
 
@@ -214,6 +218,9 @@ class LogOrchestrator:
 
             if any(k in line for k in native_crash_keywords):
                 self._add_context_window(buckets, 'native_crash', lines, idx, window=60)
+
+            if any(k in line for k in binder_keywords):
+                buckets['binder'].append(line)
 
         for name, bucket_lines in buckets.items():
             seen = set()
@@ -291,6 +298,8 @@ class LogOrchestrator:
             if dns_res := self.dns_parser.analyze(buckets['dns'], global_uid_map=global_uid_map): result['dns_queries'] = dns_res
             if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
                 result["battery_thermal_stats"] = battery_thermal_res
+            if binder_res := self.binder_parser.analyze(buckets['binder']):
+                result['binder_warnings'] = binder_res
 
             # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
             self.ntn_processor.save_ui_report("./result", self.base_name)
