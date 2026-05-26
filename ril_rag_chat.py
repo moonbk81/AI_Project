@@ -11,6 +11,33 @@ from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
 
+def _to_chroma_meta_value(value, max_chars=5000):
+    """ChromaDB metadata accepts only scalar/list values, not dict.
+    Convert dict/tuple/set and oversized values to safe strings.
+    """
+    import json
+    if value is None or isinstance(value, (str, int, float, bool)):
+        out = value
+    elif isinstance(value, list):
+        safe_list = []
+        for item in value:
+            if item is None or isinstance(item, (str, int, float, bool)):
+                safe_list.append(item)
+            else:
+                safe_list.append(json.dumps(item, ensure_ascii=False, default=str))
+        out = safe_list
+    else:
+        out = json.dumps(value, ensure_ascii=False, default=str)
+    if isinstance(out, str) and len(out) > max_chars:
+        out = out[:max_chars] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
+    return out
+
+def _sanitize_chroma_metadata(meta, max_chars=5000):
+    safe = {}
+    for k, v in (meta or {}).items():
+        safe[str(k)] = _to_chroma_meta_value(v, max_chars=max_chars)
+    return safe
+
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
@@ -211,10 +238,7 @@ class RilRagChat:
             docs.append(str(item["document"])[:MAX_DOC_CHARS])
             meta = item.get("metadata", {}).copy()
             meta["source_file"] = filename
-            for k, v in list(meta.items()):
-                if isinstance(v, str) and len(v) > MAX_META_CHARS:
-                    meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED]"
-            metas.append(meta)
+            metas.append(_sanitize_chroma_metadata(meta, max_chars=MAX_META_CHARS))
             ids.append(f"{base_id}_{i}")
 
         print(f"🔄 '{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
@@ -274,10 +298,7 @@ class RilRagChat:
                 safe_documents.append(str(doc)[:MAX_DOC_CHARS])
                 safe_meta = meta.copy() if meta else {}
                 safe_meta['source_file'] = filename
-                for k, v in safe_meta.items():
-                    if isinstance(v, str) and len(v) > MAX_META_CHARS:
-                        safe_meta[k] = v[:MAX_META_CHARS] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
-                safe_metadatas.append(safe_meta)
+                safe_metadatas.append(_sanitize_chroma_metadata(safe_meta, max_chars=MAX_META_CHARS))
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
             print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")

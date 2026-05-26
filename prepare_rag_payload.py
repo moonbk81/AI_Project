@@ -335,7 +335,8 @@ class RagPayloadBuilder:
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Binder_Context",
-                    "signals": signals,
+                    "signals": json.dumps(signals, ensure_ascii=False),
+                    "signal_keys": ",".join(sorted(signals.keys())) if isinstance(signals, dict) else "",
                 }
                 text_content = (
                     f"[바인더 추가 확인 문맥] 감지된 주변 신호: {signals}. "
