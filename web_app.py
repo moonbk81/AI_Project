@@ -216,19 +216,34 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
         try:
             os.makedirs("./temp_logs", exist_ok=True)
             saved_paths = []
+
+            # 1. 파일 저장 및 💡 [중복 방지 로직 추가]
             for file in uploaded_files:
-                path = os.path.join("./temp_logs", file.name)
-                with open(path, "wb") as f: f.write(file.getbuffer())
+                original_name = file.name
+                name, ext = os.path.splitext(original_name)
+                counter = 1
+                unique_name = original_name
+
+                # 동일한 파일명이 존재하면 뒤에 _1, _2 등을 붙임
+                while os.path.exists(os.path.join("./temp_logs", unique_name)):
+                    unique_name = f"{name}_{counter}{ext}"
+                    counter += 1
+
+                path = os.path.join("./temp_logs", unique_name)
+                with open(path, "wb") as f:
+                    f.write(file.getbuffer())
                 saved_paths.append(path)
 
+            # 2. Base Name 설정 💡 [새로 부여된 고유 파일명 기준으로 변경]
             if len(saved_paths) > 1:
                 st.write(f"🔄 {len(saved_paths)}개의 파편화된 로그를 시간순으로 병합 중...")
-                base_name = os.path.splitext(uploaded_files[0].name)[0] + "_merged"
+                # 기존 uploaded_files[0].name 대신 저장된 실제 파일명 사용
+                base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0] + "_merged"
                 target_log_path = os.path.join("./temp_logs", f"{base_name}.txt")
                 merge_log_files(saved_paths, target_log_path)
             else:
                 target_log_path = saved_paths[0]
-                base_name = os.path.splitext(uploaded_files[0].name)[0]
+                base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0]
 
             if use_slice:
                 st.write(f"✂️ 타임라인 슬라이싱 적용 중...")
