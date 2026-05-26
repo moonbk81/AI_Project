@@ -648,6 +648,10 @@ with tab_dash:
                         else: st.info("데이터 사용량 기록이 없습니다.")
                     else: st.info("데이터 사용량 로그를 찾을 수 없습니다.")
 
+
+                    current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
+                    st.divider()
+                    ui.render_rilj_transactions(current_base)
                     st.divider()
                     ui.render_battery_thermal_chart(df)
                     st.divider()
@@ -666,7 +670,7 @@ with tab_dash:
                     ui.render_data_usage_timeline(df)
 
                     st.divider()
-                    current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
+
                     ui.render_ims_sip_flow(current_base)
 
                     st.divider()

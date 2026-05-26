@@ -176,6 +176,10 @@ class RilRagChat:
                 selected_tools.update(self.routing_map["Tiantong_Satellite"].get("tools", []))
                 selected_log_types.update(self.routing_map["Tiantong_Satellite"].get("log_types", []))
 
+        if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
+            # 기존 인텐트에 살짝 얹어주거나, RILJ 로그 타입을 강제 추가합니다.
+            selected_log_types.update(["RILJ_Transaction"])
+
         top_matches = [{"intent": category, "score": float(score)} for category, score, _ in category_scores[:3]]
         return {"intents": sorted(list(selected_intents)), "tools": sorted(list(selected_tools)), "log_types": sorted(list(selected_log_types)), "scores": routing_scores, "top_matches": top_matches}
 

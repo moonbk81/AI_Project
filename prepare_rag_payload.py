@@ -325,6 +325,31 @@ class RagPayloadBuilder:
                 text_content = f"[바인더 통신 장애] 시간: {meta['time']}, 유형: {meta['type']}, 상세: {meta['desc']}"
                 rag_payload.append({"document": text_content, "metadata": meta})
 
+        # ==========================================
+        # 🚨 RILJ (모뎀 ↔ AP) 문제 트랜잭션 페이로드 변환
+        # ==========================================
+        if "rilj_transactions" in report_data:
+            rilj_data = report_data["rilj_transactions"]
+
+            # 1. 타임아웃 (응답 없음)
+            for t in rilj_data.get("timeouts", []):
+                meta = {"log_type": "RILJ_Transaction", "status": "TIMEOUT", "command": t["command"]}
+                doc = f"[모뎀 응답 먹통(TIMEOUT)] 시간: {t['time']}, 명령어: {t['command']} 에 대해 모뎀이 응답하지 않았습니다."
+                rag_payload.append({"document": doc, "metadata": meta})
+
+            # 2. 에러 및 지연 응답
+            for c in rilj_data.get("completed", []):
+                if c.get("is_error") or c.get("latency_ms", 0) > 500:
+                    status = "ERROR" if c.get("is_error") else "SLOW"
+                    meta = {
+                        "log_type": "RILJ_Transaction",
+                        "status": status,
+                        "command": c["command"],
+                        "latency_ms": c["latency_ms"]
+                    }
+                    doc = f"[모뎀 응답 이상({status})] 시간: {c['start_time']}, 명령어: {c['command']}, 지연시간: {c['latency_ms']}ms, 에러내용: {c['error_msg']}"
+                    rag_payload.append({"document": doc, "metadata": meta})
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
         os.makedirs(payload_dir, exist_ok=True)

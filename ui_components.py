@@ -1508,3 +1508,81 @@ def render_nitz_timeline(nitz_data):
     # 6. 차트 렌더링
     fig = px.line(df, x='log_time_dt', y='offset_num', line_shape='hv', markers=True)
     st.plotly_chart(fig, use_container_width=True)
+
+def render_rilj_transactions(current_base=None):
+    """RILJ (모뎀 ↔ AP) 전수 트랜잭션 분석 렌더러"""
+    st.subheader("⚙️ RILJ (모뎀 ↔ AP) 트랜잭션 분석")
+
+    # 💡 [핵심] df 대신 current_base(파일명)만 받아서 내부에서 직접 JSON을 엽니다!
+    if not current_base:
+        return
+
+    report_path = f"./result/{current_base}_report.json"
+    if not os.path.exists(report_path):
+        return
+
+    with open(report_path, 'r', encoding='utf-8') as f:
+        report_data = json.load(f)
+
+    rilj_data = report_data.get("rilj_transactions", {})
+    completed = rilj_data.get("completed", [])
+    timeouts = rilj_data.get("timeouts", [])
+    unsol = rilj_data.get("unsol", [])
+
+    if not completed and not timeouts and not unsol:
+        st.info("현재 분석 대상 로그에 RILJ 트랜잭션 데이터가 없습니다.")
+        return
+
+    # 지연(Latency) 기준 설정 (500ms 이상이면 경고)
+    SLOW_THRESHOLD = 500
+
+    # 1. 상단 4대 핵심 KPI 카드
+    total_req = len(completed) + len(timeouts)
+    errors = len([c for c in completed if c.get("is_error")])
+    slows = len([c for c in completed if c.get("latency_ms", 0) > SLOW_THRESHOLD])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("총 RIL 요청", f"{total_req} 회")
+    c2.metric("응답 없음 (Timeout)", f"{len(timeouts)} 회", delta="위험" if timeouts else "정상", delta_color="inverse")
+    c3.metric("에러 응답 (Fail)", f"{errors} 회", delta="에러" if errors else "정상", delta_color="inverse")
+    c4.metric("일방 통보 (UNSL/UNSOL)", f"{len(unsol)} 건", delta="모뎀 이벤트" if unsol else "정상")
+
+    st.divider()
+
+    tab_anomaly, tab_unsol = st.tabs(["🚨 문제 트랜잭션 (에러/지연/Timeout)", "📡 모뎀 일방 통보 (UNSL)"])
+
+    with tab_anomaly:
+        abnormal_rows = []
+        for t in timeouts:
+            abnormal_rows.append({
+                "상태": "🔴 TIMEOUT", "시간": t["time"], "명령어": t["command"],
+                "지연(ms)": "N/A", "에러코드": "NO_RESPONSE", "상세": t["details"]
+            })
+
+        for c in completed:
+            if c.get("is_error"):
+                abnormal_rows.append({
+                    "상태": "❌ ERROR", "시간": c["start_time"], "명령어": c["command"],
+                    "지연(ms)": c["latency_ms"], "에러코드": c["error_msg"],
+                    "상세": f"Req: {c['req_details']} | Resp: {c['resp_details']}"
+                })
+            elif c.get("latency_ms", 0) > SLOW_THRESHOLD:
+                abnormal_rows.append({
+                    "상태": "⚠️ SLOW", "시간": c["start_time"], "명령어": c["command"],
+                    "지연(ms)": c["latency_ms"], "에러코드": "SUCCESS", "상세": c["req_details"]
+                })
+
+        if abnormal_rows:
+            df_abnormal = pd.DataFrame(abnormal_rows).sort_values(by="시간")
+            st.dataframe(df_abnormal, width="stretch", hide_index=True)
+        else:
+            st.success("🎉 분석된 타임라인 내에 에러, 타임아웃, 또는 500ms 이상 지연된 RIL 요청이 없습니다. (정상)")
+
+    with tab_unsol:
+        if unsol:
+            st.markdown(f"**📋 모뎀 실시간 상태 업데이트 이력 (총 {len(unsol)}건)**")
+            df_unsol = pd.DataFrame(unsol).sort_values(by="time")
+            df_unsol.columns = ["발생 시간", "이벤트명 (Command)", "상세 데이터 (Details)"]
+            st.dataframe(df_unsol, width="stretch", hide_index=True)
+        else:
+            st.info("수집된 UNSL 이벤트 로그가 없습니다.")

@@ -19,6 +19,7 @@ from parsers.battery_thermal_analyzer import CpuUsageParser
 from parsers.internet_stall_parser import InternetStallParser
 from parsers.native_crash_parser import NativeCrashParser
 from parsers.diagnostic_parser import BinderWarningParser
+from parsers.rilj_parser import RiljParser
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -48,6 +49,7 @@ class LogOrchestrator:
         self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
         self.binder_parser = BinderWarningParser()
+        self.rilj_parser = RiljParser()
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -106,6 +108,7 @@ class LogOrchestrator:
             'nitz': [],
             'native_crash': [],
             'binder': [],
+            'rilj': [],
         }
 
         crash_keywords = [
@@ -160,6 +163,7 @@ class LogOrchestrator:
         binder_keywords = ["binder thread pool", "binder_sample", "Binder transaction to"]
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
+        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)RILJ\b', re.IGNORECASE)
 
         for idx, line in enumerate(lines):
             if line.startswith("!@Boot"):
@@ -221,6 +225,9 @@ class LogOrchestrator:
 
             if any(k in line for k in binder_keywords):
                 buckets['binder'].append(line)
+
+            if rilj_tag_regex.search(line):
+                buckets['rilj'].append(line)
 
         for name, bucket_lines in buckets.items():
             seen = set()
@@ -300,6 +307,8 @@ class LogOrchestrator:
                 result["battery_thermal_stats"] = battery_thermal_res
             if binder_res := self.binder_parser.analyze(buckets['binder']):
                 result['binder_warnings'] = binder_res
+            if rilj_res := self.rilj_parser.analyze(buckets['rilj']):
+                result['rilj_transactions'] = rilj_res
 
             # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
             self.ntn_processor.save_ui_report("./result", self.base_name)

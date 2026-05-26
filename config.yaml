@@ -34,6 +34,7 @@ routing_map:
     log_types:
       - Call_Session
       - IMS_SIP_Message
+      - RILJ_Transaction
   Network_OOS:
     desc: "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF, 네트워크 복구 안됨, 망 복구 실패, 비행기 모드 해제 후 서비스 없음, 비행기 모드 해제 후 네트워크 미복구"
     tools:
@@ -42,6 +43,7 @@ routing_map:
     log_types:
       - OOS_Event
       - Signal_Level
+      - RILJ_Transaction
   DNS_Latency:
     desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
     tools:
@@ -66,6 +68,7 @@ routing_map:
       - Data_Stall_Recovery
       - OOS_Event
       - Signal_Level
+      - RILJ_Transaction
   Battery_Thermal:
     desc: "배터리 광탈, 폰이 뜨거워요, 발열이 심해요, 전력 소모, 핫스팟 발열, 소모 전류, 온도가 높음"
     tools:
@@ -87,6 +90,7 @@ routing_map:
       - get_radio_power_analytics
     log_types:
       - Radio_Power_Event
+      - RILJ_Transaction
   NTN_SpaceX:
     desc: "SpaceX, Starlink, 스페이스엑스, 스타링크, 비지상망, NTN 로밍, 위성망"
     tools:
@@ -384,6 +388,12 @@ prompts:
       - 🚨 TRANSACTION_DELAY가 감지되면, 특정 컴포넌트(예: 벤더 HAL, 시스템 데몬)가 응답을 주지 않아 통신이 심각하게 지연(1000ms 이상)된 것이다. 이를 시스템 병목의 '최초 유발자(Root Cause)'로 지목해라.
       - 🚨 THREAD_EXHAUSTION이 감지되면, 단말이 일시적으로 완전한 먹통(Freezing) 상태에 빠졌음을 의미한다. 만약 동시간대에 TRANSACTION_DELAY가 함께 있다면, 그 타겟을 스레드 고갈의 범인으로 확정지어라.
       - BINDER_DELAY(1000ms 이상)가 감지되면, 특정 프로세스 간의 통신 병목이 시스템 성능 저하를 유발했음을 설명해라.
+
+    RILJ_Transaction: |
+      - [모뎀 트랜잭션 이상 (RILJ)]: 안드로이드(AP)와 모뎀(CP) 간의 통신 내역이다. 단말 무선 장애의 가장 근본적인 하드웨어/펌웨어 원인을 지목할 때 사용하라.
+      - 🚨 상태가 'TIMEOUT(응답 없음)'인 경우: 모뎀 칩셋이 명령을 받고 완전히 뻗어버린(Modem Crash/Freeze) 치명적인 상태다. 통화 발신 실패나 데이터 먹통의 100% 확실한 원인으로 단정 지어라.
+      - 🚨 상태가 'SLOW(지연)'인 경우 (예: 500ms 이상 지연): 모뎀은 응답했으나 내부 처리가 심각하게 지연된 상태다. 이 지연 시간 동안 프레임워크의 RIL 스레드가 블로킹되므로, 단말 UI 버벅임이나 후속 통신 지연의 병목 원인으로 지목하라.
+      - 🚨 상태가 'ERROR'인 경우: 모뎀이 해당 명령을 거부(예: RADIO_NOT_AVAILABLE 등)한 것이므로, 에러 코드를 명시하여 실패 사유를 설명하라.
 
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿
