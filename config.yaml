@@ -199,10 +199,10 @@ quick_prompts:
 
     IF_규칙 2 (장애 발생 시 서술):
     팩트 데이터에 문제가 "확실하게 존재할 때만" 아래 지침에 따라 서술하라.
-    - 🚨 [바인더 통신 지연(원인) 및 스레드 고갈(결과)]:
-      `TRANSACTION_DELAY` 팩트가 발견되면, 어느 타겟 프로세스/인터페이스(예: ISehWifi 등)로 향하는 바인더 호출이 몇 ms 동안 지연되었는지 짚어내라.
-      그리고 이것이 동시간대 발생한 `THREAD_EXHAUSTION`(바인더 스레드 고갈)의 '직접적인 범인'임을 강력하게 연결 지어 설명하라.
-      "특정 모듈의 응답 지연(원인) -> system_server 스레드 고갈(결과) -> 단말 전체 프리징(증상)" 의 흐름으로 인과관계를 작성하라.
+    - [바인더 통신 지연 및 스레드 고갈 분석]:
+      `TRANSACTION_DELAY` 팩트가 발견되면, 어느 타겟 프로세스/인터페이스로 향하는 Binder 호출이 몇 ms 동안 지연되었는지 짚어내라.
+      다만 이를 곧바로 `THREAD_EXHAUSTION`의 직접 범인으로 단정하지 말고, 반복성/시간 선후관계/ANR stack/Watchdog/lock contention/CPU pressure 로그가 함께 있는지 확인하라.
+      근거가 충분할 때만 "특정 모듈 응답 지연 후보 → Binder thread 대기 증가 → ANR/프리징 가능성"의 흐름으로 설명하고, 근거가 부족하면 원인 후보로 제한해서 서술하라.
     - 🚨 [바인더 페이로드 초과]: Java Crash 중 `TransactionTooLargeException`이 확인되면, "해당 앱이 안드로이드 바인더 1MB 버퍼 제한을 초과하는 너무 큰 데이터를 담아 전송하려다 강제 종료(Crash)되었다"고 명확히 지적하라.    - Java 단 Crash/ANR이 발생한 경우: 팩트의 콜스택을 기반으로 프레임워크와의 연관성을 객관적으로 서술하라.
     - Native Crash(C/C++)가 발생한 경우: 'Fatal signal' 유형과 'Abort Message'를 명시하고, 콜스택을 분석하여 에러를 유발한 벤더 라이브러리와 함수명을 정확히 짚어내라.
     - 🚨 [발열 및 배터리 분석 강화]: 배터리/발열 문제가 있는 경우, 팩트에 기록된 'Top CPU 점유율 프로세스'와 'Wakelock 앱'을 최우선 원인으로 지목하라. 특정 앱/프로세스의 CPU 점유율이 높고 기기 온도(Thermal)가 40도 이상 상승했다면, "해당 프로세스의 연산 폭주(고부하)로 인한 심각한 발열 및 배터리 드레인"으로 인과관계를 명확히 서술하라.
@@ -385,9 +385,11 @@ prompts:
       - 특히 TransactionTooLargeException은 앱 자체의 데이터 전송 설계 오류(1MB 제한 초과)임을 지적해라.
 
     Binder_Warning: |
-      - 🚨 TRANSACTION_DELAY가 감지되면, 특정 컴포넌트(예: 벤더 HAL, 시스템 데몬)가 응답을 주지 않아 통신이 심각하게 지연(1000ms 이상)된 것이다. 이를 시스템 병목의 '최초 유발자(Root Cause)'로 지목해라.
-      - 🚨 THREAD_EXHAUSTION이 감지되면, 단말이 일시적으로 완전한 먹통(Freezing) 상태에 빠졌음을 의미한다. 만약 동시간대에 TRANSACTION_DELAY가 함께 있다면, 그 타겟을 스레드 고갈의 범인으로 확정지어라.
-      - BINDER_DELAY(1000ms 이상)가 감지되면, 특정 프로세스 간의 통신 병목이 시스템 성능 저하를 유발했음을 설명해라.
+      - TRANSACTION_DELAY가 감지되면, 특정 컴포넌트(예: 벤더 HAL, 시스템 데몬) 대상 Binder transaction이 1000ms 이상 지연된 것이다. 단독으로 Root Cause를 확정하지 말고, 동시간대 ANR, Watchdog, THREAD_EXHAUSTION, 대상 서비스 재시작/사망 여부와 함께 원인 후보로 검토하라.
+      - THREAD_EXHAUSTION이 감지되면, Binder thread pool 포화 또는 starvation을 의미하는 강한 이상 신호다. 단말 Freezing/ANR과 직접 관련될 가능성이 높지만, 어떤 transaction이 선행했는지와 system_server 상태를 함께 확인하라.
+      - BINDER_DELAY 또는 binder_sample 지연은 IPC 병목 지표다. 반복 발생하거나 ANR/Watchdog 시점과 인접할 때 중요도가 높아진다.
+      - BINDER_TRANSACTION_FAILURE, BINDER_BUFFER_ERROR가 있으면 대상 프로세스 사망, RemoteException, TransactionTooLargeException, binder buffer 부족 가능성을 확인하라.
+      - Binder_Context가 제공되면 UI 테이블 이벤트가 아니라 RCA 보조 문맥이다. ANR/Input timeout, Watchdog/system_server, lock contention, CPU/iowait/memory pressure, Telephony/RILJ 이벤트와의 시간 상관관계를 확인하는 용도로만 사용하라.
 
     RILJ_Transaction: |
       - [모뎀 트랜잭션 이상 (RILJ)]: 안드로이드(AP)와 모뎀(CP) 간의 통신 내역이다. 단말 무선 장애의 가장 근본적인 하드웨어/펌웨어 원인을 지목할 때 사용하라.

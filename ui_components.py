@@ -315,7 +315,7 @@ def render_network_timeseries_and_dns(df):
     st.subheader("🌐 DNS 및 네트워크 시계열 분석")
 
     if 'log_type' in df.columns:
-        # 1. DNS 이슈 요약 (기존 유지)
+        # 1. DNS 이슈 요약
         dns_df = df[df['log_type'] == 'Network_DNS_Issue'].copy()
         if not dns_df.empty:
             col_dns1, col_dns2 = st.columns(2)
@@ -329,6 +329,28 @@ def render_network_timeseries_and_dns(df):
                 pkg_counts.columns = ['package', 'count']
                 fig_pkg = px.bar(pkg_counts, x='count', y='package', orientation='h')
                 st.plotly_chart(fig_pkg, width="stretch")
+
+            # 💡 [여기부터 신규 추가!] 차트 아래에 Net ID와 패키지명이 포함된 상세 표 렌더링
+            st.markdown("**📋 DNS 차단/실패 상세 내역 (망 교차 분석)**")
+
+            # 출력할 컬럼 지정 및 한글화
+            display_cols = ['time', 'net_id', 'package', 'result', 'suspected_reason']
+            exist_cols = [c for c in display_cols if c in dns_df.columns]
+
+            detail_df = dns_df[exist_cols].copy()
+
+            # 사용자 가독성을 위해 컬럼명 예쁘게 변경
+            col_rename_map = {
+                'time': '시간',
+                'net_id': '망(NetID)',
+                'package': '앱 이름',
+                'result': '결과(에러)',
+                'suspected_reason': '추정 원인'
+            }
+            detail_df.rename(columns=col_rename_map, inplace=True)
+
+            st.dataframe(detail_df, width="stretch", hide_index=True)
+
         else:
             st.info("적재된 DNS 이슈 데이터가 없습니다.")
 
@@ -699,9 +721,46 @@ def render_crash_analyzer(report_data):
         return
 
     if binder_warnings:
-        st.warning(f"⚠️ 총 {len(binder_warnings)}건의 치명적인 Binder 통신 지연/고갈(Thread Exhaustion)이 감지되었습니다! (시스템 멈춤 원인)")
-        with st.expander("🔗 상세 Binder 경고 로그 보기"):
-            st.dataframe(pd.DataFrame(binder_warnings)[['time', 'type', 'desc']], width="stretch")
+        # Binder context/checklist 류 보조 데이터가 실수로 섞여 들어와도 UI 테이블에는
+        # 실제 문제 이벤트만 표시합니다. 대량 로그로 인한 UI 폭증을 방지합니다.
+        binder_event_types = {
+            "THREAD_EXHAUSTION", "TRANSACTION_DELAY", "BINDER_DELAY",
+            "BINDER_TRANSACTION_FAILURE", "BINDER_BUFFER_ERROR", "REPEATED_BINDER_DELAY"
+        }
+        binder_event_rows = [
+            b for b in binder_warnings
+            if isinstance(b, dict) and b.get("type") in binder_event_types
+        ]
+
+        st.warning(
+            f"⚠️ 총 {len(binder_event_rows)}건의 Binder 지연/실패/스레드 포화 이벤트가 감지되었습니다. "
+            "단독 원인 확정보다는 ANR/Watchdog/서비스 재시작 여부와 함께 확인하세요."
+        )
+        with st.expander("🔗 상세 Binder 이벤트 로그 보기"):
+            if binder_event_rows:
+                binder_df = pd.DataFrame(binder_event_rows)[['time', 'type', 'desc']]
+                max_display_rows = 300
+                if len(binder_df) > max_display_rows:
+                    st.caption(f"표시는 최근 {max_display_rows}건으로 제한합니다. 전체 이벤트 수: {len(binder_df)}건")
+                    binder_df = binder_df.tail(max_display_rows)
+                st.dataframe(binder_df, width="stretch")
+            else:
+                st.info("표시할 Binder 이벤트가 없습니다.")
+
+        binder_context_summary = report_data.get("binder_context_summary", {})
+        if binder_context_summary:
+            with st.expander("🧭 Binder 추가 확인 요약", expanded=False):
+                signals = binder_context_summary.get("signals", {})
+                checklist = binder_context_summary.get("checklist", [])
+                if signals:
+                    signal_df = pd.DataFrame([
+                        {"context": k, "matched_lines": v} for k, v in signals.items()
+                    ])
+                    st.dataframe(signal_df, width="stretch", hide_index=True)
+                if checklist:
+                    st.markdown("**추가 확인 항목:**")
+                    for item in checklist:
+                        st.markdown(f"- {item}")
 
     if native_crash_data:
         st.error(f"☠️ 총 {len(native_crash_data)}건의 Native C/C++ 크래시가 감지되었습니다!")

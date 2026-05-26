@@ -108,6 +108,7 @@ class LogOrchestrator:
             'nitz': [],
             'native_crash': [],
             'binder': [],
+            'binder_context': [],
             'rilj': [],
         }
 
@@ -159,8 +160,29 @@ class LogOrchestrator:
         internet_stall_line_keywords = [
             "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
         ]
-        native_crash_keywords = ["Fatal signal", "Abort mesage:", "backtrace:"]
-        binder_keywords = ["binder thread pool", "binder_sample", "Binder transaction to"]
+        native_crash_keywords = ["Fatal signal", "Abort mesage:", "Abort message:", "backtrace:"]
+
+        # Binder UI 테이블에는 직접적인 Binder 문제 이벤트만 넣습니다.
+        # 주변 문맥(ANR/Watchdog/CPU 등)은 별도 binder_context 버킷으로 분리하여
+        # LLM RCA 보조 팩트에만 사용합니다. UI 테이블 폭증 방지가 목적입니다.
+        binder_keywords = [
+            "binder thread pool", "binder_sample", "Binder transaction to",
+            "DeadObjectException", "FAILED_TRANSACTION", "binder transaction failed",
+            "TransactionTooLargeException", "binder_alloc", "binder buffer",
+        ]
+        binder_context_keywords = [
+            "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
+            "Watchdog", "system_server", "slow dispatch", "slow delivery",
+            "lock contention", "monitor contention", "blocked on", "waiting to lock",
+            "DeadObjectException", "FAILED_TRANSACTION", "RemoteException", "Service not responding",
+            "CPU usage", "iowait", "lowmemorykiller", "lmkd", "memory pressure",
+            "RILJ", "rild", "radio", "telephony", "IMS", "DataCall", "OOS",
+        ]
+        binder_context_anchor_keywords = [
+            "binder thread pool", "binder_sample", "Binder transaction to",
+            "DeadObjectException", "FAILED_TRANSACTION", "TransactionTooLargeException",
+            "binder_alloc",
+        ]
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
         rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)RILJ\b', re.IGNORECASE)
@@ -224,7 +246,20 @@ class LogOrchestrator:
                 self._add_context_window(buckets, 'native_crash', lines, idx, window=60)
 
             if any(k in line for k in binder_keywords):
-                buckets['binder'].append(line)
+                 buckets['binder'].append(line)
+
+            # Binder context는 이벤트 주변의 제한된 문맥만 모읍니다.
+            # context 라인을 binder_warnings에 넣으면 UI 상세 테이블이 수천 행으로 불어납니다.
+            if any(k in line for k in binder_context_anchor_keywords):
+                start = max(0, idx - 20)
+                end = min(len(lines), idx + 21)
+                for ctx_line in lines[start:end]:
+                    if any(k.lower() in ctx_line.lower() for k in binder_context_keywords):
+                        buckets['binder_context'].append(ctx_line)
+            elif any(k.lower() in line.lower() for k in binder_context_keywords):
+                # 앵커 없이 전역으로 잡히는 context는 과다 수집 방지를 위해 직접 append하지 않습니다.
+                # ANR/Crash 전용 parser가 별도 bucket에서 처리합니다.
+                pass
 
             if rilj_tag_regex.search(line):
                 buckets['rilj'].append(line)
@@ -307,6 +342,9 @@ class LogOrchestrator:
                 result["battery_thermal_stats"] = battery_thermal_res
             if binder_res := self.binder_parser.analyze(buckets['binder']):
                 result['binder_warnings'] = binder_res
+                # Binder 관련 추가 확인 사항은 UI 테이블에 넣지 않고 별도 요약으로만 보관합니다.
+                if binder_ctx := self.binder_parser.build_context_summary(buckets.get('binder_context', [])):
+                    result['binder_context_summary'] = binder_ctx
             if rilj_res := self.rilj_parser.analyze(buckets['rilj']):
                 result['rilj_transactions'] = rilj_res
 

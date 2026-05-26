@@ -347,7 +347,17 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         has_fatal_or_anr = True
         kpi_report["10_system_crash_and_fatal_errors"]["binder_warnings"] = [
             f"[{b.get('time')}] {b.get('type')}: {b.get('desc')}" for b in binder_warnings
+            if isinstance(b, dict)
         ]
+
+    binder_context_summary = report_data.get("binder_context_summary", {})
+    if binder_context_summary:
+        has_fatal_or_anr = True
+        kpi_report["10_system_crash_and_fatal_errors"]["binder_context_summary"] = {
+            "signals": binder_context_summary.get("signals", {}),
+            "checklist": binder_context_summary.get("checklist", []),
+            "total_context_lines": binder_context_summary.get("total_context_lines", 0),
+        }
 
     if has_fatal_or_anr and "anr_events" in kpi_report["10_system_crash_and_fatal_errors"]:
         anr_events = kpi_report["10_system_crash_and_fatal_errors"].get("anr_events", [])

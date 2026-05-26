@@ -671,69 +671,201 @@ class NitzParser(BaseParser):
         return nitz_history
 
 class BinderWarningParser(BaseParser):
+    """Binder 관련 '이벤트'와 '보조 문맥'을 분리해서 분석합니다.
+
+    - analyze(): UI 테이블/팩트로 노출할 실제 Binder 문제 이벤트만 반환합니다.
+    - build_context_summary(): LLM RCA 보조용 요약만 반환합니다. UI 테이블 행으로 넣지 않습니다.
+    """
+
+    DIRECT_EVENT_TYPES = {
+        "THREAD_EXHAUSTION",
+        "TRANSACTION_DELAY",
+        "BINDER_DELAY",
+        "BINDER_TRANSACTION_FAILURE",
+        "BINDER_BUFFER_ERROR",
+        "REPEATED_BINDER_DELAY",
+    }
+
+    def _extract_time(self, line_str):
+        ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line_str)
+        return ts_m.group(0) if ts_m else line_str[:18].strip()
+
+    def _severity_label(self, duration_ms):
+        if duration_ms >= 5000:
+            return "치명적"
+        if duration_ms >= 3000:
+            return "높음"
+        return "주의"
+
     def analyze(self, lines):
         warnings = []
+        delay_count_by_target = {}
+        last_delay_event_by_target = {}
+        seen_raw = set()
 
         for line in lines:
             line_str = line.strip()
+            if not line_str or line_str in seen_raw:
+                continue
+            seen_raw.add(line_str)
+            lower = line_str.lower()
+            event_time = self._extract_time(line_str)
 
-            # 1. Thread Exhaustion / Starved (스레드 고갈 결과)
-            if "binder thread pool" in line_str and ("is full" in line_str or "starved for" in line_str):
-                starved_match = re.search(r'starved for (\d+)\s*ms', line_str)
+            # 1. Thread Exhaustion / Starved: 강한 장애 신호
+            if "binder thread pool" in lower and ("is full" in lower or "starved for" in lower):
+                starved_match = re.search(r'starved for (\d+)\s*ms', line_str, re.IGNORECASE)
                 if starved_match:
-                    delay_ms = starved_match.group(1)
-                    desc = f"Binder Thread Pool Starvation: 바인더 스레드가 고갈되어 처리 대기열에서 {delay_ms}ms(약 {round(int(delay_ms)/1000, 1)}초) 동안 치명적인 지연 발생"
+                    delay_ms = int(starved_match.group(1))
+                    desc = (
+                        f"Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 "
+                        f"{delay_ms}ms(약 {round(delay_ms / 1000, 1)}초) 대기했습니다. "
+                        "ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."
+                    )
                 else:
-                    desc = "Binder Thread Pool is full - 시스템 프리징(멈춤) 발생"
+                    desc = (
+                        "Binder thread pool 포화 감지. IPC 처리 자원 부족을 의미하는 강한 이상 신호이며, "
+                        "동시간대 ANR/Watchdog/느린 Binder transaction 여부를 함께 확인해야 합니다."
+                    )
 
                 warnings.append({
-                    "time": line_str[:18].strip(),
+                    "time": event_time,
                     "type": "THREAD_EXHAUSTION",
                     "desc": desc,
                     "raw": line_str
                 })
+                continue
 
-            # 💡 2. TRANSACTION_DELAY (무적의 String Split 파서 적용)
-            elif "Binder transaction to" in line_str and "took" in line_str:
+            # 2. Binder transaction delay: 원인 후보/증상으로 표현
+            if "binder transaction to" in line_str and "took" in line_str:
                 try:
-                    # 원문 예: "... Binder transaction to vendor.samsung... code 1598311760 took 3165ms. Data ..."
-                    # 대상 프로세스 이름 추출
-                    target_part = line_str.split("Binder transaction to ")[1]
+                    target_part = line_str.split("Binder transaction to ", 1)[1]
                     target = target_part.split()[0]
-
-                    # 지연 시간(ms) 추출 (숫자만 필터링하여 마침표나 공백 완벽 방어)
-                    took_part = line_str.split("took ")[1]
-                    duration_str = "".join(filter(str.isdigit, took_part.split("ms")[0]))
+                    took_part = line_str.split("took ", 1)[1]
+                    duration_str = "".join(filter(str.isdigit, took_part.split("ms", 1)[0]))
                     duration_ms = int(duration_str)
 
-                    if duration_ms > 1000: # 1초 이상 지연 시에만 수집
-                        warnings.append({
-                            "time": line_str[:18].strip(),
+                    if duration_ms > 1000:
+                        level = self._severity_label(duration_ms)
+                        desc = (
+                            f"[{target}] 대상 Binder transaction이 {duration_ms}ms"
+                            f"(약 {round(duration_ms / 1000, 1)}초) 지연되었습니다. 심각도: {level}. "
+                            "단독으로 Root Cause를 확정하지 말고, ANR/Watchdog/thread starvation/대상 서비스 재시작 여부와 교차 확인해야 합니다."
+                        )
+                        event = {
+                            "time": event_time,
                             "type": "TRANSACTION_DELAY",
-                            "desc": f"[{target}] 향 바인더 호출이 {duration_ms}ms(약 {round(duration_ms/1000, 1)}초) 심각하게 지연됨 (스레드 고갈 주범)",
+                            "desc": desc,
                             "raw": line_str
-                        })
-                except Exception as e:
-                    # 파싱에 실패하더라도 화면에 무조건 띄워줍니다!
+                        }
+                        warnings.append(event)
+                        delay_count_by_target[target] = delay_count_by_target.get(target, 0) + 1
+                        last_delay_event_by_target[target] = event
+                except Exception:
                     warnings.append({
-                        "time": line_str[:18].strip(),
+                        "time": event_time,
                         "type": "TRANSACTION_DELAY",
-                        "desc": f"바인더 지연 감지 (상세 추출 실패): {line_str.split('libbinder')[1][:50]}...",
+                        "desc": "Binder transaction 지연 로그가 감지되었으나 target/duration 상세 추출에 실패했습니다. 원문 확인이 필요합니다.",
                         "raw": line_str
                     })
+                continue
 
-            # 3. binder_sample (기존 프레임워크 샘플링 유지)
-            elif "binder_sample" in line_str:
-                sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,]+)')
+            # 3. binder_sample: 느린 IPC 샘플링 지표
+            if "binder_sample" in line_str:
+                sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,\]]+)')
                 m = sample_pattern.search(line_str)
                 if m:
                     interface, code, duration_ms, pkg = m.group(1), m.group(2), int(m.group(3)), m.group(4)
                     if duration_ms > 1000:
+                        level = self._severity_label(duration_ms)
                         warnings.append({
-                            "time": line_str[:18].strip(),
+                            "time": event_time,
                             "type": "BINDER_DELAY",
-                            "desc": f"[{pkg}] 패키지의 {interface} 바인더 콜이 {duration_ms}ms 지연됨",
+                            "desc": (
+                                f"[{pkg}] 패키지의 {interface} Binder call이 {duration_ms}ms 지연되었습니다. "
+                                f"심각도: {level}. 반복 발생 또는 ANR 시점 인접 여부 확인이 필요합니다."
+                            ),
                             "raw": line_str
                         })
+                continue
+
+            # 4. Binder transaction failure 계열: 단순 지연보다 장애성이 강함
+            if any(k in lower for k in [
+                "deadobjectexception", "failed_transaction", "binder transaction failed",
+                "transaction failed", "remoteexception"
+            ]):
+                warnings.append({
+                    "time": event_time,
+                    "type": "BINDER_TRANSACTION_FAILURE",
+                    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스 재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.",
+                    "raw": line_str
+                })
+                continue
+
+            # 5. Binder buffer / allocation 계열
+            if any(k in lower for k in [
+                "transactiontoolargeexception", "binder_alloc", "binder buffer",
+                "no space left", "buffer allocation", "parcel size"
+            ]):
+                warnings.append({
+                    "time": event_time,
+                    "type": "BINDER_BUFFER_ERROR",
+                    "desc": "Binder buffer/parcel 크기 관련 오류 감지. 대용량 parcel, buffer 부족 또는 TransactionTooLargeException 가능성이 있습니다.",
+                    "raw": line_str
+                })
+                continue
+
+        # 동일 target의 반복 지연은 별도 요약 이벤트 1건만 추가합니다.
+        for target, cnt in delay_count_by_target.items():
+            if cnt >= 3:
+                last = last_delay_event_by_target.get(target, {})
+                warnings.append({
+                    "time": last.get("time", ""),
+                    "type": "REPEATED_BINDER_DELAY",
+                    "desc": f"[{target}] 대상 Binder transaction 지연이 {cnt}회 반복되었습니다. 단발성 지연보다 서비스 병목 가능성이 높아 ANR/Watchdog 시점과 비교가 필요합니다.",
+                    "raw": last.get("raw", "")
+                })
 
         return warnings
+
+    def build_context_summary(self, context_lines, max_examples=12):
+        """Binder RCA 보조용 문맥 요약입니다. 반환값은 UI 테이블이 아닌 LLM/KPI 보조 팩트에만 사용합니다."""
+        if not context_lines:
+            return {}
+
+        categories = {
+            "anr_or_input_timeout": [" anr", "am_anr", "application not responding", "input dispatching timed out"],
+            "watchdog_or_system_server": ["watchdog", "system_server", "slow dispatch", "slow delivery"],
+            "lock_contention": ["lock contention", "monitor contention", "blocked on", "waiting to lock", "held by"],
+            "service_or_ipc_failure": ["deadobjectexception", "failed_transaction", "remoteexception", "service not responding"],
+            "resource_pressure": ["cpu usage", "iowait", "lowmemorykiller", "lmkd", "memory pressure", "kswapd"],
+            "telephony_nearby": ["rilj", "rild", "radio", "telephony", "ims", "datacall", "oos"],
+        }
+        summary = {"total_context_lines": len(context_lines), "signals": {}, "examples": {}}
+
+        for name, keywords in categories.items():
+            matched = []
+            for line in context_lines:
+                lower = line.lower()
+                if any(k in lower for k in keywords):
+                    matched.append(line.strip())
+            if matched:
+                summary["signals"][name] = len(matched)
+                summary["examples"][name] = matched[-max_examples:]
+
+        if summary["signals"]:
+            checklist = []
+            if summary["signals"].get("anr_or_input_timeout"):
+                checklist.append("ANR/Input timeout 시점과 Binder 지연 시점의 시간 상관관계 확인")
+            if summary["signals"].get("watchdog_or_system_server"):
+                checklist.append("system_server Watchdog/slow dispatch 동반 여부 확인")
+            if summary["signals"].get("lock_contention"):
+                checklist.append("Lock/monitor contention이 Binder 응답 지연의 선행 원인인지 확인")
+            if summary["signals"].get("service_or_ipc_failure"):
+                checklist.append("대상 서비스 사망/재시작/RemoteException 여부 확인")
+            if summary["signals"].get("resource_pressure"):
+                checklist.append("CPU/iowait/memory pressure로 인한 전역 지연 가능성 확인")
+            if summary["signals"].get("telephony_nearby"):
+                checklist.append("RILJ/Telephony/IMS/DataCall/OOS 이벤트와 장애 시점 비교")
+            summary["checklist"] = checklist
+
+        return summary if summary["signals"] else {}

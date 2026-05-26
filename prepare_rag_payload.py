@@ -314,6 +314,8 @@ class RagPayloadBuilder:
         # ==========================================
         if "binder_warnings" in report_data:
             for bw in report_data["binder_warnings"]:
+                if not isinstance(bw, dict):
+                    continue
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Binder_Warning",
@@ -322,7 +324,23 @@ class RagPayloadBuilder:
                     "desc": bw.get("desc", ""),
                     "raw_info": bw.get("raw", "")
                 }
-                text_content = f"[바인더 통신 장애] 시간: {meta['time']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+                text_content = f"[바인더 통신 이벤트] 시간: {meta['time']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+                rag_payload.append({"document": text_content, "metadata": meta})
+
+        if "binder_context_summary" in report_data:
+            ctx = report_data.get("binder_context_summary") or {}
+            signals = ctx.get("signals", {})
+            checklist = ctx.get("checklist", [])
+            if signals or checklist:
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Binder_Context",
+                    "signals": signals,
+                }
+                text_content = (
+                    f"[바인더 추가 확인 문맥] 감지된 주변 신호: {signals}. "
+                    f"추가 확인 항목: {' / '.join(checklist)}"
+                )
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
