@@ -4,10 +4,10 @@ from parsers.base import BaseParser
 
 class RiljParser(BaseParser):
     def analyze(self, lines):
-        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)RILJ\b', re.IGNORECASE)
+        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
         # 1. 정규식 튜닝: 대소문자 무시(re.IGNORECASE) 및 실제 포맷 완벽 대응
         req_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(\d+)\]>\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
-        resp_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(\d+)\]<\s*([A-Z_0-9]+)\s*(error:\s*[A-Z_0-9_]+)?(.*)', re.IGNORECASE)
+        resp_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(\d+)\]<\s*([A-Z_0-9]+)\s*(error[:\s]+[A-Z_0-9_]+)?(.*)', re.IGNORECASE)
         unsol_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(?:UNSOL|UNSL)\][><]\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
 
         pending_requests = {}
@@ -62,12 +62,27 @@ class RiljParser(BaseParser):
                         latency_ms = 0
 
                     # 에러 여부 판독 (에러 문자열이 없거나 error: NONE이면 SUCCESS)
-                    error_str = m_resp.group(3)
+                    raw_error_field = m_resp.group(3)
                     is_error = False
                     error_msg = "SUCCESS"
-                    if error_str and "error: NONE" not in error_str.upper():
-                        is_error = True
-                        error_msg = error_str.replace("error:", "").strip()
+
+                    if raw_error_field:
+                        # "error 49" 또는 "error: GENERIC_FAILURE" 등에서 실제 원인 값만 추출
+                        clean_err = re.sub(r'error[:\s]+', '', raw_error_field, flags=re.IGNORECASE).strip()
+                        if clean_err and clean_err.upper() != "NONE":
+                            is_error = True
+                            error_msg = clean_err
+
+                    # 2. 💡 [이중 방어막] 로그 라인 전체 텍스트에 대문자 'ERROR'가 존재하는데 SUCCESS로 파싱되는 현상 차단
+                    if not is_error and "ERROR" in m_resp.group(4).upper():
+                        # 응답 상세 텍스트(group(4))에서 error 뒤에 붙은 코드 패턴 추적
+                        extra_err_match = re.search(r'error[:\s]+([A-Z_0-9_]+)', m_resp.group(4), re.IGNORECASE)
+                        if extra_err_match:
+                            is_error = True
+                            error_msg = extra_err_match.group(1)
+                        else:
+                            is_error = True
+                            error_msg = "GENERIC_ERROR"
 
                     completed_requests.append({
                         "start_time": req_data['start_time'],

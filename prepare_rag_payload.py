@@ -65,14 +65,14 @@ class RagPayloadBuilder:
         elif data_dict.get("start_time"): metadata["time"] = data_dict.get("start_time")
         elif data_dict.get("time"): metadata["time"] = data_dict.get("time")
         elif data_dict.get("stats_period"): metadata["time"] = data_dict.get("stats_period")
-        # 🚨 [여기 한 줄 추가!] Boot_Stat의 Time_ms도 표준 time으로 인식하게 함
+        # 🚨 Boot_Stat의 Time_ms도 표준 time으로 인식하게 함
         elif data_dict.get("Time_ms") is not None: metadata["time"] = data_dict.get("Time_ms")
 
 
         if data_dict.get("slot"): metadata["slot"] = data_dict.get("slot")
         elif data_dict.get("slotId"): metadata["slot"] = data_dict.get("slotId")
 
-        # 🚨 [여기 추가!] Signal_Level 전용 메타데이터 통과시키기
+        # 🚨 Signal_Level 전용 메타데이터 통과시키기
         if data_dict.get("rat") is not None:
             metadata["rat"] = data_dict.get("rat")
         if data_dict.get("level") is not None:
@@ -112,15 +112,25 @@ class RagPayloadBuilder:
             rag_payload.append({"document": clean_doc, "metadata": clean_meta})
 
         if "radio_power" in report_data:
+            # 상태 변경 로직은 가벼우므로 역순 없이 처리
             for rp in report_data["radio_power"]:
                 add_to_payload(rp, "Radio_Power_Event")
 
+        # ==========================================
+        # 🚨 [수정] Call Session 최신 로그 우선 처리
+        # ==========================================
         if "call_sessions" in report_data and report_data["call_sessions"]:
-            for session in report_data["call_sessions"]:
+            # 최근에 발생한 Call (에러 등) 10개만 추출
+            recent_calls = report_data["call_sessions"][::-1][:10]
+            for session in recent_calls:
                 add_to_payload(session, "Call_Session")
 
+        # ==========================================
+        # 🚨 [수정] OOS Event 최신 로그 우선 처리
+        # ==========================================
         if "oos_events" in report_data and report_data["oos_events"]:
-            for oos in report_data["oos_events"]:
+            recent_oos = report_data["oos_events"][::-1][:5]
+            for oos in recent_oos:
                 add_to_payload(oos, "OOS_Event")
 
         # 3. ANR 방어
@@ -144,53 +154,42 @@ class RagPayloadBuilder:
 
         if "native_crash_context" in report_data and report_data["native_crash_context"]:
             for native_crash in report_data["native_crash_context"]:
-                # 콜스택을 LLM이 읽기 쉬운 문자열로 변환하여 메타데이터에 주입
                 stack_str = "\n".join([f"#{c['frame_level']} {c['library']} ({c['function']})" for c in native_crash.get('callstack', [])])
                 native_crash['raw_stack'] = stack_str
                 add_to_payload(native_crash, "Native_Crash_Event")
 
-
-        # 배터리 통계 (기존 로직 유지)
+        # 배터리 통계
         if "battery_stats" in report_data:
             add_to_payload(report_data["battery_stats"], "Battery_Drain_Report")
 
-        # ==========================================
-        # 🚨 Boot Stat 데이터 DB 적재
-        # ==========================================
         if "boot_stats" in report_data:
             for boot_stat in report_data["boot_stats"]:
                 add_to_payload(boot_stat, "Boot_Stat")
 
         if "signal_level_history" in report_data:
             for sig in report_data["signal_level_history"]:
-                # 만약 기존에 만들어둔 add_to_payload 함수가 있다면:
                 add_to_payload(sig, "Signal_Level")
 
         if "network_timeseries" in report_data:
             net_data = report_data["network_timeseries"]
             timeline = net_data.get("sorted_timeline", {})
 
-            # 1. 시계열 통계 데이터 평탄화 (그래프용)
             for ts, details in timeline.items():
                 for stat in details.get("net_stats", []):
-                    # 이 구조가 web_app.py의 px.line이 읽는 데이터 구조가 됩니다.
                     stat_item = {
                         "time": ts,
-                        "log_type": "Network_Timeline_Stat", # 중요: log_type 명시
+                        "log_type": "Network_Timeline_Stat",
                         "netId": stat.get("netId"),
                         "transport": stat.get("transport"),
                         "dns_avg": stat.get("dns_avg"),
                         "dns_err_rate": stat.get("dns_err_rate"),
                         "tcp_avg_loss": stat.get("tcp_avg_loss")
                     }
-                    # 별도의 document 텍스트 생성
                     doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
                     rag_payload.append({"document": doc, "metadata": stat_item})
 
-            # DNS 이슈들을 개별 지식 조각으로 추가
             for dns_issue in net_data.get("dns_issues", []):
                 dns_issue["log_type"] = "Network_DNS_Issue"
-                # LLM에게 전달될 문장(Document) 강화
                 doc = (
                     f"DNS Blocked Event: Package {dns_issue['package']} (UID: {dns_issue['uid']}) "
                     f"was blocked. Effective Policy: {dns_issue.get('effective_policy', 'Unknown')}. "
@@ -198,38 +197,33 @@ class RagPayloadBuilder:
                 )
                 rag_payload.append({"document": doc, "metadata": dns_issue})
 
-                # 시계열 통계 요약본 추가
                 if net_data.get("sorted_timeline"):
                     summary = {"timeline_count": len(net_data["sorted_timeline"])}
                     add_to_payload(summary, "Network_Timeline_Summary")
 
-        # 🚨 데이터 사용량 통계 페이로드 변환
         if "data_usage_stats" in report_data:
             for usage in report_data["data_usage_stats"]:
-                # 0.1 MB 이하는 너무 자잘해서 DB 용량만 차지하므로 스킵 (선택사항)
                 if usage.get("total_mb", 0) < 0.1: continue
 
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "Data_Usage",
-                    "time": usage.get("time", "시간 미상"),  # 🚨 [추가] 메타데이터에 시간(time) 필드 삽입
+                    "time": usage.get("time", "시간 미상"),
                     "app_name": usage.get("app_name", "Unknown"),
                     "rat": usage.get("rat", "Unknown"),
                     "total_mb": usage.get("total_mb", 0.0),
                     "rx_mb": usage.get("rx_mb", 0.0),
                     "tx_mb": usage.get("tx_mb", 0.0)
                 }
-
-                # 🚨 [수정] LLM이 시간대 흐름을 파악할 수 있도록 텍스트 맨 앞에 [시간] 추가
                 text_content = f"[{meta['time']}] 데이터 사용량 기록: {meta['app_name']} 앱이 {meta['rat']} 망에서 총 {meta['total_mb']} MB의 셀룰러 데이터를 사용했습니다. (다운로드: {meta['rx_mb']} MB, 업로드: {meta['tx_mb']} MB)"
-
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 DNS 쿼리 결과 페이로드 변환
+        # 🚨 [수정] DNS 쿼리 최신 로그 우선 처리
         # ==========================================
         if "dns_queries" in report_data:
-            for dns in report_data["dns_queries"]:
+            recent_dns = report_data["dns_queries"][::-1][:15]
+            for dns in recent_dns:
                 meta = {
                     "source_file": os.path.basename(self.input_file),
                     "log_type": "DNS_Query",
@@ -239,33 +233,22 @@ class RagPayloadBuilder:
                     "return_code": dns.get("return_code", "UNKNOWN"),
                     "raw_info": dns.get("raw_info", "")
                 }
-
-                # LLM이 읽을 자연어 문장 (Document) 생성
                 text_content = f"DNS 요청 기록: {meta['time']}에 {meta['app_name']} 앱(UID: {meta['uid']})이 DNS 요청을 수행했습니다. 결과 코드(return_code)는 {meta['return_code']} 입니다. (상세정보: {meta['raw_info']})"
-
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 VoLTE/IMS SIP 메시지 페이로드 변환 (추가된 부분)
+        # 🚨 [수정] VoLTE/IMS SIP 메시지 최신 로그 우선 처리
         # ==========================================
         if "ims_sip_data" in report_data:
-            for sip in report_data["ims_sip_data"]:
-                # 1. 공통 메타데이터 자동 추출 함수 태우기
+            recent_sip = report_data["ims_sip_data"][::-1][:10]
+            for sip in recent_sip:
                 meta = self._extract_metadata(sip, "IMS_SIP_Message")
-
-                # 2. UI의 [참고 로그] 탭에 원본 로그가 예쁘게 찍히도록 'raw_logs' 규격 맞춰주기
                 if "raw_log" in sip:
                     meta["raw_logs"] = json.dumps([sip["raw_log"]], ensure_ascii=False)
-
-                # 3. 앞서 ImsSipProcessor에서 예쁘게 1줄로 요약해 둔 'document'를 그대로 본문으로 사용
                 text_content = sip.get("document", self._build_markdown_doc(sip, "IMS_SIP_Message"))
-
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         battery_thermal = report_data.get("battery_thermal_stats", {})
-        # ==========================================
-        # 🚨 배터리 발열(Thermal) 기록 페이로드 변환
-        # ==========================================
         if "thermal_stats" in battery_thermal:
             for thermal in battery_thermal["thermal_stats"]:
                 meta = {
@@ -277,9 +260,6 @@ class RagPayloadBuilder:
                 text_content = f"기기 온도 기록: {meta['sensor']} 센서의 온도가 {meta['temperature']}도로 측정되었습니다."
                 rag_payload.append({"document": text_content, "metadata": meta})
 
-        # ==========================================
-        # 🚨 Wakelock (배터리 광탈 주범) 기록 페이로드 변환
-        # ==========================================
         if "wakelock_stats" in battery_thermal:
             for wl in battery_thermal["wakelock_stats"]:
                 meta = {
@@ -296,8 +276,6 @@ class RagPayloadBuilder:
             for cpu in report_data["cpu_usage_stats"]:
                 proc = cpu.get("process", "Unknown").lstrip("/")
                 pct = float(cpu.get("cpu_percent", 0.0))
-
-                # 💡 [핵심] 기존 규격(schema)과 완벽하게 동일한 구조로 포장
                 cpu_payload = {
                     "document": f"[CPU 점유율] 프로세스명: {proc}, 점유율: {pct}%",
                     "metadata": {
@@ -306,14 +284,14 @@ class RagPayloadBuilder:
                         "cpu_percent": pct
                     }
                 }
-
                 rag_payload.append(cpu_payload)
 
         # ==========================================
-        # 🚨 Binder Warning (스레드 고갈 및 지연) 페이로드 변환
+        # 🚨 [수정] Binder Warning 최신 로그 우선 처리
         # ==========================================
         if "binder_warnings" in report_data:
-            for bw in report_data["binder_warnings"]:
+            recent_binders = report_data["binder_warnings"][::-1][:10]
+            for bw in recent_binders:
                 if not isinstance(bw, dict):
                     continue
                 meta = {
@@ -345,29 +323,31 @@ class RagPayloadBuilder:
                 rag_payload.append({"document": text_content, "metadata": meta})
 
         # ==========================================
-        # 🚨 RILJ (모뎀 ↔ AP) 문제 트랜잭션 페이로드 변환
+        # 🚨 [수정] RILJ 최신 이슈 우선 추출 (핵심)
         # ==========================================
         if "rilj_transactions" in report_data:
             rilj_data = report_data["rilj_transactions"]
 
-            # 1. 타임아웃 (응답 없음)
-            for t in rilj_data.get("timeouts", []):
+            # 1. 타임아웃 (응답 없음) - 가장 최근 5개만 추출
+            recent_timeouts = rilj_data.get("timeouts", [])[::-1][:5]
+            for t in recent_timeouts:
                 meta = {"log_type": "RILJ_Transaction", "status": "TIMEOUT", "command": t["command"]}
                 doc = f"[모뎀 응답 먹통(TIMEOUT)] 시간: {t['time']}, 명령어: {t['command']} 에 대해 모뎀이 응답하지 않았습니다."
                 rag_payload.append({"document": doc, "metadata": meta})
 
-            # 2. 에러 및 지연 응답
-            for c in rilj_data.get("completed", []):
-                if c.get("is_error") or c.get("latency_ms", 0) > 500:
-                    status = "ERROR" if c.get("is_error") else "SLOW"
-                    meta = {
-                        "log_type": "RILJ_Transaction",
-                        "status": status,
-                        "command": c["command"],
-                        "latency_ms": c["latency_ms"]
-                    }
-                    doc = f"[모뎀 응답 이상({status})] 시간: {c['start_time']}, 명령어: {c['command']}, 지연시간: {c['latency_ms']}ms, 에러내용: {c['error_msg']}"
-                    rag_payload.append({"document": doc, "metadata": meta})
+            # 2. 에러 및 지연 응답 - 에러/지연 필터링 후 가장 최근 5개만 추출
+            bad_responses = [c for c in rilj_data.get("completed", []) if c.get("is_error") or c.get("latency_ms", 0) > 500]
+            recent_bad = bad_responses[::-1][:5]
+            for c in recent_bad:
+                status = "ERROR" if c.get("is_error") else "SLOW"
+                meta = {
+                    "log_type": "RILJ_Transaction",
+                    "status": status,
+                    "command": c["command"],
+                    "latency_ms": c["latency_ms"]
+                }
+                doc = f"[모뎀 응답 이상({status})] 시간: {c['start_time']}, 명령어: {c['command']}, 지연시간: {c['latency_ms']}ms, 에러내용: {c['error_msg']}"
+                rag_payload.append({"document": doc, "metadata": meta})
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")

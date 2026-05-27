@@ -40,7 +40,8 @@ class TelephonyParser(BaseParser):
     def _parse_ims_multi_calls(self, lines):
         calls = defaultdict(list)
         obj_to_tc = {}
-        pending_events = [] # 💡 objId가 없는 로그(onIncomingCall 등)를 잠시 담아둘 버퍼 추가
+        pending_events = []
+        obj_fail_reasons = defaultdict(str)
 
         obj_re = re.compile(r'objId:(\d+)')
         tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)')
@@ -49,6 +50,12 @@ class TelephonyParser(BaseParser):
             'onIncomingCall', 'takeCall', 'accept', 'reject',
             'onCallTerminated', 'onCallStartFailed'
         ]
+
+        # 🚨 [정밀 교정 정규식]
+        # 패턴 1: {369 : CODE_SIP_...} 중괄호 매칭 (숫자와 에러 단어 그룹을 각각 분리 추출)
+        ims_bracket_re = re.compile(r'ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)', re.IGNORECASE)
+        # 패턴 2: 기존 표준형 (code=361 또는 (361, 0, ...)) 방어용 백업
+        ims_standard_re = re.compile(r'ImsReasonInfo\s*(?:[:\s\(\=]+code\=)?[:\s\(\=]*(\d+)', re.IGNORECASE)
 
         for line in lines:
             if "[IPCT" not in line and "[IPCN" not in line:
@@ -64,71 +71,77 @@ class TelephonyParser(BaseParser):
                 continue
 
             timestamp = self._extract_timestamp(line)
-            # 원본 로그 형태로 가공
             event_str = f"[{timestamp}] {line.split(' - ', 1)[-1].strip()}"
 
             obj_match = obj_re.search(line)
+
+            # 🚨 [에러 추출 계층 고도화]
+            extracted_code = ""
+            bracket_match = ims_bracket_re.search(line)
+            if bracket_match:
+                # {369 : CODE_SIP_...} 구조에서 "369_CODE_SIP_REQUEST_URI_TOO_LARGE" 형태로 가독성 극대화하여 추출
+                extracted_code = f"{bracket_match.group(1)}_{bracket_match.group(2)}"
+            else:
+                standard_match = ims_standard_re.search(line)
+                if standard_match:
+                    extracted_code = f"IMS_REASON_{standard_match.group(1)}"
+
             if not obj_match:
-                # 🚨 objId가 없으면 버리지 않고 버퍼에 임시 저장합니다.
                 pending_events.append(event_str)
                 continue
 
             obj_id = obj_match.group(1)
 
+            # 에러 코드가 잡혔다면 세션 저장소에 박제
+            if extracted_code:
+                obj_fail_reasons[obj_id] = extracted_code
+
             tc_match = tc_id_re.search(line)
             if tc_match:
                 obj_to_tc[obj_id] = tc_match.group(1)
 
-            # 💡 드디어 objId가 있는 로그를 만났습니다!
-            # 버퍼에 쌓여있던 이전 로그(onIncomingCall 등)들을 이 objId 세션에 전부 털어 넣습니다.
             if pending_events:
-                # 중복 방지를 위해 확인 후 추가
                 for p_event in pending_events:
                     if not calls[obj_id] or calls[obj_id][-1] != p_event:
                         calls[obj_id].append(p_event)
-                pending_events = [] # 털어 넣은 후 버퍼 초기화
-
-            # 현재 라인 추가
-            if not calls[obj_id] or calls[obj_id][-1] != event_str:
-                calls[obj_id].append(event_str)
-
-            detected_event = None
-            for keyword in event_keywords:
-                if keyword in line:
-                    detected_event = keyword
-                    break
-
-            if not detected_event:
-                continue
-
-            timestamp = self._extract_timestamp(line)
-
-            reason = ""
-            if "Terminated" in detected_event or "reject" in detected_event or "Failed" in detected_event:
-                reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', line)
-                if reason_match:
-                    reason = f" [{reason_match.group(1).strip()}]"
-
-            event_str = f"[{timestamp}] {line.split(' - ', 1)[-1].strip()}"
+                pending_events = []
 
             if not calls[obj_id] or calls[obj_id][-1] != event_str:
                 calls[obj_id].append(event_str)
 
         multi_calls_list = []
         for obj_id, events in calls.items():
-            # 💡 대괄호 ']' 를 기준으로 자르고, 앞에 있는 '[' 를 제거하여 순수 시간만 추출합니다.
             start_time = events[0].split("]")[0].replace("[", "") if events else "Unknown"
             end_time = events[-1].split("]")[0].replace("[", "") if events else "Unknown"
-
-            # 💡 [추가] 이벤트 목록에 USER_DECLINE이 하나라도 있으면 사용자가 수신 거절한 것으로 판단
             is_user_reject = any("USER_DECLINE" in e for e in events)
 
             status = "SUCCESS"
-            if "Terminated" in events[-1] or "reject" in events[-1] or "Failed" in events[-1]:
+            has_failed_event = any(any(k in e for k in ['Terminated', 'reject', 'Failed']) for e in events)
+
+            if has_failed_event:
                  status = "FAIL" if "CODE_USER" not in events[-1] and "USER_DECLINE" not in events[-1] else "NORMAL_RELEASE"
 
             tc_id = obj_to_tc.get(obj_id)
             display_id = f"{tc_id} (objId:{obj_id})" if tc_id else f"objId:{obj_id}"
+
+            # 🚨 [최종 조립] 정제된 에러 단어를 fail_reason 필드에 매핑
+            final_reason = "0"
+            if status == "FAIL":
+                if obj_fail_reasons[obj_id]:
+                    final_reason = obj_fail_reasons[obj_id]
+                else:
+                    # 백업용 분석기 가동
+                    last_line = events[-1]
+                    reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', last_line)
+                    if reason_match:
+                        final_reason = reason_match.group(1).strip()
+                    else:
+                        fallback_match = ims_bracket_re.search(last_line)
+                        if fallback_match:
+                            final_reason = f"{fallback_match.group(1)}_{fallback_match.group(2)}"
+                        else:
+                            fallback_std = ims_standard_re.search(last_line)
+                            final_reason = f"IMS_FAIL_{fallback_std.group(1)}" if fallback_std else "IMS_CALL_START_FAILED"
 
             multi_calls_list.append({
                 "type": "PS(VoLTE)",
@@ -136,8 +149,8 @@ class TelephonyParser(BaseParser):
                 "start_time": start_time,
                 "end_time": end_time,
                 "status": status,
-                "is_user_reject": is_user_reject,  # 👈 CS와 구조를 맞추기 위해 추가
-                "fail_reason": events[-1] if status == "FAIL" else "0",
+                "is_user_reject": is_user_reject,
+                "fail_reason": final_reason,
                 "logs": events
             })
 

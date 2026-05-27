@@ -3,7 +3,7 @@
         "test_id": "TC-001",
         "category": "RILJ_Request_Failed",
         "target_log_file": "log_for_evaluation/request_failed.txt",
-        "query": "RILJ 로그에서 SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.",
+        "query": "SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.",
         "ground_truth": "SEND_SMS 요청에 대해 모뎀이 에러 응답을 내렸으며, 구체적인 실패 원인은 NETWORK_ERR 로 확인됩니다.",
         "eval_keywords": [
             "SEND_SMS",
@@ -13,11 +13,11 @@
     {
         "test_id": "TC-002",
         "category": "Call_Fail (CS)",
-        "target_log_file": "cs_call_failed.log",
+        "target_log_file": "log_for_evaluation/cs_call_failed.log",
         "query": "CS Call 발신 후 연결되지 않고 끊어진 원인(Cause Code)과 모뎀 측 분석 내용을 요약해 줘.",
-        "ground_truth": "Call 발신 후 연결되지 않고 Release 되었습니다. (FailCauseCode: 49, vendorCause: 24). 모뎀 분석 결과, 3G 상태에서 호 연결 중 2G Cell로 변경되었으나 network mode에 2G 설정이 되어있지 않아 종료된 것으로 확인됩니다.",
+        "ground_truth": "Call 발신 후 연결되지 않고 Release 되었습니다. (callFailCause: 49, vendorCause: 24). 모뎀 분석 결과, 3G 상태에서 호 연결 중 2G Cell로 변경되었으나 network mode에 2G 설정이 되어있지 않아 종료된 것으로 확인됩니다.",
         "eval_keywords": [
-            "FailCauseCode: 49",
+            "callFailCause: 49",
             "vendorCause: 24",
             "2G Cell"
         ]
@@ -25,8 +25,8 @@
     {
         "test_id": "TC-003",
         "category": "Call_Fail (PS)",
-        "target_log_file": "ps_call_369_failed.txt",
-        "query": "VoLTE(PS) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.",
+        "target_log_file": "log_for_evaluation/ps_call_369_failed.txt",
+        "query": "PS(VoLTE) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.",
         "ground_truth": "Call 발신이 기지국으로 전달되었으나, 369 (CODE_SIP_REQUEST_URI_TOO_LARGE) 에러 응답을 수신하여 호 설정에 실패했습니다.",
         "eval_keywords": [
             "369",
@@ -36,7 +36,7 @@
     {
         "test_id": "TC-004",
         "category": "Call_Fail (PS)",
-        "target_log_file": "ps_call_504_unavailable.log",
+        "target_log_file": "log_for_evaluation/ps_call_504_unavailable.log",
         "query": "VoLTE 호가 연결되기 전 단절된 원인을 SIP 응답 코드 기준으로 설명해 줘.",
         "ground_truth": "MT(수신자) 측의 Reject으로 인해 504 (CODE_USER_DECLINE) 코드로 종료되었습니다. 이는 상대방에 의한 일시적 통화 불가(Temporary Unavailable) 상태를 의미합니다.",
         "eval_keywords": [
@@ -48,7 +48,7 @@
     {
         "test_id": "TC-005",
         "category": "ANR",
-        "target_log_file": "log_anr.txt",
+        "target_log_file": "log_for_evaluation/log_anr.txt",
         "query": "ANR이 발생한 정확한 프로세스와 처리가 지연된 인텐트(Intent) 액션명을 알려줘.",
         "ground_truth": "com.android.phone 프로세스에서 ANR이 발생했으며, com.samsung.intent.action.IMEI_STATE_CHANGED 인텐트의 Broadcast 처리가 지연된 것이 원인입니다.",
         "eval_keywords": [
@@ -60,7 +60,7 @@
     {
         "test_id": "TC-006",
         "category": "Fatal_Exception",
-        "target_log_file": "dumpstate_fatal.txt",
+        "target_log_file": "log_for_evaluation/dumpstate_fatal.txt",
         "query": "메인 프로세스에서 발생한 Fatal Exception의 종류와 마지막으로 호출된 콜스택(메소드)은 무엇인가?",
         "ground_truth": "java.lang.ArrayIndexOutOfBoundsException (length=0; index=0) 에러가 발생했으며, 마지막 콜스택은 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage 로 확인됩니다.",
         "eval_keywords": [
@@ -71,7 +71,7 @@
     {
         "test_id": "TC-007",
         "category": "Native_Crash",
-        "target_log_file": "log_native.log",
+        "target_log_file": "log_for_evaluation/log_native.log",
         "query": "rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.",
         "ground_truth": "libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조 오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다.",
         "eval_keywords": [
@@ -84,7 +84,7 @@
     {
         "test_id": "TC-008",
         "category": "SetupDataCall_Failed",
-        "target_log_file": "data_call_setup.log",
+        "target_log_file": "log_for_evaluation/data_call_setup.log",
         "query": "E-PDN 데이터 호(SetupDataCall) 연결 시도가 실패한 명시적인 거절 사유를 알려줘.",
         "ground_truth": "E-PDN 연결을 시도했으나 NOT_SPECIFIED 상태로 실패했으며, 상세 거절 원인은 기지국 측의 NO CARRIER / User authentication failed 입니다.",
         "eval_keywords": [
@@ -96,7 +96,7 @@
     {
         "test_id": "TC-009",
         "category": "DataStall",
-        "target_log_file": "data_stall.log",
+        "target_log_file": "log_for_evaluation/data_stall.log",
         "query": "Data Stall 감지 시점과 Recovery 동작이 완전히 종료되어 복구된 시간을 분석해 줘.",
         "ground_truth": "10:18:29 무렵 Data Stall이 감지되어 Recovery 로직이 진입하였고, 10:18:47 경에 Recovery 동작이 종료되며 정상적으로 망 복구가 완료되었습니다.",
         "eval_keywords": [

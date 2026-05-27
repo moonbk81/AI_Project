@@ -39,6 +39,13 @@ MODEL_CONFIG = {
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
     },
+    "batiai/gemma4-e2b:q4": {
+        "num_ctx": 16384,
+        "num_predict": 2048,
+        "temperature": 0.1,
+        "repeat_penalty": 1.15,
+        "stop": ["<unused", "<|im_end|>", "<eos>"]
+    },
     "gemma3:12b": {
         "num_ctx": 32768,
         "num_predict": 4096,
