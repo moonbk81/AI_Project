@@ -53,13 +53,70 @@
         "test_id": "TC-005",
         "category": "ANR",
         "target_log_file": "log_anr.txt",
-        "query": "Volte Call fail 됐는데, 원인을 확인해줘",
-        "ground_truth": "Call 발신 후 연결되기 전 MT 에서 Reject 으로 인해, 504: CODE_USER_DECLINE 으로 종료됨, Temprorary Unavailable 상태로 상대방에 의한 일시적 통화 불가로 확인됨",
+        "query": "ANR 발생했는데 어디에서 발생했고, 원인은 뭐야?",
+        "ground_truth": "Broadcast of Intent { act=com.samsung.intent.action.IMEI_STATE_CHANGED flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1 (has extras) }",
         "eval_keywords": [
-            "상대방 거부",
-            "콜발신안됨",
-            "504",
-            "Temporary"
+            "intent",
+            "com.android.phone",
+            "Broadcast of intent"
+        ]
+    },
+    {
+        "test_id": "TC-006",
+        "category": "Fatal_Exception",
+        "target_log_file": "dumpstate_fatal.txt",
+        "query": "main process 에서 Exception 발생했어. 최종적으로 어떤 부분에서 Exception 발생한거야?",
+        "ground_truth": "java.lang.ArrayIndexOutOfBoundsException: length=0; index=0 으로 발생했고 마지막 콜스택은 at com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage 로 확인됩니다. 해당 콜스택 추가확인이 필요합니다.",
+        "eval_keywords": [
+            "Fatal",
+            "ArrayIndexOutOfBoundsException",
+            "com.samsung.accessory.manager.authentication"
+        ]
+    },
+    {
+        "test_id": "TC-007",
+        "category": "Native_Crash",
+        "target_log_file": "log_native.log",
+        "query": "rild 에서 crash 발생했는데, 어디서 발생했는지 확인해줘",
+        "ground_truth": [
+             "signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x745f687475612293 (read)",
+             "#00 pc 0000000000284e88  /vendor/lib64/libsec-ril.so DataCallManager::NotifyDataCallState(Dca*, DataCall*, int, int)+1192)",
+             "libsec-ril.so 의 특정 코드에서 SIGSEGV 발생으로 fault, RIL Reset 되었습니다."
+        ],
+        "eval_keywords": [
+            "Fault",
+            "rild크래쉬",
+            "SEGV_MAPERR"
+        ]
+    },
+    {
+        "test_id": "TC-008",
+        "category": "SetupDataCall_Failed",
+        "target_log_file": "data_call_setup.log",
+        "query": "E-PDN 에 대한 Setup Failed 발생했는데 확인해줘",
+        "ground_truth": [
+             "EPDN 연결 시도했지만 NOT_SPECIFIED 로 연결에 실패하였습니다.",
+             "E-PDN 연결 요청이 NO CARRIER / User authentication failed로 인해 reject되고 있습니다."
+        ],
+        "eval_keywords": [
+            "EPDN실패",
+            "Reject",
+            "authentication"
+        ]
+    },
+    {
+        "test_id": "TC-009",
+        "category": "DataStall",
+        "target_log_file": "data_stall.log",
+        "query": "Data Stall 발생으로 보이는데, 관련되서 확인해줘",
+        "ground_truth": [
+             "Data Stall 발생으로 Recovery 동작이 10:18:29 무렵 확인됩니다.",
+             "Recovery 동작은 최종 10:18:47 경 종료되었으며 정상적으로 복구되었습니다.",
+             "발생 원인에 대해서는 해당 시간 대 모뎀쪽 추가확인 필요합니다."
+        ],
+        "eval_keywords": [
+            "DataStall복구",
+            "Recovery"
         ]
     }
 ]

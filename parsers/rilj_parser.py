@@ -6,9 +6,9 @@ class RiljParser(BaseParser):
     def analyze(self, lines):
         rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)RILJ\b', re.IGNORECASE)
         # 1. 정규식 튜닝: 대소문자 무시(re.IGNORECASE) 및 실제 포맷 완벽 대응
-        req_pattern = re.compile(r'RILJ\s*:\s*\[(\d+)\]>\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
-        resp_pattern = re.compile(r'RILJ\s*:\s*\[(\d+)\]<\s*([A-Z_0-9]+)\s*(error:\s*[A-Z_0-9_]+)?(.*)', re.IGNORECASE)
-        unsol_pattern = re.compile(r'RILJ\s*:\s*\[(?:UNSOL|UNSL)\][><]\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
+        req_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(\d+)\]>\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
+        resp_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(\d+)\]<\s*([A-Z_0-9]+)\s*(error:\s*[A-Z_0-9_]+)?(.*)', re.IGNORECASE)
+        unsol_pattern = re.compile(r'(?:RILJ|SEM_RILJ)\s*:\s*\[(?:UNSOL|UNSL)\][><]\s*([A-Z_0-9]+)(.*)', re.IGNORECASE)
 
         pending_requests = {}
         completed_requests = []
