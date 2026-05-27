@@ -45,3 +45,11 @@ RAT_TYPE_MAP = {
     "20": "5G (NR)",
     "-2": "Unknown (망 통합 합산)"
 }
+
+RIL_ERR_MAP = {
+    "49": "NETWORK_ERR",
+    "2": "RADIO_NOT_AVAILABLE",
+    "6": "REQUEST_NOT_SUPPORTED",
+    "38": "INTERNAL_ERR",
+    # 필요 시 다른 코드들도 추가
+}

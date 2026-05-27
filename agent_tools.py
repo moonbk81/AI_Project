@@ -14,6 +14,20 @@ def _ensure_dict(value):
             return {}
     return value if isinstance(value, dict) else {}
 
+def _load_json(file_path, default_value=None):
+    if default_value is None:
+        default_value = [] # 리스트를 기본값으로 쓰던 기존 코드 호환성 유지용
+
+    if not os.path.exists(file_path):
+        return default_value
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"JSON Load Error ({file_path}): {e}")
+        return default_value
+
 def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     """
     단말의 9대 핵심 성능 지표(Health KPI)를 종합하여 반환합니다.

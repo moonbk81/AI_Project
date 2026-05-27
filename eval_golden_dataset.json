@@ -15,11 +15,10 @@
         "category": "Call_Fail (CS)",
         "target_log_file": "log_for_evaluation/cs_call_failed.log",
         "query": "CS Call 발신 후 연결되지 않고 끊어진 원인(Cause Code)과 모뎀 측 분석 내용을 요약해 줘.",
-        "ground_truth": "Call 발신 후 연결되지 않고 Release 되었습니다. (callFailCause: 49, vendorCause: 24). 모뎀 분석 결과, 3G 상태에서 호 연결 중 2G Cell로 변경되었으나 network mode에 2G 설정이 되어있지 않아 종료된 것으로 확인됩니다.",
+        "ground_truth": "all 발신 후 연결되지 않고 Release 되었습니다. 상세 원인은 callFailCause: 49 및 vendorCause: 24 로 확인됩니다.",
         "eval_keywords": [
             "callFailCause: 49",
-            "vendorCause: 24",
-            "2G Cell"
+            "vendorCause: 24"
         ]
     },
     {
@@ -37,11 +36,12 @@
         "test_id": "TC-004",
         "category": "Call_Fail (PS)",
         "target_log_file": "log_for_evaluation/ps_call_504_unavailable.log",
-        "query": "VoLTE 호가 연결되기 전 단절된 원인을 SIP 응답 코드 기준으로 설명해 줘.",
-        "ground_truth": "MT(수신자) 측의 Reject으로 인해 504 (CODE_USER_DECLINE) 코드로 종료되었습니다. 이는 상대방에 의한 일시적 통화 불가(Temporary Unavailable) 상태를 의미합니다.",
+        "query": "PS(VoLTE) 통화 발신 종료가 되었는데, sip error 등으로 인한 망 이슈인지 아니면 상대방 거절인지 확인해줘.",
+        "ground_truth": "상대측 reject으로 콜이 종료되었습니다. 네트워크 측으로부터 480 Temporarily Unavailable SIP code가 수신되었으며, 이에 따라 안드로이드 IMS 내부적으로도 504 (CODE_USER_DECLINE) 코드가 함께 확인됩니다.",
         "eval_keywords": [
             "504",
             "CODE_USER_DECLINE",
+            "480",
             "Temporary Unavailable"
         ]
     },

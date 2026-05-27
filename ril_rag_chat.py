@@ -204,7 +204,6 @@ class RilRagChat:
                 selected_log_types.update(self.routing_map["Tiantong_Satellite"].get("log_types", []))
 
         if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
-            # 기존 인텐트에 살짝 얹어주거나, RILJ 로그 타입을 강제 추가합니다.
             selected_log_types.update(["RILJ_Transaction"])
 
         top_matches = [{"intent": category, "score": float(score)} for category, score, _ in category_scores[:3]]
@@ -337,6 +336,34 @@ class RilRagChat:
 
         return "\n\n".join(guidelines)
 
+    # 🚨 [신규 추가] 소형 LLM 인지 과부하 차단용 텍스트 다이어트 헬퍼 함수
+    def _clean_log_payload(self, text: str) -> str:
+        """JSON 특수문자, 대괄호 노이즈 및 과도한 raw_logs 블록을 날려
+        2B 모델의 어텐션 붕괴를 영구 방어합니다.
+        """
+        if not text:
+            return ""
+
+        # 1. raw_logs 패턴 원천 차단 (배열/오브젝트 구조 통째로 제거)
+        text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+        text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+
+        # 2. 분석 팩트 등 날것의 JSON 형태가 잔존할 경우 가독성 높은 텍스트화
+        try:
+            # 완벽한 JSON일 경우 가볍게 파싱 후 - key: value 전환
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return "\n".join([f"- {k}: {v}" for k, v in data.items() if v and k != "raw_logs"])
+        except:
+            pass
+
+        # 3. 중괄호, 큰따옴표 등 2B 모델 토큰 지연 유발하는 구조물 정제
+        text = text.replace("{", "").replace("}", "").replace('"', "").replace("'", "")
+
+        # 4. 연속된 줄바꿈 및 의미 없는 공백 압축
+        text = re.sub(r'\n\s*\n', '\n', text).strip()
+        return text
+
     def ask(self, user_query, current_file=None, chat_history=None, top_k=8, health_kpi=None, is_bench=False):
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
 
@@ -369,8 +396,13 @@ class RilRagChat:
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
 
+        # 🚨 [방어 코드 주입 1] 도구 분석 결과 팩트 다이어트
+        tool_facts = self._clean_log_payload(tool_facts)
+
         if health_kpi:
-            tool_facts = f"=== [단말 전반 KPI 상태] ===\n{health_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
+            # KPI 스탯도 안전하게 정제해서 병합
+            sanitized_kpi = self._clean_log_payload(health_kpi)
+            tool_facts = f"=== [단말 전반 KPI 상태] ===\n{sanitized_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
         conditions = []
         if current_file: conditions.append({"source_file": current_file})
@@ -391,6 +423,9 @@ class RilRagChat:
 
         formatted_logs = self._format_results(results)
 
+        # 🚨 [방어 코드 주입 2] ChromaDB에서 서치해온 원본 로그 스니펫 및 뭉텅이 데이터 정제
+        formatted_logs = self._clean_log_payload(formatted_logs)
+
         prompt = (
             f"{self.system_role_prompt}\n\n"
             f"{domain_guidelines}\n\n"
@@ -399,7 +434,7 @@ class RilRagChat:
             f"사용자 질문: {user_query}"
         )
 
-        # 🚨 [추가] 튜플 반환으로 생각 과정(Thinking) 함께 받기
+        # 🚨 튜플 반환으로 생각 과정(Thinking) 함께 받기
         answer, thinking = self._call_llm(prompt, is_bench=is_bench)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
@@ -407,11 +442,10 @@ class RilRagChat:
 
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-
             log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines, model_name=self.llm_model_name)
         except Exception: pass
 
-        # 🚨 [추가] UI 전달을 위해 4번째 인자로 thinking 반환
+        # 🚨 UI 전달을 위해 4번째 인자로 thinking 반환
         return answer, doc_ids, meta_list, thinking
 
     def get_all_files(self):
@@ -449,16 +483,14 @@ class RilRagChat:
             formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n메타정보: {clean_meta}\n요약: {doc}\n원본 로그 스니펫:\n{snippet}")
         return "\n\n".join(formatted)
 
-    # 🚨 [핵심 수정] Gemma4/DeepSeek 대응 및 빈 답변 파싱
     def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
         """Ollama API를 호출하고 최종 답변과 생각 과정(Thinking)을 분리하여 반환합니다."""
         import ollama
         cfg = self.model_config_registry.get(
             self.llm_model_name,
             self.model_config_registry.get("default")
-        ).copy() # 원본 데이터 보호를 위해 copy() 사용
+        ).copy()
 
-        # 벤치마크 테스트 등 특수 상황에 대한 유연한 덮어쓰기(Override) 로직 유지
         if is_bench:
             cfg["num_ctx"] = 8192
         is_think = False
@@ -472,12 +504,9 @@ class RilRagChat:
             )
 
             raw_content = res['message'].get('content', '').strip()
-
-            # 🚨 [수정됨] 최신 Ollama API의 네이티브 'reasoning' 필드 우선 확인
             thinking = res['message'].get('reasoning', '')
             clean_content = raw_content
 
-            # 네이티브 필드가 비어있다면 기존처럼 텍스트 내 태그 정규식 파싱
             if not thinking:
                 think_match = re.search(r'<think>(.*?)</think>', raw_content, flags=re.DOTALL | re.IGNORECASE)
                 if think_match:
@@ -550,8 +579,6 @@ class RilRagChat:
                 options={"num_ctx": 4096, "temperature": 0.0},
             )
             content = res["message"]["content"].strip()
-
-            # JSON 포맷에서도 <think> 태그가 나올 경우 방어
             content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
 
             parsed = self._extract_json_object(content)

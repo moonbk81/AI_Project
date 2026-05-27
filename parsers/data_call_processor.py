@@ -40,9 +40,10 @@ class DataCallProcessor(BaseParser):
                 }
                 continue
 
-            res_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\]<\s*SETUP_DATA_CALL DataCallResponse: \{ cause=([^ ]+).*?cid=([\d-]+)', clean_line)
+            # 🚨 [수정됨] 정규식을 유연하게 열어서 SETUP_DATA_CALL 응답 뒤의 모든 페이로드를 가져옵니다.
+            res_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\]<\s*SETUP_DATA_CALL(.*)', clean_line)
             if res_match:
-                res_time_str, token, cause, cid = res_match.groups()
+                res_time_str, token, payload = res_match.groups()
 
                 if token in pending_requests:
                     req = pending_requests.pop(token)
@@ -54,16 +55,43 @@ class DataCallProcessor(BaseParser):
                     except:
                         latency_ms = -1
 
-                    status = "SUCCESS" if "NONE" in cause.upper() else "FAIL"
+                    # 🚨 [수정됨] Payload 내부를 샅샅이 뒤져서 진짜 상태값들을 추출합니다.
+                    cause_m = re.search(r'cause[:=]\s*([^,}\s]+)', payload, re.I)
+                    status_m = re.search(r'status[:=]\s*([^,}\s]+)', payload, re.I)
+                    cid_m = re.search(r'cid[:=]\s*([\d-]+)', payload, re.I)
 
-                    if status == "SUCCESS" and cid != "-1":
+                    cause = cause_m.group(1) if cause_m else "NONE"
+                    d_status = status_m.group(1) if status_m else "UNKNOWN"
+                    cid = cid_m.group(1) if cid_m else "-1"
+
+                    # 🚨 [핵심] 가짜 SUCCESS 판별 로직 (status가 NOT_SPECIFIED이거나 cause가 에러 코드인 경우)
+                    is_success = True
+                    if d_status.upper() in ["NOT_SPECIFIED", "FAIL", "ERROR"] or (d_status.isdigit() and d_status != "0"):
+                        is_success = False
+                    if cause.upper() not in ["0", "NONE"]:
+                        is_success = False
+
+                    final_status = "SUCCESS" if is_success else "FAIL"
+                    detailed_cause = f"status={d_status}, cause={cause}"
+
+                    # 벤더 로그나 추가 설명에 NO CARRIER, Auth failed 등이 섞여있는지 확인 (TC-008 정답지 대응)
+                    vendor_err = []
+                    if re.search(r'NO CARRIER', payload, re.I): vendor_err.append("NO CARRIER")
+                    if re.search(r'authentication failed', payload, re.I): vendor_err.append("User authentication failed")
+
+                    if vendor_err:
+                        final_status = "FAIL" # 벤더 에러가 보이면 무조건 실패 처리
+                        detailed_cause += f" ({' / '.join(vendor_err)})"
+
+                    if final_status == "SUCCESS" and cid != "-1":
                         active_sessions[cid] = {
                             'apn': req['apn'],
                             'setup_res_time': res_time_str
                         }
 
                     self.parsed_data.append({
-                        'event_type': 'DATA_SETUP',
+                        # 실패한 호 연결은 DATA_SETUP_FAIL로 명확히 이벤트 타입을 분리
+                        'event_type': 'DATA_SETUP_FAIL' if final_status == "FAIL" else 'DATA_SETUP',
                         'req_time': req['req_time'],
                         'res_time': res_time_str,
                         'token': token,
@@ -71,8 +99,8 @@ class DataCallProcessor(BaseParser):
                         'apn': req['apn'],
                         'network': req['network'],
                         'protocol': req['protocol'],
-                        'status': status,
-                        'cause': cause,
+                        'status': final_status,
+                        'cause': detailed_cause,
                         'latency_ms': latency_ms
                     })
                 continue
@@ -187,22 +215,46 @@ class DataCallProcessor(BaseParser):
             # ==========================================
             # 4. DATA STALL & RECOVERY (스톨 감지 및 복구 액션)
             # ==========================================
-            stall_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?(onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
+            # 🚨 타임스탬프 포맷(MM-DD HH... 또는 YYYY-MM-DDTHH...)과 벤더 특화 스톨 키워드 모두 호환되도록 확장
+            stall_match = re.search(r'([\d-]{5,10}[T\s]\d{2}:\d{2}:\d{2}\.\d+).*?(data stall: start|data stall: end|onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
+
             if stall_match:
                 time_str, keyword, payload = stall_match.groups()
+                keyword_lower = keyword.lower()
 
-                # Recovery Action 레벨 추출 (예: action=1, step=2 등)
-                action_m = re.search(r'(?:action|step|recoveryAction)\s*[=:]?\s*(\d+)', payload, re.IGNORECASE)
-                action_level = action_m.group(1) if action_m else "DETECTED"
+                action_desc = "스톨(병목) 현상 감지됨"
+                action_level = "DETECTED"
 
-                # AOSP 표준 복구 시퀀스 매핑
-                action_desc = "UNKNOWN"
-                if action_level == "0": action_desc = "GET_DATA_CALL_LIST (상태 확인)"
-                elif action_level == "1": action_desc = "CLEANUP (PDP 해제 및 재연결)"
-                elif action_level == "2": action_desc = "REREGISTER (망 재등록)"
-                elif action_level == "3": action_desc = "RADIO_RESTART (모뎀 리셋)"
-                elif action_level == "4": action_desc = "MODEM_RESET (하드웨어 리셋)"
-                elif action_level == "DETECTED": action_desc = "스톨(병목) 현상 감지됨"
+                # 🚨 새로 발견된 로그 포맷 처리 (start / end)
+                if "data stall: start" in keyword_lower:
+                    action_level = "START"
+                    action_desc = "Data Stall 감지되어 Recovery 로직 진입"
+                elif "data stall: end" in keyword_lower:
+                    action_level = "END"
+                    action_desc = "Recovery 동작 종료"
+
+                    # 성공 여부 판별
+                    if "isRecovered=true" in payload:
+                        action_desc += " (정상적으로 망 복구 완료됨)"
+                    else:
+                        action_desc += " (복구 실패 또는 진행 중)"
+
+                    # 소요 시간 파싱 (밀리초 -> 초 변환)
+                    dur_m = re.search(r'TimeDuration=(\d+)', payload)
+                    if dur_m:
+                        duration_sec = int(dur_m.group(1)) / 1000.0
+                        action_desc += f" [복구 소요시간: {duration_sec}초]"
+
+                else:
+                    # 기존 AOSP 표준 복구 시퀀스 매핑
+                    action_m = re.search(r'(?:action|step|recoveryAction)\s*[=:]?\s*(\d+)', payload, re.IGNORECASE)
+                    action_level = action_m.group(1) if action_m else "DETECTED"
+
+                    if action_level == "0": action_desc = "GET_DATA_CALL_LIST (상태 확인)"
+                    elif action_level == "1": action_desc = "CLEANUP (PDP 해제 및 재연결)"
+                    elif action_level == "2": action_desc = "REREGISTER (망 재등록)"
+                    elif action_level == "3": action_desc = "RADIO_RESTART (모뎀 리셋)"
+                    elif action_level == "4": action_desc = "MODEM_RESET (하드웨어 리셋)"
 
                 self.parsed_data.append({
                     'event_type': 'DATA_STALL_RECOVERY',

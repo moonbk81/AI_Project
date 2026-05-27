@@ -1,5 +1,5 @@
 """
-RAG Golden Dataset 자동 평가 파이프라인 (웹 컨벤션 완벽 싱크 버전)
+RAG Golden Dataset 자동 평가 파이프라인
 """
 import os
 import json
@@ -253,6 +253,30 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
     for k, v in summary.items():
         print(f"  {k}: {v}")
 
+"""
+# =====================================================================
+# 4. 실행 가이드
+# =====================================================================
+1) 골든 데이터세트 준비
+- eval_golden_dataset.json 파일을 준비합니다. 각 항목은 다음 필드를 포함
+    - test_id: 고유 테스트 케이스 ID
+    - category: 문제 유형 (예: "통화 끊김", "데이터 불안정")
+    - target_log_file: RAG 시스템이 참조할 원본 로그 파일 경로 (예: "./logs/call_drop_001.log")
+    - query: RAG 시스템에 투입할 질문 (예: "왜 통화가 끊겼나요?")
+    - ground_truth: 전문가가 작성한 정답 텍스트
+    - eval_keywords: 평가 시 반드시 포함되어야 할 핵심 키워드 리스트
+2) Ollama 심판 모델 준비
+- Ollama에서 평가용 모델을 준비합니다 (예: ollama/qwen2.5-coder:7b).
+- Ollama 서버가 로컬에서 실행 중인지 확인합니다 (기본 http://localhost:11434).
+3) RAG 모델 준비
+- RilRagChat에서 사용할 RAG 모델을 준비합니다 (예: gemma4:e4b).
+- RilRagChat이 해당 모델을 올바르게 로드할 수 있는지 확인합니다.
+4) 실행
+- 터미널에서 다음 명령어로 평가 스크립트를 실행합니다:
+python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e2b
+- 필요에 따라 --dataset, --output, --summary, --ollama-base 등의 인자를 조정할 수 있습니다.
+python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e4b
+"""
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Local LLM RAG Golden Dataset 자동 평가기")

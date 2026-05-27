@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 from parsers.base import BaseParser
+from core.telephony_constants import RIL_ERR_MAP
 
 class RiljParser(BaseParser):
     def analyze(self, lines):
@@ -67,22 +68,23 @@ class RiljParser(BaseParser):
                     error_msg = "SUCCESS"
 
                     if raw_error_field:
-                        # "error 49" 또는 "error: GENERIC_FAILURE" 등에서 실제 원인 값만 추출
+                        # "error 49" 등에서 실제 원인 값만 추출
                         clean_err = re.sub(r'error[:\s]+', '', raw_error_field, flags=re.IGNORECASE).strip()
                         if clean_err and clean_err.upper() != "NONE":
                             is_error = True
-                            error_msg = clean_err
+                            # 매핑 테이블에 있으면 문자로 변환, 없으면 원래 숫자/문자 그대로 사용
+                            error_msg = RIL_ERR_MAP.get(clean_err, clean_err)
 
-                    # 2. 💡 [이중 방어막] 로그 라인 전체 텍스트에 대문자 'ERROR'가 존재하는데 SUCCESS로 파싱되는 현상 차단
+                    # [이중 방어막]
                     if not is_error and "ERROR" in m_resp.group(4).upper():
-                        # 응답 상세 텍스트(group(4))에서 error 뒤에 붙은 코드 패턴 추적
                         extra_err_match = re.search(r'error[:\s]+([A-Z_0-9_]+)', m_resp.group(4), re.IGNORECASE)
                         if extra_err_match:
                             is_error = True
-                            error_msg = extra_err_match.group(1)
+                            extracted = extra_err_match.group(1)
+                            error_msg = RIL_ERR_MAP.get(extracted, extracted)
                         else:
                             is_error = True
-                            error_msg = "GENERIC_ERROR"
+                            error_msg = "UNKNOWN_ERROR" # GENERIC_ERROR보다 덜 헷갈리는 명칭으로 변경
 
                     completed_requests.append({
                         "start_time": req_data['start_time'],

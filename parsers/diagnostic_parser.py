@@ -243,6 +243,7 @@ class DnsParser(BaseParser):
                     })
         return dns_events
 
+
 class CrashParser(BaseParser):
     def analyze(self, lines):
         crashes, is_cap, step, tmp = [], False, 0, None
@@ -251,38 +252,94 @@ class CrashParser(BaseParser):
         for line in lines:
             clean_line = self.clean_line(line)
             if not clean_line: continue
+
             ts_m = RE_TIME.search(clean_line)
             ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
 
-            is_fatal_app, is_fatal_sys = DIAG_PATTERNS['FATAL_APP'].search(clean_line), DIAG_PATTERNS['FATAL_SYS'].search(clean_line)
+            is_fatal_app = DIAG_PATTERNS['FATAL_APP'].search(clean_line)
+            is_fatal_sys = DIAG_PATTERNS['FATAL_SYS'].search(clean_line)
 
             if is_fatal_app or is_fatal_sys:
                 if is_cap and tmp:
-                    if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
-                    crashes.append(tmp)
-                is_cap, step, fatal_info_count = True, (1 if is_fatal_app else 2), 0
-                tmp = {"time": ts, "trigger": clean_line, "process": ("system_server" if is_fatal_sys else "Unknown"), "exception_info": "", "call_stack": [], "context": list(pre_ctx)[-5:]}
+                    # 🚨 핵심 로직: 타임스탬프의 '초' 단위까지 비교 (예: '12-29 08:42:12')
+                    # 같은 초(Second) 안에 발생한 연쇄 크래시라면 하나로 병합!
+                    if tmp["time"][:14] == ts[:14]:
+                        tmp["exception_info"] += f"\n[Chain Crash] {clean_line} "
+
+                        detected_process = "system_server" if is_fatal_sys else "Unknown"
+                        if "Zygote" in clean_line: detected_process = "zygote"
+
+                        # 프로세스 명도 누적 (예: "zygote, com.android.phone")
+                        if detected_process not in tmp["process"]:
+                            tmp["process"] += f", {detected_process}"
+
+                        step = 1 # 다음 프로세스명이나 스택을 받기 위해 step 리셋
+                        fatal_info_count = 0
+                        continue # 새로 분리하지 않고 기존 tmp에 계속 덧붙임
+                    else:
+                        # 시간이 다르면 완전히 별개의 크래시이므로 기존 것 저장
+                        if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                        crashes.append(tmp)
+
+                # 새로운 시간대의 크래시 캡처 시작
+                is_cap = True
+                step = 1
+                fatal_info_count = 0
+                detected_process = "system_server" if is_fatal_sys else "Unknown"
+                if "Zygote" in clean_line: detected_process = "zygote"
+
+                tmp = {
+                    "time": ts,
+                    "trigger": clean_line,
+                    "process": detected_process,
+                    "exception_info": "",
+                    "call_stack": [],
+                    "context": list(pre_ctx)[-5:]
+                }
                 continue
 
             if is_cap:
                 if step == 1:
-                    if DIAG_PATTERNS['PROC_PHONE'].search(clean_line): tmp["process"] = "com.android.phone"; step = 2; continue
-                    elif "Process:" in clean_line: is_cap = False
-                elif step == 2:
-                    if DIAG_PATTERNS['STACK_LINE'].search(clean_line) or clean_line.startswith("at "): tmp["call_stack"].append(clean_line)
+                    if "Process:" in clean_line:
+                        proc_match = re.search(r"Process:\s*([^\s,]+)", clean_line)
+                        if proc_match:
+                            new_proc = proc_match.group(1)
+                            if new_proc not in tmp["process"]:
+                                tmp["process"] += f", {new_proc}"
+                        step = 2
+                        continue
+                    elif DIAG_PATTERNS['STACK_LINE'].search(clean_line) or clean_line.startswith("at ") or "Exception" in clean_line:
+                        step = 2
+
+                if step == 2:
+                    if DIAG_PATTERNS['STACK_LINE'].search(clean_line) or "at " in clean_line:
+                        tmp["call_stack"].append(clean_line)
+                        fatal_info_count = 0
                     else:
-                        if len(tmp["call_stack"]) > 0 or fatal_info_count >= 3:
-                            if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
-                            crashes.append(tmp); is_cap = False
-                        else: tmp["exception_info"] += clean_line + " "; fatal_info_count += 1
+                        if len(tmp["call_stack"]) > 0:
+                            fatal_info_count += 1
+                            if fatal_info_count > 3:
+                                if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                                crashes.append(tmp)
+                                is_cap = False
+                        else:
+                            tmp["exception_info"] += clean_line + " "
+                            fatal_info_count += 1
+                            if fatal_info_count > 15:
+                                if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                                crashes.append(tmp)
+                                is_cap = False
+
             pre_ctx.append(line.strip())
 
-        if is_cap and tmp and (len(tmp["call_stack"]) > 0 or fatal_info_count > 0):
+        if is_cap and tmp and (len(tmp["call_stack"]) > 0 or len(tmp["exception_info"]) > 0):
             if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
             crashes.append(tmp)
 
-        # 💡 리스트만 안전하게 반환!
         return crashes
+
+import re
+from collections import deque
 
 class AnrParser(BaseParser):
     def analyze(self, lines, target_package=None):
@@ -293,6 +350,8 @@ class AnrParser(BaseParser):
             r'(?:ActivityManager:\s)?ANR in\s+(\S+)|Application is not responding:\s+(\S+)',
             re.I
         )
+        # 🚨 추가: Logcat에 찍히는 ActivityManager PID 캡처용
+        anr_pid_re = re.compile(r'ActivityManager:\s+PID:\s+(\d+)')
         anr_reason_re = re.compile(r'ActivityManager:\s+Reason:\s+(.+)')
         cmd_line_re = re.compile(r'Cmd line:\s+(.+)')
 
@@ -340,11 +399,9 @@ class AnrParser(BaseParser):
                 idx = start_idx + k
                 if idx >= len(lines):
                     break
-
                 m = cmd_line_re.search(lines[idx])
                 if m:
                     return m.group(1).strip()
-
             return None
 
         def collect_context_hint(clean_line):
@@ -385,11 +442,16 @@ class AnrParser(BaseParser):
                 ).get("stack")
 
             trace_level = "TRACE_INCLUDED" if len(main_stack) > 0 else "EVENT_ONLY"
+
+            # 🚨 수정: 최상위 payload에 프로세스, PID, Intent Action을 확정적으로 노출
+            final_pid = target_pid or current_anr.get("logcat_pid", "Unknown")
+
             current_anr.update({
                 "process_info": {
                     "name": current_anr.get("process"),
-                    "pid": target_pid
+                    "pid": final_pid
                 },
+                "intent_action": current_anr.get("intent_action", "Unknown"), # LLM이 바로 볼 수 있게 승격!
                 "main": {
                     "tid": main_tid,
                     "stack": main_stack
@@ -412,12 +474,15 @@ class AnrParser(BaseParser):
                     "blocker_stack": blocker_stack
                 },
                 "active_binder_transactions": matched_tx,
-                "context_analysis": {
+                "raw_context_analysis": {
                     "cpu_logs": cpu_logs[-80:],
                     "system_server_logs": system_server_logs[-80:],
                     "io_logs": io_logs[-80:]
                 }
             })
+
+            # LLM 인지 과부하 방지를 위해 임시 필드 삭제
+            current_anr.pop("logcat_pid", None)
 
             anr_list.append(current_anr)
 
@@ -434,7 +499,8 @@ class AnrParser(BaseParser):
 
                 reset_trace_state()
 
-                process_name = anr_m.group(1)
+                # 🚨 수정: group(1)이 None일 경우 group(2) 사용 (안전한 프로세스명 추출)
+                process_name = anr_m.group(1) or anr_m.group(2)
 
                 if target_package and process_name != target_package:
                     current_anr = None
@@ -444,7 +510,9 @@ class AnrParser(BaseParser):
                 current_anr = {
                     "time": "Unknown",
                     "process": process_name,
+                    "logcat_pid": "Unknown",
                     "reason": "Unknown",
+                    "intent_action": "Unknown",
                     "raw_log": clean_line + "\n",
                     "pre_anr_logcat": list(pre_context)
                 }
@@ -459,9 +527,24 @@ class AnrParser(BaseParser):
                 pre_context.append(clean_line)
                 continue
 
-            # 2. Reason 수집
+            # 🚨 추가: traces.txt 없이 Logcat만 있을 때를 대비한 PID 확보
+            if pid_m := anr_pid_re.search(clean_line):
+                if current_anr["logcat_pid"] == "Unknown":
+                    current_anr["logcat_pid"] = pid_m.group(1)
+                    if not target_pid:
+                        target_pid = pid_m.group(1)
+                current_anr["raw_log"] += clean_line + "\n"
+
+            # 2. Reason 및 Intent Action 수집
             if reason_m := anr_reason_re.search(clean_line):
-                current_anr["reason"] = reason_m.group(1)
+                reason_str = reason_m.group(1)
+                current_anr["reason"] = reason_str
+
+                # 🚨 핵심: act= 인텐트 액션명을 명시적으로 파싱하여 최상위 키에 할당
+                intent_m = re.search(r'act=([^\s\}]+)', reason_str)
+                if intent_m:
+                    current_anr["intent_action"] = intent_m.group(1)
+
                 current_anr["raw_log"] += clean_line + "\n"
 
             # 3. ANR traces 진입
