@@ -1,0 +1,65 @@
+[
+    {
+        "test_id": "TC-001",
+        "category": "RILJ_Request_Failed",
+        "target_log_file": "log_for_evaluation/request_failed.txt",
+        "query": "Request 에 대한 Failed 응답이 있는지 확인해줘",
+        "ground_truth": "SEND_SMS 에 대한 error 응답으로 실패함. NETWORK_ERR 라는 원인이 확인됨",
+        "eval_keywords": [
+            "Request",
+            "Failed",
+            "SMS전송실패"
+        ]
+    },
+    {
+        "test_id": "TC-002",
+        "category": "Call_Fail (CS)",
+        "target_log_file": "cs_call_failed.log",
+        "query": "Call Failed 발생하는데, 원인을 파악해봐",
+        "ground_truth": "Call 발신했지만, 연결되지 않고 Release 받은 후 종료되었습니다. FailCasuseCode: 49, vendorCause: 24 로 확인됩니다. 모뎀에서의 분석으로는 3G 상태에서 콜 연결 중 2G Cell 로 변경됐는데, network mode 에 2G 설정이 되있지않아 종료된 것으로 Comment 했습니다.",
+        "eval_keywords": [
+            "Release",
+            "CallFail",
+            "Reselection실패",
+            "콜연결안됨"
+        ]
+    },
+    {
+        "test_id": "TC-003",
+        "category": "Call_Fail (PS)",
+        "target_log_file": "ps_call_369_failed.txt",
+        "query": "Volte Call fail 됐는데, 원인을 확인해줘",
+        "ground_truth": "Call 발신했지만, 연결되지 않고 369 : CODE_SIP_REQUEST_URI_TOO_LARGE 에러로 call start failed 됐습니다. ",
+        "eval_keywords": [
+            "CallFail",
+            "콜발신실패",
+            "콜연결안됨"
+        ]
+    },
+    {
+        "test_id": "TC-004",
+        "category": "Call_Fail (PS)",
+        "target_log_file": "ps_call_504_unavailable.log",
+        "query": "Volte Call fail 됐는데, 원인을 확인해줘",
+        "ground_truth": "Call 발신 후 연결되기 전 MT 에서 Reject 으로 인해, 504: CODE_USER_DECLINE 으로 종료됨, Temprorary Unavailable 상태로 상대방에 의한 일시적 통화 불가로 확인됨",
+        "eval_keywords": [
+            "상대방 거부",
+            "콜발신안됨",
+            "504",
+            "Temporary"
+        ]
+    },
+    {
+        "test_id": "TC-005",
+        "category": "ANR",
+        "target_log_file": "log_anr.txt",
+        "query": "Volte Call fail 됐는데, 원인을 확인해줘",
+        "ground_truth": "Call 발신 후 연결되기 전 MT 에서 Reject 으로 인해, 504: CODE_USER_DECLINE 으로 종료됨, Temprorary Unavailable 상태로 상대방에 의한 일시적 통화 불가로 확인됨",
+        "eval_keywords": [
+            "상대방 거부",
+            "콜발신안됨",
+            "504",
+            "Temporary"
+        ]
+    }
+]

@@ -185,7 +185,7 @@ class LogOrchestrator:
         ]
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
-        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)RILJ\b', re.IGNORECASE)
+        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
 
         for idx, line in enumerate(lines):
             if line.startswith("!@Boot"):
