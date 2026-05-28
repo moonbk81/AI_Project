@@ -143,6 +143,19 @@ class RilRagChat:
         # ==========================================
         # if를 연달아 쓰지 않고 elif로 묶어, 가장 확실한 하나의 타겟(log_type)만 강제 할당합니다.
 
+        if any(keyword in query_lower for keyword in ["cs call", "cs 통화", "cs 발신", "cs 수신", "cs csfb"]):
+            selected_intents = {"Call_Analysis"}
+            selected_tools = {"get_cs_call_analytics"}  # 👈 PS 분석 도구 제거
+            selected_log_types = {"Call_Session", "RILJ_Transaction"}  # 👈 IMS_SIP_Message 제거
+            is_hard_matched = True
+
+        # 🚨 [신규 추가] PS/VoLTE 질문 시 CS 도구 원천 차단
+        elif any(keyword in query_lower for keyword in ["ps call", "ps 통화", "volte", "ims", "sip", "보이스오버"]):
+            selected_intents = {"Call_Analysis"}
+            selected_tools = {"get_ps_ims_call_analytics"}  # 👈 CS 분석 도구 제거
+            selected_log_types = {"Call_Session", "IMS_SIP_Message", "RILJ_Transaction"}
+            is_hard_matched = True
+
         if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "바인더", "binder", "transaction"]):
             selected_intents = {"Crash_ANR"}
             if "Crash_ANR" in self.routing_map:

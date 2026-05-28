@@ -48,6 +48,11 @@ def judge_with_litellm(judge_model, ollama_base, query, ground_truth, keywords, 
 You are an expert evaluator for Android Telephony RAG systems.
 Your task is to score the AI's generated [Answer] by comparing it strictly against the expert's [Ground Truth] and [Required Keywords].
 
+[CALIBRATED EVALUATION RULES]
+1. Narrative vs. Factual: Do not penalize the AI for lacking narrative polish. Focus strictly on whether the technical root cause (e.g., Error Code, Cause Code, Status) matches the Ground Truth.
+2. Valid Log Artifacts vs. Hallucination: The AI extracting timestamps, latency (ms), or standard protocol names is NOT a hallucination, provided it corresponds to the Target Event. However, if the AI pulls data from an unrelated call or session, heavily penalize the hallucination risk.
+3. Strict Penalty for Contradictions (Zero-Tolerance for Noise): If the AI presents multiple conflicting root causes (e.g., listing `callFailCause: 31` alongside `49` when Ground Truth only specifies `49`), apply a SEVERE penalty to Accuracy. The AI must accurately isolate the issue, not just dump all found errors.
+
 [Question]: {query}
 [Ground Truth]: {ground_truth}
 [Required Keywords]: {', '.join(keywords)}
