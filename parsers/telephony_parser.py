@@ -53,7 +53,7 @@ class TelephonyParser(BaseParser):
 
         # 🚨 [정밀 교정 정규식]
         # 패턴 1: {369 : CODE_SIP_...} 중괄호 매칭 (숫자와 에러 단어 그룹을 각각 분리 추출)
-        ims_bracket_re = re.compile(r'ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)', re.IGNORECASE)
+        ims_bracket_re = re.compile(r'ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)(?:,\s*(\d+)\s*,\s*([^,}]+))?', re.IGNORECASE)
         # 패턴 2: 기존 표준형 (code=361 또는 (361, 0, ...)) 방어용 백업
         ims_standard_re = re.compile(r'ImsReasonInfo\s*(?:[:\s\(\=]+code\=)?[:\s\(\=]*(\d+)', re.IGNORECASE)
 
@@ -79,8 +79,14 @@ class TelephonyParser(BaseParser):
             extracted_code = ""
             bracket_match = ims_bracket_re.search(line)
             if bracket_match:
-                # {369 : CODE_SIP_...} 구조에서 "369_CODE_SIP_REQUEST_URI_TOO_LARGE" 형태로 가독성 극대화하여 추출
+                # 기본 안드로이드 코드 (예: 504_CODE_USER_DECLINE)
                 extracted_code = f"{bracket_match.group(1)}_{bracket_match.group(2)}"
+
+                # SIP 코드가 파싱되었다면 추가! (예: 480)
+                sip_code = bracket_match.group(3)
+                sip_desc = bracket_match.group(4)
+                if sip_code and sip_code != "0":
+                    extracted_code += f" (SIP_{sip_code}_{sip_desc.strip()})"
             else:
                 standard_match = ims_standard_re.search(line)
                 if standard_match:
@@ -92,9 +98,11 @@ class TelephonyParser(BaseParser):
 
             obj_id = obj_match.group(1)
 
-            # 에러 코드가 잡혔다면 세션 저장소에 박제
+            # 🚨 [덮어쓰기 방어] 510 같은 포괄적 종료 코드가 진짜 원인(504, 480)을 덮어쓰지 못하게 락(Lock)
             if extracted_code:
-                obj_fail_reasons[obj_id] = extracted_code
+                existing_code = obj_fail_reasons.get(obj_id, "")
+                if not existing_code or ("510" not in extracted_code and "TERMINATED" not in extracted_code):
+                    obj_fail_reasons[obj_id] = extracted_code
 
             tc_match = tc_id_re.search(line)
             if tc_match:
@@ -126,22 +134,21 @@ class TelephonyParser(BaseParser):
 
             # 🚨 [최종 조립] 정제된 에러 단어를 fail_reason 필드에 매핑
             final_reason = "0"
-            if status == "FAIL":
-                if obj_fail_reasons[obj_id]:
-                    final_reason = obj_fail_reasons[obj_id]
+            if obj_fail_reasons[obj_id]:
+                final_reason = obj_fail_reasons[obj_id]
+            elif status == "FAIL":
+                # 백업용 분석기 가동
+                last_line = events[-1]
+                reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', last_line)
+                if reason_match:
+                    final_reason = reason_match.group(1).strip()
                 else:
-                    # 백업용 분석기 가동
-                    last_line = events[-1]
-                    reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', last_line)
-                    if reason_match:
-                        final_reason = reason_match.group(1).strip()
+                    fallback_match = ims_bracket_re.search(last_line)
+                    if fallback_match:
+                        final_reason = f"{fallback_match.group(1)}_{fallback_match.group(2)}"
                     else:
-                        fallback_match = ims_bracket_re.search(last_line)
-                        if fallback_match:
-                            final_reason = f"{fallback_match.group(1)}_{fallback_match.group(2)}"
-                        else:
-                            fallback_std = ims_standard_re.search(last_line)
-                            final_reason = f"IMS_FAIL_{fallback_std.group(1)}" if fallback_std else "IMS_CALL_START_FAILED"
+                        fallback_std = ims_standard_re.search(last_line)
+                        final_reason = f"IMS_FAIL_{fallback_std.group(1)}" if fallback_std else "IMS_CALL_START_FAILED"
 
             multi_calls_list.append({
                 "type": "PS(VoLTE)",
@@ -231,6 +238,11 @@ class TelephonyParser(BaseParser):
                 if active_list:
                     target_call = active_list[-1]
 
+            is_just_completed = False
+            if not target_call and "LAST_CALL_FAIL_CAUSE" in payload and completed_list:
+                target_call = completed_list[-1] # 방금 막 종료된 타겟 호출
+                is_just_completed = True
+
             if not target_call:
                 return
 
@@ -240,6 +252,21 @@ class TelephonyParser(BaseParser):
             target_call["logs"].append(f"[{ts}] {payload}")
             if ",ACTIVE," in payload:
                 target_call["status"] = "SUCCESS"
+
+            # 🚨 [수정 2] 조기 종료된 콜에 뒤늦게 들어온 Cause Code 명시적 덮어쓰기
+            if "LAST_CALL_FAIL_CAUSE" in payload and "causeCode" in payload:
+                c_match = re.search(r'causeCode:\s*(\d+)', payload)
+                v_match = re.search(r'vendorCause:\s*(\d+)', payload)
+                if c_match:
+                    cause_str = f"callFailCause: {c_match.group(1)}"
+                    if v_match:
+                        cause_str += f", vendorCause: {v_match.group(1)}"
+                    target_call["fail_reason"] = cause_str
+                    target_call["status"] = "CALL DROP" # 명시적 에러 수신 시 강제 실패 처리
+
+            # 이미 완료 처리된 콜에 로그만 덧붙인 경우, 아래의 종료 로직(is_end)을 중복으로 타지 않고 반환
+            if is_just_completed:
+                return
 
             cs_m = TEL_PATTERNS['CS_REASON'].search(payload)
             if cs_m:

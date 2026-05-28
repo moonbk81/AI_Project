@@ -276,6 +276,8 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
 python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e2b
 - 필요에 따라 --dataset, --output, --summary, --ollama-base 등의 인자를 조정할 수 있습니다.
 python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e4b
+python run_golden_eval.py --judge-model ollama/qwen2.5-coder:7b --rag-mode
+l batiai/gemma4-e2b:q4
 """
 
 if __name__ == "__main__":

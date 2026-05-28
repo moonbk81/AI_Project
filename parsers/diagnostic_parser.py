@@ -261,38 +261,27 @@ class CrashParser(BaseParser):
 
             if is_fatal_app or is_fatal_sys:
                 if is_cap and tmp:
-                    # 🚨 핵심 로직: 타임스탬프의 '초' 단위까지 비교 (예: '12-29 08:42:12')
-                    # 같은 초(Second) 안에 발생한 연쇄 크래시라면 하나로 병합!
                     if tmp["time"][:14] == ts[:14]:
                         tmp["exception_info"] += f"\n[Chain Crash] {clean_line} "
-
-                        detected_process = "system_server" if is_fatal_sys else "Unknown"
-                        if "Zygote" in clean_line: detected_process = "zygote"
-
-                        # 프로세스 명도 누적 (예: "zygote, com.android.phone")
-                        if detected_process not in tmp["process"]:
-                            tmp["process"] += f", {detected_process}"
-
-                        step = 1 # 다음 프로세스명이나 스택을 받기 위해 step 리셋
+                        # 🚨 [수정 1] 의미 없는 zygote 오판 로직 삭제 (진짜 이름은 Process: 라인에서 찾음)
+                        step = 1
                         fatal_info_count = 0
-                        continue # 새로 분리하지 않고 기존 tmp에 계속 덧붙임
+                        continue
                     else:
-                        # 시간이 다르면 완전히 별개의 크래시이므로 기존 것 저장
                         if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
                         crashes.append(tmp)
 
-                # 새로운 시간대의 크래시 캡처 시작
                 is_cap = True
                 step = 1
                 fatal_info_count = 0
-                detected_process = "system_server" if is_fatal_sys else "Unknown"
-                if "Zygote" in clean_line: detected_process = "zygote"
 
+                # 🚨 [수정 2] 기본값을 "Unknown"으로 두고, zygote 하드코딩 삭제
                 tmp = {
                     "time": ts,
                     "trigger": clean_line,
-                    "process": detected_process,
+                    "process": "system_server" if is_fatal_sys else "Unknown",
                     "exception_info": "",
+                    "top_method": "Unknown", # 🚨 [추가] 최상단 메소드를 담을 전용 필드 신설!
                     "call_stack": [],
                     "context": list(pre_ctx)[-5:]
                 }
@@ -301,10 +290,13 @@ class CrashParser(BaseParser):
             if is_cap:
                 if step == 1:
                     if "Process:" in clean_line:
+                        # 🚨 [수정 3] 진짜 프로세스 이름을 추출 (Zygote 오판 방지)
                         proc_match = re.search(r"Process:\s*([^\s,]+)", clean_line)
                         if proc_match:
-                            new_proc = proc_match.group(1)
-                            if new_proc not in tmp["process"]:
+                            new_proc = proc_match.group(1).strip()
+                            if new_proc != "zygote" and tmp["process"] == "Unknown":
+                                tmp["process"] = new_proc
+                            elif new_proc != "zygote" and new_proc not in tmp["process"]:
                                 tmp["process"] += f", {new_proc}"
                         step = 2
                         continue
@@ -313,6 +305,12 @@ class CrashParser(BaseParser):
 
                 if step == 2:
                     if DIAG_PATTERNS['STACK_LINE'].search(clean_line) or "at " in clean_line:
+                        # 🚨 [추가 4] 첫 번째 'at ' 라인을 최상단 메소드(top_method)로 저장!
+                        if tmp["top_method"] == "Unknown":
+                            method_match = re.search(r'at\s+([^\(]+)', clean_line)
+                            if method_match:
+                                tmp["top_method"] = method_match.group(1).strip()
+
                         tmp["call_stack"].append(clean_line)
                         fatal_info_count = 0
                     else:
@@ -337,9 +335,6 @@ class CrashParser(BaseParser):
             crashes.append(tmp)
 
         return crashes
-
-import re
-from collections import deque
 
 class AnrParser(BaseParser):
     def analyze(self, lines, target_package=None):

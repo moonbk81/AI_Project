@@ -113,6 +113,7 @@ class RilRagChat:
         if not chunks:
             chunks = [query]
 
+        # 1. 시맨틱 스코어 계산 (원래 로직 유지 - top_matches 등 디버깅/로깅용)
         category_scores = []
         for category, data in self.routing_map.items():
             intent_vec = self.embed_model.encode(data["desc"])
@@ -133,81 +134,112 @@ class RilRagChat:
         selected_log_types = set()
         selected_intents = set()
 
-        threshold = 0.52
-        multi_threshold = 0.50
+        # 🚨 [핵심 플래그] 명시적 키워드가 매칭되면 시맨틱 결과를 무시하기 위한 잠금장치
+        is_hard_matched = False
+        query_lower = query.lower()
 
-        routing_scores = {category: float(score) for category, score, _ in category_scores}
+        # ==========================================
+        # 1단계: 하드코딩 키워드 (최우선 순위 - 덮어쓰기)
+        # ==========================================
+        # if를 연달아 쓰지 않고 elif로 묶어, 가장 확실한 하나의 타겟(log_type)만 강제 할당합니다.
 
-        if not category_scores:
-            selected_intents.add("Fallback_General")
-            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
-            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
-            return {"intents": list(selected_intents), "tools": list(selected_tools), "log_types": list(selected_log_types), "scores": routing_scores, "top_matches": []}
+        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "바인더", "binder", "transaction"]):
+            selected_intents = {"Crash_ANR"}
+            if "Crash_ANR" in self.routing_map:
+                selected_tools = set(self.routing_map["Crash_ANR"].get("tools", []))
+                selected_log_types = set(self.routing_map["Crash_ANR"].get("log_types", []))
+            is_hard_matched = True
 
-        top1_cat, top1_score, top1_data = category_scores[0]
-        if top1_score < threshold:
-            selected_intents.add("Fallback_General")
-            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
-            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
-        else:
-            selected_intents.add(top1_cat)
-            selected_tools.update(top1_data["tools"])
-            selected_log_types.update(top1_data["log_types"])
+        elif any(keyword in query_lower for keyword in ["인터넷", "먹통", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network", "setupdatacall"]):
+            selected_intents = {"Internet_Stall"}
+            if "Internet_Stall" in self.routing_map:
+                selected_tools = set(self.routing_map["Internet_Stall"].get("tools", []))
+                selected_log_types = set(self.routing_map["Internet_Stall"].get("log_types", []))
+            is_hard_matched = True
 
-            if len(category_scores) > 1:
-                top2_cat, top2_score, top2_data = category_scores[1]
-                if top2_score >= multi_threshold:
+        elif any(keyword in query_lower for keyword in ["send_sms", "문자", "sms"]):
+            # SMS 같은 RIL 명령어 명시 (RILJ_Transaction만 보도록 하드 록)
+            selected_intents = {"RILJ_Request_Failed"}
+            if "RILJ_Request_Failed" in self.routing_map:
+                selected_tools = set(self.routing_map["RILJ_Request_Failed"].get("tools", []))
+                selected_log_types = set(self.routing_map["RILJ_Request_Failed"].get("log_types", []))
+            else:
+                selected_log_types = {"RILJ_Transaction"}
+            is_hard_matched = True
+
+        elif any(keyword in query_lower for keyword in ["비행기 모드", "airplane mode", "flight mode", "radio power", "모뎀 전원", "라디오 파워"]):
+            selected_intents = {"Radio_Power"}
+            if "Radio_Power" in self.routing_map:
+                selected_tools = set(self.routing_map["Radio_Power"].get("tools", []))
+                selected_log_types = set(self.routing_map["Radio_Power"].get("log_types", []))
+            is_hard_matched = True
+
+        elif any(keyword in query_lower for keyword in ["dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림"]):
+            selected_intents = {"DNS_Latency"}
+            if "DNS_Latency" in self.routing_map:
+                selected_tools = set(self.routing_map["DNS_Latency"].get("tools", []))
+                selected_log_types = set(self.routing_map["DNS_Latency"].get("log_types", []))
+            is_hard_matched = True
+
+        elif any(keyword in query_lower for keyword in ["spacex", "starlink", "ntn", "스페이스엑스"]):
+            selected_intents = {"NTN_SpaceX"}
+            if "NTN_SpaceX" in self.routing_map:
+                selected_tools = set(self.routing_map["NTN_SpaceX"].get("tools", []))
+                selected_log_types = set(self.routing_map["NTN_SpaceX"].get("log_types", []))
+            is_hard_matched = True
+
+        elif any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
+            selected_intents = {"Tiantong_Satellite"}
+            if "Tiantong_Satellite" in self.routing_map:
+                selected_tools = set(self.routing_map["Tiantong_Satellite"].get("tools", []))
+                selected_log_types = set(self.routing_map["Tiantong_Satellite"].get("log_types", []))
+            is_hard_matched = True
+
+        # ==========================================
+        # 2단계: 시맨틱 검색 (명시적 키워드가 없을 때만 백업으로 동작)
+        # ==========================================
+        if not is_hard_matched:
+            threshold = 0.52
+            multi_threshold = 0.50
+
+            # 시맨틱 점수가 기준치 미달이면 기본(Fallback) 통신망 세팅
+            if not category_scores or category_scores[0][1] < threshold:
+                selected_intents.add("Fallback_General")
+                selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
+                selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
+            else:
+                top1_cat, top1_score, top1_data = category_scores[0]
+                selected_intents.add(top1_cat)
+                selected_tools.update(top1_data["tools"])
+                selected_log_types.update(top1_data["log_types"])
+
+                # 시맨틱 점수가 높을 때만 멀티 타겟 허용
+                if len(category_scores) > 1 and category_scores[1][1] >= multi_threshold:
+                    top2_cat, top2_score, top2_data = category_scores[1]
                     selected_intents.add(top2_cat)
                     selected_tools.update(top2_data["tools"])
                     selected_log_types.update(top2_data["log_types"])
 
+        # 마지막으로 RIL/명령어 관련 모호한 키워드가 섞여 있으면 RILJ만 살짝 얹어줌
+        if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
+            selected_log_types.add("RILJ_Transaction")
+
+        # 시맨틱이 돌았는데도 비어있는 에지 케이스 방어
         if not selected_tools and not selected_log_types:
             selected_intents.add("Fallback_General")
             selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
             selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
 
-        query_lower = query.lower()
-        if any(keyword in query_lower for keyword in ["비행기 모드", "airplane mode", "flight mode", "radio power", "모뎀 전원", "라디오 파워"]):
-            selected_intents.add("Radio_Power")
-            if "Radio_Power" in self.routing_map:
-                selected_tools.update(self.routing_map["Radio_Power"].get("tools", []))
-                selected_log_types.update(self.routing_map["Radio_Power"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["인터넷", "먹통", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network"]):
-            selected_intents.add("Internet_Stall")
-            if "Internet_Stall" in self.routing_map:
-                selected_tools.update(self.routing_map["Internet_Stall"].get("tools", []))
-                selected_log_types.update(self.routing_map["Internet_Stall"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림"]):
-            selected_intents.add("DNS_Latency")
-            if "DNS_Latency" in self.routing_map:
-                selected_tools.update(self.routing_map["DNS_Latency"].get("tools", []))
-                selected_log_types.update(self.routing_map["DNS_Latency"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "먹통", "바인더", "binder", "transaction"]):
-            selected_intents.add("Crash_ANR")
-            if "Crash_ANR" in self.routing_map:
-                selected_tools.update(self.routing_map["Crash_ANR"].get("tools", []))
-                selected_log_types.update(self.routing_map["Crash_ANR"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["spacex", "starlink", "ntn", "스페이스엑스"]):
-            selected_intents.add("NTN_SpaceX")
-            if "NTN_SpaceX" in self.routing_map:
-                selected_tools.update(self.routing_map["NTN_SpaceX"].get("tools", []))
-                selected_log_types.update(self.routing_map["NTN_SpaceX"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
-            selected_intents.add("Tiantong_Satellite")
-            if "Tiantong_Satellite" in self.routing_map:
-                selected_tools.update(self.routing_map["Tiantong_Satellite"].get("tools", []))
-                selected_log_types.update(self.routing_map["Tiantong_Satellite"].get("log_types", []))
-
-        if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
-            selected_log_types.update(["RILJ_Transaction"])
-
+        routing_scores = {category: float(score) for category, score, _ in category_scores}
         top_matches = [{"intent": category, "score": float(score)} for category, score, _ in category_scores[:3]]
-        return {"intents": sorted(list(selected_intents)), "tools": sorted(list(selected_tools)), "log_types": sorted(list(selected_log_types)), "scores": routing_scores, "top_matches": top_matches}
+
+        return {
+            "intents": sorted(list(selected_intents)),
+            "tools": sorted(list(selected_tools)),
+            "log_types": sorted(list(selected_log_types)),
+            "scores": routing_scores,
+            "top_matches": top_matches
+        }
 
     def ingest_file(self, file_path, force=False):
         if not os.path.exists(file_path):
@@ -323,6 +355,18 @@ class RilRagChat:
     def _get_domain_specific_guideline(self, query, intents, target_log_types):
         guidelines = []
         query_lower = query.lower()
+
+        if "cs call" in query_lower or "cs 통화" in query_lower:
+            guidelines.append("### [🚨 타겟 고정: CS Call 전용 분석]\n사용자가 'CS Call'을 명시했습니다. \
+                검색된 컨텍스트에 PS(VoLTE)나 SIP 관련 로그(예: 501_CODE_USER_TERMINATED 등)가 섞여 있더라도 절대 무시하십시오. \
+                오직 CS 관련 통화 실패(callFailCause, vendorCause) 기록만 추출하여 답변하십시오.")
+
+        # 🚨 [수정된 부분] PS(VoLTE) 통화 분석 시 정상 종료(510) 무시 및 단일 콜 타겟팅 룰 추가
+        elif "ps call" in query_lower or "volte" in query_lower or "ims" in query_lower:
+            guidelines.append("### [🚨 타겟 고정: PS(VoLTE) Call 전용 분석]\n사용자가 'PS(VoLTE) 통화 종료/실패'를 물어보면, \
+                검색된 여러 통화 세션 중 단순/정상 종료(예: 510_CODE_USER_TERMINATED 등)는 모두 분석에서 제외하십시오. \
+                오직 실제 거절이나 망 에러(예: 504_CODE_USER_DECLINE, SIP 480 등)가 발생한 '단 하나의 문제 통화'만 찾아내어, \
+                해당 에러 코드와 사유만 정답지처럼 간결하게 요약하십시오. 불필요한 objId나 여러 통화를 나열하지 마십시오.")
 
         if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
             spacex_rule = self.prompts.get('SpaceX', "")

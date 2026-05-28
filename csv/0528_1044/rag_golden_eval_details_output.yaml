@@ -1,0 +1,147 @@
+- "\uFEFFtest_id": TC-001
+  category: RILJ_Request_Failed
+  query: SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.
+  ground_truth: SEND_SMS 요청에 대해 모뎀이 에러 응답을 내렸으며, 구체적인 실패 원인은 NETWORK_ERR 로 확인됩니다.
+  rag_answer: 'SEND_SMS 요청 실패는 NETWORK_ERR 및 UNKNOWN_ERROR로 확인됨.
+
+    시간 05-22 15:41:47.305에 SEND_SMS 명령어 실행 시 지연시간 40018ms와 함께 NETWORK_ERR이 발생함.
+
+    시간 05-22 15:45:57.297에 SEND_SMS 명령어 실행 시 UNKNOWN_ERROR가 발생함.
+
+    GET_CELL_INFO_LIST 명령어 실행 시에도 에러코드 63이 기록됨.'
+  accuracy_score: 0.5
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 0.75
+  reason: The answer correctly identifies NETWORK_ERR as a cause of SEND_SMS failure,
+    which aligns with the Ground Truth. However, it incorrectly mentions UNKNOWN_ERROR
+    and GET_CELL_INFO_LIST, which are not relevant to the question.
+  error: ''
+- "\uFEFFtest_id": TC-002
+  category: Call_Fail (CS)
+  query: CS Call 발신 후 연결되지 않고 끊어진 원인(Cause Code)을 분석해 줘.
+  ground_truth: 'all 발신 후 연결되지 않고 Release 되었습니다. 상세 원인은 callFailCause: 49 및 vendorCause:
+    24 로 확인됩니다.'
+  rag_answer: 'CS Call 실패 원인은 `callFailCause: 49`로 확인됨. 해당 통화는 `Call_Session` 로그에서
+    `fail_reason: 0`으로 기록되었으며, `Call_Session` 로그에는 `CONGESTION(callFailCause: 49,
+    vendorCause: 24)`이 기록되어 있음. 모뎀 측에서는 `RILJ_Transaction`에서 `VOICE_REGISTRATION_STATE`
+    및 `DATA_REGISTRATION_STATE` 명령에 대해 `ERROR`와 에러내용 `7`이 발생했음.'
+  accuracy_score: 0.5
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 0.75
+  reason: The answer correctly identifies the call fail cause and vendor cause, but
+    it includes additional information not present in the ground truth (e.g., `Call_Session`
+    logs, `RILJ_Transaction`).
+  error: ''
+- "\uFEFFtest_id": TC-003
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.
+  ground_truth: Call 발신이 기지국으로 전달되었으나, 369 (CODE_SIP_REQUEST_URI_TOO_LARGE) 에러 응답을
+    수신하여 호 설정에 실패했습니다.
+  rag_answer: SIP 에러 코드는 369_CODE_SIP_REQUEST_URI_TOO_LARGE로 확인됨. 이는 요청 URI가 너무 크다는
+    의미이다. 해당 에러는 TC@37_1 (objId:6646076) 및 TC@42_1 (objId:7705404) 통화 시도 시 발생함.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 1.0
+  reason: The AI's answer accurately matches the Ground Truth, includes all required
+    keywords, and does not introduce any unsupported information.
+  error: ''
+- "\uFEFFtest_id": TC-004
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신 종료가 되었는데, sip error 등으로 인한 망 이슈인지 아니면 상대방 거절인지 확인해줘.
+  ground_truth: 상대측 reject으로 콜이 종료되었습니다. 네트워크 측으로부터 480 Temporarily Unavailable SIP
+    code가 수신되었으며, 이에 따라 안드로이드 IMS 내부적으로도 504 (CODE_USER_DECLINE) 코드가 함께 확인됩니다.
+  rag_answer: 'SIP 에러는 발생하지 않았으며 통화는 상대방에 의해 종료됨. `call_id: TC@1_1 (objId:143489638)`의
+    종료 사유는 `CODE_USER_TERMINATED_BY_REMOTE` (510)로 확인됨. 이는 상대방에 의한 종료로 판단됨.'
+  accuracy_score: 0.0
+  keyword_coverage: 0.0
+  hallucination_risk: 1.0
+  overall_score: 0.0
+  reason: The AI's answer is incorrect and does not match the Ground Truth or Required
+    Keywords.
+  error: ''
+- "\uFEFFtest_id": TC-005
+  category: ANR
+  query: ANR이 발생한 정확한 프로세스와 처리가 지연된 인텐트(Intent) 액션명을 알려줘.
+  ground_truth: com.android.phone 프로세스에서 ANR이 발생했으며, com.samsung.intent.action.IMEI_STATE_CHANGED
+    인텐트의 Broadcast 처리가 지연된 것이 원인입니다.
+  rag_answer: ANR은 com.android.phone 프로세스에서 발생했으며, 원인은 Broadcast of Intent act=com.samsung.intent.action.IMEI_STATE_CHANGED
+    flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1
+    이다. 해당 이벤트는 IMEI_STATE_CHANGED 인텐트 액션에 의해 발생했다.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 1.0
+  reason: The AI's answer accurately matches the Ground Truth, includes all required
+    keywords, and does not introduce any unsupported causes or events.
+  error: ''
+- "\uFEFFtest_id": TC-006
+  category: Fatal_Exception
+  query: 메인 프로세스에서 발생한 Fatal Exception의 종류와 마지막으로 호출된 콜스택(메소드)은 무엇인가?
+  ground_truth: java.lang.ArrayIndexOutOfBoundsException (length=0; index=0) 에러가 발생했으며,
+    마지막 콜스택은 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage
+    로 확인됩니다.
+  rag_answer: 'java.lang.ArrayIndexOutOfBoundsException: length=0; index=0 발생함. 해당
+    이벤트는 process: zygote에서 발생했으며, main 프로세스에 영향을 미쳤음.'
+  accuracy_score: 0.5
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 0.75
+  reason: The answer correctly identifies the type of Fatal Exception (ArrayIndexOutOfBoundsException)
+    and includes the required keyword 'CoverAuthHandler.handleMessage'. However, it
+    incorrectly states that the event occurred in the 'zygote' process instead of
+    the main process.
+  error: ''
+- "\uFEFFtest_id": TC-007
+  category: Native_Crash
+  query: rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.
+  ground_truth: libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조
+    오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다.
+  rag_answer: SIGSEGV 신호로 인해 rild 데몬에서 네이티브 크래시가 발생함. 해당 크래시는 libsec-ril.so 라이브러리의
+    DataCallManager::NotifyDataCallState 함수 내에서 발생함.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 1.0
+  reason: The AI's answer accurately matches the core technical facts of the Ground
+    Truth, includes all required keywords, and does not invent unsupported causes
+    or events.
+  error: ''
+- "\uFEFFtest_id": TC-008
+  category: SetupDataCall_Failed
+  query: E-PDN 데이터 호(SetupDataCall) 연결 시도가 실패한 명시적인 거절 사유를 알려줘.
+  ground_truth: E-PDN 연결을 시도했으나 NOT_SPECIFIED 상태로 실패했으며, 상세 거절 원인은 기지국 측의 NO CARRIER
+    / User authentication failed 입니다.
+  rag_answer: 'IPCT에서 ImsReasonInfo: 1103 : UNKNOWN_CODE, 1103, Tlte_911fail 에러가 발생함.
+    이는 TC@1_1, TC@2_1, TC@3_1 세 건의 통화 시도에서 발생함.
+
+
+    TC@1_1, TC@2_1, TC@3_1 통화 세션 모두 fail_reason이 1103_UNKNOWN_CODE로 기록됨. 이는 명시적인 거절
+    사유가 로그에 기록되어 있지 않음.
+
+
+    RILJ_Transaction 로그에서 SETUP_DATA_CALL 명령어에 대해 latency_ms가 515ms 및 840ms로 기록되었으나,
+    최종 상태는 SUCCESS로 종료됨.'
+  accuracy_score: 0.0
+  keyword_coverage: 0.0
+  hallucination_risk: 1.0
+  overall_score: 0.0
+  reason: The AI's answer does not match the core technical facts of the Ground Truth,
+    lacks required keywords, and invents unsupported causes or events.
+  error: ''
+- "\uFEFFtest_id": TC-009
+  category: DataStall
+  query: Data Stall 감지 시점과 Recovery 동작이 완전히 종료되어 복구된 시간을 분석해 줘.
+  ground_truth: 10:18:29 무렵 Data Stall이 감지되어 Recovery 로직이 진입하였고, 10:18:47 경에 Recovery
+    동작이 종료되며 정상적으로 망 복구가 완료되었습니다.
+  rag_answer: Data Stall 감지 시점은 2026-05-21T10:18:29.047502로 기록됨. Recovery 동작은 18.558초
+    소요되어 2026-05-21T10:18:47.605251에 종료되었으며, isRecovered는 true로 확인됨.
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.0
+  overall_score: 0.9
+  reason: The answer is accurate in terms of the timing and recovery process, includes
+    all required keywords, and does not introduce any unsupported information.
+  error: ''

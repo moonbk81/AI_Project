@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime
 from parsers.base import BaseParser
+from core.telephony_constants import RIL_DATA_FAIL_CAUSE_MAP
 
 class DataCallProcessor(BaseParser):
     """RIL SETUP_DATA_CALL Request/Response 매칭 및 데이터 스톨(Stall) 분석기"""
@@ -18,10 +19,16 @@ class DataCallProcessor(BaseParser):
         active_sessions = {}       # 현재 연결이 유지 중인 세션 (cid 기준)
         self.parsed_data = []
 
+        last_rild_fail_cause = None
+
         for line in lines:
             clean_line = self.clean_line(line)
             if not clean_line: continue
 
+            if "fail cause" in clean_line.lower() and ("RILD" in clean_line or "RILD2" in clean_line):
+                rild_cause_match = re.search(r'fail cause\s*\((\d+)\) is permanent fail', clean_line, re.IGNORECASE)
+                if rild_cause_match:
+                    last_rild_fail_cause = rild_cause_match.group(1)
             # ==========================================
             # 1. SETUP_DATA_CALL (연결)
             # ==========================================
@@ -78,6 +85,11 @@ class DataCallProcessor(BaseParser):
                     vendor_err = []
                     if re.search(r'NO CARRIER', payload, re.I): vendor_err.append("NO CARRIER")
                     if re.search(r'authentication failed', payload, re.I): vendor_err.append("User authentication failed")
+
+                    if last_rild_fail_cause:
+                        rild_fail_cause_str = RIL_DATA_FAIL_CAUSE_MAP.get(last_rild_fail_cause)
+                        vendor_err.append(rild_fail_cause_str)
+                        last_rild_fail_cause = None
 
                     if vendor_err:
                         final_status = "FAIL" # 벤더 에러가 보이면 무조건 실패 처리
