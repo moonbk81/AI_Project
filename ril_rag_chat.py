@@ -61,7 +61,7 @@ class RilRagChat:
         # 3. LLM 로드 (Gemma4-e4b 적용)
         self.llm_model_name = 'gemma4:e4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         if device == "cuda":
-            self.llm_model_name = 'batiai/gemma4-e2b:q4'
+            self.llm_model_name = 'gemma3:4b' #'batiai/gemma4-e2b:q4'
 
         if model_name is not None:
             self.llm_model_name = model_name
@@ -371,15 +371,13 @@ class RilRagChat:
 
         if "cs call" in query_lower or "cs 통화" in query_lower:
             guidelines.append("### [🚨 타겟 고정: CS Call 전용 분석]\n사용자가 'CS Call'을 명시했습니다. \
-                검색된 컨텍스트에 PS(VoLTE)나 SIP 관련 로그(예: 501_CODE_USER_TERMINATED 등)가 섞여 있더라도 절대 무시하십시오. \
-                오직 CS 관련 통화 실패(callFailCause, vendorCause) 기록만 추출하여 답변하십시오.")
+                검색된 컨텍스트에 PS(VoLTE)나 SIP 관련 로그(예: 501_CODE_USER_TERMINATED 등)가 섞여 있더라도 절대 무시하십시오.")
 
         # 🚨 [수정된 부분] PS(VoLTE) 통화 분석 시 정상 종료(510) 무시 및 단일 콜 타겟팅 룰 추가
         elif "ps call" in query_lower or "volte" in query_lower or "ims" in query_lower:
             guidelines.append("### [🚨 타겟 고정: PS(VoLTE) Call 전용 분석]\n사용자가 'PS(VoLTE) 통화 종료/실패'를 물어보면, \
                 검색된 여러 통화 세션 중 단순/정상 종료(예: 510_CODE_USER_TERMINATED 등)는 모두 분석에서 제외하십시오. \
-                오직 실제 거절이나 망 에러(예: 504_CODE_USER_DECLINE, SIP 480 등)가 발생한 '단 하나의 문제 통화'만 찾아내어, \
-                해당 에러 코드와 사유만 정답지처럼 간결하게 요약하십시오. 불필요한 objId나 여러 통화를 나열하지 마십시오.")
+                오직 실제 거절이나 망 에러(예: 504_CODE_USER_DECLINE, SIP 480 등)가 발생한 '단 하나의 문제 통화'만 찾아내십시오.")
 
         if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
             spacex_rule = self.prompts.get('SpaceX', "")
@@ -390,6 +388,11 @@ class RilRagChat:
         else:
             base_p = self.prompts.get('base_persona', "")
             if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
+
+        log_guidelines_dict = self.prompts.get('log_guidelines', {})
+        for log_type in target_log_types:
+            if log_type in log_guidelines_dict:
+                guidelines.append(f"### [🚨 {log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
         return "\n\n".join(guidelines)
 
@@ -537,7 +540,9 @@ class RilRagChat:
                 real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
                 if real_logs: snippet = "\n".join(real_logs[-5:])
             except: pass
-            formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n메타정보: {clean_meta}\n요약: {doc}\n원본 로그 스니펫:\n{snippet}")
+
+            meta_lines = "\n".join([f"  - {k}: {v}" for k, v in clean_meta.items()])
+            formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n[메타정보]\n{meta_lines}\n\n[요약]\n{doc}\n\n[원본 로그 스니펫]\n{snippet}")
         return "\n\n".join(formatted)
 
     def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:

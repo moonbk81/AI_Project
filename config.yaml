@@ -311,19 +311,11 @@ prompts:
 
   log_guidelines:
     Call_Session: |
-      - [Call_Session (통화)]: status가 'FAIL/DROP'인 세션을 찾고, 'fail_reason'을 반드시 읽어서 실패 원인을 설명해라. (통화 에러 분석 시 OOS와 혼동 금지)
-      - status가 NORMAL_RELEASE 또는 정상 종료이면 ERROR 키워드가 주변에 있어도 Call Drop으로 판정하지 마라.
-      - FAIL/DROP이 있더라도 이후 재발신 성공, IMS 재등록 성공, Service 복구 여부를 함께 확인하라.
-      - OOS/Signal 급감과 시간 상관관계가 없으면 RF 원인으로 단정하지 마라.
-      - CS Call과 PS/IMS Call을 혼동하지 말고, CS release cause와 SIP response를 분리해서 설명하라.
-      - 🚨 [다중 통화(Multi-call) 주의]: 2개 이상의 콜이 겹치는 다중 통화(Call Waiting 등) 상황을 주의하라. 전체 로그를 뭉뚱그려 보지 말고 반드시 `[ImsCall objId:XXXX]` 또는 `Telecom Call ID` 단위로 각 콜의 생애주기를 독립적으로 분리해서 추적하라.
-      - CMC 기능인 `onCallStartFailed` 에러를 순수 IMS 통화 실패로 오탐하지 마라.
-      - 통화 종료 시 `ImsReasonInfo`를 확인하여 전화를 끊은 주체가 상대방(510 CODE_USER_TERMINATED_BY_REMOTE)인지 사용자 거절(501/200 CODE_USER_TERMINATED)인지 명확히 구분하라.
-      - [위성 예외]: 현재 SpaceX 위성망 접속 중에는 Call 이 지원되지 않으므로, 이 구간의 통화 실패를 치명적 결함으로 분류하지 마십시오.
-      - 🚨 [핵심 키워드 필수]: 설명 시 뭉뚱그려 말하지 말고, 로그에 기록된 `callFailCause: 49`, `vendorCause: 24`와 같이 추출된 원본 에러 코드 값을 답변에 반드시 포함해라.
-      - [단일 세션 타겟팅] 사용자가 '실패', '단절', '에러' 원인을 물어볼 경우, 검색된 로그에 정상 종료(NORMAL_RELEASE) 기록이 섞여 있더라도 무시하고 반드시 '실패한 특정 세션'의 에러 코드와 사유만 단답형으로 추출할 것.
-      - [자체 모순 금지] 로그에서 실패 사유(예: CODE_USER_DECLINE 등)를 찾아서 서술했다면, "명시적인 원인이 확인되지 않음" 같은 상반된 문장을 절대 덧붙이지 말 것.
-      - [시간 선후 관계 엄수] 특정 에러의 원인을 분석할 때, 반드시 타임스탬프를 확인하라. Target 에러보다 나중에(이후에, 10초 이후) 발생한 로그나 에러는 절대 원인으로 지목하지 말 것.
+      - 🚨 [출력 양식 강제 (우선순위 최상)]: 질문된 시간대와 일치하는 단일 문제 세션 1개만 찾아라. 답변은 반드시 아래 [출력 양식] 중 하나를 선택하여 빈칸([])을 채운 '단 한 문장'으로만 작성해야 한다.
+      - 🚨 [데이터 매핑 규칙]: `slot: 0`은 '첫번째 SIM slot', `slot: 1`은 '두번째 SIM slot'으로 표기해라. CS 원인 코드는 `raw_logs` 텍스트 안에서 추출해라.
+      - [CS 통화 출력 양식 (type이 CS인 경우)]: "slot [slot]에서 [start_time]에 시작하여 [end_time]까지 진행된 통화(ID: [id])가 [status] 상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: [is_user_reject 여부])은 아니며, 상세 실패 원인은 [raw_logs에서 찾은 callFailCause 및 vendorCause 값]로 확인됩니다."
+      - [PS/VoLTE 통화 출력 양식 (type이 PS(VoLTE)인 경우)]: "slot [slot]에서 [start_time]에 시작하여 [end_time]까지 진행된 통화(ID: [id])가 [status] 상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: [is_user_reject 여부])은 아니며, 상세 실패 원인은 [fail_reason 값]로 확인됩니다."
+      - 🚨 [답변 즉시 종료 규칙 (절대 원칙)]: 위의 양식에 맞춰 단 한 문장을 완성했다면, 마침표(.)를 찍고 그 즉시 생성을 완전히 멈춰라! 검색된 다른 시간대의 로그, callFailCause: 0인 내역, PS/CS 교차 세션 등은 절대로 요약하거나 덧붙이지 마라.
 
     OOS_Event: |
       - [OOS_Event (망 이탈)]: voice_reg/data_reg 값이 0이면 '정상', 1 이상이면 '망 이탈/음영'으로 판단해라.

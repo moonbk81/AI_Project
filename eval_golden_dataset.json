@@ -14,9 +14,11 @@
         "test_id": "TC-002",
         "category": "Call_Fail (CS)",
         "target_log_file": "log_for_evaluation/cs_call_failed.log",
-        "query": "CS Call 발신 후 연결되지 않고 끊어진 원인(Cause Code)을 분석해 줘.",
-        "ground_truth": "Call 발신 후 연결되지 않고 Release 되었습니다. 상세 원인은 callFailCause: 49 및 vendorCause: 24 로 확인됩니다.",
+        "query": "03-25 17시 38분 무렵에 발생한 CS Call 통화 실패(에러) 원인을 상세히 분석해 줘.",
+        "ground_truth": "첫번째 SIM slot(slot 0)에서 17:38:25에 시작하여 17:39:16까지 약 51초 동안 진행된 통화(ID: TC@119_1)가 CALL DROP 상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: false)은 아니며, 상세 실패 원인은 callFailCause: 49, vendorCause: 24로 확인됩니다.",
         "eval_keywords": [
+            "TC@119_1",
+            "CALL DROP",
             "callFailCause: 49",
             "vendorCause: 24"
         ]
