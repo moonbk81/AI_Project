@@ -405,11 +405,6 @@ with st.sidebar:
                     st.session_state.feedback_key += 1
                     st.rerun()
 
-        st.divider()
-        st.subheader("사이드바 Copilot")
-        render_chat_interface(key_suffix="sidebar")
-
-
 with tab_chat:
     st.info("**AI 분석 질의 가이드** (분석 카테고리를 명시하면 정확도가 향상됩니다)")
     with st.expander("질문 예시 확인"):
@@ -678,13 +673,18 @@ with tab_dash:
                             current_base = st.session_state.current_file.replace("_payload.json", "")
                             health_kpi_json = get_device_health_kpi(current_base)
                             combined_query = f"""
-                            [절대 팩트 데이터 강제 주입]
-                            단말의 현재 상태를 나타내는 아래 JSON 지표들은 로그 파서를 통해 추출된 100% 정확한 팩트입니다.
+                            [입력 데이터]
                             {health_kpi_json}
-                            위 팩트 데이터와 검색된 로그 문맥을 바탕으로 통신 시스템 엔지니어의 관점에서 단말 상태를 종합 진단하십시오.
-                            [엄격한 답변 규칙]
-                            1. JSON 데이터의 9가지 부문을 반드시 기반으로 원인(Root Cause)을 객관적으로 추론할 것.
-                            2. '9_ril_sip_correlation' 항목에 연쇄 붕괴가 확인되었다면, 이를 리포트 최상단에 핵심 원인으로 명시할 것.
+
+                            [지시사항]
+                            제공된 데이터와 검색된 로그를 기반으로 단말 상태를 진단하여 다음 항목만 작성하십시오.
+
+                            1. 핵심 원인 (Root Cause):
+                               - '9_ril_sip_correlation' 항목에 문제가 확인되면 이를 최상단에 가장 먼저 명시하십시오.
+                            2. 주요 이상 징후 요약:
+                               - 입력 데이터 내 부문별 에러나 특이사항을 사실대로 요약하십시오.
+
+                            * 규칙: 데이터에 없는 수치나 원인을 임의로 추측하거나 지어내지 마십시오.
                             """
 
                             raw_result = engine.ask(combined_query, current_file=actual_file_name)

@@ -370,21 +370,20 @@ class RilRagChat:
         query_lower = query.lower()
 
         if "cs call" in query_lower or "cs 통화" in query_lower:
-            guidelines.append("### [🚨 타겟 고정: CS Call 전용 분석]\n사용자가 'CS Call'을 명시했습니다. \
-                검색된 컨텍스트에 PS(VoLTE)나 SIP 관련 로그(예: 501_CODE_USER_TERMINATED 등)가 섞여 있더라도 절대 무시하십시오.")
+            guidelines.append("### [CS Call 전용 분석]\n이 분석은 CS 통화에 집중합니다. "
+                              "VoLTE나 SIP 관련 로그 대신, CS 통화의 거절 사유(Release Cause)를 우선적으로 찾아 요약하십시오.")
 
-        # 🚨 [수정된 부분] PS(VoLTE) 통화 분석 시 정상 종료(510) 무시 및 단일 콜 타겟팅 룰 추가
+        # 💡 [SLM 최적화] '제외하라', '오직 하나만' 등의 복잡한 제약 대신, 명확한 타겟팅 제시
         elif "ps call" in query_lower or "volte" in query_lower or "ims" in query_lower:
-            guidelines.append("### [🚨 타겟 고정: PS(VoLTE) Call 전용 분석]\n사용자가 'PS(VoLTE) 통화 종료/실패'를 물어보면, \
-                검색된 여러 통화 세션 중 단순/정상 종료(예: 510_CODE_USER_TERMINATED 등)는 모두 분석에서 제외하십시오. \
-                오직 실제 거절이나 망 에러(예: 504_CODE_USER_DECLINE, SIP 480 등)가 발생한 '단 하나의 문제 통화'만 찾아내십시오.")
+            guidelines.append("### [PS(VoLTE) Call 전용 분석]\n이 분석은 PS(VoLTE/IMS) 통화 장애에 집중합니다. "
+                              "정상 종료(예: 510_CODE_USER_TERMINATED)는 요약에서 생략하고, 비정상 종료(예: 504_CODE_USER_DECLINE, SIP 에러)가 발생한 문제 통화의 시간과 에러 코드만 추출하십시오.")
 
         if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
             spacex_rule = self.prompts.get('SpaceX', "")
-            if spacex_rule: guidelines.append(f"### [🚨 위성 통신 특수 규칙 - SpaceX]\n{spacex_rule}")
+            if spacex_rule: guidelines.append(f"### [위성 통신 규칙 - SpaceX]\n{spacex_rule}")
         elif any(k in query_lower for k in ["tiantong", "티엔통", "천통", "at command"]):
             tiantong_rule = self.prompts.get('Tiantong', "")
-            if tiantong_rule: guidelines.append(f"### [🚨 위성 통신 특수 규칙 - Tiantong]\n{tiantong_rule}")
+            if tiantong_rule: guidelines.append(f"### [위성 통신 규칙 - Tiantong]\n{tiantong_rule}")
         else:
             base_p = self.prompts.get('base_persona', "")
             if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
@@ -392,11 +391,10 @@ class RilRagChat:
         log_guidelines_dict = self.prompts.get('log_guidelines', {})
         for log_type in target_log_types:
             if log_type in log_guidelines_dict:
-                guidelines.append(f"### [🚨 {log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
+                guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
         return "\n\n".join(guidelines)
 
-    # 🚨 [신규 추가] 소형 LLM 인지 과부하 차단용 텍스트 다이어트 헬퍼 함수
     def _clean_log_payload(self, text: str) -> str:
         """JSON 특수문자, 대괄호 노이즈 및 과도한 raw_logs 블록을 날려
         2B 모델의 어텐션 붕괴를 영구 방어합니다.
@@ -455,8 +453,6 @@ class RilRagChat:
                     except Exception as e: print(f"Tool 실행 에러 ({tool_name}): {e}")
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
-
-        # 🚨 [방어 코드 주입 1] 도구 분석 결과 팩트 다이어트
         tool_facts = self._clean_log_payload(tool_facts)
 
         if health_kpi:
