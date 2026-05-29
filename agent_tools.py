@@ -92,7 +92,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         }
 
     # ==========================================
-    # 3. 🌐 데이터 호(SETUP_DATA_CALL) 연결
+    # 3. 데이터 호(SETUP_DATA_CALL) 연결
     # ==========================================
     datacall_path = os.path.join(result_dir, f"{base_name}_datacall.json")
     if os.path.exists(datacall_path):
@@ -109,7 +109,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
                 }
 
     # ==========================================
-    # 4. 🚨 망 이탈(OOS) 및 신호(Signal)
+    # 4. 망 이탈(OOS) 및 신호(Signal)
     # ==========================================
     oos_history = report_data.get("oos_events", [])
     signal_history = report_data.get("signal_level_history", [])
@@ -123,7 +123,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         if levels:
             avg_signal = round(sum(levels) / len(levels), 1)
 
-        # 💡 [LLM 팩트 주입] 전체 로그 내에서 최악의 신호 상태(RSRP/SINR)를 탐색합니다.
+        # [LLM 팩트 주입] 전체 로그 내에서 최악의 신호 상태(RSRP/SINR)를 탐색합니다.
         for sig in signal_history:
             details = sig.get("details", {})
             for rat in ["LTE", "NR"]:
