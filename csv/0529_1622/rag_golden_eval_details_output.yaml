@@ -1,0 +1,183 @@
+- "\uFEFFtest_id": TC-001
+  category: RILJ_Request_Failed
+  query: SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.
+  ground_truth: SEND_SMS 요청에 대해 모뎀이 에러 응답을 내렸으며, 구체적인 실패 원인은 NETWORK_ERR 로 확인됩니다.
+  rag_answer: SEND_SMS 요청 실패 원인은 NETWORK_ERR로 확인됨. 해당 요청은 05-22 15:41:47.305 시점에 발생했으며
+    지연시간은 40018ms로 기록됨. 다른 SEND_SMS 요청(05-22 15:40:55.139) 역시 NETWORK_ERR로 실패함.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.95
+  reason: The AI accurately identified NETWORK_ERR as the cause of the SEND_SMS failure,
+    fulfilling the Ground Truth. It also included the required keywords. While it
+    mentions other SEND_SMS requests failing with NETWORK_ERR, this isn't a contradiction
+    and provides additional context, slightly reducing the hallucination risk. The
+    inclusion of timestamps and latency is acceptable as it aligns with the target
+    event.
+  error: ''
+- "\uFEFFtest_id": TC-002
+  category: Call_Fail (CS)
+  query: CS Call 발신 후 연결되지 않고 끊어진 원인(Cause Code)을 분석해 줘.
+  ground_truth: 'Call 발신 후 연결되지 않고 Release 되었습니다. 상세 원인은 callFailCause: 49 및 vendorCause:
+    24 로 확인됩니다.'
+  rag_answer: 'callFailCause: 31, vendorCause: 16으로 통화가 종료됨.
+
+    callFailCause: 49, vendorCause: 24로 통화가 종료됨.
+
+    이벤트 발생 시점은 03-25 14:36:16.009와 03-25 17:38:25.149에 기록됨.
+
+    SIP 관련 통화 세션들은 모두 NORMAL_RELEASE 상태로 종료되었으며, 실패 사유는 501_CODE_USER_TERMINATED (SIP_200_null)로
+    기록됨.'
+  accuracy_score: 0.6
+  keyword_coverage: 0.8
+  hallucination_risk: 0.4
+  overall_score: 0.6
+  reason: 'The AI correctly identified `callFailCause: 49` and `vendorCause: 24` which
+    are present in the Ground Truth, demonstrating good keyword coverage. However,
+    it also incorrectly listed `callFailCause: 31` and `vendorCause: 16`, introducing
+    contradictory information and significantly reducing the accuracy score. The inclusion
+    of timestamps and SIP details, while not explicitly requested, isn''t inherently
+    a hallucination but adds noise. The contradiction regarding the cause codes constitutes
+    a significant error, lowering the hallucination risk score.'
+  error: ''
+- "\uFEFFtest_id": TC-003
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.
+  ground_truth: Call 발신이 기지국으로 전달되었으나, 369 (CODE_SIP_REQUEST_URI_TOO_LARGE) 에러 응답을
+    수신하여 호 설정에 실패했습니다.
+  rag_answer: 369_CODE_SIP_REQUEST_URI_TOO_LARGE (SIP_414_REQUEST URI TOO LARGE) 에러가
+    발생함. 이는 SIP 요청에 대한 응답이 너무 길어 서버에서 거부되었음을 의미합니다.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI perfectly matched the Ground Truth by identifying the correct SIP
+    error code (369) and its corresponding name (CODE_SIP_REQUEST_URI_TOO_LARGE).
+    It also provided a correct explanation of the error. No hallucinations were detected.
+  error: ''
+- "\uFEFFtest_id": TC-004
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신 종료가 되었는데, sip error 등으로 인한 망 이슈인지 아니면 상대방 거절인지 확인해줘.
+  ground_truth: 상대측 reject으로 콜이 종료되었습니다. 네트워크 측으로부터 480 Temporarily Unavailable SIP
+    code가 수신되었으며, 이에 따라 안드로이드 IMS 내부적으로도 504 (CODE_USER_DECLINE) 코드가 함께 확인됩니다.
+  rag_answer: 'PS(VoLTE) 통화 종료는 상대방 거절 또는 망 에러로 발생함.
+
+
+    call_id: TC@1_1 (objId:143489638)은 fail_reason: 510_CODE_USER_TERMINATED_BY_REMOTE
+    (SIP_210_null)로 종료됨.
+
+    call_id: objId:87635467은 fail_reason: 504_CODE_USER_DECLINE (SIP_480_Temporarily
+    Unavailable)로 종료됨.
+
+    SIP 에러 로그에는 rf_correlation이 명시적인 무선 환경 악화 동반이 없다고 기록됨.'
+  accuracy_score: 0.6
+  keyword_coverage: 0.8
+  hallucination_risk: 0.7
+  overall_score: 0.7
+  reason: 'The AI correctly identifies the call termination as potentially due to
+    the remote party''s rejection, aligning with the Ground Truth. It also includes
+    the required keywords (504, CODE_USER_DECLINE, 480, Temporary Unavailable). However,
+    it introduces a `call_id: TC@1_1` with `fail_reason: 510_CODE_USER_TERMINATED_BY_REMOTE`,
+    which is not mentioned in the Ground Truth and represents a potential hallucination.
+    The AI also mentions `rf_correlation` which isn''t in the ground truth, slightly
+    lowering the accuracy and hallucination risk scores. While the AI does a reasonable
+    job, the extraneous `call_id` and `rf_correlation` detract from a perfect score.'
+  error: ''
+- "\uFEFFtest_id": TC-005
+  category: ANR
+  query: ANR이 발생한 정확한 프로세스와 처리가 지연된 인텐트(Intent) 액션명을 알려줘.
+  ground_truth: com.android.phone 프로세스에서 ANR이 발생했으며, com.samsung.intent.action.IMEI_STATE_CHANGED
+    인텐트의 Broadcast 처리가 지연된 것이 원인입니다.
+  rag_answer: ANR은 com.android.phone 프로세스에서 발생했으며, 원인은 Broadcast of Intent act=com.samsung.intent.action.IMEI_STATE_CHANGED
+    flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1
+    액션 처리 중 발생함.
+  accuracy_score: 0.9
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.93
+  reason: The AI accurately identifies the ANR occurring in the com.android.phone
+    process and correctly links it to the IMEI_STATE_CHANGED broadcast intent. It
+    includes all required keywords. The addition of 'flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1'
+    is extra detail but doesn't detract from the core accuracy and doesn't appear
+    to be hallucinated, thus the high hallucination risk score. A slight deduction
+    is applied due to the extra detail, but overall the answer is very accurate and
+    complete.
+  error: ''
+- "\uFEFFtest_id": TC-006
+  category: Fatal_Exception
+  query: 메인 프로세스에서 발생한 Fatal Exception의 종류와 마지막으로 호출된 콜스택(메소드)은 무엇인가?
+  ground_truth: java.lang.ArrayIndexOutOfBoundsException (length=0; index=0) 에러가 발생했으며,
+    마지막 콜스택은 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage
+    로 확인됩니다.
+  rag_answer: 'java.lang.ArrayIndexOutOfBoundsException: length=0; index=0 발생함. 해당
+    예외는 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage
+    메소드에서 발생함.'
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: 'The AI''s answer perfectly matches the Ground Truth, including the exact
+    exception type (java.lang.ArrayIndexOutOfBoundsException: length=0; index=0) and
+    the call stack (com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage).
+    It also covers the required keywords. There''s no hallucination risk as all information
+    is present in the Ground Truth.'
+  error: ''
+- "\uFEFFtest_id": TC-007
+  category: Native_Crash
+  query: rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.
+  ground_truth: libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조
+    오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다. 콜스택을 더 들여다보면
+    ContextActivationDca::OnDataCallDisconnected, ContextActivationDca::OnDataCallStateChanged,
+    Dca::HandleEvent, EventScheduler::DoSchedule() 로 진행됐습니다.
+  rag_answer: SIGSEGV 신호로 인해 rild 프로세스에서 네이티브 크래시가 발생함. 해당 크래시는 libsec-ril.so 라이브러리의
+    DataCallManager::NotifyDataCallState 함수에서 발생함.
+  accuracy_score: 0.6
+  keyword_coverage: 0.7
+  hallucination_risk: 0.9
+  overall_score: 0.7
+  reason: The AI correctly identifies SIGSEGV and the location in libsec-ril.so as
+    NotifyDataCallState, demonstrating good accuracy. However, it misses crucial details
+    like the signal number (11), SEGV_MAPERR, and the call stack (ContextActivationDca::OnDataCallDisconnected,
+    ContextActivationDca::OnDataCallStateChanged, Dca::HandleEvent, EventScheduler::DoSchedule).
+    The hallucination risk is low as it doesn't invent any information, but the missing
+    details significantly impact the overall accuracy and keyword coverage.
+  error: ''
+- "\uFEFFtest_id": TC-008
+  category: SetupDataCall_Failed
+  query: E-PDN 데이터 호(SetupDataCall) 연결 시도가 실패한 명시적인 거절 사유를 알려줘.
+  ground_truth: E-PDN 연결을 시도했으나 NOT_SPECIFIED 상태로 실패했으며, 상세 거절 원인은 기지국 측의 NO CARRIER
+    / User authentication failed 입니다.
+  rag_answer: DATA_SETUP_FAIL 이벤트 발생 시 status=0, cause=NOT_SPECIFIED(0xfffffff9) (USER_AUTHENTICATION)으로
+    연결 시도가 실패함. 이는 사용자 인증 관련 문제로 판단됨.
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.85
+  reason: The AI correctly identifies `NOT_SPECIFIED` and `USER_AUTHENTICATION` as
+    key elements, aligning with the Ground Truth. It accurately states the connection
+    attempt failed with that status. While the Ground Truth mentions 'NO CARRIER',
+    the AI's focus on 'USER_AUTHENTICATION' is acceptable given the prompt's request
+    for *explicit* rejection reasons. The AI's inclusion of the hexadecimal value
+    (0xfffffff9) is a minor detail but doesn't detract from the core accuracy. The
+    hallucination risk is low as the information is consistent with a plausible failure
+    scenario.
+  error: ''
+- "\uFEFFtest_id": TC-009
+  category: DataStall
+  query: Data Stall 감지 시점과 Recovery 동작이 완전히 종료되어 복구된 시간을 분석해 줘.
+  ground_truth: 10:18:29 무렵 Data Stall이 감지되어 Recovery 로직이 진입하였고, 10:18:47 경에 Recovery
+    동작이 종료되며 정상적으로 망 복구가 완료되었습니다.
+  rag_answer: 'Data Stall 감지 시점은 10:18:29.047이며 Recovery 동작은 10:18:47.605에 종료됨.
+
+    Recovery 동작 종료 시점은 18.558초 소요되었으며, 최종적으로 isRecovered=true로 확인됨.'
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.85
+  reason: The AI correctly identified the timestamps (10:18:29 and 10:18:47) and the
+    'Recovery' keyword. While the AI added the recovery time (18.558 seconds) and
+    'isRecovered=true', these details weren't in the Ground Truth, but they don't
+    contradict it, so hallucination risk is low. The AI's timestamps are slightly
+    different from the Ground Truth (0.047 vs. '무렵' and 0.605 vs. '경에'), but the core
+    information is present, hence the accuracy score is not penalized severely.
+  error: ''
