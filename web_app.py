@@ -62,18 +62,18 @@ def generate_unique_key(prefix, data_string):
 
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="RIL RAG Dashboard", page_icon="📡", layout="wide")
+st.set_page_config(page_title="RIL RAG Dashboard", layout="wide")
 
 if 'active_model' not in st.session_state:
     is_mac_mps = torch.backends.mps.is_available()
-    default_model = "batiai/gemma4-e2b:q4" if torch.cuda.is_available() else "gemma4:e4b" # ✅ 기본 모델 변경
+    default_model = "batiai/gemma4-e2b:q4" if torch.cuda.is_available() else "gemma4:e4b"
     st.session_state['active_model'] = default_model
 
 if 'active_routing_mode' not in st.session_state:
     st.session_state['active_routing_mode'] = "semantic"
 
 if 'last_loaded_at' not in st.session_state:
-    st.session_state['last_loaded_at'] = "초기 로딩 대기 중"
+    st.session_state['last_loaded_at'] = "System Initializing..."
 
 @st.cache_resource(show_spinner=False)
 def load_rag_engine(model_name, routing_mode):
@@ -88,7 +88,7 @@ try:
         st.session_state.get('active_routing_mode')
     )
 except Exception as e:
-    st.error(f"엔진 초기화 실패. 터미널에서 ollama가 실행 중인지 확인하세요.\n에러: {e}")
+    st.error(f"엔진 초기화에 실패했습니다. Ollama 서비스 활성화 여부를 확인하십시오.\nError Details: {e}")
     st.stop()
 
 def init_session_states():
@@ -109,9 +109,8 @@ def render_chat_interface(key_suffix="main", show_input=True):
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
 
-            # 🚨 [추가] Thinking 과정이 존재하면 토글 형태로 렌더링
             if msg["role"] == "assistant" and msg.get("thinking"):
-                with st.expander("💭 AI의 생각 과정 (Reasoning Trace)"):
+                with st.expander("AI Reasoning Trace"):
                     st.markdown(f"```text\n{msg['thinking']}\n```")
 
             st.markdown(msg["content"])
@@ -135,7 +134,7 @@ def render_chat_interface(key_suffix="main", show_input=True):
                         filtered_data = {k: v for k, v in signal_data.items() if v > 0}
                         if filtered_data:
                             df_signal = pd.DataFrame(list(filtered_data.items()), columns=['Level', 'Value'])
-                            fig = px.pie(df_signal, names='Level', values='Value', title=f"📊 [자료 {i+1}] 신호 세기 분포", hole=0.4)
+                            fig = px.pie(df_signal, names='Level', values='Value', title=f"[Reference {i+1}] Signal Strength Distribution", hole=0.4)
                             unique_key = generate_unique_key(f"chart_{key_suffix}_{msg_idx}_{i}", str(fig.to_json()[:100]))
                             st.plotly_chart(fig, width="stretch", key=unique_key)
 
@@ -157,33 +156,32 @@ def render_chat_interface(key_suffix="main", show_input=True):
                             sig_history.append({"time": tm, "Slot": f"Slot {sl}", "RAT": str(rt), "Level": int(lvl), "Info": meta.get('raw_info', '')})
 
             if "references" in msg and msg["references"]:
-                with st.expander(f"🔎 참고 로그 ({key_suffix})"):
+                with st.expander(f"Reference Logs ({key_suffix})"):
                     st.markdown(msg["references"])
 
     if show_input:
-        if prompt := st.chat_input("질문하세요", key=f"chat_input_{key_suffix}"):
+        if prompt := st.chat_input("질의어를 입력하십시오", key=f"chat_input_{key_suffix}"):
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             with st.chat_message("assistant"):
-                with st.spinner("분석 중..."):
+                with st.spinner("분석 진행 중..."):
                     current_target = st.session_state.get("current_file", None)
                     clean_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-5:]]
 
-                    # 🚨 [추가] thinking 변수 받아오기
                     answer, ids, metas, thinking = engine.ask(prompt, current_file=current_target, chat_history=clean_history)
 
                     ref_text = ""
                     for i, meta in enumerate(metas):
                         known_solution = meta.get('known_solution')
-                        solution_badge = " **[💡과거 해결사례 존재]**" if known_solution else ""
+                        solution_badge = " [과거 해결 사례 포함]" if known_solution else ""
                         ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
-                        if known_solution: ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
+                        if known_solution: ref_text += f"> **분석 기록:** {known_solution}\n\n"
                         raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
                         raw_logs = ui.parse_raw_logs(raw_data)
                         if raw_logs:
                             ref_text += "```text\n"
                             for log in raw_logs[:10]: ref_text += f"{log}\n"
-                            if len(raw_logs) > 10: ref_text += f"... (중략, 총 {len(raw_logs)} 라인) ...\n"
+                            if len(raw_logs) > 10: ref_text += f"... (생략됨, 총 {len(raw_logs)} 라인) ...\n"
                             ref_text += "```\n"
                         raw_req = meta.get('raw_request')
                         raw_resp = meta.get('raw_response')
@@ -194,9 +192,8 @@ def render_chat_interface(key_suffix="main", show_input=True):
                             ref_text += "```\n"
                         ref_text += "---\n"
 
-                    # 🚨 [추가] 답변 전송 시 Thinking UI 렌더링
                     if thinking:
-                        with st.expander("💭 AI의 생각 과정 (Reasoning Trace)"):
+                        with st.expander("AI Reasoning Trace"):
                             st.markdown(f"```text\n{thinking}\n```")
 
                     st.markdown(answer)
@@ -212,19 +209,17 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
     start_total = time.time()
     progress_bar = st.progress(0)
 
-    with st.status("🚀 통합 분석 파이프라인 가동 중...", expanded=True) as status:
+    with st.status("통합 분석 파이프라인 가동 중...", expanded=True) as status:
         try:
             os.makedirs("./temp_logs", exist_ok=True)
             saved_paths = []
 
-            # 1. 파일 저장 및 💡 [중복 방지 로직 추가]
             for file in uploaded_files:
                 original_name = file.name
                 name, ext = os.path.splitext(original_name)
                 counter = 1
                 unique_name = original_name
 
-                # 동일한 파일명이 존재하면 뒤에 _1, _2 등을 붙임
                 while os.path.exists(os.path.join("./temp_logs", unique_name)):
                     unique_name = f"{name}_{counter}{ext}"
                     counter += 1
@@ -234,10 +229,8 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
                     f.write(file.getbuffer())
                 saved_paths.append(path)
 
-            # 2. Base Name 설정 💡 [새로 부여된 고유 파일명 기준으로 변경]
             if len(saved_paths) > 1:
-                st.write(f"🔄 {len(saved_paths)}개의 파편화된 로그를 시간순으로 병합 중...")
-                # 기존 uploaded_files[0].name 대신 저장된 실제 파일명 사용
+                st.write(f"{len(saved_paths)}개의 로그 파일을 시간순으로 병합 중...")
                 base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0] + "_merged"
                 target_log_path = os.path.join("./temp_logs", f"{base_name}.txt")
                 merge_log_files(saved_paths, target_log_path)
@@ -246,22 +239,22 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
                 base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0]
 
             if use_slice:
-                st.write(f"✂️ 타임라인 슬라이싱 적용 중...")
+                st.write("타임라인 슬라이싱 적용 중...")
                 sliced_path = os.path.join("./temp_logs", f"sliced_{base_name}.txt")
                 slice_log_by_time(target_log_path, sliced_path, start_t, end_t)
                 target_log_path = sliced_path
 
-            st.write("1️⃣ 모든 통신 스택 로그 교차 분석 중...")
+            st.write("통신 스택 로그 교차 분석 진행 중...")
             orchestrator = LogOrchestrator(target_log_path)
             report_path = f"./result/{base_name}_report.json"
             success = orchestrator.run_batch(report_path)
             progress_bar.progress(50)
 
             if success is False: raise RuntimeError("LogOrchestrator 분석 실패")
-            if not os.path.exists(report_path): raise FileNotFoundError(f"report 파일이 생성되지 않았씁니다: {report_path}")
-            if os.path.getsize(report_path) == 0: raise RuntimeError(f"report 파일이 비어 있습니다: {report_path}")
+            if not os.path.exists(report_path): raise FileNotFoundError(f"Report 파일 누락: {report_path}")
+            if os.path.getsize(report_path) == 0: raise RuntimeError(f"Report 파일 크기가 0입니다: {report_path}")
 
-            st.write("2️⃣ RAG 지식 조각 생성 및 DB 임베딩 중...")
+            st.write("RAG 데이터셋 구성 및 Vector DB 임베딩 진행 중...")
             builder = RagPayloadBuilder(report_path)
             payload_name = f"{base_name}_payload.json"
             builder.build_payload(payload_name)
@@ -270,20 +263,20 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             ai_engine.ingest_file(payload_path, force=True)
             progress_bar.progress(100)
 
-            status.update(label="✅ 분석 완료! 이제 대화와 대시보드를 확인하세요.", state="complete", expanded=False)
+            status.update(label="분석 완료. 대시보드에서 결과를 확인하십시오.", state="complete", expanded=False)
             st.session_state.current_file = f"{base_name}_payload.json"
             st.session_state.messages = []
             st.rerun()
         except Exception as e:
-            status.update(label="❌ 파이프라인 실패", state="error")
-            st.error(f"오류가 발생했습니다: {e}")
+            status.update(label="파이프라인 실행 오류", state="error")
+            st.error(f"System Error: {e}")
 
 init_session_states()
 
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
-st.title("📡 안드로이드 RIL RAG 분석기")
-st.markdown("단말 통신 로그를 원클릭으로 적재하고 AI와 분석을 시작하세요.")
+st.title("Android RIL RAG Analysis Dashboard")
+st.markdown("단말 통신 로그를 업로드하여 AI 분석 파이프라인을 실행합니다.")
 
 if "messages" not in st.session_state: st.session_state.messages = []
 if "last_ids" not in st.session_state: st.session_state.last_ids = []
@@ -293,8 +286,8 @@ if "feedback_key" not in st.session_state: st.session_state.feedback_key = 0
 if "current_file" not in st.session_state: st.session_state.current_file = None
 
 tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark = st.tabs([
-    "💬 로그 분석 및 대화", "📊 전사 로그 통계 대시보드", "📈 부팅/Crash/ANR/NITZ",
-    "🛰️ 위성 통신", "🌐 인터넷 멈춤", "⚡ 모델 벤치마크"])
+    "로그 분석 및 대화", "전사 로그 통계 대시보드", "부팅/Crash/ANR/NITZ",
+    "위성 통신 (NTN)", "인터넷 응답 지연", "모델 벤치마크"])
 
 with st.sidebar:
     st.markdown("""
@@ -304,8 +297,8 @@ with st.sidebar:
             [data-testid="stSidebar"] .stAlert p { line-height: 1.4; margin-bottom: 0px; }
         </style>
     """, unsafe_allow_html=True)
-    st.title("⚙️ RIL RAG 분석 도구 설정")
-    st.header("⚙️ 분석 엔진 설정")
+    st.title("System Configuration")
+    st.header("분석 엔진 설정")
     st.divider()
 
     available_models = get_installed_ollama_models()
@@ -313,46 +306,46 @@ with st.sidebar:
     try: current_model_idx = available_models.index(st.session_state['active_model'])
     except ValueError: current_model_idx = 0
 
-    ui_model = st.selectbox("🤖 모델 선택", options=available_models, index=current_model_idx)
+    ui_model = st.selectbox("AI 모델 선택", options=available_models, index=current_model_idx)
     routing_options = ["semantic", "llm", "hybrid"]
     try: current_mode_idx = routing_options.index(st.session_state['active_routing_mode'])
     except ValueError: current_mode_idx = 0
-    ui_mode = st.radio("🛤️ 라우팅 모드", options=routing_options, index=current_mode_idx)
+    ui_mode = st.radio("라우팅 모드", options=routing_options, index=current_mode_idx)
 
-    if st.button("🚀 설정 적용 및 엔진 로드", width="stretch"):
+    if st.button("설정 적용 및 엔진 로드", width="stretch"):
         if (st.session_state['active_model'] != ui_model) or (st.session_state['active_routing_mode'] != ui_mode):
             st.session_state['active_model'] = ui_model
             st.session_state['active_routing_mode'] = ui_mode
             st.session_state['last_loaded_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            st.toast(f"✅ 엔진 설정이 업데이트 되었습니다!\n({ui_model} / {ui_mode})")
+            st.toast(f"엔진 설정이 업데이트 되었습니다. ({ui_model} / {ui_mode})")
             st.rerun()
         else: st.info("변경 사항이 없습니다.")
 
     st.divider()
-    st.markdown("### 📡 현재 활성 상태")
+    st.markdown("### 현재 활성 상태")
     st.info(f"**Model:** `{st.session_state['active_model']}`  \n**Mode:** `{st.session_state['active_routing_mode']}`  \n**Loaded:** `{st.session_state['last_loaded_at']}`")
     st.divider()
-    st.header("⚙️ 1-Click 자동 분석 파이프라인")
-    uploaded_files = st.file_uploader("📁 원시 로그 파일 업로드 (여러 개 동시 선택 가능)", type=['txt', 'log', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10'], accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_key}")
+    st.header("자동 분석 파이프라인")
+    uploaded_files = st.file_uploader("원시 로그 파일 업로드 (다중 선택 가능)", type=['txt', 'log', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10'], accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_key}")
 
     st.divider()
-    st.subheader("🔍 분석 세션 및 DB 관리")
+    st.subheader("분석 세션 및 데이터베이스 관리")
     existing_files = engine.get_all_files()
     if existing_files:
         default_idx = existing_files.index(st.session_state.current_file) + 1 if st.session_state.current_file in existing_files else 0
-        selected_file = st.selectbox("📁 기존 적재 파일 선택", options=["선택 안 함"] + existing_files, index=default_idx)
+        selected_file = st.selectbox("기존 적재 파일 선택", options=["선택 안 함"] + existing_files, index=default_idx)
         if selected_file != "선택 안 함" and st.session_state.current_file != selected_file:
             st.session_state.current_file = selected_file
             st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
             st.session_state.messages = []
             st.rerun()
     else:
-        st.info("DB가 비어 있습니다. 로그를 먼저 업로드하세요.")
+        st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드하십시오.")
         st.session_state.current_file = None
 
     if st.session_state.current_file: st.success(f"활성 파일: `{st.session_state.current_file}`")
 
-    if st.button("🗑️ 전체 DB 초기화", width="stretch", help="Vector DB의 모든 지식을 삭제합니다."):
+    if st.button("전체 DB 초기화", width="stretch", help="Vector DB의 모든 지식을 삭제합니다."):
         if engine.reset_db():
             import shutil
             for folder in ["./payloads", "./result", "./temp_logs"]:
@@ -360,21 +353,21 @@ with st.sidebar:
                 os.makedirs(folder, exist_ok=True)
             st.session_state.current_file = None
             reset_analysis_context()
-            st.success("DB와 물리적 파일이 모두 깔끔하게 비워졌습니다.")
+            st.success("데이터베이스 및 물리적 파일이 초기화되었습니다.")
             time.sleep(1)
             st.rerun()
 
-    use_slicing = st.checkbox("✂️ 특정 시간대만 잘라서 분석 (2GB 이상 권장)")
+    use_slicing = st.checkbox("타임라인 슬라이싱 활성화 (대용량 로그 권장)")
     start_time, end_time = "", ""
     if use_slicing:
-        st.info("💡 에러 발생 시점 주변 5~10분만 잘라내면 분석 속도가 100배 빨라집니다.")
+        st.info("이슈 발생 시점 기준 전후 5~10분으로 범위를 제한하면 분석 효율이 향상됩니다.")
         col1, col2 = st.columns(2)
-        with col1: start_time = st.text_input("시작 (예: 04-12 14:00:00)")
-        with col2: end_time = st.text_input("종료 (예: 04-12 14:15:00)")
+        with col1: start_time = st.text_input("Start (ex: 04-12 14:00:00)")
+        with col2: end_time = st.text_input("End (ex: 04-12 14:15:00)")
 
-    if st.button("🚀 분석 및 DB 적재 시작", width="stretch", type="primary"):
-        if not uploaded_files: st.error("❌ 먼저 파일을 하나 이상 업로드해주세요.")
-        elif use_slicing and (not start_time or not end_time): st.error("❌ 슬라이싱을 켰다면 시작/종료 시간을 모두 입력해주세요.")
+    if st.button("분석 및 DB 적재 시작", width="stretch", type="primary"):
+        if not uploaded_files: st.error("파일을 하나 이상 업로드하십시오.")
+        elif use_slicing and (not start_time or not end_time): st.error("슬라이싱 범위를 명확히 입력하십시오.")
         else: run_analysis_pipeline(uploaded_files, use_slicing, start_time, end_time, engine)
 
     st.divider()
@@ -382,7 +375,7 @@ with st.sidebar:
     def get_recommended_category(text, categories):
         mapping = {
             "Call_Session": ["call", "드랍", "drop", "통화", "fail", "ims", "volte"],
-            "Battery_Drain_Report": ["배터리", "battery", "drain", "광탈", "열", "thermal", "소모"],
+            "Battery_Drain_Report": ["배터리", "battery", "drain", "방전", "열", "thermal", "소모"],
             "OOS_Event": ["oos", "이탈", "서비스", "service", "reg", "등록"],
             "Signal_Level": ["신호", "signal", "안테나", "level", "수신"],
             "Network_DNS_Issue": ["dns", "차단", "block", "인터넷", "지연", "latency"]
@@ -392,74 +385,73 @@ with st.sidebar:
             if any(kw in text_lower for kw in keywords): return cat
         return "Total_Report"
 
-    st.header("📝 사내 지식 베이스 (Track B)")
+    st.header("사내 지식 베이스 (Knowledge Base)")
     if st.session_state.get("last_ids") and st.session_state.get("last_metas"):
         retrieved_types = list(set(m.get('log_type', 'Unknown') for m in st.session_state.last_metas if m))
         category_options = ["Total_Report"] + retrieved_types
-        feedback = st.text_area("해결책 / 원인 코멘트 입력:", height=100, key=f"fb_{st.session_state.feedback_key}")
+        feedback = st.text_area("해결 방안 및 분석 코멘트 입력:", height=100, key=f"fb_{st.session_state.feedback_key}")
         recommended = get_recommended_category(feedback, category_options)
         default_idx = category_options.index(recommended) if recommended in category_options else 0
-        target_type = st.selectbox("📌 박제 카테고리 (자동 추천됨)", category_options, index=default_idx)
-        severity = st.radio("🚩 이슈 중요도", ["Critical", "Major", "Minor", "Info"], index=3, horizontal=True)
+        target_type = st.selectbox("분류 카테고리 (자동 추천)", category_options, index=default_idx)
+        severity = st.radio("이슈 중요도 (Severity)", ["Critical", "Major", "Minor", "Info"], index=3, horizontal=True)
 
-        if st.button("💾 DB에 지식 영구 박제", width="stretch"):
+        if st.button("지식 베이스에 사례 등록", width="stretch"):
             if feedback.strip():
                 if target_type == "Total_Report": target_ids = st.session_state.last_ids
                 else: target_ids = [doc_id for doc_id, meta in zip(st.session_state.last_ids, st.session_state.last_metas) if meta and meta.get('log_type') == target_type]
                 if target_ids:
                     engine.save_knowledge(target_ids, feedback, severity=severity)
-                    st.toast(f"✅ {target_type}에 {severity} 등급으로 박제 완료!")
+                    st.toast(f"{target_type} 카테고리에 {severity} 등급으로 등록되었습니다.")
                     st.session_state.feedback_key += 1
                     st.rerun()
 
         st.divider()
-        st.subheader("사이드바 코파일럿")
+        st.subheader("사이드바 Copilot")
         render_chat_interface(key_suffix="sidebar")
 
 
 with tab_chat:
-    st.info("💡 **AI 분석가에게 이렇게 물어보세요!** (카테고리를 명시하면 더 정확해집니다)")
-    with st.expander("🔍 효율적인 분석을 위한 질문 예시 보기"):
+    st.info("**AI 분석 질의 가이드** (분석 카테고리를 명시하면 정확도가 향상됩니다)")
+    with st.expander("질문 예시 확인"):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("""
-            **📞 통화 및 신호 분석**
-            * "방금 발생한 **Call Fail** 원인이 뭐야?"
-            * "통화 중 **IMS 에러** 기록 찾아줘"
-            * "현재 **망 이탈(OOS)** 발생 구간이 있어?"
+            **Call 및 무선 환경 분석**
+            * "해당 로그에서 발생한 **Call Fail**의 주요 원인을 분석해 주십시오."
+            * "통화 중 기록된 **IMS 에러** 로그를 추출해 주십시오."
+            * "현재 **망 이탈(OOS)**이 발생한 구간 내역을 요약해 주십시오."
             """)
         with col2:
             st.markdown("""
-            **🔋 성능 및 네트워크 분석**
-            * "최근 1시간 동안 **배터리 광탈** 원인 분석해줘"
-            * "특정 **앱(DNS) 차단**된 이력이 있어?"
-            * "네트워크 **지연(Latency)** 통계 보여줘"
+            **단말 성능 및 네트워크 세션 분석**
+            * "최근 1시간 내 발생한 **배터리 급방전** 원인을 리포트해 주십시오."
+            * "특정 패키지에서 **DNS 차단**이 발생한 이력을 확인해 주십시오."
+            * "네트워크 **지연(Latency)** 관련 통계를 시각화해 주십시오."
             """)
-        st.caption("⚠️ '그거 찾아줘' 대신 '통화 에러 찾아줘'처럼 명칭을 포함하면 좋습니다.")
 
-    st.caption("💡 직접 질문하거나, 아래의 원클릭 분석 버튼을 사용해 완벽한 프롬프트를 전송하세요.")
+    st.caption("질의어를 직접 입력하거나, 하단의 Quick Prompt 버튼을 활용하십시오.")
     quick_prompt = None
     col_btn1, col_btn2, col_btn3 = st.columns(3)
     col_btn4, col_btn5, col_btn6 = st.columns(3)
     col_btn7, col_btn8, col_btn9 = st.columns(3)
     with col_btn1:
-        if st.button("📞 통화 끊김(Drop) 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('call_drop')
+        if st.button("통화 끊김(Drop) 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('call_drop')
     with col_btn2:
-        if st.button("🌐 데이터 네트워크 이상 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('data_network_issue')
+        if st.button("데이터 네트워크 이상 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('data_network_issue')
     with col_btn3:
-        if st.button("🔋 배터리/크래시 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('battery_crash')
+        if st.button("배터리/Crash 통합 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('battery_crash')
     with col_btn4:
-        if st.button("🚫 망 등록(Reg) 및 OOS 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('network_oos')
+        if st.button("망 등록(Reg) 및 OOS 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('network_oos')
     with col_btn5:
-        if st.button("📶 안테나(Signal) 레벨 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('antenna_level_analysis')
+        if st.button("안테나(Signal) 레벨 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('antenna_level_analysis')
     with col_btn6:
-        if st.button("💬 VoLTE/SIP 상세 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
+        if st.button("VoLTE/SIP 상세 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
     with col_btn7:
-        if st.button("🌐 인터넷 멈춤 종합 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('internet_stall_analysis')
+        if st.button("인터넷 응답 지연 종합 분석", width="stretch"): quick_prompt = QUICK_PROMPTS.get('internet_stall_analysis')
 
     st.divider()
     render_chat_interface(key_suffix="main", show_input=False)
-    user_input = st.chat_input("에러 증상이나 궁금한 점을 입력하세요")
+    user_input = st.chat_input("에러 증상 또는 분석 요청 사항을 입력하십시오")
     prompt = quick_prompt if quick_prompt else user_input
 
     if prompt:
@@ -467,26 +459,25 @@ with tab_chat:
         with st.chat_message("user"): st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("로그를 분석하고 과거 사례를 탐색 중입니다... 🕵️‍♂️"):
+            with st.spinner("로그 데이터 및 과거 해결 사례를 분석 중입니다..."):
                 current_target = st.session_state.get("current_file", None)
                 current_base = current_target.replace("_payload.json", "") if current_target else "Unknown"
                 health_kpi_json = get_device_health_kpi(current_base) if current_base != "Unknown" else None
 
-                # 🚨 [추가] thinking 변수 받아오기
                 answer, ids, metas, thinking = engine.ask(prompt, current_file=current_target, chat_history=st.session_state.messages[-5:], health_kpi=health_kpi_json)
 
                 ref_text = ""
                 for i, meta in enumerate(metas):
                     known_solution = meta.get('known_solution')
-                    solution_badge = " **[💡과거 해결사례 존재]**" if known_solution else ""
-                    ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
-                    if known_solution: ref_text += f"> **과거 분석 기록:** {known_solution}\n\n"
+                    solution_badge = " [과거 해결 사례 포함]" if known_solution else ""
+                    ref_text += f"### 자료 {i+1} (Time: {meta.get('time', 'N/A')}, Slot: {meta.get('slot', 'N/A')}){solution_badge}\n"
+                    if known_solution: ref_text += f"> **분석 기록:** {known_solution}\n\n"
                     raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
                     raw_logs = ui.parse_raw_logs(raw_data)
                     if raw_logs:
                         ref_text += "```text\n"
                         for log in raw_logs[:10]: ref_text += f"{log}\n"
-                        if len(raw_logs) > 10: ref_text += f"... (중략, 총 {len(raw_logs)} 라인) ...\n"
+                        if len(raw_logs) > 10: ref_text += f"... (생략됨, 총 {len(raw_logs)} 라인) ...\n"
                         ref_text += "```\n"
                     raw_req = meta.get('raw_request')
                     raw_resp = meta.get('raw_response')
@@ -497,9 +488,8 @@ with tab_chat:
                         ref_text += "```\n"
                     ref_text += "---\n"
 
-                # 🚨 [추가] 답변 렌더링 시 Thinking 과정 노출
                 if thinking:
-                    with st.expander("💭 AI의 생각 과정 (Reasoning Trace)"):
+                    with st.expander("AI Reasoning Trace"):
                         st.markdown(f"```text\n{thinking}\n```")
 
                 st.markdown(answer)
@@ -512,51 +502,51 @@ with tab_chat:
         st.rerun()
 
 with tab_dash:
-    st.header("📈 전사 로그 데이터 시각화")
-    st.markdown("Vector DB에 축적된 로그 데이터의 통계와 박제된 지식을 한눈에 확인합니다.")
+    st.header("전사 로그 통계 대시보드")
+    st.markdown("데이터베이스에 축적된 로그 데이터의 통계와 지식 베이스를 확인합니다.")
 
     all_data = engine.collection.get(include=["metadatas"])
     if not all_data or not all_data.get("metadatas") or len(all_data["metadatas"]) == 0:
-        st.info("DB가 비어있습니다. 첫 번째 로그 파일을 업로드해주세요!")
+        st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드해 주십시오.")
     else:
         if all_data and all_data.get("metadatas"):
             meta_list = [m for m in all_data["metadatas"] if m is not None]
             df_all = pd.DataFrame(meta_list)
 
             st.divider()
-            view_mode = st.radio("📊 분석 범위 선택", ["현재 활성 파일만", "전체 DB 히스토리 모음"], horizontal=True)
+            view_mode = st.radio("분석 범위 설정", ["현재 활성 세션", "전체 누적 히스토리"], horizontal=True)
 
-            if view_mode == "현재 활성 파일만" and st.session_state.current_file:
+            if view_mode == "현재 활성 세션" and st.session_state.current_file:
                 df = df_all[df_all['source_file'] == st.session_state.current_file]
-                st.info(f"📍 현재 분석 중인 파일: `{st.session_state.current_file}`")
+                st.info(f"현재 분석 파일: `{st.session_state.current_file}`")
             else:
                 df = df_all
-                st.info(f"🌐 전체 DB 데이터 분석 중 (총 {df_all['source_file'].nunique()}개 파일)")
+                st.info(f"전체 누적 데이터 분석 (총 {df_all['source_file'].nunique()}개 세션)")
 
             if meta_list:
                 col1, col2, col3 = st.columns(3)
-                col1.metric("총 적재된 지식 조각", f"{len(df)} 건")
-                col2.metric("분석된 로그 파일 수", f"{df['source_file'].nunique()} 개" if 'source_file' in df.columns else "0 개")
-                col3.metric("해결된(박제된) 사례 수", f"{df['known_solution'].notna().sum()} 건" if 'known_solution' in df.columns else "0 건")
+                col1.metric("총 임베딩 문서 수", f"{len(df)} 건")
+                col2.metric("분석 완료 로그 수", f"{df['source_file'].nunique()} 개" if 'source_file' in df.columns else "0 개")
+                col3.metric("해결된 사례 수", f"{df['known_solution'].notna().sum()} 건" if 'known_solution' in df.columns else "0 건")
                 st.divider()
 
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.subheader("🚩 에러 유형별 분포 (Log Type)")
+                    st.subheader("로그 유형별 분포 (Log Type)")
                     if 'log_type' in df.columns:
                         fig1 = px.pie(df, names='log_type', hole=0.4)
                         st.plotly_chart(fig1, width="stretch")
-                    else: st.info("Log Type 데이터가 없습니다.")
+                    else: st.info("Log Type 데이터가 존재하지 않습니다.")
                 with c2:
-                    st.subheader("📱 파일별 에러 비중")
+                    st.subheader("파일별 로그 비중")
                     if 'source_file' in df.columns:
                         file_counts = df['source_file'].value_counts().reset_index()
                         file_counts.columns = ['source_file', 'count']
                         fig2 = px.bar(file_counts, x='count', y='source_file', orientation='h')
                         st.plotly_chart(fig2, width="stretch")
-                    else: st.info("파일 이름 데이터가 없습니다.")
+                    else: st.info("파일 이름 데이터가 존재하지 않습니다.")
 
-                if view_mode == "현재 활성 파일만":
+                if view_mode == "현재 활성 세션":
                     import plotly.graph_objects as go
                     def draw_combined_timeline(df):
                         fig = go.Figure()
@@ -570,7 +560,7 @@ with tab_dash:
                                 fig.add_trace(go.Scatter(x=fail_calls['time'], y=[3.5]*len(fail_calls), mode='markers', marker=dict(size=12, color='red', symbol='x'), name="Call Drop", text=hover_text, hoverinfo='text+x'))
                         data_df = df[df['log_type'] == 'Data_Usage']
                         fig.add_trace(go.Scatter(x=data_df['time'], y=data_df['total_mb'], name="Data Usage(MB)", fill='tozeroy'))
-                        fig.update_layout(title="통합 로그 타임라인 분석", xaxis_title="시간", yaxis_title="상태/값")
+                        fig.update_layout(title="통합 로그 타임라인 분석", xaxis_title="Time", yaxis_title="Status/Value")
                         st.plotly_chart(fig, width="stretch")
 
                     du_df = df[df['log_type'] == 'Data_Usage'].copy()
@@ -578,7 +568,7 @@ with tab_dash:
                         du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
                         top_1 = du_df.sort_values(by='total_mb', ascending=False).iloc[0]
                         top_app_name, top_app_mb = top_1.get('app_name', 'Unknown'), f"{top_1['total_mb']:,.2f}"
-                    else: top_app_name, top_app_mb = "기록 없음", "0"
+                    else: top_app_name, top_app_mb = "N/A", "0"
 
                     call_df = df[df['log_type'] == 'Call_Session'].copy()
                     if not call_df.empty:
@@ -597,20 +587,20 @@ with tab_dash:
                     sig_df = df[df['log_type'] == 'Signal_Level'].copy()
                     avg_signal = sig_df['level'].mean() if not sig_df.empty else 0
 
-                    st.subheader("📊 단말 핵심 상태 지표")
+                    st.subheader("단말 상태 요약 지표 (KPI)")
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("🔥 데이터 사용 1위", f"{top_app_name}", f"{top_app_mb} MB")
-                    col2.metric("📡 평균 신호 세기", f"Level {avg_signal:.1f}")
-                    col3.metric("📞 통화 성공률", f"{success_rate}%", delta=f"-{drop_count} 건 실패", delta_color="inverse" if drop_count > 0 else "normal")
-                    col4.metric("🚨 OOS 발생 횟수", f"{oos_count} 회", delta="망 이탈 발생!" if oos_count > 0 else "안정적", delta_color="inverse" if oos_count > 0 else "normal")
+                    col1.metric("데이터 사용 상위 앱", f"{top_app_name}", f"{top_app_mb} MB")
+                    col2.metric("평균 신호 수신 강도", f"Level {avg_signal:.1f}")
+                    col3.metric("Call 성공률", f"{success_rate}%", delta=f"{drop_count} 건 실패", delta_color="inverse" if drop_count > 0 else "normal")
+                    col4.metric("OOS 발생 횟수", f"{oos_count} 회", delta="망 이탈 감지" if oos_count > 0 else "안정", delta_color="inverse" if oos_count > 0 else "normal")
 
                     st.divider()
-                    st.subheader("💡 사내 지식 베이스 (해결 사례 모음)")
+                    st.subheader("사내 지식 베이스 (이슈 해결 사례)")
                     if 'known_solution' in df.columns:
                         solution_df = df.dropna(subset=['known_solution'])[['source_file', 'log_type', 'known_solution']]
                         if not solution_df.empty: st.dataframe(solution_df, width="stretch")
-                        else: st.info("아직 박제된 지식(해결책)이 없습니다. 로그 분석 후 코멘트를 달아주세요!")
-                    else: st.info("알려진 솔루션 데이터 필드가 없습니다.")
+                        else: st.info("등록된 지식 데이터가 없습니다.")
+                    else: st.info("솔루션 데이터 필드가 존재하지 않습니다.")
 
                     st.divider()
                     if st.session_state.current_file:
@@ -620,33 +610,33 @@ with tab_dash:
                             try:
                                 with open(target_report_path, 'r', encoding='utf-8') as _f: _loaded_report_data = json.load(_f)
                                 ui.render_integrated_rf_call_timeline(_loaded_report_data)
-                            except Exception as e: st.error(f"차트 렌더링 중 에러가 발생했습니다: {e}")
-                        else: st.info("📊 통합 타임라인을 그리기 위한 JSON 파일이 아직 생성되지 않았습니다.")
-                    else: st.info("파일을 먼저 선택해주세요.")
+                            except Exception as e: st.error(f"차트 렌더링 오류 발생: {e}")
+                        else: st.info("통합 타임라인 생성을 위한 JSON 데이터가 부족합니다.")
+                    else: st.info("분석 대상을 선택해 주십시오.")
 
                     st.divider()
-                    st.subheader("🔍 특정 앱 딥다이브 분석")
+                    st.subheader("패키지 기반 심층 분석")
                     data_df = df[df['log_type'] == 'Data_Usage'].copy()
                     if not data_df.empty:
                         app_list = data_df['app_name'].dropna().unique().tolist()
                         if app_list:
                             top_app = data_df.groupby('app_name')['total_mb'].sum().idxmax()
                             default_idx = app_list.index(top_app) if top_app in app_list else 0
-                            selected_app = st.selectbox("분석할 패키지(앱)를 선택하세요:", app_list, index=default_idx)
+                            selected_app = st.selectbox("분석 대상 패키지 선택:", app_list, index=default_idx)
                             target_app_df = data_df[data_df['app_name'] == selected_app]
                             rat_summary = target_app_df.groupby('rat')['total_mb'].sum().reset_index()
                             rat_summary['total_mb'] = rat_summary['total_mb'].apply(lambda x: f"{x:,.2f} MB")
                             c1, c2 = st.columns([1, 2.5])
                             with c1:
-                                st.markdown(f"**📡 [{selected_app}] 망별 요약**")
+                                st.markdown(f"**[{selected_app}] RAT 요약**")
                                 st.dataframe(rat_summary, hide_index=True, width="stretch")
                             with c2:
-                                st.markdown(f"**📑 상세 사용 로그**")
+                                st.markdown(f"**상세 트래픽 로그**")
                                 display_cols = ['time', 'rat', 'total_mb', 'rx_bytes', 'tx_bytes']
                                 actual_cols = [c for c in display_cols if c in target_app_df.columns]
                                 st.dataframe(target_app_df[actual_cols], hide_index=True, width="stretch")
-                        else: st.info("데이터 사용량 기록이 없습니다.")
-                    else: st.info("데이터 사용량 로그를 찾을 수 없습니다.")
+                        else: st.info("데이터 사용량 기록이 존재하지 않습니다.")
+                    else: st.info("Netstats 로그를 찾을 수 없습니다.")
 
 
                     current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
@@ -681,9 +671,9 @@ with tab_dash:
                             with open(dc_json_path, 'r', encoding='utf-8') as f: current_dc_data = json.load(f)
                     ui.render_data_call_analyzer(current_dc_data)
 
-                    st.subheader("🤖 AI 종합 기술 진단 리포트")
-                    if st.button("📝 전체 로그 종합 분석 리포트 생성", width="stretch"):
-                        with st.spinner("모든 로그의 상관관계를 분석하여 전문 리포트를 작성 중입니다..."):
+                    st.subheader("AI 종합 기술 진단 리포트")
+                    if st.button("전체 세션 통합 분석 리포트 생성", width="stretch"):
+                        with st.spinner("로그 상관관계를 분석하여 리포트를 생성 중입니다..."):
                             actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
                             current_base = st.session_state.current_file.replace("_payload.json", "")
                             health_kpi_json = get_device_health_kpi(current_base)
@@ -691,15 +681,14 @@ with tab_dash:
                             [절대 팩트 데이터 강제 주입]
                             단말의 현재 상태를 나타내는 아래 JSON 지표들은 로그 파서를 통해 추출된 100% 정확한 팩트입니다.
                             {health_kpi_json}
-                            위 팩트 데이터와 검색된 로그 문맥을 바탕으로 15년 차 무선 통신 수석 엔지니어의 관점에서 단말 상태를 종합 진단해.
-                            [🚨 엄격한 답변 규칙 🚨]
-                            1. JSON 데이터의 9가지 부문을 반드시 기반으로 원인(Root Cause)을 과감히 추론할 것.
-                            2. '9_ril_sip_correlation' 항목에 연쇄 붕괴가 확인되었다면, 이를 리포트 최상단에 가장 강력한 원인으로 하이라이트할 것.
+                            위 팩트 데이터와 검색된 로그 문맥을 바탕으로 통신 시스템 엔지니어의 관점에서 단말 상태를 종합 진단하십시오.
+                            [엄격한 답변 규칙]
+                            1. JSON 데이터의 9가지 부문을 반드시 기반으로 원인(Root Cause)을 객관적으로 추론할 것.
+                            2. '9_ril_sip_correlation' 항목에 연쇄 붕괴가 확인되었다면, 이를 리포트 최상단에 핵심 원인으로 명시할 것.
                             """
 
                             raw_result = engine.ask(combined_query, current_file=actual_file_name)
 
-                            # 🚨 [추가] 리포트 결과에서 thinking 분리 처리
                             if isinstance(raw_result, (tuple, list)):
                                 report_answer = raw_result[0]
                                 report_thinking = raw_result[3] if len(raw_result) > 3 else ""
@@ -707,18 +696,17 @@ with tab_dash:
                                 report_answer = raw_result
                                 report_thinking = ""
 
-                            st.success("✅ 심층 진단 분석이 완료되었습니다.")
+                            st.success("심층 진단 분석이 완료되었습니다.")
 
-                            # 🚨 [추가] 리포트 상단에 생각 과정 렌더링
                             if report_thinking:
-                                with st.expander("💭 AI의 리포트 작성 논리 구조 (Reasoning Trace)"):
+                                with st.expander("AI 리포트 작성 논리 구조 (Reasoning Trace)"):
                                     st.markdown(f"```text\n{report_thinking}\n```")
 
                             safe_report = report_answer.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("\n", "\\n")
                             st.markdown(f"""
-<div style="position: relative; background-color: #f0f2f6; padding: 25px; border-radius: 10px; border-left: 5px solid #1f77b4; margin-bottom: 20px;">
-<button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #1f77b4; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.3s;">복사하기 📋</button>
-<div id="full-report-text" style="white-space: pre-wrap; font-size: 15px; color: #333; line-height: 1.6;">
+<div style="position: relative; background-color: #f8f9fa; padding: 25px; border-radius: 4px; border-left: 4px solid #0056b3; margin-bottom: 20px;">
+<button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">Copy Report</button>
+<div id="full-report-text" style="white-space: pre-wrap; font-size: 14px; color: #212529; line-height: 1.6;">
 
 {report_answer}
 
@@ -728,9 +716,9 @@ with tab_dash:
 function copyReport() {{
     const reportText = `{safe_report}`;
     navigator.clipboard.writeText(reportText.replace(/\\n/g, '\\n')).then(() => {{
-        alert('✅ 리포트가 클립보드에 복사되었습니다!\\n원하는 곳에 붙여넣기(Ctrl+V) 하세요.');
+        alert('리포트가 클립보드에 복사되었습니다.');
     }}).catch(err => {{
-        console.error('복사 실패:', err);
+        console.error('Copy failed:', err);
     }});
 }}
 </script>
@@ -740,12 +728,12 @@ function copyReport() {{
                             if all_db_data and all_db_data.get('ids'):
                                 st.session_state.last_ids = all_db_data['ids']
                                 st.session_state.last_metas = all_db_data['metadatas']
-                                st.toast("💡 리포트 결과가 박제 대기열에 등록되었습니다. 왼쪽 사이드바에서 지식 베이스에 코멘트를 남겨보세요!", icon="📝")
+                                st.toast("리포트 결과가 임시 저장되었습니다. 지식 베이스에 추가할 수 있습니다.")
             else: st.warning("데이터 형식이 올바르지 않습니다.")
-        else: st.info("DB가 비어있습니다. 첫 번째 로그 파일을 업로드해주세요!")
+        else: st.info("데이터베이스가 비어 있습니다.")
 
 with tab_boot:
-    st.subheader("🚀 Android 부팅 시퀀스 분석")
+    st.subheader("Android Boot Sequence Analysis")
     current_target = st.session_state.get("current_file", None)
     if current_target:
         base_name = current_target.replace("_payload.json", "")
@@ -756,38 +744,38 @@ with tab_boot:
             events = boot_raw.get('events', []) if isinstance(boot_raw, dict) else boot_raw
             if events:
                 df_boot = pd.DataFrame(events)
-                st.markdown("#### 📊 핵심 부팅 마일스톤")
+                st.markdown("#### Boot Milestone Summary")
                 c1, c2, c3 = st.columns(3)
                 boot_complete = df_boot['Time_ms'].max() if 'Time_ms' in df_boot.columns else 0
                 voice_events = df_boot[df_boot['Event'].str.contains('Voice|RIL|Telephony', case=False, na=False)]
-                voice_ready = voice_events['Time_ms'].max() if not voice_events.empty else "분석 불가"
+                voice_ready = voice_events['Time_ms'].max() if not voice_events.empty else "N/A"
                 data_events = df_boot[df_boot['Event'].str.contains('Data|Network|Setup', case=False, na=False)]
-                data_ready = data_events['Time_ms'].max() if not data_events.empty else "분석 불가"
-                c1.metric("최종 부팅 시점 추정", f"{boot_complete:,} ms" if boot_complete else "N/A")
-                c2.metric("Voice(RIL) Ready 시점", f"{voice_ready:,} ms" if isinstance(voice_ready, int) else voice_ready)
-                c3.metric("Data(NW) Ready 시점", f"{data_ready:,} ms" if isinstance(data_ready, int) else data_ready)
+                data_ready = data_events['Time_ms'].max() if not data_events.empty else "N/A"
+                c1.metric("Final Boot Time", f"{boot_complete:,} ms" if boot_complete else "N/A")
+                c2.metric("Voice(RIL) Ready", f"{voice_ready:,} ms" if isinstance(voice_ready, int) else voice_ready)
+                c3.metric("Data(NW) Ready", f"{data_ready:,} ms" if isinstance(data_ready, int) else data_ready)
 
                 st.divider()
-                st.write("#### 🚨 주요 병목 구간 분석 (Top 10)")
+                st.write("#### Top 10 Boot Bottlenecks")
                 if 'Delta_ms' in df_boot.columns:
                     df_slow = df_boot[df_boot['Delta_ms'] > 0].sort_values("Delta_ms", ascending=False).head(10)
                     if not df_slow.empty:
-                        fig_boot = px.bar(df_slow, x='Delta_ms', y='Event', orientation='h', color='Delta_ms', color_continuous_scale='Reds', text='Delta_ms', title="부팅 지연 이벤트 (ms)", labels={'Delta_ms': '지연 시간(ms)', 'Event': '이벤트 명'})
+                        fig_boot = px.bar(df_slow, x='Delta_ms', y='Event', orientation='h', color='Delta_ms', color_continuous_scale='Reds', text='Delta_ms', title="Boot Delay Events (ms)", labels={'Delta_ms': 'Delay(ms)', 'Event': 'Event Name'})
                         fig_boot.update_layout(yaxis={'categoryorder':'total ascending'}, height=450)
                         st.plotly_chart(fig_boot, width="stretch")
-                else: st.info("Delta_ms (구간 지연) 데이터가 존재하지 않아 병목 차트를 그릴 수 없습니다.")
+                else: st.info("Delta_ms 데이터가 존재하지 않아 병목 차트를 렌더링할 수 없습니다.")
 
-                with st.expander("📋 전체 부팅 시퀀스 타임라인 보기"):
+                with st.expander("Full Boot Sequence Timeline"):
                     df_full = df_boot.sort_values("Time_ms") if 'Time_ms' in df_boot.columns else df_boot
                     st.dataframe(df_full, width="stretch")
-            else: st.warning("분석 리포트 내에 부팅 이벤트 데이터가 없습니다. 로그가 `!@Boot` 포맷을 포함하고 있는지 확인하세요.")
+            else: st.warning("Boot event 데이터가 누락되었습니다.")
 
             st.divider()
             ui.render_crash_analyzer(report_data)
             st.divider()
             ui.render_nitz_timeline(report_data.get("nitz_history", []))
-        else: st.error(f"분석 리포트 파일(`{base_name}_report.json`)을 찾을 수 없습니다. 분석을 먼저 실행해 주세요.")
-    else: st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
+        else: st.error(f"Report file (`{base_name}_report.json`) not found.")
+    else: st.warning("분석 대상 파일을 선택해 주십시오.")
 
 with tab_ntn:
     current_target = st.session_state.get("current_file") or "Unknown"
@@ -796,7 +784,7 @@ with tab_ntn:
     current_base = current_target.replace("_payload.json", "") if current_target != "Unknown" else "Unknown"
 
     if current_base == "Unknown":
-        st.warning("왼쪽 사이드바에서 분석할 로그 파일을 먼저 선택해 주세요.")
+        st.warning("분석 대상 파일을 선택해 주십시오.")
     else:
         sat_at_path = f"./result/{current_base}_sat_at.json"
         ntn_fw_path = f"./result/{current_base}_ntn.json"
@@ -826,35 +814,33 @@ with tab_ntn:
         elif has_spacex:
             sat_type = "SpaceX"
             ui.render_ntn_advanced_fw_analyzer(current_base)
-        else: st.info("💡 이 로그에는 위성(NTN) 통신 관련 데이터(Tiantong 또는 SpaceX)가 존재하지 않거나 추출되지 않았습니다.")
+        else: st.info("NTN 위성 통신 로그가 존재하지 않습니다.")
 
         st.divider()
         if sat_type:
-            if st.button(f"🛰️ {sat_type} 위성망 심층 진단", width="stretch"):
-                with st.spinner(f"{sat_type} 위성 데이터를 분석 중입니다..."):
+            if st.button(f"{sat_type} 위성망 심층 진단 실행", width="stretch"):
+                with st.spinner(f"Analyzing {sat_type} Satellite Data..."):
                     health_kpi_json = get_device_health_kpi(current_base)
-                    prompt_template = SATELLITE_PROMPTS.get(sat_type, "위성 분석 템플릿을 찾을 수 없습니다.")
+                    prompt_template = SATELLITE_PROMPTS.get(sat_type, "Prompt template not found.")
                     sat_query = prompt_template.format(health_kpi_json=health_kpi_json)
 
                     raw_result = engine.ask(sat_query, current_file=actual_file_name)
 
-                    # 🚨 [추가] 위성망 진단에서도 thinking 분리 처리
                     final_text = raw_result[0] if isinstance(raw_result, (tuple, list)) else raw_result
                     sat_thinking = raw_result[3] if isinstance(raw_result, (tuple, list)) and len(raw_result) > 3 else ""
 
                     if isinstance(final_text, str): final_text = final_text.replace('\\n', '\n')
 
-                    st.markdown(f"### 🤖 [AI {sat_type} 위성 진단 결과]")
+                    st.markdown(f"### [AI Analysis: {sat_type} Network Diagnostic]")
 
-                    # 🚨 [추가] 위성망 분석 생각 과정 렌더링
                     if sat_thinking:
-                        with st.expander("💭 AI의 진단 논리 구조 (Reasoning Trace)"):
+                        with st.expander("AI Reasoning Trace"):
                             st.markdown(f"```text\n{sat_thinking}\n```")
 
                     st.info(final_text)
 
                     if "chat_history" in st.session_state:
-                        st.session_state.chat_history.append({"role": "user", "content": f"{sat_type} 위성망 심층 진단해 줘."})
+                        st.session_state.chat_history.append({"role": "user", "content": f"{sat_type} Network Diagnostic requested."})
                         st.session_state.chat_history.append({"role": "assistant", "content": final_text})
 
 with tab_internet:
