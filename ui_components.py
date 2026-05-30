@@ -1328,28 +1328,30 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
 
 def render_nitz_timeline(nitz_data):
     if not nitz_data:
-        st.info("No NITZ reception history.")
+        st.info("NITZ 수신 이력이 없습니다.")
         return
 
-    st.markdown("### NITZ Timezone Fluctuation Analysis")
+    st.markdown("### NITZ 타임존 및 변동 분석")
     df = pd.DataFrame(nitz_data)
 
+    # 1. 시간 파싱
     df['log_time_dt'] = pd.to_datetime(df['log_time'], errors='coerce')
     df = df.dropna(subset=['log_time_dt']).sort_values('log_time_dt')
 
+    # UTC 오프셋 숫자 추출 (예: UTC+9 -> 9.0)
     df['offset_num'] = df['timezone'].str.extract(r'UTC([+-]?\d+)').astype(float).fillna(0.0)
 
+    # 실제 값이 바뀐 지점 추출
     df_changes = df[df['timezone'] != df['timezone'].shift()].copy()
 
+    # 유지 시간 계산 및 노이즈 필터링
     if len(df_changes) > 1:
         df_changes['duration_sec'] = df_changes['log_time_dt'].diff().shift(-1).dt.total_seconds().fillna(601)
         significant_changes = df_changes[df_changes['duration_sec'] > 600].copy()
     else:
         significant_changes = df_changes
 
-    duration_days = (df['log_time_dt'].max() - df['log_time_dt'].min()).days
-    duration_days = max(1, duration_days)
-
+    duration_days = max(1, (df['log_time_dt'].max() - df['log_time_dt'].min()).days)
     flip_count = max(0, len(significant_changes) - 1)
 
     is_unstable = False
@@ -1358,15 +1360,100 @@ def render_nitz_timeline(nitz_data):
         if not significant_changes[significant_changes['rapid_check'].abs() < 3600].empty:
             is_unstable = True
 
+    # 2. 요약 KPI 대시보드
     col1, col2, col3 = st.columns(3)
-    with col1: st.metric("Initial Timezone", df['timezone'].iloc[0])
-    with col2: st.metric("Final Timezone", df['timezone'].iloc[-1], delta="Changed" if flip_count > 0 else "Maintained")
+    with col1: st.metric("최초 타임존", df['timezone'].iloc[0])
+    with col2: st.metric("최종 타임존", df['timezone'].iloc[-1], delta="타임존 변경됨" if flip_count > 0 else "유지됨")
     with col3:
-        status = "Unstable (Ping-Pong)" if is_unstable else "Stable (Long Term Transition)" if duration_days > 30 else "Stable"
-        st.metric("Total Flips", f"{flip_count}", delta=status, delta_color="inverse" if is_unstable else "normal")
+        status = "불안정 (핑퐁)" if is_unstable else "장기 체류" if duration_days > 30 else "안정"
+        st.metric("타임존 변경 횟수", f"{flip_count} 회", delta=status, delta_color="inverse" if is_unstable else "normal")
 
-    fig = px.line(df, x='log_time_dt', y='offset_num', line_shape='hv', markers=True)
-    st.plotly_chart(fig, use_container_width=True)
+    st.divider()
+
+    # ==========================================
+    # 3. UTC 오프셋 기반 세계 지도 (Geo Map) 매핑
+    # ==========================================
+    # 대표적인 UTC 오프셋별 위도/경도/지역명 매핑 (자주 테스트하는 로밍 지역 위주)
+    UTC_GEO_MAP = {
+        9.0: {"lat": 37.5665, "lon": 126.9780, "name": "Korea/Japan (UTC+9)"},
+        8.0: {"lat": 39.9042, "lon": 116.4074, "name": "China/Singapore (UTC+8)"},
+        7.0: {"lat": 13.7563, "lon": 100.5018, "name": "SE Asia (UTC+7)"},
+        5.5: {"lat": 28.6139, "lon": 77.2090, "name": "India (UTC+5.5)"},
+        4.0: {"lat": 25.2048, "lon": 55.2708, "name": "UAE/Dubai (UTC+4)"},
+        3.0: {"lat": 55.7558, "lon": 37.6173, "name": "Russia/Middle East (UTC+3)"},
+        2.0: {"lat": 48.8566, "lon": 2.3522, "name": "Central Europe (UTC+2)"},
+        1.0: {"lat": 51.5074, "lon": -0.1278, "name": "UK/Western Europe (UTC+1)"},
+        0.0: {"lat": 51.4826, "lon": 0.0077, "name": "GMT/UTC (UTC+0)"},
+        -4.0: {"lat": -23.5505, "lon": -46.6333, "name": "Brazil/SA (UTC-4)"},
+        -5.0: {"lat": 40.7128, "lon": -74.0060, "name": "US Eastern (UTC-5)"},
+        -8.0: {"lat": 34.0522, "lon": -118.2437, "name": "US Pacific (UTC-8)"},
+        -10.0: {"lat": 21.3069, "lon": -157.8583, "name": "Hawaii (UTC-10)"}
+    }
+
+    # 현재 로그에 존재하는 모든 고유 UTC 오프셋 추출
+    unique_offsets = df['offset_num'].unique()
+    geo_data = []
+
+    for offset in unique_offsets:
+        # 맵에 정확히 일치하는 오프셋이 없으면 근사치(round) 지역으로 맵핑
+        closest_offset = min(UTC_GEO_MAP.keys(), key=lambda k: abs(k - offset))
+        geo_info = UTC_GEO_MAP[closest_offset]
+
+        # 해당 오프셋에 머문 로그 개수 계산 (원의 크기 조절용)
+        count = len(df[df['offset_num'] == offset])
+
+        geo_data.append({
+            "offset": f"UTC{'+' if offset > 0 else ''}{offset}",
+            "lat": geo_info["lat"],
+            "lon": geo_info["lon"],
+            "region": geo_info["name"],
+            "count": count
+        })
+
+    geo_df = pd.DataFrame(geo_data)
+
+    # UI 레이아웃 분할 (좌측: 타임라인, 우측: 지도)
+    col_chart, col_map = st.columns([1, 1])
+
+    with col_chart:
+        st.markdown("** 시간대별 오프셋(UTC) 변화 타임라인**")
+        fig_line = px.line(df, x='log_time_dt', y='offset_num', line_shape='hv', markers=True,
+                           labels={'log_time_dt': '시간', 'offset_num': 'UTC 오프셋 (+/-)'})
+        fig_line.update_traces(line_color='#2ca02c')
+        fig_line.update_layout(height=350, margin=dict(t=30, b=20, l=10, r=10))
+        st.plotly_chart(fig_line, use_container_width=True)
+
+    with col_map:
+        st.markdown("**타임존 기반 예상 체류 지역 (Estimated Region)**")
+        if not geo_df.empty:
+            fig_map = px.scatter_geo(
+                geo_df,
+                lat='lat', lon='lon',
+                size='count',          # 오래 머문 지역일수록 원이 크게 표시됨
+                color='offset',        # 시간대별로 색상 구분
+                hover_name='region',
+                hover_data={'lat': False, 'lon': False, 'count': True},
+                projection="natural earth" # 부드러운 세계 지도 투영법
+            )
+            # 지도 스타일링 (바다색, 육지색 지정)
+            fig_map.update_geos(
+                showcountries=True, countrycolor="lightgray",
+                showcoastlines=True, coastlinecolor="gray",
+                showland=True, landcolor="#f4f4f4",
+                showocean=True, oceancolor="#e0f3f8"
+            )
+            fig_map.update_layout(height=350, margin=dict(t=0, b=0, l=0, r=0))
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            st.info("지도에 표시할 좌표 데이터가 없습니다.")
+
+    # 4. 상세 변화 이력 표 출력
+    if not df_changes.empty:
+        with st.expander("🔍 상세 타임존 변경 이력 보기"):
+            display_df = df_changes[['log_time', 'timezone', 'nitz_raw']].rename(
+                columns={'log_time': '변경 시간', 'timezone': '타임존', 'nitz_raw': '원본 NITZ 데이터'}
+            )
+            st.dataframe(display_df, hide_index=True, width="stretch")
 
 def render_rilj_transactions(current_base=None):
     st.subheader("RILJ (Modem ↔ AP) Transaction Analysis")

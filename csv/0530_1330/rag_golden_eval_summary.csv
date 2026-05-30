@@ -1,2 +1,2 @@
 ﻿total_test_cases,failed_evals,avg_accuracy_score,avg_keyword_coverage,avg_hallucination_risk,avg_overall_score
-12,0,0.917,0.992,0.933,0.932
+9,0,0.933,0.989,0.933,0.939

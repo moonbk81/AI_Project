@@ -208,6 +208,13 @@ class RilRagChat:
                 selected_log_types = set(self.routing_map["Tiantong_Satellite"].get("log_types", []))
             is_hard_matched = True
 
+        elif any(keyword in query_lower for keyword in ["nitz", "타임존", "시간대", "시간 변경", "핑퐁"]):
+            selected_intents = {"Nitz_Time_Analysis"}
+            # NITZ는 도구(Tool) 없이 로그(Payload)만으로 분석하므로 tools는 비워둡니다.
+            selected_tools = set()
+            selected_log_types = {"Nitz_Time_Event"}
+            is_hard_matched = True
+
         # ==========================================
         # 2단계: 시맨틱 검색 (명시적 키워드가 없을 때만 백업으로 동작)
         # ==========================================
@@ -306,15 +313,10 @@ class RilRagChat:
 
         json_files = glob.glob(os.path.join(folder_path, "*.json"))
         if not json_files:
-            print(f"⚠️ '{folder_path}' 폴더에 적재할 데이터가 없습니다.")
+            print(f"'{folder_path}' 폴더에 적재할 데이터가 없습니다.")
             return
 
-        existing_data = self.collection.get(include=["metadatas"])
-        processed_files = set()
-        if existing_data and existing_data["metadatas"]:
-            for meta in existing_data["metadatas"]:
-                if meta and "source_file" in meta:
-                    processed_files.add(meta["source_file"])
+        processed_files = set(self.get_all_files())
 
         new_files = [f for f in json_files if os.path.basename(f) not in processed_files]
         if not new_files:
@@ -471,11 +473,51 @@ class RilRagChat:
         elif len(conditions) > 1: where_filter = {"$and": conditions}
 
         query_embedding = self.embed_model.encode(search_query).tolist()
+        # 최종 Top K개만 가져오는게 아니라, 1차로 넉넉히(top_k * 3) 가져옵니다.
+        fetch_k = top_k * 3
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k,
+            n_results=fetch_k,
             where=where_filter
         )
+
+        if results and results.get('documents') and results['documents'][0]:
+            docs = results['documents'][0]
+            metas = results['metadatas'][0]
+            ids = results['ids'][0]
+            distances = results['distances'][0] if 'distances' in results and results['distances'] else [0]*len(docs)
+
+            # 1. 쿼리에서 핵심 키워드(영어, 숫자 등) 추출
+            import re
+            query_keywords = set(re.findall(r'[a-zA-Z0-9]+', search_query.lower()))
+
+            reranked_results = []
+            for doc, meta, doc_id, dist in zip(docs, metas, ids, distances):
+                doc_lower = doc.lower()
+
+                # 2. 키워드 일치도 계산 (Keyword Score)
+                match_count = sum(1 for kw in query_keywords if kw in doc_lower)
+                keyword_score = match_count / max(1, len(query_keywords))
+
+                # 3. Vector Distance(낮을수록 좋음)를 Score로 변환
+                # 거리가 0에 가까울수록 점수가 1에 가까워지도록 정규화
+                vector_score = 1.0 / (1.0 + dist)
+
+                # 4. Hybrid Score 계산 (키워드 매칭에 강한 가중치 부여)
+                hybrid_score = (vector_score * 0.4) + (keyword_score * 0.6)
+
+                reranked_results.append({
+                    "doc": doc, "meta": meta, "id": doc_id, "score": hybrid_score
+                })
+
+            # 5. Hybrid Score 기준으로 내림차순 정렬 후 최종 Top K개 컷
+            reranked_results.sort(key=lambda x: x["score"], reverse=True)
+            final_top_results = reranked_results[:top_k]
+
+            # 결과를 다시 기존 results 포맷으로 덮어씌움
+            results['documents'] = [[r["doc"] for r in final_top_results]]
+            results['metadatas'] = [[r["meta"] for r in final_top_results]]
+            results['ids'] = [[r["id"] for r in final_top_results]]
 
         formatted_logs = self._format_results(results)
 
@@ -505,9 +547,37 @@ class RilRagChat:
         return answer, doc_ids, meta_list, thinking
 
     def get_all_files(self):
-        results = self.collection.get(include=["metadatas"])
-        if not results or not results["metadatas"]: return []
-        files = set(m["source_file"] for m in results["metadatas"] if m and "source_file" in m)
+        """DB에 저장된 파일 목록을 가져올 때 SQLite 한도 초과를 막기 위해 청크 단위로 끊어서 가져옵니다."""
+        files = set()
+        offset = 0
+        limit = 5000  # 한 번에 가져올 안전한 개수
+
+        while True:
+            try:
+                results = self.collection.get(
+                    include=["metadatas"],
+                    limit=limit,
+                    offset=offset
+                )
+
+                # 가져온 데이터가 없으면 루프 종료
+                if not results or not results.get("metadatas") or len(results["metadatas"]) == 0:
+                    break
+
+                for m in results["metadatas"]:
+                    if m and "source_file" in m:
+                        files.add(m["source_file"])
+
+                # 가져온 개수가 limit보다 적으면 마지막 페이지라는 뜻이므로 종료
+                if len(results["metadatas"]) < limit:
+                    break
+
+                offset += limit
+
+            except Exception as e:
+                print(f"파일 목록 조회 중 에러: {e}")
+                break
+
         return sorted(list(files))
 
     def reset_db(self):

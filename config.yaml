@@ -13,6 +13,7 @@ router_prompt: |
   - Battery_Thermal
   - Crash_ANR
   - Radio_Power
+  - Nitz_Time_Analysis
 
   반드시 아래 JSON 형식만 출력하라:
   {
@@ -35,6 +36,7 @@ routing_map:
       - Call_Session
       - IMS_SIP_Message
       - RILJ_Transaction
+      - Device_Property_State
   Network_OOS:
     desc: "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF, 네트워크 복구 안됨, 망 복구 실패, 비행기 모드 해제 후 서비스 없음, 비행기 모드 해제 후 네트워크 미복구"
     tools:
@@ -44,6 +46,7 @@ routing_map:
       - OOS_Event
       - Signal_Level
       - RILJ_Transaction
+      - Device_Property_State
   DNS_Latency:
     desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, 앱 차단, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
     tools:
@@ -69,6 +72,7 @@ routing_map:
       - OOS_Event
       - Signal_Level
       - RILJ_Transaction
+      - Device_Property_State
   Battery_Thermal:
     desc: "배터리 광탈, 폰이 뜨거워요, 발열이 심해요, 전력 소모, 핫스팟 발열, 소모 전류, 온도가 높음"
     tools:
@@ -84,6 +88,7 @@ routing_map:
       - ANR_Context
       - Native_Crash_Event
       - Binder_Warning
+      - Device_Property_State
   Radio_Power:
     desc: "모뎀 전원 꺼짐, 비행기 모드, 비행기 모드 전환, 비행기 모드 해제, 비행기 모드 ON, 비행기 모드 OFF, 비행기 모드 이후 네트워크 안됨, 비행기 모드 해제 후 데이터 안됨, 비행기 모드 해제 후 망 복구 실패, airplane mode, airplane mode off, radio power, radio power on, radio power off, modem power off, 전원 제어, 위성 모뎀 끄기, Power OFF"
     tools:
@@ -91,6 +96,7 @@ routing_map:
     log_types:
       - Radio_Power_Event
       - RILJ_Transaction
+      - Device_Property_State
   NTN_SpaceX:
     desc: "SpaceX, Starlink, 스페이스엑스, 스타링크, 비지상망, NTN 로밍, 위성망"
     tools:
@@ -111,6 +117,11 @@ routing_map:
       - get_recent_data_usage_analytics
     log_types:
       - Data_Usage
+  Nitz_Time_Analysis:
+    desc: "NITZ, 타임존, 시간 변경, 로밍 시간, 시간대, UTC, 핑퐁 현상, 시간 정보 수신"
+    tools: []
+    log_types:
+      - Nitz_Time_Event
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)
@@ -296,6 +307,17 @@ prompts:
       - 🚨 [핵심 키워드 필수]: ERROR 판정 시 단순히 '요청 실패'로 뭉뚱그리지 말고 `NETWORK_ERR`, `GENERIC_FAILURE` 등 구체적인 원인 코드를 원문 그대로 포함해라.
       - [사용자 의도적 조작 무시]: 비행기 모드 진입 및 그에 따른 Radio Power Off 등으로 인해 발생한 에러(예: REQUEST_CANCELLED, RADIO_NOT_AVAILABLE 등)는 통신 실패의 근본 원인이 아니므로 분석에서 완전히 배제하라.
 
+    Nitz_Time_Event: |
+      [NITZ 타임존 분석 양식]
+      검색된 Nitz_Time_Event 로그를 바탕으로 아래 항목만 명확히 추출하여 작성하십시오.
+      - 최초 수신 타임존: (예: UTC+9)
+      - 타임존 변경 이력: (변경 시간 및 새로운 타임존 기재, 없으면 '없음')
+      - 불안정성(핑퐁) 여부: (단시간 내 반복 변경이 있는지 확인)
+      * 로그에 명시되지 않은 시간이나 국가(타임존)를 절대 지어내지 마십시오.
+
+    Device_Property_State: |
+      - [단말 상태 점검 최우선 규칙]: 통화 실패나 데이터 끊김(OOS)을 분석할 때, 이 Device_Property_State 팩트가 검색되었다면 가장 먼저 `persist.radio.airplane_mode_on` 값과 `ril.radiostate` 값을 확인하라.
+      - 만약 airplane_mode가 1이거나 radiostate가 0이라면, "사용자의 비행기 모드 진입(또는 라디오 전원 OFF)에 의한 정상적인 통신 차단"으로 최종 결론을 내리고, 다른 에러 코드나 OOS 발생 이력은 무시하라.
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿
 # ==========================================

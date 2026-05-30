@@ -20,6 +20,7 @@ from parsers.internet_stall_parser import InternetStallParser
 from parsers.native_crash_parser import NativeCrashParser
 from parsers.diagnostic_parser import BinderWarningParser
 from parsers.rilj_parser import RiljParser
+from parsers.system_property_parser import SystemPropertyParser
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -50,6 +51,7 @@ class LogOrchestrator:
         self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
         self.binder_parser = BinderWarningParser()
         self.rilj_parser = RiljParser()
+        self.sys_prop_parser = SystemPropertyParser()
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -347,6 +349,7 @@ class LogOrchestrator:
                     result['binder_context_summary'] = binder_ctx
             if rilj_res := self.rilj_parser.analyze(buckets['rilj']):
                 result['rilj_transactions'] = rilj_res
+            result['system_properties'] = self.sys_prop_parser.analyze(lines)
 
             # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
             self.ntn_processor.save_ui_report("./result", self.base_name)

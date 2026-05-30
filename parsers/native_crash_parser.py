@@ -20,7 +20,7 @@ class NativeCrashParser(BaseParser):
                     crash_list.append(current_crash)
 
                 # 라인 맨 앞의 타임스탬프 추출 (예: 04-13 16:25:50.443)
-                ts_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})', line.strip())
+                ts_match = re.search(r'((?:\d{4}-)?\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}(?:\.\d{3,6})?)', line)
                 timestamp = ts_match.group(1) if ts_match else "Unknown Time"
 
                 # 프로세스 및 시그널 정보 추출

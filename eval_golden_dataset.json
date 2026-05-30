@@ -110,5 +110,40 @@
             "Recovery",
             "10:18:47"
         ]
+    },
+    {
+        "test_id": "TC-010",
+        "category": "battery_crash",
+        "target_log_file": "log_for_evaluation/cs_call_failed.log",
+        "query": "해당 시간대(03-25 17시 38분경)에 단말이 멈추거나 재부팅되는 치명적인 시스템 크래시(Native Crash)나 ANR(앱 응답 없음)이 발생했는지 분석해 줘.",
+        "ground_truth": "제공된 로그에는 치명적인 시스템 크래시(Native Crash)나 ANR(응답 없음) 이력이 존재하지 않습니다. 단말 소프트웨어 시스템은 정상적으로 동작 중이었습니다.",
+        "eval_keywords": [
+            "크래시",
+            "ANR",
+            "존재하지 않"
+        ]
+    },
+    {
+        "test_id": "TC-011",
+        "category": "nitz_time_analysis",
+        "target_log_file": "log_for_evaluation/cs_call_failed.log",
+        "query": "로그상에서 NITZ 시간 정보나 타임존이 어떻게 수신되었는지, 급격한 변화가 있는지 분석해.",
+        "ground_truth": "NITZ 수신 이력을 확인한 결과, UTC+0에서 변경사항 없이 유지되었습니다. 타임존 변경이나 핑퐁 현상은 관찰되지 않았습니다.",
+        "eval_keywords": [
+            "UTC+0",
+            "변경",
+            "핑퐁 현상은 관찰되지 않"
+        ]
+    },
+    {
+        "test_id": "TC-012",
+        "category": "nitz_time_analysis",
+        "target_log_file": "log_for_evaluation/request_failed.txt",
+        "query": "이 로그에서 NITZ 타임존이 비정상적으로 튀거나 핑퐁 현상을 보인 구간이 있어?",
+        "ground_truth": "해당 로그에는 NITZ 시간 정보 수신 이력(Nitz_Time_Event)이 존재하지 않습니다. 따라서 타임존 변경이나 핑퐁 현상 여부를 확인할 수 없습니다.",
+        "eval_keywords": [
+            "수신 이력이 존재하지 않",
+            "확인할 수 없"
+        ]
     }
 ]

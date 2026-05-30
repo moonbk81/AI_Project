@@ -10,7 +10,7 @@ class RagPayloadBuilder:
         """임베딩 및 LLM이 읽을 아주 가벼운 본문(Document) 생성"""
         lines = [f"### [Type: {log_type}]"]
 
-        # 제외할 키워드에 cross_context_logs 추가 (수동으로 예쁘게 붙이기 위함)
+        # 제외할 키워드 (전체 원문을 다 넣으면 임베딩 품질이 떨어지므로 일단 제외)
         exclude_keys = ["logs", "context_snapshot", "context", "stack", "call_stack", "raw_logs", "cross_context_logs"]
 
         for key, value in data_dict.items():
@@ -21,6 +21,19 @@ class RagPayloadBuilder:
                     lines.append(f"- {key}_{sub_k}: {sub_v}")
             else:
                 lines.append(f"- {key}: {value}")
+
+        # 원문 로그가 임베딩 모델의 눈에 띄도록, 에러가 몰려있는 마지막 5줄만 강제로 본문에 삽입합니다.
+        raw_snippets = []
+        for exc_key in exclude_keys:
+            if exc_key in data_dict and data_dict[exc_key]:
+                val = data_dict[exc_key]
+                if isinstance(val, list) and len(val) > 0:
+                    # 긴 스택이나 로그에서 핵심 단서가 있는 뒷부분 추출 (최대 5줄)
+                    snippet = "\n".join(str(x) for x in val[-5:])
+                    raw_snippets.append(f"[{exc_key} Key Snippet]:\n{snippet}")
+
+        if raw_snippets:
+            lines.append("\n" + "\n".join(raw_snippets))
 
         return "\n".join(lines)
 
@@ -286,6 +299,17 @@ class RagPayloadBuilder:
                 }
                 rag_payload.append(cpu_payload)
 
+        if "nitz_history" in report_data:
+            for nitz in report_data["nitz_history"]:
+                meta = {
+                    "log_type": "Nitz_Time_Event",
+                    "time": nitz.get("log_time", ""),
+                    "timezone": nitz.get("timezone", ""),
+                    "raw_info": nitz.get("nitz_raw", "")
+                }
+                text_content = f"NITZ Time Update: Time: {meta['time']}, Timezone: {meta['timezone']} (RAW: {meta['raw_info']})"
+                rag_payload.append({"document": text_content, "metadata": meta})
+
         # ==========================================
         # 🚨 [수정] Binder Warning 최신 로그 우선 처리
         # ==========================================
@@ -348,6 +372,30 @@ class RagPayloadBuilder:
                 }
                 doc = f"[모뎀 응답 이상({status})] 시간: {c['start_time']}, 명령어: {c['command']}, 지연시간: {c['latency_ms']}ms, 에러내용: {c['error_msg']}"
                 rag_payload.append({"document": doc, "metadata": meta})
+
+        # ==========================================
+        # 🚨 [신규] System Property 최우선 적재
+        # ==========================================
+        if "system_properties" in report_data and report_data["system_properties"]:
+            props = report_data["system_properties"]
+
+            # 검색 및 메타데이터 필터링용 핵심 값 추출
+            meta = {
+                "source_file": os.path.basename(self.input_file),
+                "log_type": "Device_Property_State",
+                "airplane_mode": props.get("persist.radio.airplane_mode_on", "Unknown"),
+                "radio_state": props.get("ril.radiostate", "Unknown")
+            }
+
+            # LLM이 읽을 본문(Document) 텍스트 조립
+            doc_lines = ["### [Type: Device_Property_State]"]
+            for k, v in props.items():
+                doc_lines.append(f"- {k}: {v}")
+
+            rag_payload.append({
+                "document": "\n".join(doc_lines),
+                "metadata": meta
+            })
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")

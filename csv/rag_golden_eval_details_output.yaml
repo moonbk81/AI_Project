@@ -1,0 +1,246 @@
+- "\uFEFFtest_id": TC-001
+  category: RILJ_Request_Failed
+  query: SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.
+  ground_truth: SEND_SMS 요청에 대해 모뎀이 에러 응답을 내렸으며, 구체적인 실패 원인은 NETWORK_ERR 로 확인됩니다.
+  rag_answer: SEND_SMS 요청은 두 차례에 걸쳐 실패함. 15:40:55와 15:41:47에 각각 발생한 트랜잭션 모두 상태가 ERROR로
+    기록됨. 실패 원인은 모뎀이 해당 명령을 거부했기 때문이며, 구체적인 에러 코드는 NETWORK_ERR임. 이 과정에서 모뎀 응답 지연시간이
+    15021ms와 40018ms로 매우 길게 측정되어 통신 실패의 병목 현상을 유발함.
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.7
+  overall_score: 0.8
+  reason: The AI correctly identifies NETWORK_ERR as the failure reason, fulfilling
+    the core requirement. It also includes SEND_SMS, covering the required keywords.
+    However, the inclusion of timestamps (15:40:55, 15:41:47) and latency measurements
+    (15021ms, 40018ms) which weren't explicitly in the Ground Truth introduces a slight
+    hallucination risk, although they are plausible related artifacts. The AI's explanation
+    is slightly more verbose than the Ground Truth, but the core technical accuracy
+    is high.
+  error: ''
+- "\uFEFFtest_id": TC-002
+  category: Call_Fail (CS)
+  query: 03-25 17시 38분 무렵에 발생한 CS Call 통화 실패(에러) 원인을 상세히 분석해 줘.
+  ground_truth: '첫번째 SIM slot(slot 0)에서 17:38:25에 시작하여 17:39:16까지 약 51초 동안 진행된 통화(ID:
+    TC@119_1)가 CALL DROP 상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: false)은 아니며, 상세 실패
+    원인은 callFailCause: 49, vendorCause: 24로 확인됩니다.'
+  rag_answer: 'slot 0에서 17:38:25에 시작하여 17:39:16까지 진행된 통화(ID: TC@119_1)가 CALL DROP
+    상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: False)은 아니며, 상세 실패 원인은 callFailCause:
+    49, vendorCause: 24로 확인됩니다.'
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI's answer perfectly matches the Ground Truth, including all required
+    keywords and technical details. There's no evidence of hallucination; the response
+    is a direct and accurate extraction.
+  error: ''
+- "\uFEFFtest_id": TC-003
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.
+  ground_truth: Call 발신이 기지국으로 전달되었으나, 369 (CODE_SIP_REQUEST_URI_TOO_LARGE) 에러 응답을
+    수신하여 호 설정에 실패했습니다.
+  rag_answer: PS(VoLTE) 통화 발신 실패는 두 건의 세션에서 확인됨. 05-23 14:41:26.728과 05-23 15:38:56.456에
+    각각 발생했으며, 두 경우 모두 통화가 FAIL 상태로 종료됨. 상세 실패 원인은 369_CODE_SIP_REQUEST_URI_TOO_LARGE이며,
+    이는 SIP 414_REQUEST URI TOO LARGE 에러로 확인됨.
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.85
+  reason: The AI correctly identified the error code (369) and its corresponding name
+    (CODE_SIP_REQUEST_URI_TOO_LARGE). It also correctly linked it to a SIP 414 error.
+    The mention of two separate sessions is not explicitly in the ground truth but
+    doesn't contradict it, reducing hallucination risk slightly. Accuracy is slightly
+    reduced because the ground truth states the call failed *after* being transmitted
+    to the base station, which the AI doesn't mention.
+  error: ''
+- "\uFEFFtest_id": TC-004
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신 종료가 되었는데, sip error 등으로 인한 망 이슈인지 아니면 상대방 거절인지 확인해줘.
+  ground_truth: 상대측 reject으로 콜이 종료되었습니다. 네트워크 측으로부터 480 Temporarily Unavailable SIP
+    code가 수신되었으며, 이에 따라 안드로이드 IMS 내부적으로도 504 (CODE_USER_DECLINE) 코드가 함께 확인됩니다.
+  rag_answer: '분석된 PS(VoLTE) 통화 종료 로그를 분석한 결과, 통화 종료 원인은 상대방의 거절(Rejection)과 원격 종료(Remote
+    Termination)가 혼재되어 확인됨.
+
+    12:07:00.876에 발생한 통화(objId:87635467)는 504_CODE_USER_DECLINE (SIP_480_Temporarily
+    Unavailable)로, 상대방 측의 명확한 거절이 원인으로 확인됨.
+
+    반면, 11:37:21.707, 12:08:04.608에 종료된 통화들은 510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)로,
+    원격 측에서 통화를 종료했음을 나타냄.
+
+    또한, 12:04:11.972 및 12:06:23.541에 종료된 통화는 501_CODE_USER_TERMINATED (SIP_200_null)로,
+    사용자에 의한 종료로 기록됨.
+
+    SIP 에러 로그에서는 12:07:00.865에 480 Temporarily Unavailable 메시지가 반복적으로 확인되었으나, 이는 504_CODE_USER_DECLINE과
+    시간적으로 일치하며, 명시적인 무선 환경(RF) 악화는 동반되지 않음.'
+  accuracy_score: 0.6
+  keyword_coverage: 1.0
+  hallucination_risk: 0.3
+  overall_score: 0.6
+  reason: The AI correctly identifies the rejection as a primary cause and includes
+    all required keywords (504, CODE_USER_DECLINE, 480, Temporary Unavailable). However,
+    the Ground Truth explicitly states that the 480 code *accompanied* the 504 code,
+    and the AI presents them as if they are separate events, introducing a contradiction.
+    The AI also introduces multiple other call termination reasons (510, 501) which
+    are not mentioned in the Ground Truth, increasing hallucination risk.
+  error: ''
+- "\uFEFFtest_id": TC-005
+  category: ANR
+  query: ANR이 발생한 정확한 프로세스와 처리가 지연된 인텐트(Intent) 액션명을 알려줘.
+  ground_truth: com.android.phone 프로세스에서 ANR이 발생했으며, com.samsung.intent.action.IMEI_STATE_CHANGED
+    인텐트의 Broadcast 처리가 지연된 것이 원인입니다.
+  rag_answer: ANR은 03-25 00:05:58.802에 발생하였으며, 영향을 받은 프로세스는 `com.android.phone`임.
+    지연을 유발한 인텐트 액션은 `com.samsung.intent.action.IMEI_STATE_CHANGED`임. 해당 ANR은 `Broadcast
+    of Intent` 처리 과정에서 발생한 것으로 확인됨.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI's answer perfectly matches the Ground Truth, including all required
+    keywords (com.android.phone, IMEI_STATE_CHANGED, Broadcast). There's no indication
+    of hallucination; the information is directly aligned with the provided facts.
+  error: ''
+- "\uFEFFtest_id": TC-006
+  category: Fatal_Exception
+  query: 메인 프로세스에서 발생한 Fatal Exception의 종류와 마지막으로 호출된 콜스택(메소드)은 무엇인가?
+  ground_truth: java.lang.ArrayIndexOutOfBoundsException (length=0; index=0) 에러가 발생했으며,
+    마지막 콜스택은 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage
+    로 확인됩니다.
+  rag_answer: '발생한 Fatal Exception은 `java.lang.ArrayIndexOutOfBoundsException: length=0;
+    index=0`임. 해당 에러는 `system_server` 프로세스에서 발생한 것으로 확인됨. 마지막으로 호출된 콜스택(top method)은
+    `com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage`임.'
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI accurately identified the `java.lang.ArrayIndexOutOfBoundsException`
+    and the `CoverAuthHandler.handleMessage` call stack, which are the core elements
+    of the Ground Truth. The AI did not introduce any extraneous or contradictory
+    information, indicating a low hallucination risk. The answer perfectly aligns
+    with the provided information.
+  error: ''
+- "\uFEFFtest_id": TC-007
+  category: Native_Crash
+  query: rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.
+  ground_truth: libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조
+    오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다. 콜스택을 더 들여다보면
+    ContextActivationDca::OnDataCallDisconnected, ContextActivationDca::OnDataCallStateChanged,
+    Dca::HandleEvent, EventScheduler::DoSchedule() 로 진행됐습니다.
+  rag_answer: 'rild 데몬에서 반복적으로 `SIGSEGV`가 감지됨. 이는 잘못된 메모리 참조 오류(Segmentation Violation)를
+    의미함.
+
+    모든 크래시의 원인 호출 지점은 `libsec-ril.so` 라이브러리 내의 `DataCallManager::NotifyDataCallState(Dca*,
+    DataCall*, int, int)` 함수임.
+
+    해당 함수는 `ContextActivationDca::OnDataCallDisconnected`와 `Dca::HandleEvent`를 거쳐
+    호출되는 것으로 확인됨.'
+  accuracy_score: 0.7
+  keyword_coverage: 0.9
+  hallucination_risk: 0.9
+  overall_score: 0.8
+  reason: The AI correctly identifies `SIGSEGV`, `libsec-ril.so`, and `DataCallManager::NotifyDataCallState`
+    as key elements, and mentions `ContextActivationDca::OnDataCallDisconnected` and
+    `Dca::HandleEvent`. However, it misses the crucial detail of `SEGV_MAPERR` and
+    the signal number (11). The AI's description of the call stack is slightly less
+    detailed than the Ground Truth, but the core elements are present. The hallucination
+    risk is low as the AI doesn't invent any new components or events.
+  error: ''
+- "\uFEFFtest_id": TC-008
+  category: SetupDataCall_Failed
+  query: E-PDN 데이터 호(SetupDataCall) 연결 시도가 실패한 명시적인 거절 사유를 알려줘.
+  ground_truth: E-PDN 연결을 시도했으나 NOT_SPECIFIED 상태로 실패했으며, 상세 거절 원인은 기지국 측의 NO CARRIER
+    / User authentication failed 입니다.
+  rag_answer: '데이터 호출(DataCall) 연결 시도 실패는 04-10 10:42:42.090 시점에 확인됨.
+
+    실패 원인은 `DATA_SETUP_FAIL` 이벤트로 기록되었으며, 명시적인 거절 사유는 `cause=NOT_SPECIFIED(0xfffffff9)`로
+    확인됨.
+
+    해당 에러 코드는 사용자 인증(USER_AUTHENTICATION)과 관련된 실패를 지시함.'
+  accuracy_score: 0.8
+  keyword_coverage: 1.0
+  hallucination_risk: 0.9
+  overall_score: 0.85
+  reason: The AI correctly identifies `NOT_SPECIFIED` as the rejection cause and mentions
+    `User authentication` which aligns with the Ground Truth. While it introduces
+    `DATA_SETUP_FAIL` and `USER_AUTHENTICATION` which weren't explicitly in the Ground
+    Truth, they are plausible related events and don't contradict the core information.
+    The timestamp is a valid artifact. Therefore, the accuracy is high, keyword coverage
+    is complete, and hallucination risk is low.
+  error: ''
+- "\uFEFFtest_id": TC-009
+  category: DataStall
+  query: Data Stall 감지 시점과 Recovery 동작이 완전히 종료되어 복구된 시간을 분석해 줘.
+  ground_truth: 10:18:29 무렵 Data Stall이 감지되어 Recovery 로직이 진입하였고, 10:18:47 경에 Recovery
+    동작이 종료되며 정상적으로 망 복구가 완료되었습니다.
+  rag_answer: '[Data Stall 및 Recovery 분석]
+
+    Data Stall 감지 및 Recovery 로직 진입은 10:18:29에 시작됨. 해당 이벤트는 Data Stall 감지로 인해 Recovery
+    로직이 작동했음을 확인함. Recovery 동작은 10:18:47에 종료되었으며, 정상적으로 망 복구가 완료된 것으로 판정됨. 총 복구 소요
+    시간은 18.558초로 측정됨.'
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI accurately extracted the timestamps (10:18:29 and 10:18:47) and correctly
+    identified the Recovery process and its completion. It also calculated the recovery
+    time, which is a reasonable addition. No contradictions or hallucinations were
+    present. All required keywords were covered.
+  error: ''
+- "\uFEFFtest_id": TC-010
+  category: call_drop
+  query: 03-25 17시 38분 무렵의 로그에서 PS Call(VoLTE) 통화 실패나 IMS 에러(4xx, 5xx)가 발생했는지 상세히
+    분석해 줘.
+  ground_truth: 해당 구간의 로그에는 PS Call(VoLTE) 통화 세션이나 IMS 트랜잭션 기록이 전혀 존재하지 않습니다. 따라서
+    PS 통화와 관련된 에러나 종료 이력을 확인할 수 없습니다.
+  rag_answer: '03-25 17:37:42.830에 401 Unauthorized (Client Error) SIP 에러가 발생함. 해당
+    에러는 망 이탈(OOS) 발생과 시간적으로 연관됨. 로그에 기록된 RF 상관관계 분석 결과, RSRP: -88 dBm, SINR: 15.0
+    dB 등의 측정값이 확인됨. 이는 무선 환경 불안정성이 IMS 통신 실패의 원인일 가능성을 시사함.'
+  accuracy_score: 0.0
+  keyword_coverage: 0.0
+  hallucination_risk: 0.2
+  overall_score: 0.0
+  reason: The Ground Truth explicitly states that no PS Call or IMS records exist
+    in the specified log segment. The AI's answer describes a 401 error and RF measurements,
+    which directly contradicts this. While the AI doesn't *completely* hallucinate
+    (it references a SIP error, which could theoretically exist), it presents information
+    that is factually incorrect given the Ground Truth. Therefore, accuracy is 0.0.
+    Keyword coverage is also 0.0 as the AI's response doesn't reflect the '존재하지 않'
+    or '확인할 수 없' aspects of the Ground Truth. Hallucination risk is low (0.2) because
+    it references a plausible error type, but the core information is fabricated.
+  error: ''
+- "\uFEFFtest_id": TC-011
+  category: nitz_time_analysis
+  query: 로그상에서 NITZ 시간 정보나 타임존이 어떻게 수신되었는지, 급격한 변화가 있는지 분석해.
+  ground_truth: NITZ 수신 이력을 확인한 결과, UTC+0에서 변경사항 없이 유지되었습니다. 타임존 변경이나 핑퐁 현상은 관찰되지
+    않았습니다.
+  rag_answer: '[NITZ 타임존 분석 양식]
+
+    - 최초 수신 타임존: UTC+0시간
+
+    - 타임존 변경 이력: 없음
+
+    - 불안정성(핑퐁) 여부: 없음. 모든 NITZ_Time_Event 로그에서 타임존이 일관되게 UTC+0시간으로 유지됨.'
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI's answer perfectly matches the Ground Truth, covering all required
+    keywords ('UTC+0', '변경', '핑퐁 현상은 관찰되지 않') and presenting no contradictions or
+    hallucinations. The format is also appropriate for the analysis request.
+  error: ''
+- "\uFEFFtest_id": TC-012
+  category: nitz_time_analysis
+  query: 이 로그에서 NITZ 타임존이 비정상적으로 튀거나 핑퐁 현상을 보인 구간이 있어?
+  ground_truth: 해당 로그에는 NITZ 시간 정보 수신 이력(Nitz_Time_Event)이 존재하지 않습니다. 따라서 타임존 변경이나
+    핑퐁 현상 여부를 확인할 수 없습니다.
+  rag_answer: 제공된 분석 팩트에는 NITZ 타임존 관련 데이터가 포함되어 있지 않음. 데이터 스톨 및 복구 이력은 CLEAN 상태로 확인되어
+    병목 현상은 없음. DNS 지연 분석 결과, critical_dns_latency_spikes가 감지되지 않았으며, DNS 차단 앱 수도 0건임.
+    따라서, NITZ 타임존의 비정상적인 급증 또는 핑퐁 현상에 대한 정보는 제공된 로그에서 확인할 수 없습니다.
+  accuracy_score: 1.0
+  keyword_coverage: 1.0
+  hallucination_risk: 1.0
+  overall_score: 1.0
+  reason: The AI's answer perfectly aligns with the Ground Truth, stating that NITZ
+    time zone data is absent and therefore the requested information cannot be confirmed.
+    It also incorporates the required keywords '확인할 수 없'. There's no hallucination
+    as it doesn't invent any data or events.
+  error: ''
