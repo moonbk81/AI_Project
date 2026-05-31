@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import re
 import agent_tools
+import ollama
 
 from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
@@ -82,7 +83,8 @@ class RilRagChat:
             "get_internet_stall_analytics": getattr(agent_tools, 'get_internet_stall_analytics', None),
             "get_ntn_spacex_analytics": getattr(agent_tools, 'get_ntn_spacex_analytics', None),
             "get_tiantong_satellite_analytics": getattr(agent_tools, 'get_tiantong_satellite_analytics', None),
-            "get_recent_data_usage_analytics": getattr(agent_tools, 'get_recent_data_usage_analytics', None)
+            "get_recent_data_usage_analytics": getattr(agent_tools, 'get_recent_data_usage_analytics', None),
+            "get_binder_warning_analytics": getattr(agent_tools, 'get_binder_warning_analytics', None)
         }
 
     def _load_config(self):
@@ -292,7 +294,7 @@ class RilRagChat:
             metas.append(_sanitize_chroma_metadata(meta, max_chars=MAX_META_CHARS))
             ids.append(f"{base_id}_{i}")
 
-        print(f"🔄 '{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
+        print(f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
         for i in range(0, len(docs), BATCH_SIZE):
             batch_docs = docs[i : i + BATCH_SIZE]
             batch_metas = metas[i : i + BATCH_SIZE]
@@ -303,12 +305,12 @@ class RilRagChat:
             gc.collect()
             if torch.cuda.is_available(): torch.cuda.empty_cache()
             elif torch.backends.mps.is_available(): torch.mps.empty_cache()
-        print(f"✅ {filename} 단일 파일 재적재 완료: {len(docs)} docs")
+        print(f"{filename} 단일 파일 재적재 완료: {len(docs)} docs")
 
     def ingest_folder(self, folder_path="./payloads"):
         if not os.path.exists(folder_path):
             os.makedirs(folder_path, exist_ok=True)
-            print(f"📂 '{folder_path}' 폴더가 생성되었습니다. 분석된 JSON 파일을 넣어주세요.")
+            print(f"'{folder_path}' 폴더가 생성되었습니다. 분석된 JSON 파일을 넣어주세요.")
             return
 
         json_files = glob.glob(os.path.join(folder_path, "*.json"))
@@ -323,7 +325,7 @@ class RilRagChat:
             print("✨ 모든 파일이 이미 최신 상태입니다. (추가 적재 없음)")
             return
 
-        print(f"📦 총 {len(new_files)}개의 새로운 로그 파일을 발견했습니다. 적재 시작...")
+        print(f"총 {len(new_files)}개의 새로운 로그 파일을 발견했습니다. 적재 시작...")
         total_docs = 0
         for file_path in new_files:
             filename = os.path.basename(file_path)
@@ -347,7 +349,7 @@ class RilRagChat:
                 safe_metadatas.append(_sanitize_chroma_metadata(safe_meta, max_chars=MAX_META_CHARS))
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
-            print(f"🔄 '{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
+            print(f"'{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
 
             BATCH_SIZE = 100
             import gc
@@ -365,7 +367,7 @@ class RilRagChat:
             total_docs += len(safe_documents)
             del raw_documents, raw_metadatas, safe_documents, safe_metadatas, ids
             gc.collect()
-        print(f"\n✅ 지식 창고 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
+        print(f"\nVector DB 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
     def _get_domain_specific_guideline(self, query, intents, target_log_types):
         guidelines = []
@@ -394,6 +396,9 @@ class RilRagChat:
         for log_type in target_log_types:
             if log_type in log_guidelines_dict:
                 guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
+
+        root_cause_synthetic = self.prompts.get('root_cause_synthetic', "")
+        guidelines.append(f"### [근본 원인 종합 분석]\n{root_cause_synthetic}")
 
         return "\n\n".join(guidelines)
 
@@ -488,7 +493,6 @@ class RilRagChat:
             distances = results['distances'][0] if 'distances' in results and results['distances'] else [0]*len(docs)
 
             # 1. 쿼리에서 핵심 키워드(영어, 숫자 등) 추출
-            import re
             query_keywords = set(re.findall(r'[a-zA-Z0-9]+', search_query.lower()))
 
             reranked_results = []
@@ -613,7 +617,6 @@ class RilRagChat:
 
     def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
         """Ollama API를 호출하고 최종 답변과 생각 과정(Thinking)을 분리하여 반환합니다."""
-        import ollama
         cfg = self.model_config_registry.get(
             self.llm_model_name,
             self.model_config_registry.get("default")
@@ -681,7 +684,6 @@ class RilRagChat:
         return json.loads(match.group(0))
 
     def _get_llm_routing(self, query: str) -> dict:
-        import ollama
         allowed_tools = set()
         allowed_log_types = set()
         allowed_intents = set(self.routing_map.keys())

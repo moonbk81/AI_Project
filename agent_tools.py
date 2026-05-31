@@ -824,13 +824,109 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
             "pre_anr_logcat_tail": pre_anr_logcat[-40:]
         })
 
+    binder_warnings = report_data.get("binder_warnings", []) or []
+    binder_context_summary = report_data.get("binder_context_summary", {}) or {}
+
     return json.dumps({
         "crash_count": len(crashes),
         "crash_history": crash_facts,
         "native_crash_count": len(native_crashes),
         "native_crash_history": native_crash_facts,
         "anr_count": len(anr_facts),
-        "anr_history": anr_facts
+        "anr_history": anr_facts,
+        "binder_warning_count": len(binder_warnings),
+        "binder_warning_types": dict(Counter([
+            b.get("type") or b.get("event_type") or "UNKNOWN"
+            for b in binder_warnings
+            if isinstance(b, dict)
+        ])),
+        "binder_context_summary": {
+            "signals": binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {},
+            "checklist": binder_context_summary.get("checklist", []) if isinstance(binder_context_summary, dict) else [],
+            "total_context_lines": binder_context_summary.get("total_context_lines", 0) if isinstance(binder_context_summary, dict) else 0,
+        }
+    }, ensure_ascii=False)
+
+
+# ==========================================
+# Binder Warning Analytics
+# ==========================================
+def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """
+    Binder IPC 병목/스레드 고갈/transaction failure 관련 이벤트를 전용으로 추출합니다.
+    Crash/ANR이 0건이어도 Binder_Warning만 존재하는 케이스(TC-020 등)를 RAG가 놓치지 않도록 돕습니다.
+    """
+    report_data = _load_report_json(base_name, result_dir)
+
+    binder_warnings = report_data.get("binder_warnings", []) or []
+    binder_context_summary = report_data.get("binder_context_summary", {}) or {}
+
+    warning_facts = []
+    type_counter = Counter()
+    max_wait_ms = None
+
+    for warning in binder_warnings:
+        if not isinstance(warning, dict):
+            continue
+
+        warning_type = warning.get("type") or warning.get("event_type") or "UNKNOWN"
+        desc = warning.get("desc") or warning.get("message") or warning.get("raw") or ""
+        raw = warning.get("raw") or desc
+
+        type_counter[warning_type] += 1
+
+        wait_ms = None
+        wait_match = re.search(r"(\d{2,6})\s*ms", str(raw)) or re.search(r"(\d{2,6})\s*ms", str(desc))
+        if wait_match:
+            try:
+                wait_ms = int(wait_match.group(1))
+                max_wait_ms = wait_ms if max_wait_ms is None else max(max_wait_ms, wait_ms)
+            except ValueError:
+                wait_ms = None
+
+        warning_facts.append({
+            "time": warning.get("time") or warning.get("timestamp"),
+            "type": warning_type,
+            "desc": desc,
+            "wait_ms": wait_ms,
+            "raw": raw,
+        })
+
+    signals = binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {}
+    checklist = binder_context_summary.get("checklist", []) if isinstance(binder_context_summary, dict) else []
+    total_context_lines = binder_context_summary.get("total_context_lines", 0) if isinstance(binder_context_summary, dict) else 0
+
+    thread_exhaustion_events = [
+        item for item in warning_facts
+        if "THREAD_EXHAUSTION" in str(item.get("type", ""))
+        or "THREAD_EXHAUSTION" in str(item.get("desc", ""))
+        or "THREAD_EXHAUSTION" in str(item.get("raw", ""))
+    ]
+
+    transaction_failures = [
+        item for item in warning_facts
+        if "BINDER_TRANSACTION_FAILURE" in str(item.get("type", ""))
+        or "BINDER_TRANSACTION_FAILURE" in str(item.get("desc", ""))
+        or "BINDER_TRANSACTION_FAILURE" in str(item.get("raw", ""))
+    ]
+
+    return json.dumps({
+        "status": "OK" if warning_facts or binder_context_summary else "NO_DATA",
+        "binder_warning_count": len(warning_facts),
+        "warning_type_counts": dict(type_counter),
+        "thread_exhaustion_count": len(thread_exhaustion_events),
+        "binder_transaction_failure_count": len(transaction_failures),
+        "max_wait_ms": max_wait_ms,
+        "has_thread_exhaustion": len(thread_exhaustion_events) > 0,
+        "has_binder_transaction_failure": len(transaction_failures) > 0,
+        "binder_warnings": warning_facts[:50],
+        "thread_exhaustion_events": thread_exhaustion_events[:20],
+        "transaction_failure_events": transaction_failures[:20],
+        "binder_context_summary": {
+            "signals": signals,
+            "checklist": checklist,
+            "total_context_lines": total_context_lines,
+        }
     }, ensure_ascii=False)
 
 def get_radio_power_analytics(base_name: str, result_dir: str = "./result") -> str:

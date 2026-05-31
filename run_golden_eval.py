@@ -41,39 +41,116 @@ def extract_json_object(text: str) -> dict:
 # =====================================================================
 # 2. 평가 LLM 호출 함수 (LiteLLM + Ollama)
 # =====================================================================
-def judge_with_litellm(judge_model, ollama_base, query, ground_truth, keywords, rag_answer, timeout=180) -> dict:
+def normalize_golden_item(item: dict) -> dict:
+    """
+    v1/v2 Golden Dataset 호환 계층.
+    - v1: ground_truth + eval_keywords 중심
+    - v2: expected_decision/root_cause/must_have/evidence_should_include/must_not_claim/trap_type 중심
+    """
+    expected_answer = item.get("expected_answer") or {}
+
+    ground_truth = item.get("ground_truth", "")
+    eval_keywords = item.get("eval_keywords", []) or []
+
+    expected_decision = item.get("expected_decision") or expected_answer.get("decision") or ""
+    root_cause = item.get("root_cause") or expected_answer.get("root_cause") or ground_truth
+
+    must_have = item.get("must_have") or expected_answer.get("must_have") or []
+    evidence_should_include = (
+        item.get("evidence_should_include")
+        or item.get("required_evidence")
+        or expected_answer.get("evidence_should_include")
+        or expected_answer.get("required_evidence")
+        or eval_keywords
+    )
+    must_not_claim = (
+        item.get("must_not_claim")
+        or item.get("must_not_have")
+        or expected_answer.get("must_not_claim")
+        or expected_answer.get("must_not_have")
+        or []
+    )
+    trap_type = item.get("trap_type") or expected_answer.get("trap_type") or ""
+    severity = item.get("severity") or expected_answer.get("severity") or ""
+
+    # v1 데이터셋도 rubric 기반 judge prompt에서 쓸 수 있게 보정
+    if not must_have and eval_keywords:
+        must_have = eval_keywords
+    if not expected_decision and ground_truth:
+        expected_decision = ground_truth
+
+    return {
+        "ground_truth": ground_truth,
+        "eval_keywords": eval_keywords,
+        "expected_decision": expected_decision,
+        "root_cause": root_cause,
+        "must_have": must_have,
+        "evidence_should_include": evidence_should_include,
+        "must_not_claim": must_not_claim,
+        "trap_type": trap_type,
+        "severity": severity,
+    }
+
+
+def _json_dumps_for_prompt(value) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def judge_with_litellm(judge_model, ollama_base, query, golden_eval, rag_answer, timeout=180) -> dict:
     os.environ.setdefault("OLLAMA_API_BASE", ollama_base)
 
     prompt = f"""
 You are an expert evaluator for Android Telephony RAG systems.
-Your task is to score the AI's generated [Answer] by comparing it strictly against the expert's [Ground Truth] and [Required Keywords].
+Your task is to score the AI's generated [Answer] by comparing it strictly against the structured [Golden Rubric].
+
+[CORE PRINCIPLE]
+Evaluate whether the answer correctly identifies the expected decision/root cause and cites the right supporting log evidence.
+Do not reward generic troubleshooting text. Do not require identical wording if the technical meaning is correct.
+
+[GOLDEN RUBRIC FIELDS]
+- expected_decision: The final conclusion the answer should reach.
+- root_cause: The core technical cause or absence/presence decision.
+- must_have: Facts that must be present or conceptually covered.
+- evidence_should_include: Log artifacts, codes, states, timestamps, or parser findings that should support the answer.
+- must_not_claim: Claims that must NOT appear. Penalize heavily if the answer asserts any of these.
+- trap_type: If present, this is a trap/adversarial test. Be strict about false positives and misleading causal claims.
 
 [CALIBRATED EVALUATION RULES]
-1. Narrative vs. Factual: Do not penalize the AI for lacking narrative polish. Focus strictly on whether the technical root cause (e.g., Error Code, Cause Code, Status) matches the Ground Truth.
-2. Valid Log Artifacts vs. Hallucination: The AI extracting timestamps, latency (ms), or standard protocol names is NOT a hallucination, provided it corresponds to the Target Event. However, if the AI pulls data from an unrelated call or session, heavily penalize the hallucination risk.
-3. Strict Penalty for Contradictions (Zero-Tolerance for Noise): If the AI presents multiple conflicting root causes (e.g., listing `callFailCause: 31` alongside `49` when Ground Truth only specifies `49`), apply a SEVERE penalty to Accuracy. The AI must accurately isolate the issue, not just dump all found errors.
+1. Root Cause First: Accuracy is mainly determined by whether expected_decision/root_cause is correct.
+2. Evidence Matters: A correct conclusion without supporting evidence should lose evidence/coverage points.
+3. Absence Claims: If the expected answer says an event is absent, the AI must not invent that event. Correctly saying "not found" is acceptable only when aligned with the rubric.
+4. Must-Not Claims: If the answer includes a forbidden claim from must_not_claim, apply a severe penalty to accuracy and hallucination_safety.
+5. Related-but-Extra Findings: Mentioning extra valid log artifacts is acceptable only if they do not change or confuse the root cause.
+6. Wrong Session/Time Mix: If the answer uses evidence from an unrelated call/session/time window as the main cause, heavily penalize accuracy and hallucination_safety.
+7. Trap Handling: For trap_type cases, prioritize whether the answer resists the misleading premise.
 
-[Question]: {query}
-[Ground Truth]: {ground_truth}
-[Required Keywords]: {', '.join(keywords)}
+[Question]
+{query}
 
-[AI's Answer to Evaluate]:
+[Golden Rubric]
+{_json_dumps_for_prompt(golden_eval)}
+
+[AI's Answer to Evaluate]
 {rag_answer}
-
-Evaluate the Answer based on the following criteria (Score 0.0 to 1.0, where 1.0 is excellent):
-1. accuracy_score: How closely does the answer match the core technical facts of the Ground Truth?
-2. keyword_coverage: Did the answer include or conceptually cover the Required Keywords?
-3. hallucination_risk: Did the AI invent unsupported causes or events? (1.0 = VERY SAFE, 0.0 = COMPLETELY HALLUCINATED)
-4. overall_score: The final weighted score of the answer.
 
 Return ONLY valid JSON in the exact following format without markdown or extra text:
 {{
   "accuracy_score": 0.0,
-  "keyword_coverage": 0.0,
-  "hallucination_risk": 0.0,
+  "evidence_coverage": 0.0,
+  "must_have_coverage": 0.0,
+  "must_not_violation": 0.0,
+  "hallucination_safety": 0.0,
   "overall_score": 0.0,
+  "missing_must_have": [],
+  "missing_evidence": [],
+  "violated_must_not_claim": [],
   "reason": "Short explanation of the scores and missing elements"
 }}
+
+Scoring guide:
+- must_not_violation: 0.0 means no violation, 1.0 means severe forbidden-claim violation.
+- hallucination_safety: 1.0 means safe/grounded, 0.0 means unsupported or wrong-session hallucination.
+- overall_score should weight accuracy/root cause highest, then evidence and safety.
 """
     response = litellm.completion(
         model=judge_model,
@@ -89,15 +166,83 @@ Return ONLY valid JSON in the exact following format without markdown or extra t
 
 
 # =====================================================================
+# 2.5. Judge Score 후처리 함수 및 유틸
+# =====================================================================
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+            return parsed if isinstance(parsed, list) else [stripped]
+        except Exception:
+            return [stripped]
+    return [value]
+
+
+def postprocess_judge_scores(scores: dict) -> dict:
+    """
+    Judge LLM이 must_not_violation의 방향을 반대로 주거나,
+    violated_must_not_claim=[] 인데 must_not_violation=1.0을 주는 경우를 보정한다.
+    정의:
+    - must_not_violation = 0.0: 금지 주장 위반 없음
+    - must_not_violation = 1.0: 심각한 금지 주장 위반
+    """
+    if not isinstance(scores, dict):
+        return {}
+
+    normalized = dict(scores)
+    violated = _as_list(normalized.get("violated_must_not_claim"))
+    normalized["violated_must_not_claim"] = violated
+
+    if not violated:
+        normalized["must_not_violation"] = 0.0
+    else:
+        try:
+            raw_violation = float(normalized.get("must_not_violation", 1.0))
+        except Exception:
+            raw_violation = 1.0
+
+        # Judge가 반대로 해석해서 낮은 점수를 준 경우에도 위반 목록이 있으면 최소 0.5 이상으로 보정
+        normalized["must_not_violation"] = max(0.5, min(1.0, raw_violation))
+
+        try:
+            hallucination_safety = float(normalized.get("hallucination_safety", normalized.get("hallucination_risk", 1.0)))
+        except Exception:
+            hallucination_safety = 1.0
+        normalized["hallucination_safety"] = min(hallucination_safety, 0.6)
+
+    return normalized
+
+
+# =====================================================================
 # 3. 메인 실행 파이프라인
 # =====================================================================
-def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, rag_model, ollama_base):
+def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, rag_model, ollama_base, test_ids=None, categories=None):
     if not os.path.exists(dataset_path):
         print(f"❌ 골든 데이터세트를 찾을 수 없습니다: {dataset_path}")
         return
 
     with open(dataset_path, 'r', encoding='utf-8') as f:
         golden_data = json.load(f)
+
+    selected_test_ids = {x.strip() for x in (test_ids or []) if x and x.strip()}
+    selected_categories = {x.strip() for x in (categories or []) if x and x.strip()}
+
+    if selected_test_ids:
+        golden_data = [item for item in golden_data if item.get("test_id", "") in selected_test_ids]
+
+    if selected_categories:
+        golden_data = [item for item in golden_data if item.get("category", "") in selected_categories]
+
+    if not golden_data:
+        print("❌ 선택 조건에 맞는 테스트 케이스가 없습니다.")
+        return
 
     print(f"🚀 [INIT] 총 {len(golden_data)}개의 테스트 케이스 로드 완료.")
     print(f"   - 생성용 RAG 모델: {rag_model}")
@@ -168,8 +313,9 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
         category = item.get("category", "Unknown")
         target_file = item.get("target_log_file", "")
         query = item.get("query", "")
-        ground_truth = item.get("ground_truth", "")
-        keywords = item.get("eval_keywords", [])
+        golden_eval = normalize_golden_item(item)
+        ground_truth = golden_eval["ground_truth"]
+        keywords = golden_eval["eval_keywords"]
 
         print(f"\n=======================================================")
         print(f"🔄 [EVAL] {idx}/{len(golden_data)} | {test_id} | {category}")
@@ -191,6 +337,9 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
             print(f"✅ RAG 답변 생성 완료.")
         except Exception as e:
             rag_answer = f"RAG 파이프라인 내부 에러: {e}"
+            doc_ids = []
+            meta_list = []
+            thinking = ""
             print(f"❌ {rag_answer}")
 
         # 📌 STEP B: 평가용 로컬 LLM 호출 (심판 채점 계층)
@@ -202,10 +351,10 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
                 judge_model=judge_model,
                 ollama_base=ollama_base,
                 query=query,
-                ground_truth=ground_truth,
-                keywords=keywords,
+                golden_eval=golden_eval,
                 rag_answer=rag_answer
             )
+            scores = postprocess_judge_scores(scores)
             print(f"⚖️ 채점 완료: {scores.get('overall_score', 0.0)} | 사유: {scores.get('reason', '')}")
         except Exception as e:
             error_msg = repr(e)
@@ -219,13 +368,30 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
             "test_id": test_id,
             "category": category,
             "query": query,
+            "target_log_file": target_file,
+            "expected_decision": golden_eval.get("expected_decision", ""),
+            "root_cause": golden_eval.get("root_cause", ""),
             "ground_truth": str(ground_truth),
+            "must_have": json.dumps(golden_eval.get("must_have", []), ensure_ascii=False),
+            "evidence_should_include": json.dumps(golden_eval.get("evidence_should_include", []), ensure_ascii=False),
+            "must_not_claim": json.dumps(golden_eval.get("must_not_claim", []), ensure_ascii=False),
+            "trap_type": golden_eval.get("trap_type", ""),
+            "severity": golden_eval.get("severity", ""),
             "rag_answer": rag_answer,
+            "doc_ids": json.dumps(doc_ids, ensure_ascii=False),
+            "retrieved_meta": json.dumps(meta_list, ensure_ascii=False),
+            "thinking": thinking,
             "accuracy_score": safe_float(scores.get("accuracy_score")),
-            "keyword_coverage": safe_float(scores.get("keyword_coverage")),
-            "hallucination_risk": safe_float(scores.get("hallucination_risk")),
+            "evidence_coverage": safe_float(scores.get("evidence_coverage")),
+            "must_have_coverage": safe_float(scores.get("must_have_coverage", scores.get("keyword_coverage"))),
+            "must_not_violation": safe_float(scores.get("must_not_violation")),
+            "hallucination_safety": safe_float(scores.get("hallucination_safety", scores.get("hallucination_risk"))),
             "overall_score": safe_float(scores.get("overall_score")),
+            "missing_must_have": json.dumps(scores.get("missing_must_have", []), ensure_ascii=False),
+            "missing_evidence": json.dumps(scores.get("missing_evidence", []), ensure_ascii=False),
+            "violated_must_not_claim": json.dumps(scores.get("violated_must_not_claim", []), ensure_ascii=False),
             "reason": scores.get("reason", ""),
+            "judge_raw": judge_raw,
             "error": error_msg
         })
 
@@ -238,14 +404,25 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
         writer.writeheader()
         writer.writerows(result_rows)
 
-    metrics = ["accuracy_score", "keyword_coverage", "hallucination_risk", "overall_score"]
+    metrics = [
+        "accuracy_score",
+        "evidence_coverage",
+        "must_have_coverage",
+        "must_not_violation",
+        "hallucination_safety",
+        "overall_score",
+    ]
+    valid_rows = [r for r in result_rows if not r["error"]]
+    clean_rows = [r for r in valid_rows if r.get("must_not_violation", 0.0) == 0.0]
+
     summary = {
         "total_test_cases": len(result_rows),
-        "failed_evals": sum(1 for r in result_rows if r["error"])
+        "failed_evals": sum(1 for r in result_rows if r["error"]),
+        "must_not_clean_rate": round(len(clean_rows) / len(valid_rows), 3) if valid_rows else 0.0,
     }
 
     for m in metrics:
-        valid_vals = [r[m] for r in result_rows if not r["error"]]
+        valid_vals = [r[m] for r in valid_rows]
         summary[f"avg_{m}"] = round(statistics.mean(valid_vals), 3) if valid_vals else 0.0
 
     with open(summary_csv, "w", newline="", encoding="utf-8-sig") as f:
@@ -268,8 +445,14 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
     - category: 문제 유형 (예: "통화 끊김", "데이터 불안정")
     - target_log_file: RAG 시스템이 참조할 원본 로그 파일 경로 (예: "./logs/call_drop_001.log")
     - query: RAG 시스템에 투입할 질문 (예: "왜 통화가 끊겼나요?")
-    - ground_truth: 전문가가 작성한 정답 텍스트
-    - eval_keywords: 평가 시 반드시 포함되어야 할 핵심 키워드 리스트
+    - ground_truth: 전문가가 작성한 정답 텍스트(v1 호환용)
+    - eval_keywords: 평가 시 반드시 포함되어야 할 핵심 키워드 리스트(v1 호환용)
+    - expected_decision: 최종적으로 내려야 하는 판단(v2 권장)
+    - root_cause: 핵심 원인 또는 부재 판단(v2 권장)
+    - must_have: 반드시 포함해야 하는 핵심 사실 리스트(v2 권장)
+    - evidence_should_include: 답변 근거로 포함되어야 하는 로그/코드/상태 리스트(v2 권장)
+    - must_not_claim: 답변에 포함되면 안 되는 금지 주장 리스트(v2 권장)
+    - trap_type: 유도 질문/부재 확인/시간 혼동 등 trap 유형(v2 선택)
 2) Ollama 심판 모델 준비
 - Ollama에서 평가용 모델을 준비합니다 (예: ollama/qwen2.5-coder:7b).
 - Ollama 서버가 로컬에서 실행 중인지 확인합니다 (기본 http://localhost:11434).
@@ -293,6 +476,18 @@ if __name__ == "__main__":
     parser.add_argument("--judge-model", default="ollama/qwen2.5-coder:7b", help="로컬 심판 모델명")
     parser.add_argument("--rag-model", default="gemma4:e4b", help="우리 RAG 모델명")
     parser.add_argument("--ollama-base", default="http://localhost:11434", help="Ollama 주소")
+    parser.add_argument(
+        "--test-id",
+        action="append",
+        default=[],
+        help="특정 test_id만 실행합니다. 여러 개는 --test-id TC-018 --test-id TC-019 형태로 지정",
+    )
+    parser.add_argument(
+        "--category",
+        action="append",
+        default=[],
+        help="특정 category만 실행합니다. 여러 개는 --category Call_Drop_Trap --category System_Bottleneck 형태로 지정",
+    )
     args = parser.parse_args()
 
     evaluate_golden_dataset(
@@ -301,5 +496,7 @@ if __name__ == "__main__":
         summary_csv=args.summary,
         judge_model=args.judge_model,
         rag_model=args.rag_model,
-        ollama_base=args.ollama_base
+        ollama_base=args.ollama_base,
+        test_ids=args.test_id,
+        categories=args.category
     )
