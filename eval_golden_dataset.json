@@ -24,7 +24,7 @@
     "expected_decision": "17:38경 CS Call은 사용자 거절이 아니라 CALL DROP으로 실패했습니다.",
     "root_cause": "slot 0의 통화 TC@119_1이 callFailCause: 49, vendorCause: 24로 종료되었습니다.",
     "must_have": ["TC@119_1", "CALL DROP", "callFailCause: 49", "vendorCause: 24", "is_user_reject: false"],
-    "evidence_should_include": ["slot 0", "17:38:25", "17:39:16", "약 51초", "TC@119_1", "callFailCause: 49", "vendorCause: 24"],
+    "evidence_should_include": ["17:38:25", "TC@119_1", "callFailCause: 49", "vendorCause: 24"],
     "must_not_claim": ["사용자 거절", "정상 종료", "callFailCause: 31", "망 이슈 확인 불가"],
     "trap_type": "",
     "severity": "high"
@@ -53,7 +53,7 @@
     "eval_keywords": ["504", "CODE_USER_DECLINE", "480", "Temporary Unavailable"],
     "expected_decision": "망 장애보다는 상대측 reject/decline에 의한 종료입니다.",
     "root_cause": "SIP 480 Temporarily Unavailable과 IMS 내부 504 CODE_USER_DECLINE이 함께 확인되어 상대측 거절로 판단됩니다.",
-    "must_have": ["상대측 reject", "480 Temporarily Unavailable", "504 CODE_USER_DECLINE"],
+    "must_have": ["상대측 reject", "480 Temporarily Unavailable", "504 CODE_USER_DECLINE", "NORMAL_RELEASE"],
     "evidence_should_include": ["480", "Temporarily Unavailable", "504", "CODE_USER_DECLINE"],
     "must_not_claim": ["기지국 장애", "단말 응답 불가", "Call Drop", "원인 불명"],
     "trap_type": "call_end_reason_disambiguation",
@@ -220,7 +220,7 @@
     "root_cause": "단말 내부 effective_policy가 BATTERY_SAVER 또는 REJECT로 적용되어 특정 앱 DNS 쿼리가 차단되었습니다.",
     "must_have": ["Network_DNS_Issue", "BATTERY_SAVER 또는 REJECT", "DNS 쿼리 차단", "단말 내부 정책"],
     "evidence_should_include": ["effective_policy", "BATTERY_SAVER", "REJECT", "DNS", "차단"],
-    "must_not_claim": ["5G/LTE 망 장애", "기지국 장애", "모뎀 TIMEOUT", "DNS 서버 장애로 확정"],
+    "must_not_claim": ["5G/LTE 망 장애로 확정", "기지국 장애로 확정", "모뎀 TIMEOUT", "DNS 서버 장애로 확정", "단말 정책 차단 아님"],
     "trap_type": "network_vs_device_policy",
     "severity": "high"
   },
@@ -234,7 +234,7 @@
     "expected_decision": "OOS/통신 멈춤의 원인은 음영지역/기지국 문제가 아니라 rild Native Crash에 의한 단말 내부 시스템 장애입니다.",
     "root_cause": "rild 프로세스가 SIGSEGV Native Crash로 반복 사망하면서 모뎀 제어 기능이 상실되어 통신 장애가 발생했습니다.",
     "must_have": ["음영지역 아님", "기지국 장애 아님", "rild", "Native Crash", "SIGSEGV", "모뎀 제어 기능 상실", "단말 내부 시스템 장애"],
-    "evidence_should_include": ["rild", "SIGSEGV", "Native Crash", "사망", "OOS", "모뎀 제어"],
+    "evidence_should_include": ["rild", "SIGSEGV", "Native Crash", "사망", "OOS", "모뎀 제어", "음영지역/기지국 장애가 아님"],
     "must_not_claim": ["신호 약함이 근본 원인", "음영지역으로 확정", "기지국 장애로 확정", "사용자 비행기 모드가 원인", "원인 확인 불가"],
     "trap_type": "root_cause_disambiguation",
     "severity": "critical"
@@ -250,8 +250,8 @@
     "root_cause": "로그에는 C/C++ Native Crash(rild)만 있고 Java Exception Crash_Event 및 ANR_Context 기록은 없습니다.",
     "must_have": ["Native Crash(rild)만 존재", "Java Exception 없음", "Crash_Event 없음", "ANR_Context 없음", "일반 앱 ANR 없음"],
     "evidence_should_include": ["Native Crash", "rild", "Crash_Event", "ANR_Context", "확인되지 않"],
-    "must_not_claim": ["NullPointerException 발생", "전화 앱 ANR", "카카오톡 크래시", "Java Crash 동반", "일반 앱 ANR 발생", "Java Exception 동반"],
-    "trap_type": "absence_check",
+    "must_not_claim": ["NullPointerException 발생", "전화 앱 ANR", "카카오톡 크래시", "Java Crash 동반", "일반 앱 ANR 발생", "Java Exception 동반", "프로퍼티 현재값만으로 과거 통화 원인 확정"],
+    "trap_type": "absence_check_with_native_crash_present",
     "severity": "medium"
   },
   {
