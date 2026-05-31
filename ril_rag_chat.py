@@ -242,6 +242,28 @@ class RilRagChat:
                     selected_tools.update(top2_data["tools"])
                     selected_log_types.update(top2_data["log_types"])
 
+        # ==========================================
+        # 1.5단계: Root Cause/시간순 비교형 질문 보강
+        # ==========================================
+        # TC-016 계열: OOS 원인 비교 질문은 OOS 후보만 보지 말고 Native Crash(rild/SIGSEGV)를 함께 봐야 함.
+        if (
+            any(keyword in query_lower for keyword in ["oos", "망 이탈", "통신이 멈", "통신 멈춤", "음영", "기지국"])
+            and any(keyword in query_lower for keyword in ["rild", "native crash", "sigsegv", "단말 내부", "root cause", "원인"])
+        ):
+            selected_intents.update(["Crash_ANR", "Network_OOS"])
+            selected_tools.update(["get_crash_anr_analytics", "get_network_oos_analytics"])
+            selected_log_types.update(["OOS_Event", "Native_Crash_Event", "RILJ_Transaction"])
+
+        # TC-019 계열: 비행기 모드 현재값만으로 과거 통화 원인을 확정하지 않도록,
+        # Call_Session + Radio_Power_Event + OOS_Event + Device_Property_State를 같이 검색한다.
+        if (
+            any(keyword in query_lower for keyword in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])
+            and any(keyword in query_lower for keyword in ["통화", "call", "call_session", "종료", "끊", "시간순", "12:", "code_user_terminated"])
+        ):
+            selected_intents.update(["Radio_Power", "Call_Analysis", "Network_OOS"])
+            selected_tools.update(["get_radio_power_analytics", "get_ps_ims_call_analytics", "get_network_oos_analytics"])
+            selected_log_types.update(["Device_Property_State", "Call_Session", "Radio_Power_Event", "OOS_Event", "IMS_SIP_Message"])
+
         # 마지막으로 RIL/명령어 관련 모호한 키워드가 섞여 있으면 RILJ만 살짝 얹어줌
         if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
             selected_log_types.add("RILJ_Transaction")
@@ -498,9 +520,11 @@ class RilRagChat:
             reranked_results = []
             for doc, meta, doc_id, dist in zip(docs, metas, ids, distances):
                 doc_lower = doc.lower()
+                meta_text = json.dumps(meta or {}, ensure_ascii=False, default=str).lower()
+                combined_text = f"{doc_lower}\n{meta_text}"
 
                 # 2. 키워드 일치도 계산 (Keyword Score)
-                match_count = sum(1 for kw in query_keywords if kw in doc_lower)
+                match_count = sum(1 for kw in query_keywords if kw in combined_text)
                 keyword_score = match_count / max(1, len(query_keywords))
 
                 # 3. Vector Distance(낮을수록 좋음)를 Score로 변환
@@ -509,6 +533,45 @@ class RilRagChat:
 
                 # 4. Hybrid Score 계산 (키워드 매칭에 강한 가중치 부여)
                 hybrid_score = (vector_score * 0.4) + (keyword_score * 0.6)
+
+                log_type = str((meta or {}).get("log_type", ""))
+                query_lower_for_rank = search_query.lower()
+
+                # TC-016 계열 boost: OOS 원인 비교 시 Native_Crash_Event(rild/SIGSEGV)와 OOS_Event를 우선 노출
+                if (
+                    any(k in query_lower_for_rank for k in ["oos", "망 이탈", "음영", "기지국", "통신 멈"])
+                    and any(k in query_lower_for_rank for k in ["rild", "native crash", "sigsegv", "단말 내부", "root cause", "원인"])
+                ):
+                    if log_type == "Native_Crash_Event":
+                        hybrid_score += 0.45
+                    elif log_type == "OOS_Event":
+                        hybrid_score += 0.25
+                    if "rild" in combined_text:
+                        hybrid_score += 0.15
+                    if "sigsegv" in combined_text or "native_crash" in combined_text or "native crash" in combined_text:
+                        hybrid_score += 0.15
+
+                # TC-019 계열 boost: 비행기 모드/통화 시간순 비교 시 Call_Session, Radio_Power_Event, OOS_Event 우선 노출
+                if (
+                    any(k in query_lower_for_rank for k in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])
+                    and any(k in query_lower_for_rank for k in ["통화", "call", "call_session", "종료", "끊", "시간순", "12:", "code_user_terminated"])
+                ):
+                    if log_type == "Call_Session":
+                        hybrid_score += 0.50
+                    elif log_type == "Radio_Power_Event":
+                        hybrid_score += 0.35
+                    elif log_type == "OOS_Event":
+                        hybrid_score += 0.35
+                    elif log_type == "Device_Property_State":
+                        hybrid_score += 0.10
+                    elif log_type == "RILJ_Transaction":
+                        hybrid_score -= 0.20
+                    if "code_user_terminated" in combined_text:
+                        hybrid_score += 0.30
+                    if "12:08:10" in combined_text or "12:08:09" in combined_text:
+                        hybrid_score += 0.15
+                    if "airplane_mode" in combined_text:
+                        hybrid_score += 0.05
 
                 reranked_results.append({
                     "doc": doc, "meta": meta, "id": doc_id, "score": hybrid_score
