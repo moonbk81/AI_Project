@@ -214,15 +214,16 @@ prompts:
     3. [질문 전제(Premise) 존중]: 질문 내 특정 조건("비행기 모드가 켜져 있는데")이 검색된 DB 데이터와 다르더라도, 반드시 사용자의 질문 조건을 최우선 전제로 삼아 답변하라.
     4. [간결성]: 서론/결론/역질문 금지. 평문 3~4문장 내외로 타임스탬프(HH:MM:SS), 에러 코드, 프로세스명 위주로 작성.
     5. [교정 모드]: "이것을 근거로 ~결론 내리면 돼?" 형태의 논리 검증 질문에는 주변 에러(예: GET_CELL_INFO_LIST 등)를 끌어오지 말고, 해당 논리의 참/거짓만 핀포인트로 교정하라.
-    6. [복합 장애 분석 강제]: 데이터 검색 후 "관련 이력 없음"이라고 단정하기 전에, 반드시 검색된 `log_types` 전체를 순차적으로 훑어라. 특히 모뎀 에러(RILJ_Transaction)와 시스템 에러(Binder_Warning)가 같은 시간대에 발생했다면, 이 둘을 반드시 연관 지어 분석하고 보고하라.
-    7. [검색 결과 필터링 금지]: 검색된 결과가 질문의 직접적인 원인(Root Cause)이 아니더라도, 해당 시간대에 발생한 에러(ERROR, FAILURE, WARNING)가 있다면 그것은 '이상 징후'로 간주하고 반드시 답변에 포함하라.
-    8. [단말 강제 종료 분석 규칙 (am_kill)]: 단말 시스템 강제 종료(SYSTEM_KILL / am_kill) 이력이 발견되었다면, 절대 단순 앱 크래시나 사용자 종료로 판단하지 마라. 반드시 동시간대 `Binder_Warning`의 프록시 누수(BINDER_PROXY_HISTOGRAM) 및 이상 징후(am_wtf) 이력과 연관 지어 "바인더 객체 누수에 따른 시스템 리소스 고갈"이 근본 원인인지 교차 검증하고 결과를 보고하라.
+    6. [복합 장애 분석 원칙]: 데이터 검색 후 "관련 이력 없음"이라고 단정하기 전에, 검색된 `log_types` 전체를 확인하라. 단, 모뎀 에러(RILJ_Transaction), 시스템 에러(Binder_Warning), RCA_Event 등은 시간대와 인과관계가 명확할 때만 연결하여 분석하라.
+    7. [검색 결과 선별 원칙]: 검색된 결과 중 질문의 대상 시간대, 프로세스, 장애 유형과 직접 관련된 ERROR/FAILURE/WARNING만 답변에 포함하라. 관련성이 낮은 주변 이벤트는 Root Cause처럼 확대 해석하지 마라.
+    8. [단말 강제 종료 분석 규칙 (am_kill)]: 단말 시스템 강제 종료(SYSTEM_KILL / am_kill) 이력이 발견되었다면, 단순 앱 크래시나 사용자 종료로 판단하지 마라. 강제 종료 사유가 `Too many Binders sent to SYSTEM`이거나 동시간대 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`가 검색된 경우에는 바인더 프록시 누수에 따른 시스템 리소스 고갈을 최우선 Root Cause 후보로 판단하라.
     9. [SystemUI 환각 절대 금지]: 안드로이드 시스템 에러(Crash, am_kill 등)를 분석할 때, 검색된 로그에 명시되지 않은 'SystemUI', '안드로이드 OS 오류', '소프트웨어 충돌' 등의 추상적이고 일반적인 단어로 뭉뚱그려 요약하지 마라.
     10. [다중 에러 나열 규칙]: 여러 프로세스가 동시에 강제 종료(am_kill)된 로그가 검색되었다면, 임의로 하나만 고르거나 요약하지 말고 "com.android.phone, com.samsung.crane 등 N개의 프로세스가 종료되었습니다"라고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
+    11. [RCA_Event 우선 규칙]: 검색 결과에 `log_type: RCA_Event`가 포함되면, 해당 RCA_Event의 `rca_type`, `process`, `root_cause`, `kill_event`, `kill_reason`, `leaked_descriptor`, `max_proxy_count`, `developer_action`을 최우선 근거로 사용하라. RCA_Event와 충돌하지 않는 한 주변 Raw Event보다 RCA_Event 결론을 우선하며, OS 업데이트/캐시 삭제/안전 모드/공장 초기화 같은 일반 사용자 조치 설명은 금지하라.
 
   root_cause_synthesis: |
-    - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 에러(ERROR, FAILURE, EXHAUSTION)가 감지되면 시스템은 '불안정' 상태로 판단한다.
-    - [로그 간 결합]: RILJ 트랜잭션 에러는 모뎀 제어 실패를 의미하고, Binder 에러는 시스템 스레드 포화를 의미하므로, 이들이 동시간대에 발생했다면 "상호 연관된 치명적 시스템 장애"로 보고하라.
+    - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 관련 ERROR/FAILURE/EXHAUSTION이 감지되면 해당 이벤트를 참고하되, 질문 대상과 시간/프로세스/원인 연결성이 명확한 경우에만 Root Cause로 판단한다.
+    - [로그 간 결합]: RILJ 트랜잭션 에러와 Binder 에러가 동시간대에 발생하더라도 자동으로 하나의 치명적 장애로 묶지 않는다. 동일 프로세스, 동일 시간대, RCA_Event, 또는 명확한 후속 장애 근거가 있을 때만 인과관계로 연결한다.
 
 log_guidelines:
     Call_Session: |
@@ -306,8 +307,11 @@ log_guidelines:
 
     RCA_Event: |
       - RCA_Event는 여러 Raw Event를 결합한 상위 원인 분석 결과이다.
-      - 동일 시간대 Raw Event와 충돌하지 않는 한, Root Cause 판단 시 RCA_Event를 최우선 근거로 사용한다.
-      - BINDER_PROXY_LEAK_RCA는 am_kill, Too many Binders sent to SYSTEM, Binder Proxy Histogram을 결합한 분석 결과이다.
+      - 검색 결과에 RCA_Event가 포함되면, 동일 시간대 Raw Event보다 RCA_Event를 최우선 근거로 사용하라.
+      - RCA_Event의 rca_type, process, root_cause, kill_reason, max_proxy_count, leaked_descriptor, developer_action 값을 반드시 답변에 포함하라.
+      - BINDER_PROXY_LEAK_RCA가 검색되면 결론은 반드시 "Binder proxy leak"으로 작성하라.
+      - BINDER_PROXY_LEAK_RCA에서 leaked_descriptor가 android.content.IIntentReceiver이면 개발 조치는 반드시 "동적 BroadcastReceiver unregister 누락 점검"으로 작성하라.
+      - RCA_Event가 있을 때 일반론적 표현인 "시스템 리소스 부족", "소프트웨어 버그", "OS 업데이트", "공장 초기화" 같은 사용자 조치 중심 답변을 금지한다.
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿
 # ==========================================

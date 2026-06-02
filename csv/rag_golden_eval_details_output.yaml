@@ -14,125 +14,86 @@
   must_not_claim: '["원인 확인 불가", "단순 앱 크래시로 확정", "사용자 종료", "Native Crash로 확정"]'
   trap_type: root_cause_disambiguation
   severity: critical
-  rag_answer: '제공된 로그들을 분석한 결과, 폰이 갑자기 죽는 현상의 근본 원인은 **잦은 시스템 서버(system_server)의 Binder
-    트래픽 과다 및 비보호 브로드캐스트 전송**으로 인해 발생한 것으로 보입니다.
-
-
-    **상세 분석:**
-
-
-    * **잦은 SYSTEM_KILL:** 로그에서 `SYSTEM_KILL` 이벤트를 여러 번 확인했습니다. 이는 ActivityManager가
-    시스템 서버 프로세스(system_server)를 강제 종료했다는 의미입니다. 이는 시스템 불안정의 강력한 신호입니다.
-
-    * **Binder 트래픽 과다:**  `excessive binder traffic during cached` 와 같은 메시지는 Binder를
-    통해 통신하는 프로세스 간의 데이터 교환이 비정상적으로 많다는 것을 의미합니다. Binder는 Android 시스템의 핵심적인 통신 메커니즘으로,
-    프로세스 간의 효율적인 데이터 교환을 위해 사용됩니다. 과도한 Binder 트래픽은 시스템 리소스(CPU, 메모리)를 과도하게 사용하고, 시스템
-    응답성을 저하시키며, 궁극적으로 시스템 불안정으로 이어질 수 있습니다.
-
-    * **비보호 브로드캐스트 전송:** `Sending non-protected broadcast` 이벤트는 시스템 프로세스가 보호되지 않은
-    브로드캐스트 메시지를 전송했다는 것을 의미합니다.  보호되지 않은 브로드캐스트는 시스템 전체에 메시지를 전파하여 다른 프로세스에 영향을 미치고,
-    시스템 리소스를 낭비할 수 있습니다.
-
-    * **CellBroadcast 관련 문제:**  `Cant deliver broadcast` 이벤트는 브로드캐스트 메시지를 전달하는 데 실패했다는
-    것을 의미합니다. 이는 CellBroadcast 관련 프로세스에서 문제가 발생하여 시스템에 영향을 미쳤을 가능성을 시사합니다.
-
-
-    **가능한 근본 원인:**
-
-
-    1. **시스템 서버 과부하:** 시스템 서버는 Android 시스템의 핵심적인 역할을 수행하며, 많은 프로세스 간의 통신을 관리합니다.  시스템
-    서버에 과부하가 걸리면 Binder 트래픽이 급증하고, 비보호 브로드캐스트 전송이 증가하여 시스템 불안정으로 이어질 수 있습니다.
-
-    2. **CellBroadcast 관련 문제:** CellBroadcast는 문자 메시지, 알림 등과 같은 정보를 전송하는 서비스입니다. CellBroadcast
-    관련 프로세스에서 문제가 발생하면 Binder 트래픽이 증가하고, 시스템 불안정으로 이어질 수 있습니다.
-
-    3. **앱 간의 충돌:** 특정 앱이 시스템 리소스를 과도하게 사용하거나, 다른 앱과 충돌을 일으켜 Binder 트래픽을 증가시킬 수 있습니다.
-
-    4. **소프트웨어 버그:** Android 시스템 소프트웨어 자체에 버그가 존재하여 시스템 불안정을 유발할 수 있습니다.
-
-
-    **추가 조치:**
-
-
-    * **시스템 로그 분석:**  더 자세한 시스템 로그를 분석하여 문제의 정확한 원인을 파악해야 합니다.
-
-    * **앱 활동 모니터링:**  앱 활동 모니터링 도구를 사용하여 어떤 앱이 시스템 리소스를 과도하게 사용하고 있는지 확인해야 합니다.
-
-    * **소프트웨어 업데이트:**  Android 시스템 소프트웨어를 최신 버전으로 업데이트하여 버그를 수정해야 합니다.
-
-    * **앱 업데이트:**  사용 중인 앱을 최신 버전으로 업데이트하여 버그를 수정하고, 시스템과의 호환성을 개선해야 합니다.
-
-    * **폰 초기화 (최후의 수단):**  위의 모든 조치가 효과가 없다면, 폰을 초기화하는 것을 고려해 볼 수 있습니다. (데이터 백업 필수)
-
-
-    **결론:**
-
-
-    제공된 로그를 바탕으로 볼 때, 폰이 갑자기 죽는 현상의 주요 원인은 시스템 서버의 Binder 트래픽 과다 및 비보호 브로드캐스트 전송으로
-    인한 시스템 불안정입니다.  위에서 제시된 추가 조치를 통해 문제의 근본 원인을 해결하고, 폰의 안정적인 작동을 확보할 수 있을 것입니다.'
-  doc_ids: '["binder_leak_am_kill_payload_3", "binder_leak_am_kill_payload_5", "binder_leak_am_kill_payload_4",
-    "binder_leak_am_kill_payload_6", "binder_leak_am_kill_payload_1", "binder_leak_am_kill_payload_7",
-    "binder_leak_am_kill_payload_10", "binder_leak_am_kill_payload_9"]'
-  retrieved_meta: '[{"top_method": "Too many Binders sent to SYSTEM,174292", "exception_info":
-    "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,174292", "process":
-    "com.samsung.crane", "type": "SYSTEM_KILL", "time": "06-01 15:13:17.326", "source_file":
-    "binder_leak_am_kill_payload.json", "trigger": "06-01 15:13:17.326  3179 23269
-    I am_kill : [0,16326,com.samsung.crane,100,Too many Binders sent to SYSTEM,174292]",
-    "log_type": "Crash_Event"}, {"time": "06-01 15:13:17.330", "process": "com.android.phone",
-    "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,235536",
-    "top_method": "Too many Binders sent to SYSTEM,235536", "type": "SYSTEM_KILL",
-    "trigger": "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
-    many Binders sent to SYSTEM,235536]", "source_file": "binder_leak_am_kill_payload.json",
-    "log_type": "Crash_Event"}, {"process": "com.sec.phone", "source_file": "binder_leak_am_kill_payload.json",
-    "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,107308",
-    "type": "SYSTEM_KILL", "trigger": "06-01 15:13:17.329  3179 23269 I am_kill :
-    [0,10965,com.sec.phone,100,Too many Binders sent to SYSTEM,107308]", "top_method":
-    "Too many Binders sent to SYSTEM,107308", "log_type": "Crash_Event", "time": "06-01
-    15:13:17.329"}, {"top_method": "Too many Binders sent to SYSTEM,117904", "type":
-    "SYSTEM_KILL", "trigger": "06-01 15:13:17.337  3179 23269 I am_kill : [0,29582,com.samsung.android.app.telephonyui:callsettingsprovider,995,Too
-    many Binders sent to SYSTEM,117904]", "exception_info": "시스템(ActivityManager)
-    강제 종료. 사유: Too many Binders sent to SYSTEM,117904", "source_file": "binder_leak_am_kill_payload.json",
-    "time": "06-01 15:13:17.337", "log_type": "Crash_Event", "process": "com.samsung.android.app.telephonyui:callsettingsprovider"},
-    {"exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,133068",
-    "trigger": "06-01 15:13:17.324  3179 23269 I am_kill : [0,15349,com.samsung.android.app.telephonyui,905,Too
-    many Binders sent to SYSTEM,133068]", "log_type": "Crash_Event", "process": "com.samsung.android.app.telephonyui",
-    "source_file": "binder_leak_am_kill_payload.json", "top_method": "Too many Binders
-    sent to SYSTEM,133068", "time": "06-01 15:13:17.324", "type": "SYSTEM_KILL"},
-    {"top_method": "Too many Binders sent to SYSTEM,107424", "time": "06-01 15:13:17.340",
-    "type": "SYSTEM_KILL", "process": ".dataservices", "trigger": "06-01 15:13:17.340  3179
-    23269 I am_kill : [0,4940,.dataservices,-800,Too many Binders sent to SYSTEM,107424]",
-    "log_type": "Crash_Event", "source_file": "binder_leak_am_kill_payload.json",
-    "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,107424"},
-    {"log_type": "Crash_Event", "process": "com.google.android.googlequicksearchbox:search",
-    "type": "SYSTEM_KILL", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: excessive
-    binder traffic during cached,221068", "trigger": "06-01 15:51:54.691  3179  3387
-    I am_kill : [0,6758,com.google.android.googlequicksearchbox:search,945,excessive
-    binder traffic during cached,221068]", "top_method": "excessive binder traffic
-    during cached,221068", "source_file": "binder_leak_am_kill_payload.json", "time":
-    "06-01 15:51:54.691"}, {"log_type": "Crash_Event", "top_method": "Can''t deliver
-    broadcast,0", "type": "SYSTEM_KILL", "source_file": "binder_leak_am_kill_payload.json",
-    "process": "com.sec.imsservice", "time": "06-01 15:13:17.415", "trigger": "06-01
-    15:13:17.415  3179  3387 I am_kill : [0,4535,com.sec.imsservice,-800,Can''t deliver
-    broadcast,0]", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Can''t deliver
-    broadcast,0"}]'
+  rag_answer: com.android.phone 프로세스가 am_kill로 강제 종료된 이력이 확인됨. 강제 종료 사유는 'Too many
+    Binders sent to SYSTEM'이며, 동시간대 Binder Proxy Histogram에서 android.content.IIntentReceiver
+    객체가 최대 7262개까지 누수된 정황이 확인됨. 따라서 근본 원인은 단순 앱 크래시나 Native Crash가 아니라 IIntentReceiver
+    Binder proxy leak에 따른 시스템 리소스 고갈로 판단됨. 발생 시각은 06-01 15:13:17.330이며, 개발자는 동적 BroadcastReceiver
+    register 후 unregister 누락 여부를 점검해야 함.
+  doc_ids: '["binder_leak_am_kill_payload_25", "binder_leak_am_kill_payload_3", "binder_leak_am_kill_payload_5",
+    "binder_leak_am_kill_payload_4", "binder_leak_am_kill_payload_6", "binder_leak_am_kill_payload_1",
+    "binder_leak_am_kill_payload_7", "binder_leak_am_kill_payload_10"]'
+  retrieved_meta: '[{"rca_type": "BINDER_PROXY_LEAK_RCA", "log_type": "RCA_Event",
+    "leaked_descriptor": "android.content.IIntentReceiver", "trigger": "06-01 15:13:17.330  3179
+    23269 I am_kill : [0,4442,com.android.phone,-800,Too many Binders sent to SYSTEM,235536]",
+    "process": "com.android.phone", "symptom_keywords": "폰 죽음, 갑자기 죽음, 강제 종료, 시스템
+    크래시, SYSTEM_KILL, am_kill, crash, kill", "am_wtf_count_observed": 0, "developer_action":
+    "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함", "time": "06-01 15:13:17.330",
+    "max_proxy_count": 7262, "root_cause": "IIntentReceiver Binder proxy leak", "kill_event":
+    "am_kill", "source_file": "binder_leak_am_kill_payload.json", "kill_reason": "Too
+    many Binders sent to SYSTEM"}, {"source_file": "binder_leak_am_kill_payload.json",
+    "type": "SYSTEM_KILL", "process": "com.samsung.crane", "time": "06-01 15:13:17.326",
+    "top_method": "Too many Binders sent to SYSTEM,174292", "exception_info": "시스템(ActivityManager)
+    강제 종료. 사유: Too many Binders sent to SYSTEM,174292", "trigger": "06-01 15:13:17.326  3179
+    23269 I am_kill : [0,16326,com.samsung.crane,100,Too many Binders sent to SYSTEM,174292]",
+    "log_type": "Crash_Event"}, {"process": "com.android.phone", "time": "06-01 15:13:17.330",
+    "source_file": "binder_leak_am_kill_payload.json", "log_type": "Crash_Event",
+    "top_method": "Too many Binders sent to SYSTEM,235536", "exception_info": "시스템(ActivityManager)
+    강제 종료. 사유: Too many Binders sent to SYSTEM,235536", "trigger": "06-01 15:13:17.330  3179
+    23269 I am_kill : [0,4442,com.android.phone,-800,Too many Binders sent to SYSTEM,235536]",
+    "type": "SYSTEM_KILL"}, {"time": "06-01 15:13:17.329", "process": "com.sec.phone",
+    "top_method": "Too many Binders sent to SYSTEM,107308", "log_type": "Crash_Event",
+    "source_file": "binder_leak_am_kill_payload.json", "exception_info": "시스템(ActivityManager)
+    강제 종료. 사유: Too many Binders sent to SYSTEM,107308", "type": "SYSTEM_KILL", "trigger":
+    "06-01 15:13:17.329  3179 23269 I am_kill : [0,10965,com.sec.phone,100,Too many
+    Binders sent to SYSTEM,107308]"}, {"trigger": "06-01 15:13:17.337  3179 23269
+    I am_kill : [0,29582,com.samsung.android.app.telephonyui:callsettingsprovider,995,Too
+    many Binders sent to SYSTEM,117904]", "top_method": "Too many Binders sent to
+    SYSTEM,117904", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders
+    sent to SYSTEM,117904", "type": "SYSTEM_KILL", "source_file": "binder_leak_am_kill_payload.json",
+    "log_type": "Crash_Event", "time": "06-01 15:13:17.337", "process": "com.samsung.android.app.telephonyui:callsettingsprovider"},
+    {"process": "com.samsung.android.app.telephonyui", "trigger": "06-01 15:13:17.324  3179
+    23269 I am_kill : [0,15349,com.samsung.android.app.telephonyui,905,Too many Binders
+    sent to SYSTEM,133068]", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too
+    many Binders sent to SYSTEM,133068", "time": "06-01 15:13:17.324", "log_type":
+    "Crash_Event", "top_method": "Too many Binders sent to SYSTEM,133068", "type":
+    "SYSTEM_KILL", "source_file": "binder_leak_am_kill_payload.json"}, {"source_file":
+    "binder_leak_am_kill_payload.json", "exception_info": "시스템(ActivityManager) 강제
+    종료. 사유: Too many Binders sent to SYSTEM,107424", "process": ".dataservices", "type":
+    "SYSTEM_KILL", "trigger": "06-01 15:13:17.340  3179 23269 I am_kill : [0,4940,.dataservices,-800,Too
+    many Binders sent to SYSTEM,107424]", "time": "06-01 15:13:17.340", "log_type":
+    "Crash_Event", "top_method": "Too many Binders sent to SYSTEM,107424"}, {"exception_info":
+    "시스템(ActivityManager) 강제 종료. 사유: excessive binder traffic during cached,221068",
+    "top_method": "excessive binder traffic during cached,221068", "time": "06-01
+    15:51:54.691", "source_file": "binder_leak_am_kill_payload.json", "trigger": "06-01
+    15:51:54.691  3179  3387 I am_kill : [0,6758,com.google.android.googlequicksearchbox:search,945,excessive
+    binder traffic during cached,221068]", "type": "SYSTEM_KILL", "log_type": "Crash_Event",
+    "process": "com.google.android.googlequicksearchbox:search"}]'
   thinking: ''
-  accuracy_score: 0.3
-  evidence_coverage: 0.2
-  must_have_coverage: 0.1
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
   must_not_violation: 0.0
-  hallucination_safety: 0.4
-  overall_score: 0.25
-  missing_must_have: '["com.android.phone", "Too many Binders sent to SYSTEM"]'
-  missing_evidence: '["binder proxy histogram"]'
+  hallucination_safety: 0.95
+  overall_score: 0.95
+  missing_must_have: '[]'
+  missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer does not correctly identify the expected decision and root cause,
-    lacks supporting evidence, and includes unrelated findings.
-  judge_raw: '{"accuracy_score": 0.3, "evidence_coverage": 0.2, "must_have_coverage":
-    0.1, "must_not_violation": 0.0, "hallucination_safety": 0.4, "overall_score":
-    0.25, "missing_must_have": ["com.android.phone", "Too many Binders sent to SYSTEM"],
-    "missing_evidence": ["binder proxy histogram"], "violated_must_not_claim": [],
-    "reason": "The answer does not correctly identify the expected decision and root
-    cause, lacks supporting evidence, and includes unrelated findings."}'
+  reason: The answer correctly identifies the root cause (Binder proxy leak leading
+    to am_kill) and includes key evidence like 'Too many Binders sent to SYSTEM' and
+    the count of 7262. It also correctly excludes possibilities like simple app crash
+    or native crash. The answer is slightly less perfect because it mentions IIntentReceiver,
+    which isn't explicitly in the golden rubric, but it's a reasonable inference from
+    the binder proxy leak context. Overall, the answer is highly accurate and safe.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the root cause (Binder proxy leak
+    leading to am_kill) and includes key evidence like ''Too many Binders sent to
+    SYSTEM'' and the count of 7262. It also correctly excludes possibilities like
+    simple app crash or native crash. The answer is slightly less perfect because
+    it mentions IIntentReceiver, which isn''t explicitly in the golden rubric, but
+    it''s a reasonable inference from the binder proxy leak context. Overall, the
+    answer is highly accurate and safe."}'
   error: ''
 - "\uFEFFtest_id": TC-022
   category: System_Bottleneck
@@ -151,100 +112,90 @@
   must_not_claim: '["am_wtf 이력 없음", "누수 개수 확인 불가", "7262회를 am_wtf 발생 횟수로 단정"]'
   trap_type: fact_retrieval
   severity: high
-  rag_answer: 'am_wtf (이상 징후) 로그가 대량으로 발생한 프로세스 및 발생 횟수는 다음과 같습니다.
-
-
-    *   **시스템 서버 (system_server):** 총 86회 발생
-
-    *   **시스템 (system):** 총 5604회 발생
-
-    *   **com.google.android.googlequicksearchbox:search:** 총 11회 발생
-
-    *   **com.android.phone:** 총 1회 발생 (RCA 이벤트)
-
-
-    바인더 프록시 객체 누수의 최대 개수는 **7262개**입니다.  이 누수는 `com.android.phone` 프로세스에서 발생했습니다.
-
-
-    **추가 정보:**
-
-
-    *   로그 분석 결과, IIntentReceiver Binder proxy leak이 주요 원인으로 파악되었습니다.
-
-    *   시스템 서버, 시스템, 그리고 com.google.android.googlequicksearchbox:search 프로세스에서 excessive
-    binder traffic during cached 문제가 발생했습니다.
-
-    *   Binder transaction failure/RemoteException 로그가 여러 번 발생하여, IPC 통신 문제로 인한 잠재적인
-    오류를 시사합니다.'
-  doc_ids: '["binder_leak_am_kill_payload_12", "binder_leak_am_kill_payload_13", "binder_leak_am_kill_payload_11",
-    "binder_leak_am_kill_payload_25", "binder_leak_am_kill_payload_10", "binder_leak_am_kill_payload_14",
+  rag_answer: 'am_wtf 이상 징후 대량 발생 이력은 this 86회, system_server 11회, system 5604회로 확인됨.
+    동시간대 Binder Proxy Histogram에서는 android.content.IIntentReceiver 객체가 최대 7262개까지
+    누수된 것으로 확인됨. 근거 원문 요약: Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver
+    (7262개), android.content.IContentProvider (1434개), android.database.IContentObserver
+    (917개), android.app.IServiceConnection (298개), android.app.IApplicationThread
+    (211개), android.view.contentcapture.IContentCaptureOptionsCallback (210개), android.os.IMessenger
+    (158개), android.app.job.IJobService (90개) 따라서 수치형 질문은 Raw Event 추론보다 Summary/Histogram의
+    구조화된 count 값을 우선 사용함.'
+  doc_ids: '["binder_leak_am_kill_payload_25", "binder_leak_am_kill_payload_12", "binder_leak_am_kill_payload_13",
+    "binder_leak_am_kill_payload_11", "binder_leak_am_kill_payload_10", "binder_leak_am_kill_payload_14",
     "binder_leak_am_kill_payload_17", "binder_leak_am_kill_payload_18"]'
-  retrieved_meta: '[{"source_file": "binder_leak_am_kill_payload.json", "type": "SYSTEM_WTF_SUMMARY",
+  retrieved_meta: '[{"source_file": "binder_leak_am_kill_payload.json", "kill_reason":
+    "Too many Binders sent to SYSTEM", "process": "com.android.phone", "max_proxy_count":
+    7262, "time": "06-01 15:13:17.330", "rca_type": "BINDER_PROXY_LEAK_RCA", "log_type":
+    "RCA_Event", "kill_event": "am_kill", "symptom_keywords": "폰 죽음, 갑자기 죽음, 강제 종료,
+    시스템 크래시, SYSTEM_KILL, am_kill, crash, kill", "leaked_descriptor": "android.content.IIntentReceiver",
+    "root_cause": "IIntentReceiver Binder proxy leak", "developer_action": "동적 BroadcastReceiver
+    register 후 unregister 누락 여부를 점검해야 함", "am_wtf_count_observed": 0, "trigger": "06-01
+    15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too many Binders
+    sent to SYSTEM,235536]"}, {"process": "this", "type": "SYSTEM_WTF_SUMMARY", "time":
+    "06-01 16:03:29.605", "source_file": "binder_leak_am_kill_payload.json", "exception_info":
+    "am_wtf 이상 징후 대량 발생: 총 86회 반복됨 (최초: 06-01 15:00:11.733 ~ 최후: 06-01 16:03:29.605)",
     "trigger_sample": "06-01 15:00:11.733  3179  3387 I am_wtf  : [0,3179,system_server,-1,Binder,Outgoing
-    transactions from this process must be FLAG_ONEWAY]", "exception_info": "am_wtf
-    이상 징후 대량 발생: 총 86회 반복됨 (최초: 06-01 15:00:11.733 ~ 최후: 06-01 16:03:29.605)", "time":
-    "06-01 16:03:29.605", "process": "this", "log_type": "Crash_Event"}, {"process":
-    "system_server", "time": "06-01 16:03:32.479", "exception_info": "am_wtf 이상 징후
-    대량 발생: 총 11회 반복됨 (최초: 06-01 15:01:08.435 ~ 최후: 06-01 16:03:32.479)", "source_file":
-    "binder_leak_am_kill_payload.json", "trigger_sample": "06-01 15:01:08.435  3179  3387
+    transactions from this process must be FLAG_ONEWAY]", "log_type": "Crash_Event"},
+    {"source_file": "binder_leak_am_kill_payload.json", "exception_info": "am_wtf
+    이상 징후 대량 발생: 총 11회 반복됨 (최초: 06-01 15:01:08.435 ~ 최후: 06-01 16:03:32.479)", "process":
+    "system_server", "log_type": "Crash_Event", "trigger_sample": "06-01 15:01:08.435  3179  3387
     I am_wtf  : [0,3179,system_server,-1,JobScheduler.Connectivity,System default
-    network is unknown but active]", "log_type": "Crash_Event", "type": "SYSTEM_WTF_SUMMARY"},
-    {"trigger_sample": "06-01 14:55:23.655  3179  3387 I am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending
+    network is unknown but active]", "time": "06-01 16:03:32.479", "type": "SYSTEM_WTF_SUMMARY"},
+    {"time": "06-01 16:03:38.059", "log_type": "Crash_Event", "type": "SYSTEM_WTF_SUMMARY",
+    "process": "system", "source_file": "binder_leak_am_kill_payload.json", "trigger_sample":
+    "06-01 14:55:23.655  3179  3387 I am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending
     non-protected broadcast com.samsung.action.kpiscanner from system 4442:com.android.phone/1001
     pkg com.android.phone]", "exception_info": "am_wtf 이상 징후 대량 발생: 총 5604회 반복됨 (최초:
-    06-01 14:55:23.655 ~ 최후: 06-01 16:03:38.059)", "process": "system", "time": "06-01
-    16:03:38.059", "log_type": "Crash_Event", "source_file": "binder_leak_am_kill_payload.json",
-    "type": "SYSTEM_WTF_SUMMARY"}, {"developer_action": "동적 BroadcastReceiver register
-    후 unregister 누락 여부를 점검해야 함", "am_wtf_count_observed": 0, "kill_event": "am_kill",
-    "kill_reason": "Too many Binders sent to SYSTEM", "leaked_descriptor": "android.content.IIntentReceiver",
-    "time": "06-01 15:13:17.330", "trigger": "06-01 15:13:17.330  3179 23269 I am_kill
-    : [0,4442,com.android.phone,-800,Too many Binders sent to SYSTEM,235536]", "root_cause":
-    "IIntentReceiver Binder proxy leak", "log_type": "RCA_Event", "process": "com.android.phone",
-    "source_file": "binder_leak_am_kill_payload.json", "max_proxy_count": 7262, "rca_type":
-    "BINDER_PROXY_LEAK_RCA"}, {"time": "06-01 15:51:54.691", "log_type": "Crash_Event",
-    "type": "SYSTEM_KILL", "process": "com.google.android.googlequicksearchbox:search",
-    "top_method": "excessive binder traffic during cached,221068", "exception_info":
+    06-01 14:55:23.655 ~ 최후: 06-01 16:03:38.059)"}, {"type": "SYSTEM_KILL", "exception_info":
     "시스템(ActivityManager) 강제 종료. 사유: excessive binder traffic during cached,221068",
-    "trigger": "06-01 15:51:54.691  3179  3387 I am_kill : [0,6758,com.google.android.googlequicksearchbox:search,945,excessive
-    binder traffic during cached,221068]", "source_file": "binder_leak_am_kill_payload.json"},
-    {"raw_info": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개),
-    android.content.IContentProvider (1434개), android.database.IContentObserver (917개),
-    android.app.IServiceConnection (298개), android.app.IApplicationThread (211개),
-    android.view.contentcapture.IContentCaptureOptionsCallback (210개), android.os.IMessenger
-    (158개), android.app.job.IJobService (90개)", "source_file": "binder_leak_am_kill_payload.json",
-    "leaked_descriptor": "android.content.IIntentReceiver", "log_type": "Binder_Warning",
-    "max_proxy_count": 7262, "type": "BINDER_PROXY_LEAK_SUMMARY", "time": "06-01 15:13:17.312"},
-    {"log_type": "Binder_Warning", "source_file": "binder_leak_am_kill_payload.json",
+    "source_file": "binder_leak_am_kill_payload.json", "trigger": "06-01 15:51:54.691  3179  3387
+    I am_kill : [0,6758,com.google.android.googlequicksearchbox:search,945,excessive
+    binder traffic during cached,221068]", "time": "06-01 15:51:54.691", "process":
+    "com.google.android.googlequicksearchbox:search", "log_type": "Crash_Event", "top_method":
+    "excessive binder traffic during cached,221068"}, {"time": "06-01 15:13:17.312",
+    "raw_info": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
+    (1434개), android.database.IContentObserver (917개), android.app.IServiceConnection
+    (298개), android.app.IApplicationThread (211개), android.view.contentcapture.IContentCaptureOptionsCallback
+    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "source_file":
+    "binder_leak_am_kill_payload.json", "max_proxy_count": 7262, "leaked_descriptor":
+    "android.content.IIntentReceiver", "type": "BINDER_PROXY_LEAK_SUMMARY", "log_type":
+    "Binder_Warning"}, {"source_file": "binder_leak_am_kill_payload.json", "desc":
+    "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스 재시작, IPC
+    실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "type": "BINDER_TRANSACTION_FAILURE",
+    "raw_info": "06-01 15:13:17.978  4747 21185 E EPDG-0  : [EpdgModem] handleSendIpc:
+    android.os.DeadObjectException", "time": "06-01 15:13:17.978", "log_type": "Binder_Warning"},
+    {"time": "06-01 15:13:17.570", "source_file": "binder_leak_am_kill_payload.json",
     "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스
-    재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "time": "06-01 15:13:17.978",
-    "type": "BINDER_TRANSACTION_FAILURE", "raw_info": "06-01 15:13:17.978  4747 21185
-    E EPDG-0  : [EpdgModem] handleSendIpc: android.os.DeadObjectException"}, {"type":
-    "BINDER_TRANSACTION_FAILURE", "log_type": "Binder_Warning", "source_file": "binder_leak_am_kill_payload.json",
-    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스
-    재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "time": "06-01 15:13:17.570",
-    "raw_info": "06-01 15:13:17.570 17540 17540 E RCS-CapabilityCommon: [D] RemoteException"}]'
+    재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "raw_info": "06-01 15:13:17.570
+    17540 17540 E RCS-CapabilityCommon: [D] RemoteException", "type": "BINDER_TRANSACTION_FAILURE",
+    "log_type": "Binder_Warning"}]'
   thinking: ''
-  accuracy_score: 0.8
-  evidence_coverage: 0.7
-  must_have_coverage: 1.0
+  accuracy_score: 0.6
+  evidence_coverage: 0.8
+  must_have_coverage: 0.9
   must_not_violation: 0.0
-  hallucination_safety: 0.9
-  overall_score: 0.85
+  hallucination_safety: 0.7
+  overall_score: 0.7
   missing_must_have: '[]'
-  missing_evidence: '["com.android.phone 프로세스에서 am_wtf 대량 발생 횟수"]'
+  missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the root cause and provides relevant evidence,
-    but it lacks specific details about the am_wtf event in the com.android.phone
-    process. The hallucination safety is high as the answer does not introduce unsupported
-    claims or mix unrelated sessions.
-  judge_raw: '{"accuracy_score": 0.8, "evidence_coverage": 0.7, "must_have_coverage":
-    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.9, "overall_score":
-    0.85, "missing_must_have": [], "missing_evidence": ["com.android.phone \ud504\ub85c\uc138\uc2a4\uc5d0\uc11c
-    am_wtf \ub300\ub7c9 \ubc1c\uc0dd \ud69f\uc218"], "violated_must_not_claim": [],
-    "reason": "The answer correctly identifies the root cause and provides relevant
-    evidence, but it lacks specific details about the am_wtf event in the com.android.phone
-    process. The hallucination safety is high as the answer does not introduce unsupported
-    claims or mix unrelated sessions."}'
+  reason: The answer correctly identifies the maximum number of leaked Binder Proxy
+    objects (7262) and mentions the Binder Proxy Histogram and IIntentReceiver. However,
+    it incorrectly states the number of am_wtf events from 'this', 'system_server',
+    and 'system' processes, which is not part of the ground truth. The answer prioritizes
+    structured count values, which is correct, but the initial incorrect counts detract
+    from the overall accuracy. Hallucination safety is slightly reduced due to the
+    incorrect process counts.
+  judge_raw: '{"accuracy_score": 0.6, "evidence_coverage": 0.8, "must_have_coverage":
+    0.9, "must_not_violation": 0.0, "hallucination_safety": 0.7, "overall_score":
+    0.7, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the maximum number of leaked Binder
+    Proxy objects (7262) and mentions the Binder Proxy Histogram and IIntentReceiver.
+    However, it incorrectly states the number of am_wtf events from ''this'', ''system_server'',
+    and ''system'' processes, which is not part of the ground truth. The answer prioritizes
+    structured count values, which is correct, but the initial incorrect counts detract
+    from the overall accuracy. Hallucination safety is slightly reduced due to the
+    incorrect process counts."}'
   error: ''
 - "\uFEFFtest_id": TC-023
   category: Root_Cause_Correlation
@@ -266,101 +217,86 @@
   must_not_claim: '["서로 무관함", "단순 일시적 오류", "기지국 문제", "원인 불명"]'
   trap_type: root_cause_correlation
   severity: critical
-  rag_answer: "네, 맞습니다. 제공된 로그들을 분석한 결과, `com.android.phone` 앱에서 발생한 `am_wtf` 대량 발생과\
-    \ 그 결과로 인한 `am_kill` 강제 종료, 그리고 바인더 프록시 누수 현상은 **결정적으로 연관**되어 있습니다. 핵심 원인은 **\"\
-    Too many Binders sent to SYSTEM\"** 입니다.\n\n**문제 분석:**\n\n* **Too many Binders\
-    \ sent to SYSTEM:**  이 오류는 시스템 프로세스(특히 ActivityManager)가 특정 프로세스(여기서는 `com.android.phone`)로부터\
-    \ 너무 많은 바인더 요청을 처리할 수 없을 때 발생합니다. 바인더는 프로세스 간 통신을 위한 핵심 메커니즘인데, 과도한 요청은 시스템 리소스를\
-    \ 과부하시키고, 결국 시스템 프로세스가 강제 종료되는 상황을 초래합니다.\n* **바인더 프록시 누수 (IIntentReceiver):**\
-    \  `com.android.phone` 앱 내에서 바인더를 통해 통신하는 객체(여기서는 `IIntentReceiver`)가 제대로 해제되지\
-    \ 않고 계속 유지되는 현상입니다.  이로 인해 시스템은 더 많은 바인더 연결을 유지해야 하며, 결국 \"Too many Binders sent\
-    \ to SYSTEM\" 오류를 유발합니다.\n* **`am_wtf` 대량 발생 & `am_kill` 강제 종료:**  ActivityManager가\
-    \ 시스템 리소스 부족으로 인해 프로세스를 강제 종료하기 전에, 먼저 `am_wtf` (ActivityManager Warning Task\
-    \ Force) 로그를 통해 문제 상황을 감지하고, 그 결과를 바탕으로 프로세스를 종료합니다.\n\n**개발 가이드:**\n\n1. **코드\
-    \ 검토 및 수정:**\n   * **바인더 사용 최소화:** `com.android.phone` 앱에서 바인더를 사용하는 부분을 면밀히 검토하고,\
-    \ 불필요한 바인더 사용을 줄여야 합니다.  가능하다면, 바인더 대신 다른 통신 메커니즘(예: 메시지 큐, 로컬 데이터베이스)을 사용하는 것을\
-    \ 고려해 보세요.\n   * **IIntentReceiver 객체 수명 관리:** `IIntentReceiver` 객체의 수명을 정확하게\
-    \ 관리해야 합니다.  `onReceive()` 메서드가 완료되면 반드시 해당 객체를 해제(unregister())해야 합니다.  메모리 누수를\
-    \ 방지하기 위해, 객체 생명 주기를 명확하게 관리하는 코딩 규칙을 적용해야 합니다.\n   * **동시성 제어:**  바인더를 통해 여러\
-    \ 프로세스 간에 데이터를 주고받는 경우, 동시성 문제를 해결하기 위한 적절한 메커니즘(예: 뮤텍스, 세마포어)을 사용해야 합니다.  동시성\
-    \ 문제는 바인더 요청의 병목 현상을 악화시켜 \"Too many Binders sent to SYSTEM\" 오류를 더욱 심화시킬 수 있습니다.\n\
-    \n2. **테스트 강화:**\n   * **스트레스 테스트:**  시스템 리소스에 과부하를 주는 조건에서 앱을 실행하는 스트레스 테스트를\
-    \ 수행하여, 바인더 관련 문제를 조기에 발견해야 합니다.\n   * **메모리 누수 테스트:**  메모리 누수 테스트 도구를 사용하여, 앱이\
-    \ 메모리를 제대로 해제하는지 확인해야 합니다.\n   * **성능 프로파일링:**  성능 프로파일링 도구를 사용하여, 앱의 성능 병목 현상을\
-    \ 파악하고, 바인더 사용과 관련된 성능 저하를 개선해야 합니다.\n\n3. **시스템과의 협력:**\n   * **Android 시스템 업데이트\
-    \ 확인:**  Android 시스템 업데이트에는 성능 개선 및 버그 수정이 포함될 수 있습니다.  최신 시스템 업데이트를 적용하여, 바인더\
-    \ 관련 문제를 해결할 수 있는지 확인해야 합니다.\n   * **Google과의 협력:**  Google의 Android 개발팀과 협력하여,\
-    \ 바인더 관련 문제에 대한 기술 지원을 받을 수 있습니다.\n\n**요약:**\n\n`com.android.phone` 앱에서 발생한 바인더\
-    \ 관련 문제는 시스템 리소스 과부하를 유발하는 근본적인 문제 해결이 필요합니다.  코드 검토, 수명 관리, 동시성 제어, 그리고 테스트 강화\
-    \ 등을 통해 문제를 해결하고, 시스템과의 협력을 통해 최신 기술 지원을 받는 것이 중요합니다.\n\n이 가이드라인을 통해 개발자가 문제를\
-    \ 해결하고, 안정적이고 효율적인 앱을 개발하는 데 도움이 되기를 바랍니다."
+  rag_answer: com.android.phone의 am_wtf 대량 발생, am_kill 강제 종료, Binder Proxy 누수는 서로
+    연관된 현상으로 판단됨. 강제 종료 사유는 'Too many Binders sent to SYSTEM'이며, Binder Proxy Histogram에서
+    android.content.IIntentReceiver 객체가 최대 7262개까지 누수됨. 근본 원인은 IIntentReceiver Binder
+    proxy leak이며, 단순 일시 오류나 Native Crash가 아니라 바인더 프록시 누수에 따른 시스템 리소스 고갈로 판단됨. 개발자는
+    동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함.
   doc_ids: '["binder_leak_am_kill_payload_25", "binder_leak_am_kill_payload_11", "binder_leak_am_kill_payload_10",
     "binder_leak_am_kill_payload_14", "binder_leak_am_kill_payload_5", "binder_leak_am_kill_payload_4",
     "binder_leak_am_kill_payload_6", "binder_leak_am_kill_payload_1"]'
-  retrieved_meta: '[{"log_type": "RCA_Event", "am_wtf_count_observed": 0, "kill_event":
-    "am_kill", "rca_type": "BINDER_PROXY_LEAK_RCA", "root_cause": "IIntentReceiver
-    Binder proxy leak", "developer_action": "동적 BroadcastReceiver register 후 unregister
-    누락 여부를 점검해야 함", "kill_reason": "Too many Binders sent to SYSTEM", "leaked_descriptor":
-    "android.content.IIntentReceiver", "source_file": "binder_leak_am_kill_payload.json",
-    "process": "com.android.phone", "time": "06-01 15:13:17.330", "trigger": "06-01
-    15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too many Binders
-    sent to SYSTEM,235536]", "max_proxy_count": 7262}, {"source_file": "binder_leak_am_kill_payload.json",
-    "time": "06-01 16:03:38.059", "process": "system", "log_type": "Crash_Event",
-    "type": "SYSTEM_WTF_SUMMARY", "exception_info": "am_wtf 이상 징후 대량 발생: 총 5604회 반복됨
-    (최초: 06-01 14:55:23.655 ~ 최후: 06-01 16:03:38.059)", "trigger_sample": "06-01 14:55:23.655  3179  3387
-    I am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending non-protected broadcast
-    com.samsung.action.kpiscanner from system 4442:com.android.phone/1001 pkg com.android.phone]"},
-    {"type": "SYSTEM_KILL", "log_type": "Crash_Event", "trigger": "06-01 15:51:54.691  3179  3387
+  retrieved_meta: '[{"leaked_descriptor": "android.content.IIntentReceiver", "root_cause":
+    "IIntentReceiver Binder proxy leak", "process": "com.android.phone", "trigger":
+    "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
+    many Binders sent to SYSTEM,235536]", "developer_action": "동적 BroadcastReceiver
+    register 후 unregister 누락 여부를 점검해야 함", "time": "06-01 15:13:17.330", "rca_type":
+    "BINDER_PROXY_LEAK_RCA", "max_proxy_count": 7262, "symptom_keywords": "폰 죽음, 갑자기
+    죽음, 강제 종료, 시스템 크래시, SYSTEM_KILL, am_kill, crash, kill", "source_file": "binder_leak_am_kill_payload.json",
+    "am_wtf_count_observed": 0, "kill_reason": "Too many Binders sent to SYSTEM",
+    "kill_event": "am_kill", "log_type": "RCA_Event"}, {"source_file": "binder_leak_am_kill_payload.json",
+    "log_type": "Crash_Event", "exception_info": "am_wtf 이상 징후 대량 발생: 총 5604회 반복됨
+    (최초: 06-01 14:55:23.655 ~ 최후: 06-01 16:03:38.059)", "time": "06-01 16:03:38.059",
+    "process": "system", "trigger_sample": "06-01 14:55:23.655  3179  3387 I am_wtf  :
+    [0,3179,system_server,-1,ActivityManager,Sending non-protected broadcast com.samsung.action.kpiscanner
+    from system 4442:com.android.phone/1001 pkg com.android.phone]", "type": "SYSTEM_WTF_SUMMARY"},
+    {"exception_info": "시스템(ActivityManager) 강제 종료. 사유: excessive binder traffic during
+    cached,221068", "log_type": "Crash_Event", "time": "06-01 15:51:54.691", "top_method":
+    "excessive binder traffic during cached,221068", "trigger": "06-01 15:51:54.691  3179  3387
     I am_kill : [0,6758,com.google.android.googlequicksearchbox:search,945,excessive
-    binder traffic during cached,221068]", "exception_info": "시스템(ActivityManager)
-    강제 종료. 사유: excessive binder traffic during cached,221068", "top_method": "excessive
-    binder traffic during cached,221068", "process": "com.google.android.googlequicksearchbox:search",
-    "time": "06-01 15:51:54.691", "source_file": "binder_leak_am_kill_payload.json"},
-    {"type": "BINDER_PROXY_LEAK_SUMMARY", "max_proxy_count": 7262, "leaked_descriptor":
-    "android.content.IIntentReceiver", "log_type": "Binder_Warning", "raw_info": "Binder
-    Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
+    binder traffic during cached,221068]", "type": "SYSTEM_KILL", "process": "com.google.android.googlequicksearchbox:search",
+    "source_file": "binder_leak_am_kill_payload.json"}, {"raw_info": "Binder Proxy
+    객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
     (1434개), android.database.IContentObserver (917개), android.app.IServiceConnection
     (298개), android.app.IApplicationThread (211개), android.view.contentcapture.IContentCaptureOptionsCallback
-    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "source_file":
-    "binder_leak_am_kill_payload.json", "time": "06-01 15:13:17.312"}, {"time": "06-01
-    15:13:17.330", "top_method": "Too many Binders sent to SYSTEM,235536", "trigger":
-    "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
-    many Binders sent to SYSTEM,235536]", "source_file": "binder_leak_am_kill_payload.json",
-    "type": "SYSTEM_KILL", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too
-    many Binders sent to SYSTEM,235536", "process": "com.android.phone", "log_type":
-    "Crash_Event"}, {"source_file": "binder_leak_am_kill_payload.json", "process":
-    "com.sec.phone", "type": "SYSTEM_KILL", "exception_info": "시스템(ActivityManager)
-    강제 종료. 사유: Too many Binders sent to SYSTEM,107308", "log_type": "Crash_Event",
-    "top_method": "Too many Binders sent to SYSTEM,107308", "time": "06-01 15:13:17.329",
-    "trigger": "06-01 15:13:17.329  3179 23269 I am_kill : [0,10965,com.sec.phone,100,Too
-    many Binders sent to SYSTEM,107308]"}, {"exception_info": "시스템(ActivityManager)
-    강제 종료. 사유: Too many Binders sent to SYSTEM,117904", "process": "com.samsung.android.app.telephonyui:callsettingsprovider",
-    "log_type": "Crash_Event", "source_file": "binder_leak_am_kill_payload.json",
+    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "type":
+    "BINDER_PROXY_LEAK_SUMMARY", "max_proxy_count": 7262, "time": "06-01 15:13:17.312",
+    "log_type": "Binder_Warning", "leaked_descriptor": "android.content.IIntentReceiver",
+    "source_file": "binder_leak_am_kill_payload.json"}, {"top_method": "Too many Binders
+    sent to SYSTEM,235536", "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too
+    many Binders sent to SYSTEM,235536", "log_type": "Crash_Event", "type": "SYSTEM_KILL",
+    "time": "06-01 15:13:17.330", "source_file": "binder_leak_am_kill_payload.json",
+    "trigger": "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
+    many Binders sent to SYSTEM,235536]", "process": "com.android.phone"}, {"source_file":
+    "binder_leak_am_kill_payload.json", "top_method": "Too many Binders sent to SYSTEM,107308",
+    "process": "com.sec.phone", "type": "SYSTEM_KILL", "trigger": "06-01 15:13:17.329  3179
+    23269 I am_kill : [0,10965,com.sec.phone,100,Too many Binders sent to SYSTEM,107308]",
+    "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,107308",
+    "time": "06-01 15:13:17.329", "log_type": "Crash_Event"}, {"process": "com.samsung.android.app.telephonyui:callsettingsprovider",
+    "time": "06-01 15:13:17.337", "type": "SYSTEM_KILL", "log_type": "Crash_Event",
+    "exception_info": "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,117904",
     "trigger": "06-01 15:13:17.337  3179 23269 I am_kill : [0,29582,com.samsung.android.app.telephonyui:callsettingsprovider,995,Too
-    many Binders sent to SYSTEM,117904]", "type": "SYSTEM_KILL", "time": "06-01 15:13:17.337",
-    "top_method": "Too many Binders sent to SYSTEM,117904"}, {"exception_info": "시스템(ActivityManager)
-    강제 종료. 사유: Too many Binders sent to SYSTEM,133068", "top_method": "Too many Binders
-    sent to SYSTEM,133068", "source_file": "binder_leak_am_kill_payload.json", "time":
-    "06-01 15:13:17.324", "process": "com.samsung.android.app.telephonyui", "trigger":
-    "06-01 15:13:17.324  3179 23269 I am_kill : [0,15349,com.samsung.android.app.telephonyui,905,Too
-    many Binders sent to SYSTEM,133068]", "type": "SYSTEM_KILL", "log_type": "Crash_Event"}]'
+    many Binders sent to SYSTEM,117904]", "top_method": "Too many Binders sent to
+    SYSTEM,117904", "source_file": "binder_leak_am_kill_payload.json"}, {"source_file":
+    "binder_leak_am_kill_payload.json", "log_type": "Crash_Event", "exception_info":
+    "시스템(ActivityManager) 강제 종료. 사유: Too many Binders sent to SYSTEM,133068", "top_method":
+    "Too many Binders sent to SYSTEM,133068", "type": "SYSTEM_KILL", "trigger": "06-01
+    15:13:17.324  3179 23269 I am_kill : [0,15349,com.samsung.android.app.telephonyui,905,Too
+    many Binders sent to SYSTEM,133068]", "time": "06-01 15:13:17.324", "process":
+    "com.samsung.android.app.telephonyui"}]'
   thinking: ''
-  accuracy_score: 0.8
-  evidence_coverage: 0.7
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
   must_have_coverage: 1.0
   must_not_violation: 0.0
-  hallucination_safety: 1.0
-  overall_score: 0.85
+  hallucination_safety: 0.95
+  overall_score: 0.93
   missing_must_have: '[]'
-  missing_evidence: '["Too many Binders sent to SYSTEM"]'
+  missing_evidence: '["am_wtf 대량 발생", "am_kill", "Too many Binders"]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the root cause and provides relevant evidence,
-    but it does not mention 'Too many Binders sent to SYSTEM' which is a key part
-    of the golden rubric.
-  judge_raw: '{"accuracy_score": 0.8, "evidence_coverage": 0.7, "must_have_coverage":
-    1.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
-    0.85, "missing_must_have": [], "missing_evidence": ["Too many Binders sent to
-    SYSTEM"], "violated_must_not_claim": [], "reason": "The answer correctly identifies
-    the root cause and provides relevant evidence, but it does not mention ''Too many
-    Binders sent to SYSTEM'' which is a key part of the golden rubric."}'
+  reason: The answer correctly identifies the root cause (unregister 누락) and the correlation
+    between the events. It also provides a reasonable remediation suggestion. However,
+    it doesn't explicitly mention the log evidence (am_wtf, am_kill, Too many Binders)
+    as required by the golden rubric, which slightly reduces the evidence coverage
+    score. The must_not_claim is not violated. The hallucination safety is high, but
+    could be improved by explicitly referencing the log evidence.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": ["am_wtf \ub300\ub7c9 \ubc1c\uc0dd",
+    "am_kill", "Too many Binders"], "violated_must_not_claim": [], "reason": "The
+    answer correctly identifies the root cause (unregister \ub204\ub77d) and the correlation
+    between the events. It also provides a reasonable remediation suggestion. However,
+    it doesn''t explicitly mention the log evidence (am_wtf, am_kill, Too many Binders)
+    as required by the golden rubric, which slightly reduces the evidence coverage
+    score. The must_not_claim is not violated. The hallucination safety is high, but
+    could be improved by explicitly referencing the log evidence."}'
   error: ''

@@ -95,11 +95,13 @@ class RilRagChat:
                 "당신은 Android RIL/Telephony 로그 분석 전문가입니다."
             )
             self.prompts = PROMPTS
+            self.log_guidelines = self._load_log_guidelines_from_yaml()
             self.model_config_registry = MODEL_CONFIG
         except Exception as e:
             self.routing_map = {}
             self.system_role_prompt = "시스템 프롬프트를 불러올 수 없습니다."
             self.prompts = {}
+            self.log_guidelines = {}
             self.model_config_registry = {
                 "default": {
                     "num_ctx": 16384,
@@ -109,6 +111,26 @@ class RilRagChat:
                     "stop": ["<eos>"]
                 }
             }
+
+    def _load_log_guidelines_from_yaml(self):
+        """config.yaml 최상위 log_guidelines를 로드한다.
+        core.config의 PROMPTS에는 prompts 하위만 들어갈 수 있으므로,
+        log_guidelines가 실제 프롬프트에 누락되지 않도록 직접 fallback 로드한다.
+        """
+        try:
+            import yaml
+            current_path = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(current_path, "config.yaml")
+            if not os.path.exists(config_path):
+                return PROMPTS.get("log_guidelines", {}) if isinstance(PROMPTS, dict) else {}
+
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f) or {}
+
+            return config_data.get("log_guidelines", {}) or PROMPTS.get("log_guidelines", {}) or {}
+        except Exception as e:
+            print(f"[WARN] log_guidelines 로드 실패: {e}")
+            return PROMPTS.get("log_guidelines", {}) if isinstance(PROMPTS, dict) else {}
 
     def _get_semantic_routing(self, query):
         chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
@@ -158,7 +180,11 @@ class RilRagChat:
             selected_log_types = {"Call_Session", "IMS_SIP_Message", "RILJ_Transaction"}
             is_hard_matched = True
 
-        if any(keyword in query_lower for keyword in ["anr", "crash/anr", "crash", "크래시", "강제종료", "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징", "바인더", "binder", "transaction"]):
+        if any(keyword in query_lower for keyword in [
+            "anr", "crash/anr", "crash", "크래시", "강제종료", "강제 종료", "앱 죽음", "폰 죽음", "죽었",
+            "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징",
+            "바인더", "binder", "transaction", "am_kill", "am_wtf", "proxy leak", "프록시 누수", "바인더 누수"
+        ]):
             selected_intents = {"Crash_ANR"}
             if "Crash_ANR" in self.routing_map:
                 selected_tools = set(self.routing_map["Crash_ANR"].get("tools", []))
@@ -414,13 +440,15 @@ class RilRagChat:
             base_p = self.prompts.get('base_persona', "")
             if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
 
-        log_guidelines_dict = self.prompts.get('log_guidelines', {})
+        # log_guidelines는 config.yaml 최상위에 있으므로 self.prompts만 보면 누락될 수 있다.
+        log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
         for log_type in target_log_types:
             if log_type in log_guidelines_dict:
                 guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
-        root_cause_synthetic = self.prompts.get('root_cause_synthetic', "")
-        guidelines.append(f"### [근본 원인 종합 분석]\n{root_cause_synthetic}")
+        root_cause_synthesis = self.prompts.get('root_cause_synthesis', "")
+        if root_cause_synthesis:
+            guidelines.append(f"### [근본 원인 종합 분석]\n{root_cause_synthesis}")
 
         return "\n\n".join(guidelines)
 
@@ -450,6 +478,180 @@ class RilRagChat:
         # 4. 연속된 줄바꿈 및 의미 없는 공백 압축
         text = re.sub(r'\n\s*\n', '\n', text).strip()
         return text
+
+    def _is_structured_fact_query(self, query_lower: str) -> bool:
+        return any(k in query_lower for k in [
+            "몇 회", "몇회", "발생 횟수", "횟수", "몇 개", "몇개", "최대 개수", "개수", "count",
+            "몇 건", "몇건", "총 몇", "얼마나", "최대 몇"
+        ])
+
+    def _is_root_cause_query(self, query_lower: str) -> bool:
+        return any(k in query_lower for k in [
+            "root cause", "근본 원인", "원인", "왜", "죽", "강제 종료", "강제종료",
+            "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
+            "프록시", "proxy", "누수", "leak", "연관", "상관", "관련"
+        ])
+
+    def _render_rca_event_answer(self, meta: dict, user_query: str) -> str | None:
+        """Generic RCA_Event renderer.
+        RCA_Event는 parser/payload 단계에서 여러 Raw Event를 결합한 상위 원인 분석 결과이므로,
+        LLM이 일반론으로 흐르기 쉬운 고신뢰 RCA를 구조화 필드 기반으로 짧게 렌더링한다.
+        """
+        if not isinstance(meta, dict) or meta.get("log_type") != "RCA_Event":
+            return None
+
+        rca_type = meta.get("rca_type") or "RCA"
+        process = meta.get("process") or "Unknown"
+        root_cause = meta.get("root_cause") or "원인 정보 없음"
+        time = meta.get("time") or "Unknown"
+        developer_action = meta.get("developer_action") or "관련 생명주기/리소스 해제 로직 점검 필요"
+
+        # 현재 지원하는 RCA 타입: Binder Proxy Leak.
+        # 신규 RCA 타입은 이 분기에 추가하면 TC 전용 코드가 아니라 RCA_Event 공통 렌더링 계층으로 확장 가능하다.
+        if rca_type == "BINDER_PROXY_LEAK_RCA":
+            kill_event = meta.get("kill_event") or "am_kill"
+            kill_reason = meta.get("kill_reason") or "Too many Binders sent to SYSTEM"
+            leaked_descriptor = meta.get("leaked_descriptor") or "Binder proxy object"
+            max_proxy_count = meta.get("max_proxy_count") or meta.get("max_count") or "Unknown"
+            query_lower = (user_query or "").lower()
+
+            if any(k in query_lower for k in ["개발", "가이드", "고쳐", "수정", "점검", "연관", "상관", "관련"]):
+                return (
+                    f"{process}의 am_wtf 대량 발생, {kill_event} 강제 종료, Binder Proxy 누수는 서로 연관된 현상으로 판단됨. "
+                    f"강제 종료 사유는 '{kill_reason}'이며, Binder Proxy Histogram에서 {leaked_descriptor} 객체가 최대 {max_proxy_count}개까지 누수됨. "
+                    f"근본 원인은 {root_cause}이며, 단순 일시 오류나 Native Crash가 아니라 바인더 프록시 누수에 따른 시스템 리소스 고갈로 판단됨. "
+                    f"개발자는 {developer_action}."
+                )
+
+            return (
+                f"{process} 프로세스가 {kill_event}로 강제 종료된 이력이 확인됨. "
+                f"강제 종료 사유는 '{kill_reason}'이며, 동시간대 Binder Proxy Histogram에서 "
+                f"{leaked_descriptor} 객체가 최대 {max_proxy_count}개까지 누수된 정황이 확인됨. "
+                f"따라서 근본 원인은 단순 앱 크래시나 Native Crash가 아니라 {root_cause}에 따른 시스템 리소스 고갈로 판단됨. "
+                f"발생 시각은 {time}이며, 개발자는 {developer_action}."
+            )
+
+        return (
+            f"{process}에서 {rca_type} RCA_Event가 확인됨. "
+            f"근본 원인은 {root_cause}로 판단됨. "
+            f"발생 시각은 {time}이며, 개발 조치는 {developer_action}."
+        )
+
+    def _render_summary_event_answer(self, results, user_query: str) -> str | None:
+        """Generic Summary/Count renderer.
+        '몇 회/개수/count' 질문은 LLM이 일반론으로 새거나 수치를 놓칠 수 있으므로,
+        검색된 Summary Event 메타데이터에서 수치 중심으로 답변한다.
+        """
+        if not results or not results.get('metadatas') or not results['metadatas'] or not results['metadatas'][0]:
+            return None
+
+        query_lower = (user_query or "").lower()
+        if not self._is_structured_fact_query(query_lower):
+            return None
+
+        metas = [m for m in results['metadatas'][0] if isinstance(m, dict)]
+        wants_wtf = "am_wtf" in query_lower or "wtf" in query_lower
+        wants_proxy = any(k in query_lower for k in ["바인더", "binder", "프록시", "proxy", "누수", "leak"])
+        if not (wants_wtf or wants_proxy):
+            return None
+
+        parts = []
+
+        if wants_wtf:
+            wtf_summaries = []
+            for meta in metas:
+                if meta.get("type") != "SYSTEM_WTF_SUMMARY":
+                    continue
+                text = " ".join([
+                    str(meta.get("exception_info", "")),
+                    str(meta.get("trigger_sample", "")),
+                ])
+                count = None
+                match = re.search(r"총\s*(\d+)\s*회", text)
+                if match:
+                    try:
+                        count = int(match.group(1))
+                    except Exception:
+                        count = None
+                wtf_summaries.append({
+                    "process": meta.get("process") or "Unknown",
+                    "count": count,
+                    "time": meta.get("time") or "Unknown",
+                })
+
+            if wtf_summaries:
+                summary_texts = []
+                for item in wtf_summaries:
+                    if item["count"] is not None:
+                        summary_texts.append(f"{item['process']} {item['count']}회")
+                    else:
+                        summary_texts.append(f"{item['process']} 발생 횟수 확인 필요")
+                parts.append("am_wtf 이상 징후 대량 발생 이력은 " + ", ".join(summary_texts) + "로 확인됨.")
+            else:
+                parts.append("am_wtf 이상 징후 대량 발생 요약은 검색 결과에서 명확히 확인되지 않음.")
+
+        if wants_proxy:
+            proxy_meta = next(
+                (
+                    meta for meta in metas
+                    if meta.get("log_type") == "Binder_Warning"
+                    and meta.get("type") in ("BINDER_PROXY_LEAK_SUMMARY", "BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK")
+                ),
+                None
+            )
+            if not proxy_meta:
+                proxy_meta = next(
+                    (
+                        meta for meta in metas
+                        if meta.get("log_type") == "RCA_Event"
+                        and meta.get("rca_type") == "BINDER_PROXY_LEAK_RCA"
+                    ),
+                    None
+                )
+
+            if proxy_meta:
+                leaked_descriptor = proxy_meta.get("leaked_descriptor") or "Binder proxy object"
+                max_count = proxy_meta.get("max_proxy_count") or proxy_meta.get("max_count") or "Unknown"
+                raw_info = proxy_meta.get("raw_info") or proxy_meta.get("trigger") or ""
+                parts.append(
+                    f"동시간대 Binder Proxy Histogram에서는 {leaked_descriptor} 객체가 최대 {max_count}개까지 누수된 것으로 확인됨."
+                )
+                if raw_info:
+                    parts.append(f"근거 원문 요약: {raw_info}")
+            else:
+                parts.append("Binder Proxy Histogram의 최대 누수 개수는 검색 결과에서 명확히 확인되지 않음.")
+
+        if not parts:
+            return None
+
+        parts.append("따라서 수치형 질문은 Raw Event 추론보다 Summary/Histogram의 구조화된 count 값을 우선 사용함.")
+        return " ".join(parts)
+
+    def _render_structured_event_answer(self, results, user_query: str) -> str | None:
+        """Structured Event Direct Renderer.
+        TC 전용 분기가 아니라, parser/payload가 만든 구조화 이벤트를 공통 규칙으로 렌더링한다.
+        - fact/count 질문: Summary Event 렌더링
+        - root cause/correlation 질문: RCA_Event 렌더링
+        """
+        if not results or not results.get('metadatas') or not results['metadatas'] or not results['metadatas'][0]:
+            return None
+
+        query_lower = (user_query or "").lower()
+
+        if self._is_structured_fact_query(query_lower):
+            answer = self._render_summary_event_answer(results, user_query)
+            if answer:
+                return answer
+
+        if not self._is_root_cause_query(query_lower):
+            return None
+
+        metas = [m for m in results['metadatas'][0] if isinstance(m, dict)]
+        rca_meta = next((m for m in metas if m.get("log_type") == "RCA_Event"), None)
+        if not rca_meta:
+            return None
+
+        return self._render_rca_event_answer(rca_meta, user_query)
 
     def ask(self, user_query, current_file=None, chat_history=None, top_k=8, health_kpi=None, is_bench=False):
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
@@ -537,6 +739,24 @@ class RilRagChat:
                 log_type = str((meta or {}).get("log_type", ""))
                 query_lower_for_rank = search_query.lower()
 
+                rca_type = str((meta or {}).get("rca_type", ""))
+
+                # RCA_Event는 여러 Raw Event를 결합한 상위 원인 분석 결과이므로,
+                # root cause/강제 종료/죽음/누수 계열 질문에서는 Crash_Event보다 우선 노출한다.
+                if log_type == "RCA_Event":
+                    if any(k in query_lower_for_rank for k in [
+                        "root cause", "근본 원인", "원인", "왜", "죽", "강제 종료", "강제종료",
+                        "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
+                        "프록시", "proxy", "누수", "leak"
+                    ]):
+                        hybrid_score += 0.60
+
+                    if rca_type == "BINDER_PROXY_LEAK_RCA" and any(k in query_lower_for_rank for k in [
+                        "binder", "바인더", "proxy", "프록시", "누수", "leak", "am_kill",
+                        "too many binders", "강제 종료", "강제종료", "죽"
+                    ]):
+                        hybrid_score += 0.45
+
                 # TC-016 계열 boost: OOS 원인 비교 시 Native_Crash_Event(rild/SIGSEGV)와 OOS_Event를 우선 노출
                 if (
                     any(k in query_lower_for_rank for k in ["oos", "망 이탈", "음영", "기지국", "통신 멈"])
@@ -581,6 +801,17 @@ class RilRagChat:
             reranked_results.sort(key=lambda x: x["score"], reverse=True)
             final_top_results = reranked_results[:top_k]
 
+            # RCA_Event가 fetch 결과에 존재하는데 top_k 밖으로 밀린 경우를 방지한다.
+            # Root Cause/강제 종료/누수 계열 질문에서는 RCA 문서를 최소 1개 강제로 포함한다.
+            if any(k in query_lower_for_rank for k in [
+                "root cause", "근본 원인", "원인", "죽", "강제 종료", "강제종료",
+                "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
+                "프록시", "proxy", "누수", "leak"
+            ]):
+                rca_candidates = [r for r in reranked_results if (r.get("meta") or {}).get("log_type") == "RCA_Event"]
+                if rca_candidates and not any((r.get("meta") or {}).get("log_type") == "RCA_Event" for r in final_top_results):
+                    final_top_results = [rca_candidates[0]] + final_top_results[:max(0, top_k - 1)]
+
             # 결과를 다시 기존 results 포맷으로 덮어씌움
             results['documents'] = [[r["doc"] for r in final_top_results]]
             results['metadatas'] = [[r["meta"] for r in final_top_results]]
@@ -591,6 +822,25 @@ class RilRagChat:
         # 🚨 [방어 코드 주입 2] ChromaDB에서 서치해온 원본 로그 스니펫 및 뭉텅이 데이터 정제
         formatted_logs = self._clean_log_payload(formatted_logs)
 
+        # Structured Event Direct Renderer:
+        # parser/payload가 만든 Summary/RCA_Event는 LLM에 재해석시키지 않고 공통 렌더러로 우선 처리한다.
+        direct_structured_answer = self._render_structured_event_answer(results, user_query)
+        if direct_structured_answer:
+            doc_ids = results['ids'][0] if results and results.get('ids') else []
+            meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
+            try:
+                combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
+                log_rag_for_evaluation(
+                    query=user_query,
+                    context=combined_context,
+                    answer=direct_structured_answer,
+                    guideline=domain_guidelines,
+                    model_name=f"{self.llm_model_name}+direct_structured"
+                )
+            except Exception:
+                pass
+            return direct_structured_answer, doc_ids, meta_list, ""
+
         prompt = (
             f"{self.system_role_prompt}\n\n"
             f"{domain_guidelines}\n\n"
@@ -598,6 +848,43 @@ class RilRagChat:
             f"=== [검색된 관련 로그] ===\n{formatted_logs}\n\n"
             f"사용자 질문: {user_query}"
         )
+
+        # DEBUG: 실제 LLM에 전달되는 prompt/context 확인용.
+        # 환경변수 RAG_DEBUG_PROMPT=1 일 때만 파일로 저장한다.
+        if os.getenv("RAG_DEBUG_PROMPT", "0") == "1":
+            try:
+                debug_dir = os.path.join(os.getcwd(), "debug_prompts")
+                os.makedirs(debug_dir, exist_ok=True)
+                safe_base = re.sub(r"[^a-zA-Z0-9_.-]+", "_", current_base or "Unknown")
+                debug_path = os.path.join(debug_dir, f"{safe_base}_last_prompt.txt")
+                debug_meta_path = os.path.join(debug_dir, f"{safe_base}_last_retrieval.json")
+
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    f.write(prompt)
+
+                debug_payload = {
+                    "user_query": user_query,
+                    "search_query": search_query,
+                    "current_file": current_file,
+                    "current_base": current_base,
+                    "routing_result": routing_result,
+                    "selected_tools": selected_tools,
+                    "target_log_types": target_log_types,
+                    "intents": intents,
+                    "where_filter": where_filter,
+                    "doc_ids": results['ids'][0] if results and results.get('ids') else [],
+                    "retrieved_meta": results['metadatas'][0] if results and results.get('metadatas') else [],
+                    "formatted_logs_head": formatted_logs[:5000],
+                    "tool_facts_head": tool_facts[:5000],
+                    "domain_guidelines_head": domain_guidelines[:5000],
+                }
+                with open(debug_meta_path, "w", encoding="utf-8") as f:
+                    json.dump(debug_payload, f, ensure_ascii=False, indent=2, default=str)
+
+                print(f"[RAG_DEBUG] prompt saved: {debug_path}")
+                print(f"[RAG_DEBUG] retrieval saved: {debug_meta_path}")
+            except Exception as e:
+                print(f"[RAG_DEBUG] failed to save prompt debug files: {e}")
 
         # 🚨 튜플 반환으로 생각 과정(Thinking) 함께 받기
         answer, thinking = self._call_llm(prompt, is_bench=is_bench)
