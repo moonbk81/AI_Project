@@ -326,7 +326,8 @@ with st.sidebar:
     st.info(f"**Model:** `{st.session_state['active_model']}`  \n**Mode:** `{st.session_state['active_routing_mode']}`  \n**Loaded:** `{st.session_state['last_loaded_at']}`")
     st.divider()
     st.header("자동 분석 파이프라인")
-    uploaded_files = st.file_uploader("원시 로그 파일 업로드 (다중 선택 가능)", type=['txt', 'log', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10'], accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_key}")
+
+    uploaded_files = st.file_uploader("원시 로그 파일 업로드 (다중 선택 가능)", accept_multiple_files=True, key=f"uploader_{st.session_state.uploader_key}")
 
     st.divider()
     st.subheader("분석 세션 및 데이터베이스 관리")
@@ -772,6 +773,8 @@ with tab_boot:
 
             st.divider()
             ui.render_crash_analyzer(report_data)
+            st.divider()
+            ui.render_binder_proxy_leaks(report_data.get("binder_warnings", []))
             st.divider()
             ui.render_nitz_timeline(report_data.get("nitz_history", []))
         else: st.error(f"Report file (`{base_name}_report.json`) not found.")

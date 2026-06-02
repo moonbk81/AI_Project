@@ -256,6 +256,40 @@ class CrashParser(BaseParser):
             ts_m = RE_TIME.search(clean_line)
             ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
 
+            if "am_kill" in clean_line:
+                # 예: am_kill : [0,1234,com.android.phone,0,Too many Binders sent to SYSTEM]
+                match = re.search(r'am_kill\s*:\s*\[\d+,\d+,([^,]+),-?\d+,\s*([^\]]+)\]', clean_line)
+                if match:
+                    process = match.group(1)
+                    reason = match.group(2)
+                    crashes.append({
+                        "time": ts,
+                        "type": "SYSTEM_KILL",
+                        "process": process,
+                        "trigger": clean_line,
+                        "exception_info": f"시스템(ActivityManager) 강제 종료. 사유: {reason}",
+                        "top_method": reason, # UI 표출을 위해 사유를 매핑
+                        "call_stack": [],
+                        "cross_context_logs": self.get_context_fn(lines, ts) if self.get_context_fn else []
+                    })
+                continue
+
+            # 💡 [신규 추가] am_wtf (What a Terrible Failure) 감지
+            if "am_wtf" in clean_line:
+                match = re.search(r'am_wtf\s*:\s*\[\d+,\d+,([^,]+),', clean_line)
+                process = match.group(1) if match else "Unknown"
+                crashes.append({
+                    "time": ts,
+                    "type": "SYSTEM_WTF",
+                    "process": process,
+                    "trigger": clean_line,
+                    "exception_info": "시스템 WTF(What a Terrible Failure) 발생. 심각한 시스템 상태 이상.",
+                    "top_method": "WTF_Event",
+                    "call_stack": [],
+                    "cross_context_logs": self.get_context_fn(lines, ts) if self.get_context_fn else []
+                })
+                continue
+
             is_fatal_app = DIAG_PATTERNS['FATAL_APP'].search(clean_line)
             is_fatal_sys = DIAG_PATTERNS['FATAL_SYS'].search(clean_line)
 
@@ -780,6 +814,10 @@ class BinderWarningParser(BaseParser):
         delay_count_by_target = {}
         last_delay_event_by_target = {}
         seen_raw = set()
+        in_proxy_histogram = False
+        current_histogram = []
+        histogram_time = ""
+        histogram_line_count = 0
 
         for line in lines:
             line_str = line.strip()
@@ -788,6 +826,49 @@ class BinderWarningParser(BaseParser):
             seen_raw.add(line_str)
             lower = line_str.lower()
             event_time = self._extract_time(line_str)
+
+            if "binderproxy descriptor histogram" in lower:
+                in_proxy_histogram = True
+                current_histogram = []
+                histogram_time = event_time
+                histogram_line_count = 0
+                continue
+
+            if in_proxy_histogram:
+                histogram_line_count += 1
+
+                # 💡 2. 종료점 감지 (명시적 종료 메시지 OR 너무 많은 라인이 지났을 때 강제 종료)
+                if "critical dump took" in lower or histogram_line_count > 100:
+                    in_proxy_histogram = False
+
+                    if current_histogram:
+                        # 내림차순 정렬
+                        current_histogram.sort(key=lambda x: x[1], reverse=True)
+
+                        # 💡 필터링 제거: 수집된 모든 Top N 데이터를 그대로 보존
+                        max_count = current_histogram[0][1] # 가장 큰 값 저장
+
+                        details = ", ".join([f"{name} ({cnt}개)" for name, cnt in current_histogram])
+                        raw_logs = "\n".join([f"  {name} x{cnt}" for name, cnt in current_histogram])
+
+                        warnings.append({
+                            "time": histogram_time,
+                            "type": "BINDER_PROXY_HISTOGRAM", # 💡 중립적인 이름으로 변경
+                            "max_count": max_count,           # 💡 UI/LLM이 판단할 수 있도록 기준값 제공
+                            "desc": f"Binder Proxy 객체 상태 덤프: {details}",
+                            "raw": raw_logs
+                        })
+                    continue
+
+                # 💡 3. 실제 데이터 파싱 (정규식 강화)
+                # 앞부분의 Logcat 태그(I Binder :)를 무시하고,
+                # 반드시 영문자로 시작하는 클래스명([a-zA-Z_][a-zA-Z0-9\.\$]*)만 매칭하여 오탐지 차단
+                match = re.search(r'(?:#\d+:\s*)?([a-zA-Z_][a-zA-Z0-9\.\$]+)\s*x\s*(\d+)', line_str)
+                if match:
+                    descriptor = match.group(1).strip()
+                    count = int(match.group(2))
+                    current_histogram.append((descriptor, count))
+                continue
 
             # 1. Thread Exhaustion / Starved: 강한 장애 신호
             if "binder thread pool" in lower and ("is full" in lower or "starved for" in lower):

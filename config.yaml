@@ -278,6 +278,12 @@ log_guidelines:
     Binder_Warning: |
       - TRANSACTION_DELAY (1000ms 이상 지연): 동시간대 ANR, Watchdog, 사망 여부 결합 분석.
       - THREAD_EXHAUSTION: Binder thread pool 포화(Starvation). ANR/Freezing 원인으로 지목하되 선행 transaction 확인.
+      - 🚨 [BINDER_PROXY_LEAK 감지 시 최우선 규칙]: BINDER_PROXY_LEAK이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver, IWindowSession 등)를 확인하고, 해당 인터페이스의 "콜백(Callback)이나 리스너(Listener)가 등록(Register)만 되고 해제(Unregister)되지 않은 메모리 릭(Memory Leak)"을 시스템 다운(am_kill)의 근본 원인(Root Cause)으로 지목하라.
+        * 맞춤형 가이드 제공:
+          - 만약 누수 객체가 'IIntentReceiver'라면 "동적 BroadcastReceiver 해제(unregister) 누락"을 원인으로 지목하라.
+          - 만약 'IWindowSession'이라면 "WindowManager에서 View 제거(removeView) 누락"을 원인으로 지목하라.
+          - 만약 'ITelephonyRegistry' 관련이라면 "PhoneStateListener 해제 누락"을 원인으로 지목하라.
+          - 그 외의 객체라면, 해당 객체를 사용하는 앱 컴포넌트의 생명주기(Lifecycle) 해제 로직을 점검하라고 가이드하라.
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
 
     RILJ_Transaction: |

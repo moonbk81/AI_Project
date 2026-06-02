@@ -117,6 +117,7 @@ class LogOrchestrator:
         crash_keywords = [
             "FATAL EXCEPTION", "Fatal signal", "AndroidRuntime", "am_crash",
             "force close", "Tombstone written to", "Build fingerprint:", "Abort message:",
+            "am_wtf", "am_kill",
         ]
         anr_keywords = [
             "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
@@ -188,6 +189,7 @@ class LogOrchestrator:
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
         rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
+        in_proxy_histogram = False
 
         for idx, line in enumerate(lines):
             if line.startswith("!@Boot"):
@@ -246,6 +248,15 @@ class LogOrchestrator:
 
             if any(k in line for k in native_crash_keywords):
                 self._add_context_window(buckets, 'native_crash', lines, idx, window=60)
+
+            lower_line = line.lower()
+            if "binderproxy descriptor histogram" in lower_line:
+                in_proxy_histogram = True
+
+            if in_proxy_histogram:
+                buckets['binder'].append(line)
+                if "critical dump took" in lower_line or "binderproxydumphelper" in lower_line or line.startswith("---------"):
+                    in_proxy_histogram = False
 
             if any(k in line for k in binder_keywords):
                  buckets['binder'].append(line)

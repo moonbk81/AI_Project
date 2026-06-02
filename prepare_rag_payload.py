@@ -160,8 +160,42 @@ class RagPayloadBuilder:
             if not crashes:
                 add_clean_state("Crash_Event", "분석 구간 내 치명적인 Crash 이력이 발견되지 않았습니다.")
             else:
-                for crash in crashes:
+                # 💡 [신규 추가] am_wtf와 일반 크래시 분리
+                wtfs = [c for c in crashes if c.get("type") == "SYSTEM_WTF"]
+                others = [c for c in crashes if c.get("type") != "SYSTEM_WTF"]
+
+                # 일반 크래시 및 am_kill은 그대로 개별 적재
+                for crash in others:
                     add_to_payload(crash, "Crash_Event")
+
+                # 💡 [신규 추가] am_wtf 대량 발생(Flood) 방어 로직: 프로세스별로 1개로 압축
+                if wtfs:
+                    wtf_summary = {}
+                    for w in wtfs:
+                        proc = w.get("process", "Unknown")
+                        ts = w.get("time", "Unknown")
+                        if proc not in wtf_summary:
+                            wtf_summary[proc] = {
+                                "count": 0,
+                                "first": ts,
+                                "last": ts,
+                                "raw_sample": w.get("trigger", "")
+                            }
+                        wtf_summary[proc]["count"] += 1
+                        if ts != "Unknown":
+                            wtf_summary[proc]["last"] = ts
+
+                    # 압축된 요약본만 RAG 페이로드에 단일 문서로 추가
+                    for proc, data in wtf_summary.items():
+                        summary_doc = {
+                            "time": data["last"],  # 기준 시간은 가장 최근 시간
+                            "type": "SYSTEM_WTF_SUMMARY",
+                            "process": proc,
+                            "exception_info": f"am_wtf 이상 징후 대량 발생: 총 {data['count']}회 반복됨 (최초: {data['first']} ~ 최후: {data['last']})",
+                            "trigger_sample": data["raw_sample"]
+                        }
+                        # RAG DB에는 단 1건으로 들어감
+                        add_to_payload(summary_doc, "Crash_Event")
         else:
             add_clean_state("Crash_Event", "분석 구간 내 치명적인 Crash 이력이 발견되지 않았습니다.")
 
