@@ -298,5 +298,50 @@
     "must_not_claim": ["망 문제로 확정", "기지국 장애로 확정", "OOS가 병목 원인", "병목 흔적 없음", "Binder_Warning 없음", "THREAD_EXHAUSTION 없음", "에러 없음"],
     "trap_type": "system_bottleneck_detection",
     "severity": "high"
+  },
+  {
+    "test_id": "TC-021",
+    "category": "System_Crash_and_Leak",
+    "target_log_file": "log_for_evaluation/binder_leak_am_kill.txt",
+    "query": "폰이 갑자기 죽었는데, 크래시나 강제 종료 이력이 있어? 근본 원인이 뭔지 분석해 줘.",
+    "ground_truth": "네, com.android.phone 프로세스가 시스템에 의해 강제 종료(am_kill)된 이력이 확인됩니다. 종료 사유는 'Too many Binders sent to SYSTEM'입니다. 근본 원인은 해당 프로세스에서 특정 바인더 프록시 객체가 비정상적으로 누수되어 최대 7262개까지 폭증했고, 이로 인해 시스템 서버의 리소스가 고갈되어 시스템 보호 차원에서 강제 종료가 발생한 것입니다.",
+    "eval_keywords": ["am_kill", "com.android.phone", "Too many Binders sent to SYSTEM", "바인더 프록시", "누수", "7262"],
+    "expected_decision": "com.android.phone 프로세스가 바인더 프록시 누수로 인해 am_kill 강제 종료되었습니다.",
+    "root_cause": "바인더 프록시 객체의 대량 누수(7262개)로 시스템 리소스가 고갈되어 am_kill이 트리거되었습니다.",
+    "must_have": ["am_kill", "Too many Binders sent to SYSTEM", "프록시 객체 누수"],
+    "evidence_should_include": ["com.android.phone", "7262개", "am_kill"],
+    "must_not_claim": ["원인 확인 불가", "단순 앱 크래시", "사용자 종료", "Native Crash"],
+    "trap_type": "root_cause_disambiguation",
+    "severity": "critical"
+  },
+  {
+    "test_id": "TC-022",
+    "category": "System_Bottleneck",
+    "target_log_file": "log_for_evaluation/binder_leak_am_kill.txt",
+    "query": "am_wtf (이상 징후) 로그가 대량으로 발생했다면 어떤 프로세스에서 몇 회나 발생했는지, 그리고 바인더 프록시 객체 누수 최대 개수도 알려줘.",
+    "ground_truth": "am_wtf 이벤트는 com.android.phone 프로세스에서 총 7262회 반복적으로 대량 발생했습니다. 또한, 동시간대 확인된 바인더 프록시 객체의 최대 누수 개수 역시 7262개로 기록되어 있습니다.",
+    "eval_keywords": ["am_wtf", "com.android.phone", "7262회", "프록시 객체", "7262개"],
+    "expected_decision": "com.android.phone 프로세스에서 am_wtf가 7262회 발생했으며 프록시 누수 개수도 7262개입니다.",
+    "root_cause": "am_wtf 이상 징후 발생 횟수와 프록시 객체 누수 카운트가 7262로 동일하게 측정되었습니다.",
+    "must_have": ["am_wtf", "com.android.phone", "7262회", "7262개"],
+    "evidence_should_include": ["7262회", "7262개", "com.android.phone"],
+    "must_not_claim": ["am_wtf 이력 없음", "누수 개수 확인 불가", "타 프로세스 언급"],
+    "trap_type": "fact_retrieval",
+    "severity": "high"
+  },
+  {
+    "test_id": "TC-023",
+    "category": "Root_Cause_Correlation",
+    "target_log_file": "log_for_evaluation/binder_leak_am_kill.txt",
+    "query": "com.android.phone 앱에서 발생한 am_wtf 대량 발생과 am_kill 강제 종료, 그리고 바인더 프록시 누수(IIntentReceiver 7262개) 현상이 서로 연관이 있는 거야? 개발자가 뭘 고쳐야 하는지 가이드해 줘.",
+    "ground_truth": "세 가지 현상은 모두 명확한 인과관계로 연결되어 있습니다. 개발자가 IIntentReceiver(동적 BroadcastReceiver)를 등록(register)한 후 해제(unregister)하지 않는 메모리 릭(Memory Leak)을 발생시켰습니다. 이로 인해 누수 객체가 7262개까지 쌓이면서 시스템 서버에 엄청난 부하를 주어 am_wtf 이상 징후가 대량으로 찍히게 된 것이며, 최종적으로 단말 시스템을 보호하기 위해 ActivityManager가 'Too many Binders sent to SYSTEM' 사유로 해당 프로세스를 강제 암살(am_kill)한 것입니다. 개발자는 해당 앱의 브로드캐스트 리시버 생명주기(Lifecycle) 해제 로직을 즉시 점검해야 합니다.",
+    "eval_keywords": ["인과관계", "IIntentReceiver", "BroadcastReceiver", "해제 누락", "메모리 릭", "생명주기 점검"],
+    "expected_decision": "BroadcastReceiver 해제 누락이 프록시 누수를 일으켰고, 이것이 am_wtf 폭주와 am_kill을 유발했습니다.",
+    "root_cause": "IIntentReceiver 객체의 unregister 누락에 의한 메모리 릭이 모든 현상의 근본 원인입니다.",
+    "must_have": ["연관되어 있습니다", "IIntentReceiver", "BroadcastReceiver 해제(unregister) 누락", "생명주기 점검 가이드"],
+    "evidence_should_include": ["IIntentReceiver", "am_wtf 대량 발생", "am_kill", "Too many Binders"],
+    "must_not_claim": ["서로 무관함", "단순 일시적 오류", "기지국 문제", "원인 불명"],
+    "trap_type": "root_cause_correlation",
+    "severity": "critical"
   }
 ]

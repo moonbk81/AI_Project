@@ -348,7 +348,25 @@ class RagPayloadBuilder:
         # 🚨 [수정] Binder Warning 최신 로그 우선 처리
         # ==========================================
         if "binder_warnings" in report_data:
-            recent_binders = report_data["binder_warnings"][::-1][:10]
+            recent_binders = report_data["binder_warnings"]
+             # 1. 🚨 바인더 프록시 누수 (히스토그램) - 10개 제한 없이 무조건 DB에 적재!
+            leak_warnings = [bw for bw in binder_warnings if isinstance(bw, dict) and bw.get("type") in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK")]
+            for bw in leak_warnings:
+                max_count = bw.get("max_count", 0)
+                desc = bw.get("desc", bw.get("raw", ""))
+                meta = {
+                    "source_file": os.path.basename(self.input_file),
+                    "log_type": "Binder_Warning",
+                    "time": bw.get("time", "Unknown"),
+                    "type": "BINDER_PROXY_LEAK_SUMMARY"
+                }
+                text_content = f"🚨 심각한 바인더 프록시 객체 누수(Memory Leak) 감지: 최대 {max_count}개의 객체가 해제되지 않고 누적됨. (상세 내역: {desc})"
+                rag_payload.append({"document": text_content, "metadata": meta})
+
+            # 2. 일반 바인더 경고 (최신 10개만 적재)
+            normal_warnings = [bw for bw in binder_warnings if isinstance(bw, dict) and bw.get("type") not in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK")]
+            recent_binders = normal_warnings[::-1][:10]
+
             for bw in recent_binders:
                 if not isinstance(bw, dict):
                     continue

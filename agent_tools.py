@@ -740,11 +740,11 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
         raw_stack = str(c.get("stacktrace", "")).lower()
         is_binder_too_large = "transactiontoolargeexception" in raw_stack
         crash_facts.append({
-            "time": c.get("timestamp"),
+            "time": c.get("timestamp") or c.get("time"), # 💡 am_kill/am_wtf 호환 (time)
             "process": c.get("process"),
-            "type": c.get("crash_type"),
+            "type": c.get("crash_type") or c.get("type"), # 💡 am_kill/am_wtf 호환 (type)
             "binder_transaction_too_large": is_binder_too_large,
-            "exception_reason": c.get("exception_name", "Unknown")
+            "exception_reason": c.get("exception_name") or c.get("top_method", "Unknown") # 💡 호환
         })
 
     native_crash_facts = []
@@ -847,14 +847,13 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
         }
     }, ensure_ascii=False)
 
-
 # ==========================================
 # Binder Warning Analytics
 # ==========================================
 def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -> str:
     """
-    Binder IPC 병목/스레드 고갈/transaction failure 관련 이벤트를 전용으로 추출합니다.
-    Crash/ANR이 0건이어도 Binder_Warning만 존재하는 케이스(TC-020 등)를 RAG가 놓치지 않도록 돕습니다.
+    Binder IPC 상태 및 메모리 누수(Proxy), 그리고 이와 연관된
+    시스템 강제 종료(am_kill, am_wtf) 정보를 종합적으로 반환합니다.
     """
     report_data = _load_report_json(base_name, result_dir)
 
@@ -864,8 +863,13 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
     warning_facts = []
     type_counter = Counter()
     max_wait_ms = None
+    proxy_leaks = [] # 💡 BINDER_PROXY_HISTOGRAM 수집용
 
     for warning in binder_warnings:
+        # 문자열로 들어온 경우 안전하게 파싱
+        if isinstance(warning, str):
+            try: warning = json.loads(warning)
+            except: continue
         if not isinstance(warning, dict):
             continue
 
@@ -875,22 +879,30 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
 
         type_counter[warning_type] += 1
 
-        wait_ms = None
-        wait_match = re.search(r"(\d{2,6})\s*ms", str(raw)) or re.search(r"(\d{2,6})\s*ms", str(desc))
-        if wait_match:
-            try:
-                wait_ms = int(wait_match.group(1))
-                max_wait_ms = wait_ms if max_wait_ms is None else max(max_wait_ms, wait_ms)
-            except ValueError:
-                wait_ms = None
+        # 💡 [신규 추가] 히스토그램 누수 정보 분리 수집
+        if warning_type in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK"):
+            proxy_leaks.append({
+                "time": warning.get("time", "Unknown"),
+                "max_count": warning.get("max_count", 0),
+                "desc": desc
+            })
+        else:
+            wait_ms = None
+            wait_match = re.search(r"(\d{2,6})\s*ms", str(raw)) or re.search(r"(\d{2,6})\s*ms", str(desc))
+            if wait_match:
+                try:
+                    wait_ms = int(wait_match.group(1))
+                    max_wait_ms = wait_ms if max_wait_ms is None else max(max_wait_ms, wait_ms)
+                except ValueError:
+                    wait_ms = None
 
-        warning_facts.append({
-            "time": warning.get("time") or warning.get("timestamp"),
-            "type": warning_type,
-            "desc": desc,
-            "wait_ms": wait_ms,
-            "raw": raw,
-        })
+            warning_facts.append({
+                "time": warning.get("time") or warning.get("timestamp"),
+                "type": warning_type,
+                "desc": desc,
+                "wait_ms": wait_ms,
+                "raw": raw,
+            })
 
     signals = binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {}
     checklist = binder_context_summary.get("checklist", []) if isinstance(binder_context_summary, dict) else []
@@ -910,9 +922,34 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         or "BINDER_TRANSACTION_FAILURE" in str(item.get("raw", ""))
     ]
 
+    # 💡 [신규 추가] System Kill (am_kill) & WTF (am_wtf) 추출
+    crashes = report_data.get("crash_context", [])
+    system_kills = []
+    system_wtfs = []
+
+    for c in crashes:
+        c_type = c.get("type")
+        if c_type == "SYSTEM_KILL":
+            system_kills.append({
+                "time": c.get("time"),
+                "process": c.get("process"),
+                "reason": c.get("top_method"),
+                "raw_trigger": c.get("trigger")
+            })
+        elif c_type in ("SYSTEM_WTF", "SYSTEM_WTF_SUMMARY"):
+            system_wtfs.append({
+                "time": c.get("time"),
+                "process": c.get("process"),
+                "summary": c.get("exception_info") if c_type == "SYSTEM_WTF_SUMMARY" else c.get("trigger")
+            })
+
+    # JSON 응답으로 반환 (LLM이 키워드로 파싱)
     return json.dumps({
-        "status": "OK" if warning_facts or binder_context_summary else "NO_DATA",
+        "status": "OK" if warning_facts or proxy_leaks or system_kills or system_wtfs else "NO_DATA",
         "binder_warning_count": len(warning_facts),
+        "proxy_leak_histograms": proxy_leaks, # 💡 LLM에게 바인더 누수 심각성 전달
+        "system_kills_am_kill": system_kills, # 💡 LLM에게 강제 종료 원인 전달
+        "system_wtfs_am_wtf": system_wtfs,    # 💡 LLM에게 이상징후 대량 발생 전달
         "warning_type_counts": dict(type_counter),
         "thread_exhaustion_count": len(thread_exhaustion_events),
         "binder_transaction_failure_count": len(transaction_failures),

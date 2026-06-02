@@ -80,7 +80,7 @@ routing_map:
     log_types:
       - Battery_Drain_Report
   Crash_ANR:
-    desc: "앱 강제종료, 앱 크래시, ANR, 응답 없음, 응답 없음 팝업, 앱 응답 없음, 폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, 시스템 리부팅, watchdog reset, fatal exception, native crash, 네이티브 크래시, C++ 에러, 톰스톤, tombstone, Fatal signal, SIGSEGV, SIGABRT, RIL 죽음, 통신데몬 죽음, IPC, 병목, bottleneck, 바인더, binder"
+    desc: "앱 강제종료, 앱 크래시, ANR, 응답 없음, 응답 없음 팝업, 앱 응답 없음, 폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, 시스템 리부팅, watchdog reset, fatal exception, native crash, 네이티브 크래시, C++ 에러, 톰스톤, tombstone, Fatal signal, SIGSEGV, SIGABRT, RIL 죽음, 통신데몬 죽음, IPC, 병목, bottleneck, 바인더, binder, am_kill, am_wtf, 프록시 누수, proxy leak, 바인더 누수, 강제 종료"
     tools:
       - get_crash_anr_analytics
       - get_binder_warning_analytics
@@ -215,6 +215,9 @@ prompts:
     5. [교정 모드]: "이것을 근거로 ~결론 내리면 돼?" 형태의 논리 검증 질문에는 주변 에러(예: GET_CELL_INFO_LIST 등)를 끌어오지 말고, 해당 논리의 참/거짓만 핀포인트로 교정하라.
     6. [복합 장애 분석 강제]: 데이터 검색 후 "관련 이력 없음"이라고 단정하기 전에, 반드시 검색된 `log_types` 전체를 순차적으로 훑어라. 특히 모뎀 에러(RILJ_Transaction)와 시스템 에러(Binder_Warning)가 같은 시간대에 발생했다면, 이 둘을 반드시 연관 지어 분석하고 보고하라.
     7. [검색 결과 필터링 금지]: 검색된 결과가 질문의 직접적인 원인(Root Cause)이 아니더라도, 해당 시간대에 발생한 에러(ERROR, FAILURE, WARNING)가 있다면 그것은 '이상 징후'로 간주하고 반드시 답변에 포함하라.
+    8. [단말 강제 종료 분석 규칙 (am_kill)]: 단말 시스템 강제 종료(SYSTEM_KILL / am_kill) 이력이 발견되었다면, 절대 단순 앱 크래시나 사용자 종료로 판단하지 마라. 반드시 동시간대 `Binder_Warning`의 프록시 누수(BINDER_PROXY_HISTOGRAM) 및 이상 징후(am_wtf) 이력과 연관 지어 "바인더 객체 누수에 따른 시스템 리소스 고갈"이 근본 원인인지 교차 검증하고 결과를 보고하라.
+    9. [SystemUI 환각 절대 금지]: 안드로이드 시스템 에러(Crash, am_kill 등)를 분석할 때, 검색된 로그에 명시되지 않은 'SystemUI', '안드로이드 OS 오류', '소프트웨어 충돌' 등의 추상적이고 일반적인 단어로 뭉뚱그려 요약하지 마라.
+    10. [다중 에러 나열 규칙]: 여러 프로세스가 동시에 강제 종료(am_kill)된 로그가 검색되었다면, 임의로 하나만 고르거나 요약하지 말고 "com.android.phone, com.samsung.crane 등 N개의 프로세스가 종료되었습니다"라고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
 
   root_cause_synthesis: |
     - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 에러(ERROR, FAILURE, EXHAUSTION)가 감지되면 시스템은 '불안정' 상태로 판단한다.
@@ -274,17 +277,16 @@ log_guidelines:
       - Process: <프로세스명> 라인에서 이름 추출. '메인 스레드'와 프로세스 혼동 금지.
       - 콜스택 요구 시 Exception 바로 밑 첫 번째 'at ...' 라인 추출.
       - [TMI 억제]: 명확한 Crash/ANR이 없으면 주변 에러 끌어오지 말고 "관련 이력 없음" 단호히 답변.
+      - 🚨 [SYSTEM_KILL (am_kill) 해석]: 일반 크래시가 아닌 시스템 서버에 의한 '강제 암살(am_kill)' 이벤트입니다. 프로세스가 스스로 죽은 것이 아니라 시스템 보호를 위해 제거된 것이므로, 트리거 사유(예: Too many Binders)를 명시하십시오.
+      - 🚨 [SYSTEM_WTF (am_wtf) 해석]: 시스
+      - 🚨 [am_kill의 근본 원인 추적]: 시스템 강제 종료(SYSTEM_KILL)가 검색되었다면, 그 자체로 결론 내리지 마라. 강제 종료 사유(예: Too many Binders sent to SYSTEM)를 확인하고, 반드시 **get_binder_warning_analytics 도구를 함께 호출**하여 동시간대 바인더 프록시 누수(BINDER_PROXY_LEAK)가 원인인지 교차 검증하라.
 
     Binder_Warning: |
       - TRANSACTION_DELAY (1000ms 이상 지연): 동시간대 ANR, Watchdog, 사망 여부 결합 분석.
       - THREAD_EXHAUSTION: Binder thread pool 포화(Starvation). ANR/Freezing 원인으로 지목하되 선행 transaction 확인.
-      - 🚨 [BINDER_PROXY_LEAK 감지 시 최우선 규칙]: BINDER_PROXY_LEAK이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver, IWindowSession 등)를 확인하고, 해당 인터페이스의 "콜백(Callback)이나 리스너(Listener)가 등록(Register)만 되고 해제(Unregister)되지 않은 메모리 릭(Memory Leak)"을 시스템 다운(am_kill)의 근본 원인(Root Cause)으로 지목하라.
-        * 맞춤형 가이드 제공:
-          - 만약 누수 객체가 'IIntentReceiver'라면 "동적 BroadcastReceiver 해제(unregister) 누락"을 원인으로 지목하라.
-          - 만약 'IWindowSession'이라면 "WindowManager에서 View 제거(removeView) 누락"을 원인으로 지목하라.
-          - 만약 'ITelephonyRegistry' 관련이라면 "PhoneStateListener 해제 누락"을 원인으로 지목하라.
-          - 그 외의 객체라면, 해당 객체를 사용하는 앱 컴포넌트의 생명주기(Lifecycle) 해제 로직을 점검하라고 가이드하라.
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
+      - 🚨 [BINDER_PROXY_HISTOGRAM / LEAK 감지 시 최우선 규칙]: 바인더 프록시 객체가 수천 개 단위로 누수된 히스토그램이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver 등)를 확인하고 "해당 인터페이스의 등록(Register) 후 해제(Unregister) 누락에 의한 메모리 릭"을 시스템 마비 및 am_kill의 근본 원인(Root Cause)으로 지목하라.
+        * 맞춤형 가이드: 누수 객체가 'IIntentReceiver'라면 반드시 "동적 BroadcastReceiver 해제(unregister) 누락"을 원인으로 지목하고 앱의 생명주기 로직을 점검하라고 가이드하라.
 
     RILJ_Transaction: |
       - TIMEOUT: 모뎀 칩셋 Freeze 치명 상태. 통화/데이터 실패 근본 원인 100% 확정.
