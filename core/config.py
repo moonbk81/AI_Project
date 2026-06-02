@@ -40,10 +40,10 @@ MODEL_CONFIG = {
         "stop": ["<unused", "<|im_end|>", "<eos>"]
     },
     "batiai/gemma4-e2b:q4": {
-        "num_ctx": 16384,
-        "num_predict": 2048,
-        "temperature": 0.1,
-        "repeat_penalty": 1.15,
+        "num_ctx": 8192,
+        "num_predict": 1024,
+        "temperature": 0.0,
+        "repeat_penalty": 1.25,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
     },
     "gemma3:12b": {
@@ -54,9 +54,9 @@ MODEL_CONFIG = {
         "stop": ["<unused", "<|im_end|>", "<eos>"]
     },
     "gemma3:4b": {
-        "num_ctx": 32768,       # 회사 PC 8GB VRAM 최적화 크기
+        "num_ctx": 8192,       # 회사 PC 8GB VRAM 최적화 크기
         "num_predict": 2048,
-        "temperature": 0.1,
+        "temperature": 0.0,
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
     },

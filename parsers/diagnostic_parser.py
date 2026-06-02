@@ -278,6 +278,10 @@ class CrashParser(BaseParser):
             if "am_wtf" in clean_line:
                 match = re.search(r'am_wtf\s*:\s*\[\d+,\d+,([^,]+),', clean_line)
                 process = match.group(1) if match else "Unknown"
+                from_match = re.search(r'from\s+(?:\d+:)?([a-zA-Z0-9\._]+)', clean_line)
+                if from_match:
+                    process = from_match.group(1)
+
                 crashes.append({
                     "time": ts,
                     "type": "SYSTEM_WTF",

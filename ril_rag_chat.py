@@ -62,7 +62,7 @@ class RilRagChat:
         # 3. LLM 로드 (Gemma4-e4b 적용)
         self.llm_model_name = 'gemma4:e4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         if device == "cuda":
-            self.llm_model_name = 'gemma3:4b' #'batiai/gemma4-e2b:q4'
+            self.llm_model_name = 'gemma3:4b'
 
         if model_name is not None:
             self.llm_model_name = model_name

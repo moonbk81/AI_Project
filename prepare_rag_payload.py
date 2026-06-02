@@ -93,6 +93,11 @@ class RagPayloadBuilder:
         if data_dict.get("raw_info"):
             metadata["raw_info"] = data_dict.get("raw_info")
 
+        if data_dict.get("top_method") is not None:
+            metadata["top_method"] = data_dict.get("top_method")
+        if data_dict.get("exception_info") is not None:
+            metadata["exception_info"] = data_dict.get("exception_info")
+
         return metadata
 
     def build_payload(self, output_filename=None):
@@ -348,7 +353,7 @@ class RagPayloadBuilder:
         # 🚨 [수정] Binder Warning 최신 로그 우선 처리
         # ==========================================
         if "binder_warnings" in report_data:
-            recent_binders = report_data["binder_warnings"]
+            binder_warnings = report_data["binder_warnings"] or []
              # 1. 🚨 바인더 프록시 누수 (히스토그램) - 10개 제한 없이 무조건 DB에 적재!
             leak_warnings = [bw for bw in binder_warnings if isinstance(bw, dict) and bw.get("type") in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK")]
             for bw in leak_warnings:

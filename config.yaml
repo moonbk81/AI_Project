@@ -280,6 +280,7 @@ log_guidelines:
       - 🚨 [SYSTEM_KILL (am_kill) 해석]: 일반 크래시가 아닌 시스템 서버에 의한 '강제 암살(am_kill)' 이벤트입니다. 프로세스가 스스로 죽은 것이 아니라 시스템 보호를 위해 제거된 것이므로, 트리거 사유(예: Too many Binders)를 명시하십시오.
       - 🚨 [SYSTEM_WTF (am_wtf) 해석]: 시스
       - 🚨 [am_kill의 근본 원인 추적]: 시스템 강제 종료(SYSTEM_KILL)가 검색되었다면, 그 자체로 결론 내리지 마라. 강제 종료 사유(예: Too many Binders sent to SYSTEM)를 확인하고, 반드시 **get_binder_warning_analytics 도구를 함께 호출**하여 동시간대 바인더 프록시 누수(BINDER_PROXY_LEAK)가 원인인지 교차 검증하라.
+      - 🚨 [문구 인용 규칙]: 시스템 강제 종료(SYSTEM_KILL) 분석 시, ActivityManager가 출력한 강제 종료 사유 문구(예: 'Too many Binders sent to SYSTEM')를 생략하거나 요약하지 말고 **반드시 따옴표를 사용하여 원문 그대로 답변에 포함하라.**
 
     Binder_Warning: |
       - TRANSACTION_DELAY (1000ms 이상 지연): 동시간대 ANR, Watchdog, 사망 여부 결합 분석.
@@ -287,6 +288,7 @@ log_guidelines:
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
       - 🚨 [BINDER_PROXY_HISTOGRAM / LEAK 감지 시 최우선 규칙]: 바인더 프록시 객체가 수천 개 단위로 누수된 히스토그램이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver 등)를 확인하고 "해당 인터페이스의 등록(Register) 후 해제(Unregister) 누락에 의한 메모리 릭"을 시스템 마비 및 am_kill의 근본 원인(Root Cause)으로 지목하라.
         * 맞춤형 가이드: 누수 객체가 'IIntentReceiver'라면 반드시 "동적 BroadcastReceiver 해제(unregister) 누락"을 원인으로 지목하고 앱의 생명주기 로직을 점검하라고 가이드하라.
+      - 🚨 [데이터 참조 우선순위]: 'am_wtf' 로그의 발생 횟수보다 'BINDER_PROXY_HISTOGRAM'에서 추출된 'max_count' 값을 장애의 규모를 나타내는 가장 정확한 팩트로 간주하라. am_wtf는 현상이고 max_count 가 누수의 실체이다.
 
     RILJ_Transaction: |
       - TIMEOUT: 모뎀 칩셋 Freeze 치명 상태. 통화/데이터 실패 근본 원인 100% 확정.
