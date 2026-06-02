@@ -60,6 +60,46 @@ def generate_unique_key(prefix, data_string):
     hash_obj = hashlib.md5(data_string.encode('utf-8')).hexdigest()[:8]
     return f"{prefix}_{hash_obj}"
 
+
+# Helper function: batch get all metadatas from collection to avoid SQLite 'too many SQL variables' error
+def get_collection_metadatas_batched(collection, batch_size=500, where=None):
+    """ChromaDB 전체 metadata 조회를 batch 단위로 수행한다.
+    collection.get(include=["metadatas"])를 한 번에 호출하면 문서 수가 많을 때
+    SQLite 'too many SQL variables' 오류가 발생할 수 있다.
+    """
+    all_metadatas = []
+    all_ids = []
+    offset = 0
+
+    while True:
+        kwargs = {
+            "include": ["metadatas"],
+            "limit": batch_size,
+            "offset": offset,
+        }
+        if where:
+            kwargs["where"] = where
+
+        batch = collection.get(**kwargs)
+        batch_metas = batch.get("metadatas", []) if batch else []
+        batch_ids = batch.get("ids", []) if batch else []
+
+        if not batch_metas:
+            break
+
+        all_metadatas.extend(batch_metas)
+        all_ids.extend(batch_ids)
+
+        if len(batch_metas) < batch_size:
+            break
+
+        offset += batch_size
+
+    return {
+        "metadatas": all_metadatas,
+        "ids": all_ids,
+    }
+
 warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="RIL RAG Dashboard", layout="wide")
@@ -501,7 +541,11 @@ with tab_dash:
     st.header("전사 로그 통계 대시보드")
     st.markdown("데이터베이스에 축적된 로그 데이터의 통계와 지식 베이스를 확인합니다.")
 
-    all_data = engine.collection.get(include=["metadatas"])
+    try:
+        all_data = get_collection_metadatas_batched(engine.collection, batch_size=500)
+    except Exception as e:
+        st.error(f"Vector DB metadata 조회 중 오류가 발생했습니다: {e}")
+        all_data = {"metadatas": [], "ids": []}
     if not all_data or not all_data.get("metadatas") or len(all_data["metadatas"]) == 0:
         st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드해 주십시오.")
     else:
@@ -725,7 +769,11 @@ function copyReport() {{
 </script>
 """, unsafe_allow_html=True)
 
-                            all_db_data = engine.collection.get(where={"source_file": actual_file_name})
+                            all_db_data = get_collection_metadatas_batched(
+                                engine.collection,
+                                batch_size=500,
+                                where={"source_file": actual_file_name}
+                            )
                             if all_db_data and all_db_data.get('ids'):
                                 st.session_state.last_ids = all_db_data['ids']
                                 st.session_state.last_metas = all_db_data['metadatas']
