@@ -90,6 +90,7 @@ routing_map:
       - Native_Crash_Event
       - Binder_Warning
       - Device_Property_State
+      - RCA_Event
   Radio_Power:
     desc: "모뎀 전원 꺼짐, 비행기 모드, 비행기 모드 전환, 비행기 모드 해제, 비행기 모드 ON, 비행기 모드 OFF, 비행기 모드 이후 네트워크 안됨, 비행기 모드 해제 후 데이터 안됨, 비행기 모드 해제 후 망 복구 실패, airplane mode, airplane mode off, radio power, radio power on, radio power off, modem power off, 전원 제어, 위성 모뎀 끄기, Power OFF"
     tools:
@@ -302,6 +303,11 @@ log_guidelines:
     Device_Property_State: |
       - 1. [과거 원인 단정 금지]: airplane_mode_on: 1, radiostate: 0 은 '로그 추출 시점' 스냅샷일 뿐임. 과거 장애를 해당 프로퍼티로 덮어씌우지 마라.
       - 2. [논리 교정 및 실제 교차검증 수행]: 과거 장애 원인을 묻는 질문 시, 단순히 "교차 검증이 필요하다"라고 변명하며 답변을 회피하지 마라! 반드시 "해당 값은 로그 추출 시점의 상태일 뿐이므로 단정 지을 수 없다"고 교정한 뒤, 제공된 `Radio_Power_Event`(전원 차단 시점)와 `Call_Session`(통화 종료 시점 및 원인) 로그의 타임스탬프를 실제로 비교 분석하여 선후 관계와 진짜 원인을 명확히 설명하라.
+
+    RCA_Event: |
+      - RCA_Event는 여러 Raw Event를 결합한 상위 원인 분석 결과이다.
+      - 동일 시간대 Raw Event와 충돌하지 않는 한, Root Cause 판단 시 RCA_Event를 최우선 근거로 사용한다.
+      - BINDER_PROXY_LEAK_RCA는 am_kill, Too many Binders sent to SYSTEM, Binder Proxy Histogram을 결합한 분석 결과이다.
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿
 # ==========================================
