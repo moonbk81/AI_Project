@@ -343,5 +343,20 @@
     "must_not_claim": ["서로 무관함", "단순 일시적 오류", "기지국 문제", "원인 불명"],
     "trap_type": "root_cause_correlation",
     "severity": "critical"
+  },
+  {
+    "test_id": "TC-024",
+    "category": "Negative_Binder_Leak_Check",
+    "target_log_file": "log_for_evaluation/ps_call_504_unavailable.log",
+    "query": "이 로그에서 Binder proxy leak이나 Too many Binders sent to SYSTEM 때문에 프로세스가 am_kill로 강제 종료된 흔적이 있나요? Binder Proxy Histogram이나 BINDER_PROXY_LEAK_RCA가 없으면 없다고 명확히 답해줘.",
+    "ground_truth": "해당 로그에서는 Binder proxy leak으로 판단할 근거가 없습니다. Binder Proxy Histogram이나 BINDER_PROXY_LEAK_RCA가 확인되지 않으며, 'Too many Binders sent to SYSTEM' 사유의 am_kill 강제 종료 이력도 확인되지 않습니다. 따라서 Binder proxy leak에 의한 시스템 리소스 고갈 또는 프로세스 강제 종료로 판단해서는 안 됩니다.",
+    "eval_keywords": ["Binder proxy leak", "확인되지 않", "Too many Binders sent to SYSTEM", "am_kill", "없음"],
+    "expected_decision": "Binder proxy leak 또는 Too many Binders sent to SYSTEM에 의한 am_kill 강제 종료 흔적은 확인되지 않습니다.",
+    "root_cause": "해당 로그에서는 Binder Proxy Histogram, BINDER_PROXY_LEAK_RCA, Too many Binders sent to SYSTEM 사유의 am_kill 이벤트가 확인되지 않습니다.",
+    "must_have": ["Binder proxy leak 확인되지 않음", "Too many Binders sent to SYSTEM 없음", "am_kill 강제 종료 근거 없음"],
+    "evidence_should_include": ["Binder Proxy Histogram 없음", "BINDER_PROXY_LEAK_RCA 없음", "Too many Binders sent to SYSTEM 없음"],
+    "must_not_claim": ["Binder proxy leak 발생", "BINDER_PROXY_LEAK_RCA 확인", "Too many Binders sent to SYSTEM 발생", "am_kill 강제 종료"],
+    "trap_type": "negative_binder_leak_absence_check",
+    "severity": "high"
   }
 ]
