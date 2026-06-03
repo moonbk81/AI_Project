@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import datetime
 
 def render_call_history_summary(df):
     """전체 통화 세션 (Call History) 차트 및 표 렌더링"""
