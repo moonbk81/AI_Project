@@ -4,27 +4,68 @@
 Android RIL(Radio Interface Layer) 및 Telephony 시스템 로그를 원클릭으로 파싱하고, 대형 언어 모델(LLM)과 RAG(Retrieval-Augmented Generation) 기술을 활용해 통신 장애 원인을 수석 엔지니어 수준으로 분석해 주는 자동화 대시보드 시스템입니다.
 
 ## ✨ 주요 기능 (Key Features)
-* **LLM 기반 RAG 챗봇 (`ril_rag_chat.py`)**: 의미 기반(Semantic) 및 하이브리드 라우팅을 통해 사용자 질문의 의도를 파악하고, Vector DB(Chroma)에서 연관 로그를 검색하여 정확한 원인 분석 리포트를 제공합니다.
-* **통합 로그 오케스트레이션 (`log_orchestrator.py`)**: 방대한 단말 로그를 효율적으로 스플릿하고, CS Call(통화 절단), 망 이탈(OOS), Crash/ANR, Binder 지연 등 핵심 이벤트의 시간적 상관관계를 분석하는 파이프라인입니다.
-* **대화형 시각화 대시보드 (`ui_components.py`)**: Streamlit과 Plotly를 활용하여 데이터 사용량, 무선 신호(RSRP) 타임라인, 발열 및 배터리 드레인, CPU 점유율 등을 직관적인 차트로 렌더링합니다.
-* **Fact 기반 팩트 추출 (`agent_tools.py`)**: LLM의 환각(Hallucination) 현상을 막기 위해, 파싱된 로그에서 100% 확실한 시스템 KPI(Health Indicator)와 장애 팩트만 추출하여 AI의 프롬프트에 강제 주입합니다.
+* **LLM 기반 RAG 챗봇 (`ril_rag_chat.py`)**: Semantic / Hybrid Routing 기반으로 사용자 질의를 분석하고 Vector DB에서 관련 로그를 검색하여 장애 원인 및 RCA(Root Cause Analysis)를 수행합니다.
+* **통합 로그 오케스트레이션 (`log_orchestrator.py`)**: 대용량 Android 로그를 분류·정규화하고 Call, OOS, Crash, ANR, Binder, Internet Stall 등 주요 이벤트를 추출합니다.
+* **Fact 기반 분석 (`agent_tools.py`)**: LLM 환각(Hallucination)을 최소화하기 위해 실제 로그 기반 KPI와 장애 팩트를 강제 주입합니다.
+* **RCA(Event) 분석 레이어**: Binder, Internet Stall, Telephony 이벤트에 대해 원인 후보를 구조적으로 분석하고 AI 응답 품질을 향상시킵니다.
+* **Knowledge Base 기능**: 과거 장애 분석 결과 및 해결 사례를 저장하고 향후 분석 시 RAG 기반 참고 자료로 활용합니다.
+* **대화형 시각화 대시보드**: Streamlit + Plotly 기반으로 통화 이력, 신호 레벨, 배터리, 데이터 사용량, DNS 지연, 발열 등을 시각화합니다.
+
+* **NTN(위성 통신) 분석**: Tiantong 및 SpaceX 기반 NTN 로그를 분석하고 위성망 상태를 진단합니다.
+
+## 🎯 지원 분석 영역 (Supported Analysis Domains)
+
+* Call Drop / Call Fail
+* IMS / SIP Signaling 분석
+* OOS (Out Of Service) 및 망 등록 이슈
+* Internet Stall / Data Stall
+* DNS Latency 및 DNS Failure
+* Binder Warning / Binder Leak 분석
+* ANR (Application Not Responding)
+* Native / Java Crash 분석
+* Battery Thermal / Battery Drain
+* NTN (Tiantong / SpaceX) 위성 통신
+
+## 📊 RAG 평가 체계 (RAG Evaluation)
+
+* Golden Set 기반 정량 평가
+* LLM-as-a-Judge 기반 응답 품질 평가
+* Semantic / Hybrid Routing 성능 비교
+* Retrieval 적합성 및 RCA 정확도 검증
+* Overall Score 기반 품질 추적
+* 신규 Parser 및 RCA Layer 추가 시 회귀 테스트 수행
 
 ## 🏗️ 시스템 아키텍처 및 폴더 구조 (Architecture & Structure)
 
-프로젝트는 크게 **1) 데이터 파이프라인**, **2) RAG/AI 엔진**, **3) UI 대시보드** 세 가지 계층으로 분리되어 있습니다.
-
 ```text
 📦 Android-RIL-RAG-Analyzer
- ┣ 📂 core/                # 시스템 설정 및 프롬프트 (config.yaml 등)
- ┣ 📂 parsers/             # 도메인별 로그 파서 모음 (Telephony, Binder, Crash 등)
- ┣ 📂 payloads/            # Vector DB에 적재될 Chunking 및 메타데이터 JSON
- ┣ 📂 result/              # 파싱이 완료된 중간 결과물 JSON (UI 렌더링용)
- ┣ 📜 web_app.py           # Streamlit 메인 실행 파일 (Entry Point)
- ┣ 📜 ui_components.py     # 대시보드 차트 및 UI 렌더링 모듈
- ┣ 📜 log_orchestrator.py  # 로그 분배 및 파이프라인 병합 컨트롤러
- ┣ 📜 prepare_rag_payload.py # RAG 임베딩을 위한 Document/Metadata 규격화 포장
- ┣ 📜 ril_rag_chat.py      # LLM 통신, Vector DB 검색 및 인텐트 라우팅
- ┗ 📜 agent_tools.py       # 분석 팩트 요약 및 단말 상태(KPI) 도출 헬퍼
+ ┣ 📂 core/
+ ┃ ┗ 시스템 설정 및 프롬프트
+ ┣ 📂 parsers/
+ ┃ ┗ Telephony, Binder, Crash, ANR, Internet Stall 등 도메인별 파서
+ ┣ 📂 app/
+ ┃ ┣ 📜 helpers.py          # 공통 유틸리티
+ ┃ ┣ 📜 pipeline.py         # 로그 분석 및 RAG 적재 파이프라인
+ ┃ ┣ 📜 sidebar.py          # Streamlit Sidebar UI
+ ┃ ┣ 📜 chat_panel.py       # 채팅 UI 렌더링
+ ┃ ┗ 📂 tabs/
+ ┃   ┣ 📜 chat_tab.py
+ ┃   ┣ 📜 dashboard_tab.py
+ ┃   ┣ 📜 boot_tab.py
+ ┃   ┣ 📜 satellite_tab.py
+ ┃   ┣ 📜 internet_tab.py
+ ┃   ┗ 📜 benchmark_tab.py
+ ┣ 📂 payloads/
+ ┃ ┗ Vector DB 적재용 Payload
+ ┣ 📂 result/
+ ┃ ┗ Parser 결과 JSON
+ ┣ 📜 web_app.py            # Streamlit Entry Point
+ ┣ 📜 log_orchestrator.py   # 전체 로그 분석 컨트롤러
+ ┣ 📜 prepare_rag_payload.py # RAG 문서 생성기
+ ┣ 📜 ril_rag_chat.py       # Intent Routing 및 AI 분석 엔진
+ ┣ 📜 agent_tools.py        # KPI 추출 및 Fact 분석 도구
+ ┗ 📜 ui_components.py      # Dashboard Widget 및 Visualization Library
+```
 
 ## 🚀 설치 및 실행 방법
 
