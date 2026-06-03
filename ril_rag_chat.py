@@ -3,42 +3,26 @@ import json
 import glob
 import chromadb
 import torch
-import numpy as np
+
 import re
 import agent_tools
-import ollama
 
 from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
 from rca import StructuredEventRenderer
-
-def _to_chroma_meta_value(value, max_chars=5000):
-    """ChromaDB metadata accepts only scalar/list values, not dict.
-    Convert dict/tuple/set and oversized values to safe strings.
-    """
-    import json
-    if value is None or isinstance(value, (str, int, float, bool)):
-        out = value
-    elif isinstance(value, list):
-        safe_list = []
-        for item in value:
-            if item is None or isinstance(item, (str, int, float, bool)):
-                safe_list.append(item)
-            else:
-                safe_list.append(json.dumps(item, ensure_ascii=False, default=str))
-        out = safe_list
-    else:
-        out = json.dumps(value, ensure_ascii=False, default=str)
-    if isinstance(out, str) and len(out) > max_chars:
-        out = out[:max_chars] + "\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]"
-    return out
-
-def _sanitize_chroma_metadata(meta, max_chars=5000):
-    safe = {}
-    for k, v in (meta or {}).items():
-        safe[str(k)] = _to_chroma_meta_value(v, max_chars=max_chars)
-    return safe
+from rag.chroma_utils import (
+    sanitize_chroma_metadata,
+)
+from rag.routing import extract_json_object, get_hybrid_routing, get_llm_routing, get_semantic_routing
+from rag.llm_client import call_llm
+from rag.retrieval import build_where_filter, retrieve_and_rerank
+from rag.ingest import (
+    ingest_file as ingest_payload_file,
+    get_all_files as get_all_ingested_files,
+    reset_db as reset_collection_db,
+)
+from rag.prompt_builder import build_rag_prompt
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
@@ -134,227 +118,15 @@ class RilRagChat:
             return PROMPTS.get("log_guidelines", {}) if isinstance(PROMPTS, dict) else {}
 
     def _get_semantic_routing(self, query):
-        chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
-        if not chunks:
-            chunks = [query]
-
-        # 1. 시맨틱 스코어 계산 (원래 로직 유지 - top_matches 등 디버깅/로깅용)
-        category_scores = []
-        for category, data in self.routing_map.items():
-            intent_vec = self.embed_model.encode(data["desc"])
-            max_sim = 0.0
-
-            for chunk in chunks:
-                chunk_vec = self.embed_model.encode(chunk)
-                sim = np.dot(chunk_vec, intent_vec) / (
-                    np.linalg.norm(chunk_vec) * np.linalg.norm(intent_vec)
-                )
-                if sim > max_sim:
-                    max_sim = sim
-            category_scores.append((category, float(max_sim), data))
-
-        category_scores.sort(key=lambda x: x[1], reverse=True)
-
-        selected_tools = set()
-        selected_log_types = set()
-        selected_intents = set()
-
-        # 🚨 [핵심 플래그] 명시적 키워드가 매칭되면 시맨틱 결과를 무시하기 위한 잠금장치
-        is_hard_matched = False
-        query_lower = query.lower()
-
-        # ==========================================
-        # 1단계: 하드코딩 키워드 (최우선 순위 - 덮어쓰기)
-        # ==========================================
-        # if를 연달아 쓰지 않고 elif로 묶어, 가장 확실한 하나의 타겟(log_type)만 강제 할당합니다.
-
-        if any(keyword in query_lower for keyword in ["cs call", "cs 통화", "cs 발신", "cs 수신", "cs csfb"]):
-            selected_intents = {"Call_Analysis"}
-            selected_tools = {"get_cs_call_analytics"}  # 👈 PS 분석 도구 제거
-            selected_log_types = {"Call_Session", "RILJ_Transaction"}  # 👈 IMS_SIP_Message 제거
-            is_hard_matched = True
-
-        # 🚨 [신규 추가] PS/VoLTE 질문 시 CS 도구 원천 차단
-        elif any(keyword in query_lower for keyword in ["ps call", "ps 통화", "volte", "ims", "sip", "보이스오버"]):
-            selected_intents = {"Call_Analysis"}
-            selected_tools = {"get_ps_ims_call_analytics"}  # 👈 CS 분석 도구 제거
-            selected_log_types = {"Call_Session", "IMS_SIP_Message", "RILJ_Transaction"}
-            is_hard_matched = True
-
-        if any(keyword in query_lower for keyword in [
-            "anr", "crash/anr", "crash", "크래시", "강제종료", "강제 종료", "앱 죽음", "폰 죽음", "죽었",
-            "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징",
-            "바인더", "binder", "transaction", "am_kill", "am_wtf", "proxy leak", "프록시 누수", "바인더 누수"
-        ]):
-            selected_intents = {"Crash_ANR"}
-            if "Crash_ANR" in self.routing_map:
-                selected_tools = set(self.routing_map["Crash_ANR"].get("tools", []))
-                selected_log_types = set(self.routing_map["Crash_ANR"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["인터넷", "먹통", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network", "setupdatacall"]):
-            selected_intents = {"Internet_Stall"}
-            if "Internet_Stall" in self.routing_map:
-                selected_tools = set(self.routing_map["Internet_Stall"].get("tools", []))
-                selected_log_types = set(self.routing_map["Internet_Stall"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["send_sms", "문자", "sms"]):
-            # SMS 같은 RIL 명령어 명시 (RILJ_Transaction만 보도록 하드 록)
-            selected_intents = {"RILJ_Request_Failed"}
-            if "RILJ_Request_Failed" in self.routing_map:
-                selected_tools = set(self.routing_map["RILJ_Request_Failed"].get("tools", []))
-                selected_log_types = set(self.routing_map["RILJ_Request_Failed"].get("log_types", []))
-            else:
-                selected_log_types = {"RILJ_Transaction"}
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["비행기 모드", "airplane mode", "flight mode", "radio power", "모뎀 전원", "라디오 파워"]):
-            selected_intents = {"Radio_Power"}
-            if "Radio_Power" in self.routing_map:
-                selected_tools = set(self.routing_map["Radio_Power"].get("tools", []))
-                selected_log_types = set(self.routing_map["Radio_Power"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림"]):
-            selected_intents = {"DNS_Latency"}
-            if "DNS_Latency" in self.routing_map:
-                selected_tools = set(self.routing_map["DNS_Latency"].get("tools", []))
-                selected_log_types = set(self.routing_map["DNS_Latency"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["spacex", "starlink", "ntn", "스페이스엑스"]):
-            selected_intents = {"NTN_SpaceX"}
-            if "NTN_SpaceX" in self.routing_map:
-                selected_tools = set(self.routing_map["NTN_SpaceX"].get("tools", []))
-                selected_log_types = set(self.routing_map["NTN_SpaceX"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
-            selected_intents = {"Tiantong_Satellite"}
-            if "Tiantong_Satellite" in self.routing_map:
-                selected_tools = set(self.routing_map["Tiantong_Satellite"].get("tools", []))
-                selected_log_types = set(self.routing_map["Tiantong_Satellite"].get("log_types", []))
-            is_hard_matched = True
-
-        elif any(keyword in query_lower for keyword in ["nitz", "타임존", "시간대", "시간 변경", "핑퐁"]):
-            selected_intents = {"Nitz_Time_Analysis"}
-            # NITZ는 도구(Tool) 없이 로그(Payload)만으로 분석하므로 tools는 비워둡니다.
-            selected_tools = set()
-            selected_log_types = {"Nitz_Time_Event"}
-            is_hard_matched = True
-
-        # ==========================================
-        # 2단계: 시맨틱 검색 (명시적 키워드가 없을 때만 백업으로 동작)
-        # ==========================================
-        if not is_hard_matched:
-            threshold = 0.52
-            multi_threshold = 0.50
-
-            # 시맨틱 점수가 기준치 미달이면 기본(Fallback) 통신망 세팅
-            if not category_scores or category_scores[0][1] < threshold:
-                selected_intents.add("Fallback_General")
-                selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
-                selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
-            else:
-                top1_cat, top1_score, top1_data = category_scores[0]
-                selected_intents.add(top1_cat)
-                selected_tools.update(top1_data["tools"])
-                selected_log_types.update(top1_data["log_types"])
-
-                # 시맨틱 점수가 높을 때만 멀티 타겟 허용
-                if len(category_scores) > 1 and category_scores[1][1] >= multi_threshold:
-                    top2_cat, top2_score, top2_data = category_scores[1]
-                    selected_intents.add(top2_cat)
-                    selected_tools.update(top2_data["tools"])
-                    selected_log_types.update(top2_data["log_types"])
-
-        # ==========================================
-        # 1.5단계: Root Cause/시간순 비교형 질문 보강
-        # ==========================================
-        # TC-016 계열: OOS 원인 비교 질문은 OOS 후보만 보지 말고 Native Crash(rild/SIGSEGV)를 함께 봐야 함.
-        if (
-            any(keyword in query_lower for keyword in ["oos", "망 이탈", "통신이 멈", "통신 멈춤", "음영", "기지국"])
-            and any(keyword in query_lower for keyword in ["rild", "native crash", "sigsegv", "단말 내부", "root cause", "원인"])
-        ):
-            selected_intents.update(["Crash_ANR", "Network_OOS"])
-            selected_tools.update(["get_crash_anr_analytics", "get_network_oos_analytics"])
-            selected_log_types.update(["OOS_Event", "Native_Crash_Event", "RILJ_Transaction"])
-
-        # TC-019 계열: 비행기 모드 현재값만으로 과거 통화 원인을 확정하지 않도록,
-        # Call_Session + Radio_Power_Event + OOS_Event + Device_Property_State를 같이 검색한다.
-        if (
-            any(keyword in query_lower for keyword in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])
-            and any(keyword in query_lower for keyword in ["통화", "call", "call_session", "종료", "끊", "시간순", "12:", "code_user_terminated"])
-        ):
-            selected_intents.update(["Radio_Power", "Call_Analysis", "Network_OOS"])
-            selected_tools.update(["get_radio_power_analytics", "get_ps_ims_call_analytics", "get_network_oos_analytics"])
-            selected_log_types.update(["Device_Property_State", "Call_Session", "Radio_Power_Event", "OOS_Event", "IMS_SIP_Message"])
-
-        # 마지막으로 RIL/명령어 관련 모호한 키워드가 섞여 있으면 RILJ만 살짝 얹어줌
-        if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
-            selected_log_types.add("RILJ_Transaction")
-
-        # 시맨틱이 돌았는데도 비어있는 에지 케이스 방어
-        if not selected_tools and not selected_log_types:
-            selected_intents.add("Fallback_General")
-            selected_tools.update(["get_cs_call_analytics", "get_network_oos_analytics", "get_dns_latency_analytics"])
-            selected_log_types.update(["Call_Session", "OOS_Event", "Signal_Level", "Network_Timeline_Stat", "Network_DNS_Issue"])
-
-        routing_scores = {category: float(score) for category, score, _ in category_scores}
-        top_matches = [{"intent": category, "score": float(score)} for category, score, _ in category_scores[:3]]
-
-        return {
-            "intents": sorted(list(selected_intents)),
-            "tools": sorted(list(selected_tools)),
-            "log_types": sorted(list(selected_log_types)),
-            "scores": routing_scores,
-            "top_matches": top_matches
-        }
+        return get_semantic_routing(query, self.routing_map, self.embed_model)
 
     def ingest_file(self, file_path, force=False):
-        if not os.path.exists(file_path):
-            print(f"❌ payload 파일 없음: {file_path}")
-            return
-        filename = os.path.basename(file_path)
-        base_id = os.path.splitext(filename)[0]
-
-        if force:
-            old = self.collection.get(where={"source_file": filename}, include=[])
-            if old and old.get("ids"):
-                self.collection.delete(ids=old["ids"])
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not data:
-            print(f"⚠️ 비어있는 payload: {filename}")
-            return
-
-        MAX_DOC_CHARS = 4000
-        MAX_META_CHARS = 5000
-        BATCH_SIZE = 100
-        import gc
-
-        docs, metas, ids = [], [], []
-        for i, item in enumerate(data):
-            docs.append(str(item["document"])[:MAX_DOC_CHARS])
-            meta = item.get("metadata", {}).copy()
-            meta["source_file"] = filename
-            metas.append(_sanitize_chroma_metadata(meta, max_chars=MAX_META_CHARS))
-            ids.append(f"{base_id}_{i}")
-
-        print(f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
-        for i in range(0, len(docs), BATCH_SIZE):
-            batch_docs = docs[i : i + BATCH_SIZE]
-            batch_metas = metas[i : i + BATCH_SIZE]
-            batch_ids = ids[i : i + BATCH_SIZE]
-            batch_embeddings = self.embed_model.encode(batch_docs, batch_size=16, convert_to_numpy=True, normalize_embeddings=True).tolist()
-            self.collection.add(ids=batch_ids, documents=batch_docs, metadatas=batch_metas, embeddings=batch_embeddings)
-            del batch_embeddings
-            gc.collect()
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
-            elif torch.backends.mps.is_available(): torch.mps.empty_cache()
-        print(f"{filename} 단일 파일 재적재 완료: {len(docs)} docs")
+        return ingest_payload_file(
+            collection=self.collection,
+            embed_model=self.embed_model,
+            file_path=file_path,
+            force=force,
+        )
 
     def ingest_folder(self, folder_path="./payloads"):
         if not os.path.exists(folder_path):
@@ -395,7 +167,7 @@ class RilRagChat:
                 safe_documents.append(str(doc)[:MAX_DOC_CHARS])
                 safe_meta = meta.copy() if meta else {}
                 safe_meta['source_file'] = filename
-                safe_metadatas.append(_sanitize_chroma_metadata(safe_meta, max_chars=MAX_META_CHARS))
+                safe_metadatas.append(sanitize_chroma_metadata(safe_meta, max_chars=MAX_META_CHARS))
 
             ids = [f"{base_id}_{i}" for i in range(len(data))]
             print(f"'{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
@@ -519,131 +291,19 @@ class RilRagChat:
             sanitized_kpi = self._clean_log_payload(health_kpi)
             tool_facts = f"=== [단말 전반 KPI 상태] ===\n{sanitized_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
-        conditions = []
-        if current_file: conditions.append({"source_file": current_file})
-        if target_log_types:
-            if len(target_log_types) == 1: conditions.append({"log_type": target_log_types[0]})
-            else: conditions.append({"log_type": {"$in": target_log_types}})
-
-        where_filter = None
-        if len(conditions) == 1: where_filter = conditions[0]
-        elif len(conditions) > 1: where_filter = {"$and": conditions}
-
-        query_embedding = self.embed_model.encode(search_query).tolist()
-        # 최종 Top K개만 가져오는게 아니라, 1차로 넉넉히(top_k * 3) 가져옵니다.
-        fetch_k = top_k * 3
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=fetch_k,
-            where=where_filter
+        where_filter = build_where_filter(
+            current_file=current_file,
+            target_log_types=target_log_types,
         )
 
-        if results and results.get('documents') and results['documents'][0]:
-            docs = results['documents'][0]
-            metas = results['metadatas'][0]
-            ids = results['ids'][0]
-            distances = results['distances'][0] if 'distances' in results and results['distances'] else [0]*len(docs)
-
-            # 1. 쿼리에서 핵심 키워드(영어, 숫자 등) 추출
-            query_keywords = set(re.findall(r'[a-zA-Z0-9]+', search_query.lower()))
-
-            reranked_results = []
-            for doc, meta, doc_id, dist in zip(docs, metas, ids, distances):
-                doc_lower = doc.lower()
-                meta_text = json.dumps(meta or {}, ensure_ascii=False, default=str).lower()
-                combined_text = f"{doc_lower}\n{meta_text}"
-
-                # 2. 키워드 일치도 계산 (Keyword Score)
-                match_count = sum(1 for kw in query_keywords if kw in combined_text)
-                keyword_score = match_count / max(1, len(query_keywords))
-
-                # 3. Vector Distance(낮을수록 좋음)를 Score로 변환
-                # 거리가 0에 가까울수록 점수가 1에 가까워지도록 정규화
-                vector_score = 1.0 / (1.0 + dist)
-
-                # 4. Hybrid Score 계산 (키워드 매칭에 강한 가중치 부여)
-                hybrid_score = (vector_score * 0.4) + (keyword_score * 0.6)
-
-                log_type = str((meta or {}).get("log_type", ""))
-                query_lower_for_rank = search_query.lower()
-
-                rca_type = str((meta or {}).get("rca_type", ""))
-
-                # RCA_Event는 여러 Raw Event를 결합한 상위 원인 분석 결과이므로,
-                # root cause/강제 종료/죽음/누수 계열 질문에서는 Crash_Event보다 우선 노출한다.
-                if log_type == "RCA_Event":
-                    if any(k in query_lower_for_rank for k in [
-                        "root cause", "근본 원인", "원인", "왜", "죽", "강제 종료", "강제종료",
-                        "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
-                        "프록시", "proxy", "누수", "leak"
-                    ]):
-                        hybrid_score += 0.60
-
-                    if rca_type == "BINDER_PROXY_LEAK_RCA" and any(k in query_lower_for_rank for k in [
-                        "binder", "바인더", "proxy", "프록시", "누수", "leak", "am_kill",
-                        "too many binders", "강제 종료", "강제종료", "죽"
-                    ]):
-                        hybrid_score += 0.45
-
-                # TC-016 계열 boost: OOS 원인 비교 시 Native_Crash_Event(rild/SIGSEGV)와 OOS_Event를 우선 노출
-                if (
-                    any(k in query_lower_for_rank for k in ["oos", "망 이탈", "음영", "기지국", "통신 멈"])
-                    and any(k in query_lower_for_rank for k in ["rild", "native crash", "sigsegv", "단말 내부", "root cause", "원인"])
-                ):
-                    if log_type == "Native_Crash_Event":
-                        hybrid_score += 0.45
-                    elif log_type == "OOS_Event":
-                        hybrid_score += 0.25
-                    if "rild" in combined_text:
-                        hybrid_score += 0.15
-                    if "sigsegv" in combined_text or "native_crash" in combined_text or "native crash" in combined_text:
-                        hybrid_score += 0.15
-
-                # TC-019 계열 boost: 비행기 모드/통화 시간순 비교 시 Call_Session, Radio_Power_Event, OOS_Event 우선 노출
-                if (
-                    any(k in query_lower_for_rank for k in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])
-                    and any(k in query_lower_for_rank for k in ["통화", "call", "call_session", "종료", "끊", "시간순", "12:", "code_user_terminated"])
-                ):
-                    if log_type == "Call_Session":
-                        hybrid_score += 0.50
-                    elif log_type == "Radio_Power_Event":
-                        hybrid_score += 0.35
-                    elif log_type == "OOS_Event":
-                        hybrid_score += 0.35
-                    elif log_type == "Device_Property_State":
-                        hybrid_score += 0.10
-                    elif log_type == "RILJ_Transaction":
-                        hybrid_score -= 0.20
-                    if "code_user_terminated" in combined_text:
-                        hybrid_score += 0.30
-                    if "12:08:10" in combined_text or "12:08:09" in combined_text:
-                        hybrid_score += 0.15
-                    if "airplane_mode" in combined_text:
-                        hybrid_score += 0.05
-
-                reranked_results.append({
-                    "doc": doc, "meta": meta, "id": doc_id, "score": hybrid_score
-                })
-
-            # 5. Hybrid Score 기준으로 내림차순 정렬 후 최종 Top K개 컷
-            reranked_results.sort(key=lambda x: x["score"], reverse=True)
-            final_top_results = reranked_results[:top_k]
-
-            # RCA_Event가 fetch 결과에 존재하는데 top_k 밖으로 밀린 경우를 방지한다.
-            # Root Cause/강제 종료/누수 계열 질문에서는 RCA 문서를 최소 1개 강제로 포함한다.
-            if any(k in query_lower_for_rank for k in [
-                "root cause", "근본 원인", "원인", "죽", "강제 종료", "강제종료",
-                "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
-                "프록시", "proxy", "누수", "leak"
-            ]):
-                rca_candidates = [r for r in reranked_results if (r.get("meta") or {}).get("log_type") == "RCA_Event"]
-                if rca_candidates and not any((r.get("meta") or {}).get("log_type") == "RCA_Event" for r in final_top_results):
-                    final_top_results = [rca_candidates[0]] + final_top_results[:max(0, top_k - 1)]
-
-            # 결과를 다시 기존 results 포맷으로 덮어씌움
-            results['documents'] = [[r["doc"] for r in final_top_results]]
-            results['metadatas'] = [[r["meta"] for r in final_top_results]]
-            results['ids'] = [[r["id"] for r in final_top_results]]
+        results = retrieve_and_rerank(
+            collection=self.collection,
+            embed_model=self.embed_model,
+            search_query=search_query,
+            top_k=top_k,
+            current_file=current_file,
+            target_log_types=target_log_types,
+        )
 
         formatted_logs = self._format_results(results)
 
@@ -669,12 +329,12 @@ class RilRagChat:
                 pass
             return direct_structured_answer, doc_ids, meta_list, ""
 
-        prompt = (
-            f"{self.system_role_prompt}\n\n"
-            f"{domain_guidelines}\n\n"
-            f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n"
-            f"=== [검색된 관련 로그] ===\n{formatted_logs}\n\n"
-            f"사용자 질문: {user_query}"
+        prompt = build_rag_prompt(
+            system_role_prompt=self.system_role_prompt,
+            domain_guidelines=domain_guidelines,
+            tool_facts=tool_facts,
+            formatted_logs=formatted_logs,
+            user_query=user_query,
         )
 
         # DEBUG: 실제 LLM에 전달되는 prompt/context 확인용.
@@ -729,51 +389,10 @@ class RilRagChat:
         return answer, doc_ids, meta_list, thinking
 
     def get_all_files(self):
-        """DB에 저장된 파일 목록을 가져올 때 SQLite 한도 초과를 막기 위해 청크 단위로 끊어서 가져옵니다."""
-        files = set()
-        offset = 0
-        limit = 5000  # 한 번에 가져올 안전한 개수
-
-        while True:
-            try:
-                results = self.collection.get(
-                    include=["metadatas"],
-                    limit=limit,
-                    offset=offset
-                )
-
-                # 가져온 데이터가 없으면 루프 종료
-                if not results or not results.get("metadatas") or len(results["metadatas"]) == 0:
-                    break
-
-                for m in results["metadatas"]:
-                    if m and "source_file" in m:
-                        files.add(m["source_file"])
-
-                # 가져온 개수가 limit보다 적으면 마지막 페이지라는 뜻이므로 종료
-                if len(results["metadatas"]) < limit:
-                    break
-
-                offset += limit
-
-            except Exception as e:
-                print(f"파일 목록 조회 중 에러: {e}")
-                break
-
-        return sorted(list(files))
+        return get_all_ingested_files(self.collection)
 
     def reset_db(self):
-        try:
-            results = self.collection.get()
-            if results and results.get("ids"):
-                self.collection.delete(ids=results["ids"])
-                print("[DEBUG] DB 초기화 완료: 기존 데이터 삭제됨")
-            else:
-                print("[DEBUG] DB가 이미 비어있어 삭제를 건너뜁니다.")
-            return True
-        except Exception as e:
-            print(f"[ERROR] DB 초기화 중 오류 발생: {e}")
-            return False
+        return reset_collection_db(self.collection)
 
     def _format_results(self, results) -> str:
         if not results or not results.get('documents') or not results['documents'][0]:
@@ -794,49 +413,12 @@ class RilRagChat:
         return "\n\n".join(formatted)
 
     def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
-        """Ollama API를 호출하고 최종 답변과 생각 과정(Thinking)을 분리하여 반환합니다."""
-        cfg = self.model_config_registry.get(
-            self.llm_model_name,
-            self.model_config_registry.get("default")
-        ).copy()
-
-        if is_bench:
-            cfg["num_ctx"] = 8192
-        is_think = False
-        if self.llm_model_name.startswith("gemma4"): is_think = True
-        try:
-            res = ollama.chat(
-                model=self.llm_model_name,
-                messages=[{'role': 'user', 'content': prompt}],
-                options=cfg,
-                think=is_think
-            )
-
-            raw_content = res['message'].get('content', '').strip()
-            thinking = res['message'].get('reasoning', '')
-            clean_content = raw_content
-
-            if not thinking:
-                think_match = re.search(r'<think>(.*?)</think>', raw_content, flags=re.DOTALL | re.IGNORECASE)
-                if think_match:
-                    thinking = think_match.group(1).strip()
-                    clean_content = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
-                else:
-                    channel_match = re.search(r'<\|channel>thought(.*?)(<channel\|>|<\/|\|>|$)', raw_content, flags=re.DOTALL)
-                    if channel_match:
-                        thinking = channel_match.group(1).strip()
-                        clean_content = re.sub(r'<\|channel>thought.*?<channel\|>', '', raw_content, flags=re.DOTALL).strip()
-
-            if clean_content.startswith('<unused'):
-                clean_content = "분석 결과 생성 중 모델이 일찍 종료되었습니다. (Context 가 부족할 수 있습니다.)"
-
-            if not clean_content and thinking:
-                clean_content = "분석 과정(Thinking)은 완료되었으나, 최종 답변이 비어있습니다. AI의 생각 과정을 참고해주세요."
-
-            return clean_content, thinking
-
-        except Exception as e:
-            return f"LLM 추론 중 에러가 발생했습니다: {str(e)}", ""
+        return call_llm(
+            prompt=prompt,
+            model_name=self.llm_model_name,
+            model_config_registry=self.model_config_registry,
+            is_bench=is_bench,
+        )
 
     def save_knowledge(self, target_ids, feedback, severity="Normal", **kwargs):
         try:
@@ -852,64 +434,10 @@ class RilRagChat:
             return False
 
     def _extract_json_object(self, text: str) -> dict:
-        if not text: raise ValueError("empty LLM routing response")
-        text = text.strip()
-        text = re.sub(r"^```json\s*", "", text)
-        text = re.sub(r"^```\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match: raise ValueError(f"No JSON object found in response: {text[:300]}")
-        return json.loads(match.group(0))
+        return extract_json_object(text)
 
     def _get_llm_routing(self, query: str) -> dict:
-        allowed_tools = set()
-        allowed_log_types = set()
-        allowed_intents = set(self.routing_map.keys())
-
-        for intent, data in self.routing_map.items():
-            allowed_tools.update(data.get("tools", []))
-            allowed_log_types.update(data.get("log_types", []))
-
-        prompt = f"""
-    너는 Android Telephony 로그 분석 라우터다.
-    사용자 질문을 보고 필요한 intent/tools/log_types를 JSON으로만 반환하라.
-    사용 가능한 intent: {sorted(list(allowed_intents))}
-    사용 가능한 tools: {sorted(list(allowed_tools))}
-    사용 가능한 log_types: {sorted(list(allowed_log_types))}
-    반드시 JSON만 출력: {{"intents": [], "tools": [], "log_types": [], "reason": ""}}
-    사용자 질문: {query}
-    """
-        try:
-            res = ollama.chat(
-                model=self.llm_model_name,
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
-                options={"num_ctx": 4096, "temperature": 0.0},
-            )
-            content = res["message"]["content"].strip()
-            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
-
-            parsed = self._extract_json_object(content)
-            return {
-                "intents": sorted(list(set(parsed.get("intents", [])) & allowed_intents)),
-                "tools": sorted(list(set(parsed.get("tools", [])) & allowed_tools)),
-                "log_types": sorted(list(set(parsed.get("log_types", [])) & allowed_log_types)),
-                "reason": parsed.get("reason", ""),
-                "raw": content,
-            }
-        except Exception as e:
-            return {"intents": [], "tools": [], "log_types": [], "reason": f"LLM routing failed: {e}", "raw": content if "content" in locals() else ""}
+        return get_llm_routing(query, self.routing_map, self.llm_model_name)
 
     def _get_hybrid_routing(self, query: str) -> dict:
-        semantic = self._get_semantic_routing(query)
-        llm_route = self._get_llm_routing(query)
-        merged_intents = set(semantic.get("intents", []))
-        merged_tools = set(semantic.get("tools", []))
-        merged_log_types = set(semantic.get("log_types", []))
-        merged_intents.update(llm_route.get("intents", []))
-        merged_tools.update(llm_route.get("tools", []))
-        merged_log_types.update(llm_route.get("log_types", []))
-        return {
-            "intents": sorted(merged_intents), "tools": sorted(merged_tools), "log_types": sorted(merged_log_types),
-            "semantic_routing": semantic, "llm_routing": llm_route, "routing_mode": "hybrid",
-        }
+        return get_hybrid_routing(query, self.routing_map, self.embed_model, self.llm_model_name)

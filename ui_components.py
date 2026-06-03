@@ -1,8 +1,4 @@
 # ui_components.py
-import plotly.graph_objects as go
-import json
-import ast
-
 from ui.network_ui import *
 from ui.crash_ui import *
 from ui.telephony_ui import *

@@ -4,15 +4,12 @@ import plotly.express as px
 import json
 import re
 
-
-
 def _normalize_anr_list(anr_data_list):
     if isinstance(anr_data_list, dict) and anr_data_list:
         return [anr_data_list]
     if isinstance(anr_data_list, list):
         return anr_data_list
     return []
-
 
 def _split_crash_context(original_crashes):
     system_kills = [c for c in original_crashes if isinstance(c, dict) and c.get("type") == "SYSTEM_KILL"]
@@ -22,7 +19,6 @@ def _split_crash_context(original_crashes):
         if isinstance(c, dict) and c.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF")
     ]
     return system_kills, system_wtfs, crash_data
-
 
 def _render_system_kills(system_kills):
     if not system_kills:
@@ -39,7 +35,6 @@ def _render_system_kills(system_kills):
         })
     df_kill = pd.DataFrame(kill_rows)
     st.dataframe(df_kill, use_container_width=True, hide_index=True)
-
 
 def _render_system_wtfs(system_wtfs):
     if not system_wtfs:
@@ -80,7 +75,6 @@ def _render_system_wtfs(system_wtfs):
 
         df_wtf_recent = pd.DataFrame(wtf_rows)
         st.dataframe(df_wtf_recent, use_container_width=True, hide_index=True)
-
 
 def _render_binder_events(report_data, binder_warnings):
     if not binder_warnings:
@@ -125,7 +119,6 @@ def _render_binder_events(report_data, binder_warnings):
                 for item in checklist:
                     st.markdown(f"- {item}")
 
-
 def _render_native_crashes(native_crash_data):
     if not native_crash_data:
         return
@@ -149,7 +142,6 @@ def _render_native_crashes(native_crash_data):
                 st.markdown("**Surrounding Context Log:**")
                 st.code("\n".join(n_crash['cross_context_logs']), language='log')
 
-
 def _render_anr_summary_metrics(analysis_summary):
     if not analysis_summary:
         return
@@ -167,7 +159,6 @@ def _render_anr_summary_metrics(analysis_summary):
     c6.metric("System Server Clue", "Present" if analysis_summary.get('has_system_server_hint') else "None")
     c7.metric("I/O Clue", "Present" if analysis_summary.get('has_io_hint') else "None")
 
-
 def _render_anr_pre_logcat(anr_data):
     pre_anr_logs = anr_data.get('pre_anr_logcat', [])
     if not pre_anr_logs:
@@ -176,7 +167,6 @@ def _render_anr_pre_logcat(anr_data):
     with st.expander("View Pre-ANR Logcat Context", expanded=False):
         st.caption("Logs immediately preceding the ANR detection.")
         st.code("\n".join(pre_anr_logs[-120:]), language='log')
-
 
 def _render_anr_context_analysis(anr_data):
     context_analysis = anr_data.get('context_analysis', {})
@@ -214,7 +204,6 @@ def _render_anr_context_analysis(anr_data):
         else:
             st.info("No I/O clue logs found.")
 
-
 def _render_anr_lock_chain(anr_data):
     lock_chain = anr_data.get('lock_chain', {})
     if not lock_chain or not lock_chain.get('blocker_thread'):
@@ -228,7 +217,6 @@ def _render_anr_lock_chain(anr_data):
     if lock_chain.get('blocker_stack'):
         st.markdown(f"**Occupying Thread (TID: {lock_chain['blocker_thread']}) Callstack:**")
         st.code("\n".join(lock_chain['blocker_stack']), language='java')
-
 
 def _render_anr_binder_transactions(anr_data):
     binder_txs = anr_data.get('active_binder_transactions', [])
@@ -248,7 +236,6 @@ def _render_anr_binder_transactions(anr_data):
         })
     st.dataframe(pd.DataFrame(binder_rows), width="stretch")
 
-
 def _render_anr_main_stack(anr_data):
     main_stack = anr_data.get('main', {}).get('stack', [])
     if not main_stack:
@@ -257,7 +244,6 @@ def _render_anr_main_stack(anr_data):
     st.markdown("**Main Thread Callstack:**")
     with st.expander("View Full Main Thread Stack", expanded=True):
         st.code("\n".join(main_stack), language='java')
-
 
 def _render_anr_events(anr_data_list):
     if not anr_data_list:
@@ -280,7 +266,6 @@ def _render_anr_events(anr_data_list):
             _render_anr_binder_transactions(anr_data)
             _render_anr_main_stack(anr_data)
 
-
 def _render_java_crashes(crash_data):
     if not crash_data:
         return
@@ -302,7 +287,6 @@ def _render_java_crashes(crash_data):
             elif 'raw_line' in crash:
                 st.markdown("**Raw Crash Log:**")
                 st.code(crash['raw_line'], language='log')
-
 
 def render_crash_analyzer(report_data):
     st.subheader("System Crash & FATAL Error Analysis")
