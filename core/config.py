@@ -28,7 +28,7 @@ MODEL_CONFIG = {
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 64,
+        "embed_batch_size": 16,
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
@@ -37,7 +37,7 @@ MODEL_CONFIG = {
     "gemma4:e4b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 64,
+        "embed_batch_size": 32,
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
@@ -46,7 +46,7 @@ MODEL_CONFIG = {
     "batiai/gemma4-e2b:q4": {
         "num_ctx": 8192,
         "num_predict": 1024,
-        "embed_batch_size": 32,
+        "embed_batch_size": 16,
         "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.25,
@@ -55,7 +55,7 @@ MODEL_CONFIG = {
     "gemma3:12b": {
         "num_ctx": 32768,
         "num_predict": 4096,
-        "embed_batch_size": 64,
+        "embed_batch_size": 32,
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
@@ -64,7 +64,7 @@ MODEL_CONFIG = {
     "gemma3:4b": {
         "num_ctx": 8192,       # 회사 PC 8GB VRAM 최적화 크기
         "num_predict": 2048,
-        "embed_batch_size": 32,
+        "embed_batch_size": 16,
         "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.15,
@@ -92,7 +92,7 @@ MODEL_CONFIG = {
     "default": {
         "num_ctx": 16384,
         "num_predict": 2048,
-        "embed_batch_size": 32,
+        "embed_batch_size": 16,
         "add_batch_size": 128,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
