@@ -5,7 +5,21 @@ import chromadb
 import torch
 
 import re
-import agent_tools
+from agent_toolkit import (
+    get_binder_warning_analytics,
+    get_battery_thermal_analytics,
+    get_crash_anr_analytics,
+    get_cs_call_analytics,
+    get_data_stall_and_recovery_analytics,
+    get_dns_latency_analytics,
+    get_internet_stall_analytics,
+    get_network_oos_analytics,
+    get_ntn_spacex_analytics,
+    get_ps_ims_call_analytics,
+    get_radio_power_analytics,
+    get_recent_data_usage_analytics,
+    get_tiantong_satellite_analytics,
+)
 
 from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
@@ -57,19 +71,19 @@ class RilRagChat:
         self._load_config()
 
         self.tool_registry = {
-            "get_cs_call_analytics": agent_tools.get_cs_call_analytics,
-            "get_ps_ims_call_analytics": agent_tools.get_ps_ims_call_analytics,
-            "get_network_oos_analytics": agent_tools.get_network_oos_analytics,
-            "get_dns_latency_analytics": agent_tools.get_dns_latency_analytics,
-            "get_battery_thermal_analytics": getattr(agent_tools, 'get_battery_thermal_analytics', None),
-            "get_crash_anr_analytics": getattr(agent_tools, 'get_crash_anr_analytics', None),
-            "get_radio_power_analytics": getattr(agent_tools, 'get_radio_power_analytics', None),
-            "get_data_stall_and_recovery_analytics": getattr(agent_tools, 'get_data_stall_and_recovery_analytics', None),
-            "get_internet_stall_analytics": getattr(agent_tools, 'get_internet_stall_analytics', None),
-            "get_ntn_spacex_analytics": getattr(agent_tools, 'get_ntn_spacex_analytics', None),
-            "get_tiantong_satellite_analytics": getattr(agent_tools, 'get_tiantong_satellite_analytics', None),
-            "get_recent_data_usage_analytics": getattr(agent_tools, 'get_recent_data_usage_analytics', None),
-            "get_binder_warning_analytics": getattr(agent_tools, 'get_binder_warning_analytics', None)
+            "get_cs_call_analytics": get_cs_call_analytics,
+            "get_ps_ims_call_analytics": get_ps_ims_call_analytics,
+            "get_network_oos_analytics": get_network_oos_analytics,
+            "get_dns_latency_analytics": get_dns_latency_analytics,
+            "get_battery_thermal_analytics": get_battery_thermal_analytics,
+            "get_crash_anr_analytics": get_crash_anr_analytics,
+            "get_radio_power_analytics": get_radio_power_analytics,
+            "get_data_stall_and_recovery_analytics": get_data_stall_and_recovery_analytics,
+            "get_internet_stall_analytics": get_internet_stall_analytics,
+            "get_ntn_spacex_analytics": get_ntn_spacex_analytics,
+            "get_tiantong_satellite_analytics": get_tiantong_satellite_analytics,
+            "get_recent_data_usage_analytics": get_recent_data_usage_analytics,
+            "get_binder_warning_analytics": get_binder_warning_analytics,
         }
 
     def _load_config(self):
