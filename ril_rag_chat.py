@@ -105,6 +105,8 @@ class RilRagChat:
                 "default": {
                     "num_ctx": 16384,
                     "num_predict": 2048,
+                    "embed_batch_size": 32,
+                    "add_batch_size": 128,
                     "temperature": 0.1,
                     "repeat_penalty": 1.15,
                     "stop": ["<eos>"]
@@ -140,6 +142,7 @@ class RilRagChat:
             embed_model=self.embed_model,
             file_path=file_path,
             force=force,
+            model_name=self.llm_model_name
         )
 
     def ingest_folder(self, folder_path="./payloads"):
@@ -186,19 +189,31 @@ class RilRagChat:
             ids = [f"{base_id}_{i}" for i in range(len(data))]
             print(f"'{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
 
-            BATCH_SIZE = 100
             import gc
-            for i in range(0, len(safe_documents), BATCH_SIZE):
-                batch_docs = safe_documents[i:i+BATCH_SIZE]
-                batch_metas = safe_metadatas[i:i+BATCH_SIZE]
-                batch_ids = ids[i:i+BATCH_SIZE]
-                batch_embeddings = self.embed_model.encode(batch_docs, batch_size=16, convert_to_numpy=True).tolist()
-                self.collection.add(embeddings=batch_embeddings, documents=batch_docs, metadatas=batch_metas, ids=batch_ids)
+            model_config = self.model_config_registry.get(self.llm_model_name, self.model_config_registry.get("default", {}))
+            for i in range(0, len(safe_documents), model_config["add_batch_size"]):
+                batch_docs = safe_documents[i:i+model_config["add_batch_size"]]
+                batch_metas = safe_metadatas[i:i+model_config["add_batch_size"]]
+                batch_ids = ids[i:i+model_config["add_batch_size"]]
+                batch_embeddings = self.embed_model.encode(
+                    batch_docs,
+                    batch_size=model_config["embed_batch_size"],
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                ).tolist()
+                self.collection.add(
+                    embeddings=batch_embeddings,
+                    documents=batch_docs,
+                    metadatas=batch_metas,
+                    ids=batch_ids,
+                )
                 del batch_embeddings
-                gc.collect()
-                if torch.cuda.is_available(): torch.cuda.empty_cache()
-                elif torch.backends.mps.is_available(): torch.mps.empty_cache()
 
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available():
+                torch.mps.empty_cache()
             total_docs += len(safe_documents)
             del raw_documents, raw_metadatas, safe_documents, safe_metadatas, ids
             gc.collect()

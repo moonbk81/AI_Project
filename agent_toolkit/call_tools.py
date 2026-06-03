@@ -2,7 +2,8 @@
 
 import json
 
-from agent_toolkit.common import _check_rf_correlation, _load_report_json
+from agent_toolkit.common import _load_report_json
+from agent_toolkit.correlation import _check_rf_correlation
 
 
 def get_cs_call_analytics(base_name: str, result_dir: str = "./result") -> str:

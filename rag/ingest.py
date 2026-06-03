@@ -4,10 +4,11 @@ import gc
 import json
 import os
 
+from core.config import MODEL_CONFIG
+
 from rag.chroma_utils import sanitize_chroma_metadata
 
-
-def ingest_file(collection, embed_model, file_path, force=False):
+def ingest_file(collection, embed_model, file_path, force=False, model_name="default"):
     if not os.path.exists(file_path):
         print(f"❌ payload 파일 없음: {file_path}")
         return
@@ -29,7 +30,11 @@ def ingest_file(collection, embed_model, file_path, force=False):
 
     MAX_DOC_CHARS = 4000
     MAX_META_CHARS = 5000
-    BATCH_SIZE = 100
+
+    model_cfg = MODEL_CONFIG.get(model_name, MODEL_CONFIG["default"])
+
+    EMBED_BATCH_SIZE = int(model_cfg.get("embed_batch_size", 32))
+    ADD_BATCH_SIZE = int(model_cfg.get("add_batch_size", 128))
 
     docs, metas, ids = [], [], []
     for i, item in enumerate(data):
@@ -39,12 +44,19 @@ def ingest_file(collection, embed_model, file_path, force=False):
         metas.append(sanitize_chroma_metadata(meta, max_chars=MAX_META_CHARS))
         ids.append(f"{base_id}_{i}")
 
-    print(f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs)")
-    for i in range(0, len(docs), BATCH_SIZE):
-        batch_docs = docs[i:i+BATCH_SIZE]
-        batch_metas = metas[i:i+BATCH_SIZE]
-        batch_ids = ids[i:i+BATCH_SIZE]
-        embeddings = embed_model.encode(batch_docs).tolist()
+    print(
+        f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs, embed={EMBED_BATCH_SIZE}, add={ADD_BATCH_SIZE})"
+    )
+    for i in range(0, len(docs), ADD_BATCH_SIZE):
+        batch_docs = docs[i:i+ADD_BATCH_SIZE]
+        batch_metas = metas[i:i+ADD_BATCH_SIZE]
+        batch_ids = ids[i:i+ADD_BATCH_SIZE]
+        embeddings = embed_model.encode(
+            batch_docs,
+            batch_size=EMBED_BATCH_SIZE,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        ).tolist()
         collection.add(
             documents=batch_docs,
             embeddings=embeddings,

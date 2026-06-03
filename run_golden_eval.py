@@ -294,7 +294,7 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
 
                 if os.path.exists(payload_path):
                     # RilRagChat의 원천 덮어쓰기 로드 가동
-                    rag_system.ingest_file(payload_path, force=True)
+                    rag_system.ingest_file(payload_path, force=True, model_name=rag_model)
 
                 loaded_files.add(raw_log_path)
             else:

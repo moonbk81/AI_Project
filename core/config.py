@@ -28,6 +28,8 @@ MODEL_CONFIG = {
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
+        "embed_batch_size": 64,
+        "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
@@ -35,6 +37,8 @@ MODEL_CONFIG = {
     "gemma4:e4b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
+        "embed_batch_size": 64,
+        "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
@@ -42,6 +46,8 @@ MODEL_CONFIG = {
     "batiai/gemma4-e2b:q4": {
         "num_ctx": 8192,
         "num_predict": 1024,
+        "embed_batch_size": 32,
+        "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.25,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
@@ -49,6 +55,8 @@ MODEL_CONFIG = {
     "gemma3:12b": {
         "num_ctx": 32768,
         "num_predict": 4096,
+        "embed_batch_size": 64,
+        "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
@@ -56,6 +64,8 @@ MODEL_CONFIG = {
     "gemma3:4b": {
         "num_ctx": 8192,       # 회사 PC 8GB VRAM 최적화 크기
         "num_predict": 2048,
+        "embed_batch_size": 32,
+        "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.15,
         "stop": ["<unused", "<|im_end|>", "<eos>"]
@@ -63,6 +73,8 @@ MODEL_CONFIG = {
     "qwen2.5-coder:7b": {
         "num_ctx": 4096,        # 회사 제한 사양 반영
         "num_predict": 2048,
+        "embed_batch_size": 32,
+        "add_batch_size": 128,
         "temperature": 0.0,     # 코딩/정규식 모델은 0.0에 가까울수록 정확함
         "repeat_penalty": 1.1,
         "stop": ["<|im_end|>", "<|endoftext|>"]
@@ -70,6 +82,8 @@ MODEL_CONFIG = {
     "deepseek-r1:7b": {
         "num_ctx": 32768,
         "num_predict": 8192,
+        "embed_batch_size": 64,
+        "add_batch_size": 256,
         "temperature": 0.6,     # DeepSeek 추론 모델 권장 온도 적용
         "repeat_penalty": 1.1,
         "stop": ["<｜end of sentence｜>", "<｜User｜>", "<｜Assistant｜>"]
@@ -78,6 +92,8 @@ MODEL_CONFIG = {
     "default": {
         "num_ctx": 16384,
         "num_predict": 2048,
+        "embed_batch_size": 32,
+        "add_batch_size": 128,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
         "stop": ["<eos>"]
