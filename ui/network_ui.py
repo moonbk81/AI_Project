@@ -4,6 +4,7 @@ import datetime
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from .common import _load_json, _safe_time_series
 
 def render_dns_analysis_chart(df):
     st.subheader("패키지 기반 DNS 세션 에러 매트릭스")

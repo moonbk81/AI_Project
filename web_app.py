@@ -12,7 +12,8 @@ import warnings
 from core.config import QUICK_PROMPTS, SATELLITE_PROMPTS
 from datetime import datetime
 
-import ui_components as ui
+import ui
+from ui.common import parse_raw_logs
 
 from ril_rag_chat import RilRagChat
 from log_orchestrator import LogOrchestrator
@@ -217,7 +218,7 @@ def render_chat_interface(key_suffix="main", show_input=True):
                         ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
                         if known_solution: ref_text += f"> **분석 기록:** {known_solution}\n\n"
                         raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                        raw_logs = ui.parse_raw_logs(raw_data)
+                        raw_logs = parse_raw_logs(raw_data)
                         if raw_logs:
                             ref_text += "```text\n"
                             for log in raw_logs[:10]: ref_text += f"{log}\n"
@@ -509,7 +510,7 @@ with tab_chat:
                     ref_text += f"### 자료 {i+1} (Time: {meta.get('time', 'N/A')}, Slot: {meta.get('slot', 'N/A')}){solution_badge}\n"
                     if known_solution: ref_text += f"> **분석 기록:** {known_solution}\n\n"
                     raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-                    raw_logs = ui.parse_raw_logs(raw_data)
+                    raw_logs = parse_raw_logs(raw_data)
                     if raw_logs:
                         ref_text += "```text\n"
                         for log in raw_logs[:10]: ref_text += f"{log}\n"
