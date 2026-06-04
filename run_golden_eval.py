@@ -457,15 +457,14 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
 - Ollama에서 평가용 모델을 준비합니다 (예: ollama/qwen2.5-coder:7b).
 - Ollama 서버가 로컬에서 실행 중인지 확인합니다 (기본 http://localhost:11434).
 3) RAG 모델 준비
-- RilRagChat에서 사용할 RAG 모델을 준비합니다 (예: gemma4:e4b).
+- RilRagChat에서 사용할 RAG 모델을 준비합니다 (예: gemma4:12b-mlx).
 - RilRagChat이 해당 모델을 올바르게 로드할 수 있는지 확인합니다.
 4) 실행
 - 터미널에서 다음 명령어로 평가 스크립트를 실행합니다:
 python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e2b
 - 필요에 따라 --dataset, --output, --summary, --ollama-base 등의 인자를 조정할 수 있습니다.
-python run_golden_eval.py --judge-model ollama/gemma4:26b --rag-model gemma4:e4b
-python run_golden_eval.py --judge-model ollama/qwen2.5-coder:7b --rag-mode
-l batiai/gemma4-e2b:q4
+python run_golden_eval.py --judge-model ollama/gemma3:12b --rag-model gemma4:e4b
+python run_golden_eval.py --judge-model ollama/qwen2.5-coder:7b --rag-model ollama/gemma4:12b-mlx
 """
 
 if __name__ == "__main__":
@@ -474,7 +473,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="csv/rag_golden_eval_details.csv", help="상세 결과 CSV")
     parser.add_argument("--summary", default="csv/rag_golden_eval_summary.csv", help="요약 결과 CSV")
     parser.add_argument("--judge-model", default="ollama/qwen2.5-coder:7b", help="로컬 심판 모델명")
-    parser.add_argument("--rag-model", default="gemma4:e4b", help="우리 RAG 모델명")
+    parser.add_argument("--rag-model", default="gemma4:12b-mlx", help="우리 RAG 모델명")
     parser.add_argument("--ollama-base", default="http://localhost:11434", help="Ollama 주소")
     parser.add_argument(
         "--test-id",

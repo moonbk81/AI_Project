@@ -216,7 +216,7 @@ def render_benchmark_dashboard():
                 index=0
             )
         with col_b2:
-            current_rag_model = st.session_state.get('active_model', 'gemma4:e4b')
+            current_rag_model = st.session_state.get('active_model', 'gemma4:12b-mlx')
             target_rag_model = st.text_input("RAG 모델 (답변 생성용)", value=current_rag_model)
             ollama_url = st.text_input("Ollama 서버 주소", value="http://localhost:11434")
 

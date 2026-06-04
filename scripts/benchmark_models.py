@@ -19,6 +19,7 @@ from ril_rag_chat import RilRagChat
 DEFAULT_MODELS = [
     "gemma2:9b",
     "gemma3:12b",
+    "gemma4:12b-mlx",
     "qwen2.5-coder:7b",
 ]
 
@@ -27,6 +28,7 @@ MODEL_CONTEXTS = {
     "gemma2:9b": 8192,
     "gemma3:4b": 8192,
     "gemma3:12b": 8192,
+    "gemma4:12b-mlx": 8192,
     "qwen2.5-coder:7b": 8192,
 }
 

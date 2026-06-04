@@ -32,7 +32,10 @@ MODEL_CONFIG = {
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
-        "stop": ["<unused", "<|im_end|>", "<eos>"]
+        "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1800,
+        "max_meta_chars": 3000,
+        "top_k": 4,
     },
     "gemma4:e4b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
@@ -41,7 +44,10 @@ MODEL_CONFIG = {
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
-        "stop": ["<unused", "<|im_end|>", "<eos>"]
+        "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1200,
+        "max_meta_chars": 2000,
+        "top_k": 3,
     },
     "batiai/gemma4-e2b:q4": {
         "num_ctx": 8192,
@@ -50,7 +56,10 @@ MODEL_CONFIG = {
         "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.25,
-        "stop": ["<unused", "<|im_end|>", "<eos>"]
+        "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1000,
+        "max_meta_chars": 1500,
+        "top_k": 3,
     },
     "gemma3:12b": {
         "num_ctx": 32768,
@@ -59,7 +68,10 @@ MODEL_CONFIG = {
         "add_batch_size": 256,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
-        "stop": ["<unused", "<|im_end|>", "<eos>"]
+        "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1500,
+        "max_meta_chars": 2500,
+        "top_k": 4,
     },
     "gemma3:4b": {
         "num_ctx": 8192,       # 회사 PC 8GB VRAM 최적화 크기
@@ -68,7 +80,10 @@ MODEL_CONFIG = {
         "add_batch_size": 128,
         "temperature": 0.0,
         "repeat_penalty": 1.15,
-        "stop": ["<unused", "<|im_end|>", "<eos>"]
+        "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1200,
+        "max_meta_chars": 2000,
+        "top_k": 3,
     },
     "qwen2.5-coder:7b": {
         "num_ctx": 4096,        # 회사 제한 사양 반영
@@ -77,7 +92,10 @@ MODEL_CONFIG = {
         "add_batch_size": 128,
         "temperature": 0.0,     # 코딩/정규식 모델은 0.0에 가까울수록 정확함
         "repeat_penalty": 1.1,
-        "stop": ["<|im_end|>", "<|endoftext|>"]
+        "stop": ["<|im_end|>", "<|endoftext|>"],
+        "max_doc_chars": 1200,
+        "max_meta_chars": 2000,
+        "top_k": 3,
     },
     "deepseek-r1:7b": {
         "num_ctx": 32768,
@@ -86,7 +104,10 @@ MODEL_CONFIG = {
         "add_batch_size": 256,
         "temperature": 0.6,     # DeepSeek 추론 모델 권장 온도 적용
         "repeat_penalty": 1.1,
-        "stop": ["<｜end of sentence｜>", "<｜User｜>", "<｜Assistant｜>"]
+        "stop": ["<｜end of sentence｜>", "<｜User｜>", "<｜Assistant｜>"],
+        "max_doc_chars": 800,
+        "max_meta_chars": 1500,
+        "top_k": 3,
     },
     # 리스트에 없는 새 모델을 위한 안전장치 (Fallback)
     "default": {
@@ -96,6 +117,9 @@ MODEL_CONFIG = {
         "add_batch_size": 128,
         "temperature": 0.1,
         "repeat_penalty": 1.15,
-        "stop": ["<eos>"]
+        "stop": ["<eos>"],
+        "max_doc_chars": 1200,
+        "max_meta_chars": 2000,
+        "top_k": 3,
     }
 }

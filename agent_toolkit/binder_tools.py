@@ -36,13 +36,39 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
 
         type_counter[warning_type] += 1
 
-        # 💡 [신규 추가] 히스토그램 누수 정보 분리 수집
+        # 💡 히스토그램 누수 정보 분리 수집
         if warning_type in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK"):
             proxy_leaks.append({
                 "time": warning.get("time", "Unknown"),
                 "max_count": warning.get("max_count", 0),
                 "desc": desc
             })
+            continue
+
+        if warning_type == "SYSTEM_KILL":
+            warning_facts.append({
+                "time": warning.get("time") or warning.get("timestamp"),
+                "type": warning_type,
+                "process": warning.get("process", "Unknown"),
+                "desc": desc,
+                "reason": desc,
+                "raw": raw,
+                "wait_ms": None,
+            })
+            continue
+
+        if warning_type == "SYSTEM_WTF":
+            warning_facts.append({
+                "time": warning.get("time") or warning.get("timestamp"),
+                "type": warning_type,
+                "process": warning.get("process", "Unknown"),
+                "desc": desc,
+                "summary": desc,
+                "raw": raw,
+                "wait_ms": None,
+            })
+            continue
+
         else:
             wait_ms = None
             wait_match = re.search(r"(\d{2,6})\s*ms", str(raw)) or re.search(r"(\d{2,6})\s*ms", str(desc))
@@ -79,26 +105,26 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         or "BINDER_TRANSACTION_FAILURE" in str(item.get("raw", ""))
     ]
 
-    # 💡 [신규 추가] System Kill (am_kill) & WTF (am_wtf) 추출
-    crashes = report_data.get("crash_context", [])
-    system_kills = []
-    system_wtfs = []
-
-    for c in crashes:
-        c_type = c.get("type")
-        if c_type == "SYSTEM_KILL":
-            system_kills.append({
-                "time": c.get("time"),
-                "process": c.get("process"),
-                "reason": c.get("top_method"),
-                "raw_trigger": c.get("trigger")
-            })
-        elif c_type in ("SYSTEM_WTF", "SYSTEM_WTF_SUMMARY"):
-            system_wtfs.append({
-                "time": c.get("time"),
-                "process": c.get("process"),
-                "summary": c.get("exception_info") if c_type == "SYSTEM_WTF_SUMMARY" else c.get("trigger")
-            })
+    system_kills = [
+        {
+            "time": item.get("time"),
+            "process": item.get("process", "Unknown"),
+            "reason": item.get("reason") or item.get("desc"),
+            "raw_trigger": item.get("raw"),
+        }
+        for item in warning_facts
+        if item.get("type") == "SYSTEM_KILL"
+    ]
+    system_wtfs = [
+        {
+            "time": item.get("time"),
+            "process": item.get("process", "Unknown"),
+            "summary": item.get("summary") or item.get("desc"),
+            "raw_trigger": item.get("raw"),
+        }
+        for item in warning_facts
+        if item.get("type") == "SYSTEM_WTF"
+    ]
 
     # JSON 응답으로 반환 (LLM이 키워드로 파싱)
     return json.dumps({

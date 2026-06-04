@@ -3,6 +3,7 @@
 import gc
 import json
 import os
+from tqdm import tqdm
 
 from core.config import MODEL_CONFIG
 
@@ -28,26 +29,26 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
         print(f"⚠️ 비어있는 payload: {filename}")
         return
 
-    MAX_DOC_CHARS = 4000
-    MAX_META_CHARS = 5000
-
     model_cfg = MODEL_CONFIG.get(model_name, MODEL_CONFIG["default"])
+
+    max_doc_chars = int(model_cfg.get("max_doc_chars", 1200))
+    max_meta_chars = int(model_cfg.get("max_meta_chars", 2000))
 
     EMBED_BATCH_SIZE = int(model_cfg.get("embed_batch_size", 32))
     ADD_BATCH_SIZE = int(model_cfg.get("add_batch_size", 128))
 
     docs, metas, ids = [], [], []
     for i, item in enumerate(data):
-        docs.append(str(item["document"])[:MAX_DOC_CHARS])
+        docs.append(str(item["document"])[:max_doc_chars])
         meta = item.get("metadata", {}).copy()
         meta["source_file"] = filename
-        metas.append(sanitize_chroma_metadata(meta, max_chars=MAX_META_CHARS))
+        metas.append(sanitize_chroma_metadata(meta, max_chars=max_meta_chars))
         ids.append(f"{base_id}_{i}")
 
     print(
         f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs, embed={EMBED_BATCH_SIZE}, add={ADD_BATCH_SIZE})"
     )
-    for i in range(0, len(docs), ADD_BATCH_SIZE):
+    for i in tqdm(range(0, len(docs), ADD_BATCH_SIZE), desc=f"임베딩 진행 중 ({filename})"):
         batch_docs = docs[i:i+ADD_BATCH_SIZE]
         batch_metas = metas[i:i+ADD_BATCH_SIZE]
         batch_ids = ids[i:i+ADD_BATCH_SIZE]

@@ -46,7 +46,6 @@ def build_binder_leak_rca_docs(report_data, input_file):
     """Build high-level RCA documents from Binder proxy leak + am_kill context."""
     rca_docs = []
     binder_warnings = report_data.get("binder_warnings", []) or []
-    crashes = report_data.get("crash_context", []) or []
 
     leak_warnings = [
         bw for bw in binder_warnings
@@ -69,13 +68,13 @@ def build_binder_leak_rca_docs(report_data, input_file):
     leaked_descriptor = extract_leaked_descriptor(leak_text)
 
     system_kills = [
-        c for c in crashes
-        if isinstance(c, dict)
-        and c.get("type") == "SYSTEM_KILL"
+        bw for bw in binder_warnings
+        if isinstance(bw, dict)
+        and bw.get("type") == "SYSTEM_KILL"
         and "Too many Binders sent to SYSTEM" in " ".join([
-            str(c.get("exception_info", "")),
-            str(c.get("top_method", "")),
-            str(c.get("trigger", "")),
+            str(bw.get("desc", "")),
+            str(bw.get("raw", "")),
+            str(bw.get("raw_info", "")),
         ])
     ]
     if not system_kills:
@@ -86,16 +85,16 @@ def build_binder_leak_rca_docs(report_data, input_file):
 
     process = victim.get("process", "Unknown")
     time = victim.get("time") or top_leak.get("time") or "Unknown"
-    trigger = victim.get("trigger", "")
+    trigger = victim.get("raw", victim.get("raw_info", ""))
     kill_reason = "Too many Binders sent to SYSTEM"
 
     wtf_events = [
-        c for c in crashes
-        if isinstance(c, dict)
+        bw for bw in binder_warnings
+        if isinstance(bw, dict)
         and (
-            c.get("type") in ("SYSTEM_WTF", "SYSTEM_WTF_SUMMARY")
-            or "am_wtf" in str(c.get("trigger", ""))
-            or "am_wtf" in str(c.get("trigger_sample", ""))
+            bw.get("type") == "SYSTEM_WTF"
+            or "am_wtf" in str(bw.get("raw", ""))
+            or "am_wtf" in str(bw.get("raw_info", ""))
         )
     ]
 
@@ -174,6 +173,32 @@ def build_binder_payloads(report_data, input_file):
         bw for bw in binder_warnings
         if isinstance(bw, dict) and bw.get("type") not in BINDER_LEAK_TYPES
     ]
+
+    system_kill_wtf_events = [
+        bw for bw in normal_warnings
+        if bw.get("type") in ("SYSTEM_KILL", "SYSTEM_WTF")
+    ]
+    normal_warnings = [
+        bw for bw in normal_warnings
+        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF")
+    ]
+
+    for bw in system_kill_wtf_events[::-1][:20]:
+        meta = {
+            "source_file": source_file_name(input_file),
+            "log_type": "System_Kill_Wtf_Event",
+            "time": bw.get("time", ""),
+            "type": bw.get("type", ""),
+            "process": bw.get("process", "Unknown"),
+            "desc": bw.get("desc", ""),
+            "raw_info": bw.get("raw", bw.get("raw_info", "")),
+        }
+
+        text_content = (
+            f"[시스템 Kill/WTF 이벤트] 시간: {meta['time']}, "
+            f"프로세스: {meta['process']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+        )
+        append_payload(rag_payload, text_content, meta)
 
     for bw in normal_warnings[::-1][:10]:
         meta = {

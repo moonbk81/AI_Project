@@ -49,7 +49,7 @@ class LogOrchestrator:
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
         self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
-        self.binder_parser = BinderWarningParser()
+        self.binder_parser = BinderWarningParser(self._get_surrounding_context_logs)
         self.rilj_parser = RiljParser()
         self.sys_prop_parser = SystemPropertyParser()
         self._time_index = None
@@ -117,7 +117,6 @@ class LogOrchestrator:
         crash_keywords = [
             "FATAL EXCEPTION", "Fatal signal", "AndroidRuntime", "am_crash",
             "force close", "Tombstone written to", "Build fingerprint:", "Abort message:",
-            "am_wtf", "am_kill",
         ]
         anr_keywords = [
             "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
@@ -172,6 +171,7 @@ class LogOrchestrator:
             "binder thread pool", "binder_sample", "Binder transaction to",
             "DeadObjectException", "FAILED_TRANSACTION", "binder transaction failed",
             "TransactionTooLargeException", "binder_alloc", "binder buffer",
+            "am_kill", "am_wtf",
         ]
         binder_context_keywords = [
             "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
@@ -184,7 +184,7 @@ class LogOrchestrator:
         binder_context_anchor_keywords = [
             "binder thread pool", "binder_sample", "Binder transaction to",
             "DeadObjectException", "FAILED_TRANSACTION", "TransactionTooLargeException",
-            "binder_alloc",
+            "binder_alloc", "am_kill", "am_wtf",
         ]
 
         in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수

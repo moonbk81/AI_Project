@@ -256,44 +256,6 @@ class CrashParser(BaseParser):
             ts_m = RE_TIME.search(clean_line)
             ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
 
-            if "am_kill" in clean_line:
-                # 예: am_kill : [0,1234,com.android.phone,0,Too many Binders sent to SYSTEM]
-                match = re.search(r'am_kill\s*:\s*\[\d+,\d+,([^,]+),-?\d+,\s*([^\]]+)\]', clean_line)
-                if match:
-                    process = match.group(1)
-                    reason = match.group(2)
-                    crashes.append({
-                        "time": ts,
-                        "type": "SYSTEM_KILL",
-                        "process": process,
-                        "trigger": clean_line,
-                        "exception_info": f"시스템(ActivityManager) 강제 종료. 사유: {reason}",
-                        "top_method": reason, # UI 표출을 위해 사유를 매핑
-                        "call_stack": [],
-                        "cross_context_logs": self.get_context_fn(lines, ts) if self.get_context_fn else []
-                    })
-                continue
-
-            # 💡 [신규 추가] am_wtf (What a Terrible Failure) 감지
-            if "am_wtf" in clean_line:
-                match = re.search(r'am_wtf\s*:\s*\[\d+,\d+,([^,]+),', clean_line)
-                process = match.group(1) if match else "Unknown"
-                from_match = re.search(r'from\s+(?:\d+:)?([a-zA-Z0-9\._]+)', clean_line)
-                if from_match:
-                    process = from_match.group(1)
-
-                crashes.append({
-                    "time": ts,
-                    "type": "SYSTEM_WTF",
-                    "process": process,
-                    "trigger": clean_line,
-                    "exception_info": "시스템 WTF(What a Terrible Failure) 발생. 심각한 시스템 상태 이상.",
-                    "top_method": "WTF_Event",
-                    "call_stack": [],
-                    "cross_context_logs": self.get_context_fn(lines, ts) if self.get_context_fn else []
-                })
-                continue
-
             is_fatal_app = DIAG_PATTERNS['FATAL_APP'].search(clean_line)
             is_fatal_sys = DIAG_PATTERNS['FATAL_SYS'].search(clean_line)
 
@@ -800,6 +762,8 @@ class BinderWarningParser(BaseParser):
         "BINDER_TRANSACTION_FAILURE",
         "BINDER_BUFFER_ERROR",
         "REPEATED_BINDER_DELAY",
+        "SYSTEM_KILL",
+        "SYSTEM_WTF",
     }
 
     def _extract_time(self, line_str):
@@ -830,6 +794,39 @@ class BinderWarningParser(BaseParser):
             seen_raw.add(line_str)
             lower = line_str.lower()
             event_time = self._extract_time(line_str)
+
+            if "am_kill" in line_str:
+                # 예: am_kill : [0,1234,com.android.phone,0,Too many Binders sent to SYSTEM]
+                match = re.search(r'am_kill\s*:\s*\[\d+,\d+,([^,]+),-?\d+,\s*([^\]]+)\]', line_str)
+                if match:
+                    process = match.group(1)
+                    reason = match.group(2)
+                    warnings.append({
+                        "time": event_time,
+                        "type": "SYSTEM_KILL",
+                        "process": process,
+                        "desc": f"시스템(ActivityManager) 강제 종료 이벤트 감지. 대상 프로세스: {process}, 사유: {reason}. Crash/ANR로 단정하지 말고 동시간대 Binder/메모리/프로세스 상태와 교차 확인해야 합니다.",
+                        "raw": line_str,
+                        "cross_context_logs": self.get_context_fn(lines, event_time) if self.get_context_fn else []
+                    })
+                continue
+
+            if "am_wtf" in line_str:
+                match = re.search(r'am_wtf\s*:\s*\[\d+,\d+,([^,]+),', line_str)
+                process = match.group(1) if match else "Unknown"
+                from_match = re.search(r'from\s+(?:\d+:)?([a-zA-Z0-9\._]+)', line_str)
+                if from_match:
+                    process = from_match.group(1)
+
+                warnings.append({
+                    "time": event_time,
+                    "type": "SYSTEM_WTF",
+                    "process": process,
+                    "desc": f"시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상 프로세스: {process}. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.",
+                    "raw": line_str,
+                    "cross_context_logs": self.get_context_fn(lines, event_time) if self.get_context_fn else []
+                })
+                continue
 
             if "binderproxy descriptor histogram" in lower:
                 in_proxy_histogram = True

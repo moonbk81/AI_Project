@@ -1,71 +1,109 @@
-- "\uFEFFtest_id": TC-024
-  category: Negative_Binder_Leak_Check
-  query: 이 로그에서 Binder proxy leak이나 Too many Binders sent to SYSTEM 때문에 프로세스가 am_kill로
-    강제 종료된 흔적이 있나요? Binder Proxy Histogram이나 BINDER_PROXY_LEAK_RCA가 없으면 없다고 명확히 답해줘.
-  target_log_file: log_for_evaluation/ps_call_504_unavailable.log
-  expected_decision: Binder proxy leak 또는 Too many Binders sent to SYSTEM에 의한 am_kill
-    강제 종료 흔적은 확인되지 않습니다.
-  root_cause: 해당 로그에서는 Binder Proxy Histogram, BINDER_PROXY_LEAK_RCA, Too many Binders
-    sent to SYSTEM 사유의 am_kill 이벤트가 확인되지 않습니다.
-  ground_truth: 해당 로그에서는 Binder proxy leak으로 판단할 근거가 없습니다. Binder Proxy Histogram이나
-    BINDER_PROXY_LEAK_RCA가 확인되지 않으며, 'Too many Binders sent to SYSTEM' 사유의 am_kill
-    강제 종료 이력도 확인되지 않습니다. 따라서 Binder proxy leak에 의한 시스템 리소스 고갈 또는 프로세스 강제 종료로 판단해서는
-    안 됩니다.
-  must_have: '["Binder proxy leak 확인되지 않음", "Too many Binders sent to SYSTEM 없음",
-    "am_kill 강제 종료 근거 없음"]'
-  evidence_should_include: '["Binder Proxy Histogram 없음", "BINDER_PROXY_LEAK_RCA 없음",
-    "Too many Binders sent to SYSTEM 없음"]'
-  must_not_claim: '["Binder proxy leak 발생", "BINDER_PROXY_LEAK_RCA 확인", "Too many
-    Binders sent to SYSTEM 발생", "7262개", "IIntentReceiver 누수", "am_kill 강제 종료"]'
-  trap_type: negative_binder_leak_absence_check
-  severity: high
-  rag_answer: 제공된 분석 팩트 및 로그 검색 결과에서 `BINDER_PROXY_LEAK_RCA` 이벤트는 발견되지 않았습니다. 또한,
-    `get_binder_warning_analytics` 결과에 `proxy_leak_histograms`나 `system_kills_am_kill`
-    이력이 없어 바인더 프록시 누수(Binder proxy leak)로 인한 시스템 강제 종료(am_kill) 흔적은 확인되지 않습니다. 다만,
-    04-09 12:08:08.933, 12:08:09.172, 12:09:32.004 시점에 `THREAD_EXHAUSTION` 유형의 `Binder_Warning`이
-    3회 기록되어 IPC 처리 스레드 부족 현상이 발생했음이 확인됩니다.
-  doc_ids: '["ps_call_504_unavailable_payload_672", "ps_call_504_unavailable_payload_673",
-    "ps_call_504_unavailable_payload_674", "ps_call_504_unavailable_payload_679",
-    "ps_call_504_unavailable_payload_10"]'
-  retrieved_meta: '[{"type": "THREAD_EXHAUSTION", "log_type": "Binder_Warning", "desc":
-    "Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 2509ms(약 2.5초) 대기했습니다. ANR/Watchdog/system_server
-    지연과 시간 상관관계 확인이 필요합니다.", "time": "04-09 12:09:32.004", "source_file": "ps_call_504_unavailable_payload.json",
-    "raw_info": "04-09 12:09:32.004  wifi  2115 13854 E libbinder.IPCThreadState:
-    binder thread pool (1 threads) starved for 2509 ms"}, {"desc": "Binder thread
-    pool starvation 감지: IPC 처리 스레드가 부족하여 200ms(약 0.2초) 대기했습니다. ANR/Watchdog/system_server
-    지연과 시간 상관관계 확인이 필요합니다.", "log_type": "Binder_Warning", "raw_info": "04-09 12:08:09.172  1002  2018  2056
-    E libbinder.IPCThreadState: binder thread pool (1 threads) starved for 200 ms",
-    "time": "04-09 12:08:09.172", "type": "THREAD_EXHAUSTION", "source_file": "ps_call_504_unavailable_payload.json"},
-    {"log_type": "Binder_Warning", "raw_info": "04-09 12:08:08.933   uwb  2059  2059
-    E libbinder.IPCThreadState: binder thread pool (1 threads) starved for 229 ms",
-    "source_file": "ps_call_504_unavailable_payload.json", "time": "04-09 12:08:08.933",
-    "desc": "Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 229ms(약 0.2초) 대기했습니다.
-    ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다.", "type": "THREAD_EXHAUSTION"},
-    {"source_file": "ps_call_504_unavailable_payload.json", "log_type": "Device_Property_State",
-    "radio_state": "0", "airplane_mode": "1"}, {"log_type": "Crash_Event", "status":
-    "CLEAN", "source_file": "ps_call_504_unavailable_payload.json"}]'
+- "\uFEFFtest_id": TC-011
+  category: nitz_time_analysis
+  query: 로그상에서 NITZ 시간 정보나 타임존이 어떻게 수신되었는지, 급격한 변화가 있는지 분석해.
+  target_log_file: log_for_evaluation/cs_call_failed.log
+  expected_decision: NITZ는 UTC+0 상태로 유지되었고 타임존 급변/핑퐁 현상은 없습니다.
+  root_cause: NITZ 수신 이력에서 UTC+0 외의 변경이나 반복 전환이 관찰되지 않았습니다.
+  ground_truth: NITZ 수신 이력을 확인한 결과, UTC+0에서 변경사항 없이 유지되었습니다. 타임존 변경이나 핑퐁 현상은 관찰되지
+    않았습니다.
+  must_have: '["UTC+0", "타임존 변경 없음", "핑퐁 현상 없음"]'
+  evidence_should_include: '["NITZ", "UTC+0", "변경 없음"]'
+  must_not_claim: '["타임존 급변", "핑퐁 발생", "시간 오류로 통화 실패"]'
+  trap_type: absence_check
+  severity: low
+  rag_answer: NITZ 관련 로그를 DB에서 찾지 못했습니다. 따라서 최초 수신 타임존 정보나 시간대 변화에 대한 분석이 불가능함.
+  doc_ids: '[]'
+  retrieved_meta: '[]'
   thinking: ''
-  accuracy_score: 0.8
-  evidence_coverage: 0.9
-  must_have_coverage: 1.0
+  accuracy_score: 0.0
+  evidence_coverage: 0.0
+  must_have_coverage: 0.0
   must_not_violation: 0.0
-  hallucination_safety: 0.7
-  overall_score: 0.8
-  missing_must_have: '[]'
-  missing_evidence: '[]'
+  hallucination_safety: 1.0
+  overall_score: 0.0
+  missing_must_have: '["UTC+0", "타임존 변경 없음", "핑퐁 현상 없음"]'
+  missing_evidence: '["NITZ", "UTC+0", "변경 없음"]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the absence of Binder proxy leak and Too
-    many Binders sent to SYSTEM. It also correctly mentions the absence of BINDER_PROXY_LEAK_RCA
-    and proxy_leak_histograms. However, it introduces a new issue (THREAD_EXHAUSTION)
-    which, while potentially valid, deviates from the core question and slightly reduces
-    hallucination safety. The answer is generally accurate and well-supported.
-  judge_raw: '{"accuracy_score": 0.8, "evidence_coverage": 0.9, "must_have_coverage":
-    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.7, "overall_score":
-    0.8, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
-    [], "reason": "The answer correctly identifies the absence of Binder proxy leak
-    and Too many Binders sent to SYSTEM. It also correctly mentions the absence of
-    BINDER_PROXY_LEAK_RCA and proxy_leak_histograms. However, it introduces a new
-    issue (THREAD_EXHAUSTION) which, while potentially valid, deviates from the core
-    question and slightly reduces hallucination safety. The answer is generally accurate
-    and well-supported."}'
+  reason: The AI claims it couldn't find NITZ logs, which contradicts the expected
+    decision that NITZ was received and maintained as UTC+0. This is a critical failure
+    in identifying the root cause and providing supporting evidence. The answer fails
+    to cover all 'must_have' elements.
+  judge_raw: '{"accuracy_score": 0.0, "evidence_coverage": 0.0, "must_have_coverage":
+    0.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
+    0.0, "missing_must_have": ["UTC+0", "\ud0c0\uc784\uc874 \ubcc0\uacbd \uc5c6\uc74c",
+    "\ud551\ud401 \ud604\uc0c1 \uc5c6\uc74c"], "missing_evidence": ["NITZ", "UTC+0",
+    "\ubcc0\uacbd \uc5c6\uc74c"], "violated_must_not_claim": [], "reason": "The AI
+    claims it couldn''t find NITZ logs, which contradicts the expected decision that
+    NITZ was received and maintained as UTC+0. This is a critical failure in identifying
+    the root cause and providing supporting evidence. The answer fails to cover all
+    ''must_have'' elements."}'
+  error: ''
+- "\uFEFFtest_id": TC-015
+  category: DNS_Latency
+  query: Network_DNS_Issue 로그에서 특정 앱의 DNS 실패가 5G/LTE 망 장애인지, 아니면 effective_policy
+    값(BATTERY_SAVER 또는 REJECT 등)으로 인한 단말 내부 정책 차단인지 구분해서 분석해. effective_policy, is_blocked,
+    suspected_reason 근거를 반드시 포함해.
+  target_log_file: log_for_evaluation/dumpState_0.log
+  expected_decision: 인터넷 실패 원인은 5G/LTE 망 문제가 아니라 Battery Saver/REJECT 정책에 의한 DNS 차단입니다.
+  root_cause: 단말 내부 effective_policy가 BATTERY_SAVER 또는 REJECT로 적용되어 특정 앱 DNS 쿼리가 차단되었습니다.
+  ground_truth: 'Network_DNS_Issue 분석 결과, 네트워크 자체의 5G/LTE 망 장애가 아니라 단말 내부 정책에 의한 DNS
+    쿼리 차단입니다. 근거는 Network_DNS_Issue 로그의 effective_policy 값이 BATTERY_SAVER 또는 REJECT
+    계열 정책으로 적용되고, is_blocked: true 상태로 DNS 요청이 차단된 점입니다. 따라서 DNS 서버 장애나 기지국 장애가 아니라
+    Battery Saver/REJECT 등 단말 내부 정책에 의한 정상적인 차단 동작으로 판단해야 합니다.'
+  must_have: '["Network_DNS_Issue", "effective_policy", "BATTERY_SAVER 또는 REJECT",
+    "is_blocked: true", "DNS 쿼리 차단", "단말 내부 정책", "5G/LTE 망 장애 아님"]'
+  evidence_should_include: '["Network_DNS_Issue", "effective_policy", "BATTERY_SAVER",
+    "REJECT", "is_blocked", "DNS", "차단"]'
+  must_not_claim: '["5G/LTE 망 장애로 확정", "기지국 장애로 확정", "모뎀 TIMEOUT", "DNS 서버 장애로 확정",
+    "단말 정책 차단 아님"]'
+  trap_type: network_vs_device_policy
+  severity: high
+  rag_answer: '제공된 로그 분석 결과, DNS 실패는 단말 내부의 데이터 제한 정책에 의한 강제 차단 동작으로 확인됨.
+
+    첫 번째 이벤트(03-30 22:50:15.863)에서 `com.delta.mobile.android` 패키지는 `effective_policy`:
+    APP_STANDBY|APP_BACKGROUND 조건 하에 DNS가 실패(`result: FAIL`)하고 차단됨(`is_blocked: True`).
+
+    두 번째 이벤트(03-30 22:58:44.708)의 경우, 특정 정책 제한은 없었으나 (`effective_policy`: NONE), `com.lowes.android`
+    패키지는 여전히 DNS가 실패하고 차단됨(`is_blocked: True`)이 확인되었음.
+
+    따라서 해당 장애는 외부 망(네트워크) 문제보다는 단말 내부의 절전 모드 또는 백그라운드 데이터 제한 정책에 의한 강제적인 서비스 동작으로
+    판단함.'
+  doc_ids: '["dumpState_0_payload_166", "dumpState_0_payload_175", "dumpState_0_payload_174"]'
+  retrieved_meta: '[{"package": "com.delta.mobile.android", "source_file": "dumpState_0_payload.json",
+    "suspected_reason": "Blocked by APP_STANDBY|APP_BACKGROUND", "net_id": "106",
+    "effective_policy": "APP_STANDBY|APP_BACKGROUND", "result": "FAIL", "log_type":
+    "Network_DNS_Issue", "uid": "10430", "is_blocked": true, "time": "03-30 22:50:15.863"},
+    {"result": "FAIL", "is_blocked": true, "time": "03-30 22:58:44.725", "source_file":
+    "dumpState_0_payload.json", "suspected_reason": "Blocked by NONE", "net_id": "106",
+    "effective_policy": "NONE", "log_type": "Network_DNS_Issue", "uid": "10449", "package":
+    "com.lowes.android"}, {"uid": "10449", "suspected_reason": "Blocked by NONE",
+    "package": "com.lowes.android", "effective_policy": "NONE", "is_blocked": true,
+    "source_file": "dumpState_0_payload.json", "result": "FAIL", "time": "03-30 22:58:44.708",
+    "log_type": "Network_DNS_Issue", "net_id": "106"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 0.95
+  must_not_violation: 0.0
+  hallucination_safety: 0.9
+  overall_score: 0.92
+  missing_must_have: '[]'
+  missing_evidence: '["BATTERY_SAVER 또는 REJECT (explicit mention)"]'
+  violated_must_not_claim: '[]'
+  reason: 'The answer correctly identifies the root cause as device policy-driven
+    DNS blocking, aligning with the expected decision. It includes ''is_blocked: True''
+    and mentions data restriction policies which is close to BATTERY_SAVER/REJECT.
+    However, it doesn''t explicitly mention ''BATTERY_SAVER'' or ''REJECT'', reducing
+    evidence coverage slightly. The answer avoids forbidden claims. Hallucination
+    safety is high as the analysis stays within the provided log context.'
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    0.95, "must_not_violation": 1.0, "hallucination_safety": 0.9, "overall_score":
+    0.92, "missing_must_have": [], "missing_evidence": ["BATTERY_SAVER \ub610\ub294
+    REJECT (explicit mention)"], "violated_must_not_claim": [], "reason": "The answer
+    correctly identifies the root cause as device policy-driven DNS blocking, aligning
+    with the expected decision. It includes ''is_blocked: True'' and mentions data
+    restriction policies which is close to BATTERY_SAVER/REJECT. However, it doesn''t
+    explicitly mention ''BATTERY_SAVER'' or ''REJECT'', reducing evidence coverage
+    slightly. The answer avoids forbidden claims. Hallucination safety is high as
+    the analysis stays within the provided log context."}'
   error: ''

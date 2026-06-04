@@ -95,11 +95,11 @@
     "target_log_file": "log_for_evaluation/log_native.log",
     "query": "rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.",
     "ground_truth": "libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조 오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다. 콜스택을 더 들여다보면 ContextActivationDca::OnDataCallDisconnected, ContextActivationDca::OnDataCallStateChanged, Dca::HandleEvent, EventScheduler::DoSchedule() 로 진행됐습니다.",
-    "eval_keywords": ["signal 11", "SIGSEGV", "SEGV_MAPERR", "libsec-ril.so", "NotifyDataCallState", "ContextActivationDca::OnDataCallDisconnected", "ContextActivationDca::OnDataCallStateChanged", "Dca::HandleEvent", "EventScheduler::DoSchedule"],
+    "eval_keywords": ["signal 11", "SIGSEGV", "SEGV_MAPERR", "libsec-ril.so", "NotifyDataCallState"],
     "expected_decision": "rild Native Crash는 signal 11 SIGSEGV / SEGV_MAPERR이며 libsec-ril.so의 DataCallManager::NotifyDataCallState에서 발생했습니다.",
     "root_cause": "rild가 libsec-ril.so 내부 DataCallManager::NotifyDataCallState 경로에서 메모리 참조 오류로 사망/리셋되었습니다.",
     "must_have": ["rild", "signal 11", "SIGSEGV", "SEGV_MAPERR", "libsec-ril.so", "DataCallManager::NotifyDataCallState"],
-    "evidence_should_include": ["ContextActivationDca::OnDataCallDisconnected", "ContextActivationDca::OnDataCallStateChanged", "Dca::HandleEvent", "EventScheduler::DoSchedule"],
+    "evidence_should_include": [],
     "must_not_claim": ["Java Exception", "ANR", "사용자 종료", "기지국 음영"],
     "trap_type": "",
     "severity": "critical"

@@ -12,13 +12,17 @@ def _normalize_anr_list(anr_data_list):
     return []
 
 def _split_crash_context(original_crashes):
-    system_kills = [c for c in original_crashes if isinstance(c, dict) and c.get("type") == "SYSTEM_KILL"]
-    system_wtfs = [c for c in original_crashes if isinstance(c, dict) and c.get("type") == "SYSTEM_WTF"]
     crash_data = [
         c for c in original_crashes
         if isinstance(c, dict) and c.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF")
     ]
-    return system_kills, system_wtfs, crash_data
+    return crash_data
+
+
+def _split_system_kill_wtf_events(binder_warnings):
+    system_kills = [b for b in binder_warnings if isinstance(b, dict) and b.get("type") == "SYSTEM_KILL"]
+    system_wtfs = [b for b in binder_warnings if isinstance(b, dict) and b.get("type") == "SYSTEM_WTF"]
+    return system_kills, system_wtfs
 
 def _render_system_kills(system_kills):
     if not system_kills:
@@ -30,8 +34,8 @@ def _render_system_kills(system_kills):
         kill_rows.append({
             "발생 시간 (Time)": k.get("time", "Unknown"),
             "종료된 프로세스 (Target)": k.get("process", "Unknown"),
-            "강제 종료 사유 (Reason)": k.get("top_method", "Unknown"),
-            "트리거 원문 (Raw)": k.get("trigger", "")
+            "강제 종료 사유 (Reason)": k.get("desc", k.get("top_method", "Unknown")),
+            "트리거 원문 (Raw)": k.get("raw", k.get("trigger", ""))
         })
     df_kill = pd.DataFrame(kill_rows)
     st.dataframe(df_kill, use_container_width=True, hide_index=True)
@@ -70,7 +74,7 @@ def _render_system_wtfs(system_wtfs):
             wtf_rows.append({
                 "발생 시간 (Time)": w.get("time", "Unknown"),
                 "대상 프로세스 (Target)": w.get("process", "Unknown"),
-                "트리거 원문 (Raw)": w.get("trigger", "")
+                "트리거 원문 (Raw)": w.get("raw", w.get("trigger", ""))
             })
 
         df_wtf_recent = pd.DataFrame(wtf_rows)
@@ -297,10 +301,11 @@ def render_crash_analyzer(report_data):
     binder_warnings = report_data.get("binder_warnings", [])
 
     if not original_crashes and not anr_data_list and not native_crash_data and not binder_warnings:
-        st.success("No system crashes, ANRs, or FATAL exceptions detected in the log.")
+        st.success("No system crashes, ANRs, FATAL exceptions, or Binder/System Kill events detected in the log.")
         return
 
-    system_kills, system_wtfs, crash_data = _split_crash_context(original_crashes)
+    crash_data = _split_crash_context(original_crashes)
+    system_kills, system_wtfs = _split_system_kill_wtf_events(binder_warnings)
 
     _render_system_kills(system_kills)
     _render_system_wtfs(system_wtfs)

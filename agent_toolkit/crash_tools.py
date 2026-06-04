@@ -1,12 +1,14 @@
-from collections import Counter
 import json
 
 from agent_toolkit.common import _load_report_json
 
 def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str:
     """시스템 크래시(FATAL) 및 응답없음(ANR) 발생 이력과 ANR 원인 분석 힌트를 추출합니다."""
+    crashes = [
+        c for c in _load_report_json(base_name, result_dir).get("crash_context", [])
+        if isinstance(c, dict) and c.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF", "SYSTEM_WTF_SUMMARY")
+    ]
     report_data = _load_report_json(base_name, result_dir)
-    crashes = report_data.get("crash_context", [])
     native_crashes = report_data.get("native_crash_context", [])
     anr = report_data.get("anr_context", [])
 
@@ -16,11 +18,11 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
         raw_stack = str(c.get("stacktrace", "")).lower()
         is_binder_too_large = "transactiontoolargeexception" in raw_stack
         crash_facts.append({
-            "time": c.get("timestamp") or c.get("time"), # 💡 am_kill/am_wtf 호환 (time)
+            "time": c.get("timestamp") or c.get("time"),
             "process": c.get("process"),
-            "type": c.get("crash_type") or c.get("type"), # 💡 am_kill/am_wtf 호환 (type)
+            "type": c.get("crash_type") or c.get("type"),
             "binder_transaction_too_large": is_binder_too_large,
-            "exception_reason": c.get("exception_name") or c.get("top_method", "Unknown") # 💡 호환
+            "exception_reason": c.get("exception_name") or c.get("top_method", "Unknown")
         })
 
     native_crash_facts = []
@@ -100,25 +102,11 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
             "pre_anr_logcat_tail": pre_anr_logcat[-40:]
         })
 
-    binder_warnings = report_data.get("binder_warnings", []) or []
-    binder_context_summary = report_data.get("binder_context_summary", {}) or {}
-
     return json.dumps({
         "crash_count": len(crashes),
         "crash_history": crash_facts,
         "native_crash_count": len(native_crashes),
         "native_crash_history": native_crash_facts,
         "anr_count": len(anr_facts),
-        "anr_history": anr_facts,
-        "binder_warning_count": len(binder_warnings),
-        "binder_warning_types": dict(Counter([
-            b.get("type") or b.get("event_type") or "UNKNOWN"
-            for b in binder_warnings
-            if isinstance(b, dict)
-        ])),
-        "binder_context_summary": {
-            "signals": binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {},
-            "checklist": binder_context_summary.get("checklist", []) if isinstance(binder_context_summary, dict) else [],
-            "total_context_lines": binder_context_summary.get("total_context_lines", 0) if isinstance(binder_context_summary, dict) else 0,
-        }
+        "anr_history": anr_facts
     }, ensure_ascii=False)

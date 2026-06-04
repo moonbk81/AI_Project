@@ -1,6 +1,3 @@
-
-
-
 """Device state payload builders."""
 
 from rag_builders.common import append_callback_payload
@@ -32,7 +29,7 @@ def build_device_payloads(
 
     if "nitz_history" in report_data:
         for nitz in report_data["nitz_history"]:
-            add_payload(nitz, "NITZ_Event")
+            add_payload(nitz, "Nitz_Time_Event")
 
     if "system_properties" in report_data:
         props = report_data["system_properties"]

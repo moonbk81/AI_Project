@@ -39,6 +39,7 @@ Android RIL(Radio Interface Layer) 및 Telephony 시스템 로그를 원클릭�
 * gemma3:12b
 * qwen2.5-coder:7b
 * gemma4:26b
+* gemma4:12b
 * gemma3:4b
 
 ## 🏗️ 시스템 아키텍처 및 폴더 구조 (Architecture & Structure)

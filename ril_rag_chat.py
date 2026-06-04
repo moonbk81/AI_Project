@@ -136,7 +136,7 @@ class RilRagChat:
     def _get_semantic_routing(self, query):
         return get_semantic_routing(query, self.routing_map, self.embed_model)
 
-    def ingest_file(self, file_path, force=False):
+    def ingest_file(self, file_path, force=False, model_name="default"):
         return ingest_payload_file(
             collection=self.collection,
             embed_model=self.embed_model,
@@ -282,8 +282,17 @@ class RilRagChat:
         return text
 
 
-    def ask(self, user_query, current_file=None, chat_history=None, top_k=8, health_kpi=None, is_bench=False):
+    def ask(self, user_query, current_file=None, chat_history=None, top_k=None, health_kpi=None, is_bench=False):
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
+        model_config = self.model_config_registry.get(
+            self.llm_model_name,
+            self.model_config_registry.get("default", {})
+        )
+        if top_k is None:
+            top_k = int(model_config.get("top_k", 3))
+            print(f"top_k가 지정되지 않아 모델 설정의 기본값 {top_k}를 사용합니다.")
+        else:
+            top_k = int(top_k)
 
         search_query = user_query
         if len(user_query) < 15 and chat_history:

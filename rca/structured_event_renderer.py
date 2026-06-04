@@ -1,5 +1,3 @@
-
-
 import re
 from typing import Any
 
@@ -23,8 +21,8 @@ class StructuredEventRenderer:
     @staticmethod
     def _is_root_cause_query(query_lower: str) -> bool:
         return any(k in query_lower for k in [
-            "root cause", "근본 원인", "원인", "왜", "죽", "강제 종료", "강제종료",
-            "크래시", "crash", "am_kill", "system_kill", "바인더", "binder",
+            "크래시", "crash", "am_kill", "system_kill", "system_wtf", "am_wtf",
+            "wtf", "system kill", "system_kill_wtf", "바인더", "binder",
             "프록시", "proxy", "누수", "leak", "연관", "상관", "관련"
         ])
 
@@ -33,6 +31,55 @@ class StructuredEventRenderer:
         if not results or not results.get("metadatas") or not results["metadatas"] or not results["metadatas"][0]:
             return []
         return [m for m in results["metadatas"][0] if isinstance(m, dict)]
+
+    @classmethod
+    def _render_system_kill_wtf_answer(cls, results: dict[str, Any], user_query: str) -> str | None:
+        """Render System_Kill_Wtf_Event directly without treating it as Crash_Event."""
+        query_lower = (user_query or "").lower()
+        metas = cls._metas(results)
+        events = [
+            meta for meta in metas
+            if meta.get("log_type") == "System_Kill_Wtf_Event"
+            and meta.get("type") in ("SYSTEM_KILL", "SYSTEM_WTF")
+        ]
+        if not events:
+            return None
+
+        wants_absence_crash_check = any(k in query_lower for k in [
+            "crash", "크래시", "native crash", "네이티브 크래시", "anr", "응답 없음", "발생", "있", "없"
+        ]) and not any(k in query_lower for k in [
+            "am_kill", "system_kill", "am_wtf", "system_wtf", "wtf", "바인더", "binder", "강제 종료", "강제종료"
+        ])
+        if wants_absence_crash_check:
+            return None
+
+        kills = [event for event in events if event.get("type") == "SYSTEM_KILL"]
+        wtfs = [event for event in events if event.get("type") == "SYSTEM_WTF"]
+        parts: list[str] = []
+
+        if kills:
+            kill_texts = []
+            for event in kills[:5]:
+                process = event.get("process") or "Unknown"
+                time = event.get("time") or "Unknown"
+                desc = event.get("desc") or event.get("raw_info") or "상세 사유 확인 필요"
+                kill_texts.append(f"{time} {process}: {desc}")
+            parts.append("SYSTEM_KILL(am_kill) 이벤트가 확인됨. " + " / ".join(kill_texts))
+
+        if wtfs:
+            wtf_texts = []
+            for event in wtfs[:5]:
+                process = event.get("process") or "Unknown"
+                time = event.get("time") or "Unknown"
+                desc = event.get("desc") or event.get("raw_info") or "상세 사유 확인 필요"
+                wtf_texts.append(f"{time} {process}: {desc}")
+            parts.append("SYSTEM_WTF(am_wtf) 이벤트가 확인됨. " + " / ".join(wtf_texts))
+
+        if not parts:
+            return None
+
+        parts.append("이 이벤트는 일반 앱 Crash_Event나 Native_Crash_Event로 단정하지 말고, Binder_Warning/RCA_Event와 함께 시스템 리소스 고갈 또는 Binder proxy leak 가능성을 교차 확인해야 함.")
+        return " ".join(parts)
 
     @classmethod
     def _render_rca_event_answer(cls, meta: dict[str, Any], user_query: str) -> str | None:
@@ -91,7 +138,12 @@ class StructuredEventRenderer:
         parts: list[str] = []
 
         if wants_wtf:
-            wtf_summaries = []
+            wtf_events = [
+                meta for meta in metas
+                if meta.get("log_type") == "System_Kill_Wtf_Event"
+                and meta.get("type") == "SYSTEM_WTF"
+            ]
+            legacy_wtf_summaries = []
             for meta in metas:
                 if meta.get("type") != "SYSTEM_WTF_SUMMARY":
                     continue
@@ -106,22 +158,29 @@ class StructuredEventRenderer:
                         count = int(match.group(1))
                     except Exception:
                         count = None
-                wtf_summaries.append({
+                legacy_wtf_summaries.append({
                     "process": meta.get("process") or "Unknown",
                     "count": count,
                     "time": meta.get("time") or "Unknown",
                 })
 
-            if wtf_summaries:
+            if wtf_events:
+                by_process: dict[str, int] = {}
+                for event in wtf_events:
+                    process = event.get("process") or "Unknown"
+                    by_process[process] = by_process.get(process, 0) + 1
+                summary_texts = [f"{process} {count}회" for process, count in by_process.items()]
+                parts.append("am_wtf 이상 징후 발생 이력은 " + ", ".join(summary_texts) + "로 확인됨.")
+            elif legacy_wtf_summaries:
                 summary_texts = []
-                for item in wtf_summaries:
+                for item in legacy_wtf_summaries:
                     if item["count"] is not None:
                         summary_texts.append(f"{item['process']} {item['count']}회")
                     else:
                         summary_texts.append(f"{item['process']} 발생 횟수 확인 필요")
                 parts.append("am_wtf 이상 징후 대량 발생 이력은 " + ", ".join(summary_texts) + "로 확인됨.")
             else:
-                parts.append("am_wtf 이상 징후 대량 발생 요약은 검색 결과에서 명확히 확인되지 않음.")
+                parts.append("am_wtf 이상 징후 발생 이력은 검색 결과에서 명확히 확인되지 않음.")
 
         if wants_proxy:
             proxy_meta = next(
@@ -172,6 +231,10 @@ class StructuredEventRenderer:
             answer = cls._render_summary_event_answer(results, user_query)
             if answer:
                 return answer
+
+        system_event_answer = cls._render_system_kill_wtf_answer(results, user_query)
+        if system_event_answer:
+            return system_event_answer
 
         if not cls._is_root_cause_query(query_lower):
             return None

@@ -7,6 +7,36 @@ import numpy as np
 import ollama
 
 
+def _is_crash_absence_check_query(query_lower: str) -> bool:
+    has_crash_scope = any(k in query_lower for k in [
+        "crash", "크래시", "native crash", "네이티브 크래시", "fatal exception",
+        "anr", "응답 없음", "앱 응답 없음", "시스템 크래시"
+    ])
+    has_absence_intent = any(k in query_lower for k in [
+        "있", "없", "발생", "이력", "확인", "존재", "여부"
+    ])
+    has_rca_intent = any(k in query_lower for k in [
+        "root cause", "근본 원인", "원인", "왜", "rca", "분석해", "분석"
+    ])
+    has_system_kill_scope = any(k in query_lower for k in [
+        "am_kill", "system_kill", "am_wtf", "system_wtf", "wtf",
+        "binder", "바인더", "proxy", "프록시", "누수", "leak",
+        "강제 종료", "강제종료", "too many binders"
+    ])
+    return has_crash_scope and has_absence_intent and not has_system_kill_scope and not has_rca_intent
+
+
+def _is_crash_rca_query(query_lower: str) -> bool:
+    has_crash_scope = any(k in query_lower for k in [
+        "crash", "크래시", "native crash", "네이티브 크래시", "fatal exception",
+        "anr", "응답 없음", "앱 응답 없음", "시스템 크래시", "죽", "강제 종료", "강제종료"
+    ])
+    has_rca_intent = any(k in query_lower for k in [
+        "root cause", "근본 원인", "원인", "왜", "rca", "분석해", "분석", "상관", "관련"
+    ])
+    return has_crash_scope and has_rca_intent and not _is_crash_absence_check_query(query_lower)
+
+
 def extract_json_object(text: str) -> dict:
     if not text:
         raise ValueError("empty LLM routing response")
@@ -60,9 +90,23 @@ def get_semantic_routing(query, routing_map, embed_model):
         is_hard_matched = True
 
     if any(keyword in query_lower for keyword in [
-        "anr", "crash/anr", "crash", "크래시", "강제종료", "강제 종료", "앱 죽음", "폰 죽음", "죽었",
-        "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog", "프리징",
-        "바인더", "binder", "transaction", "am_kill", "am_wtf", "proxy leak", "프록시 누수", "바인더 누수"
+        "바인더", "binder", "binder transaction", "am_kill", "am_wtf", "system_kill", "system_wtf",
+        "proxy leak", "프록시 누수", "바인더 누수", "too many binders", "system kill",
+        "ipc", "병목", "bottleneck", "system server 강제 종료", "activitymanager 강제 종료"
+    ]) or (
+        any(keyword in query_lower for keyword in ["폰", "기기", "시스템", "화면", "터치"])
+        and any(keyword in query_lower for keyword in ["먹통", "멈춤", "프리징", "멈췄", "멈춰"])
+    ):
+        selected_intents = {"System_Kill_WTF"}
+        if "System_Kill_WTF" in routing_map:
+            selected_tools = set(routing_map["System_Kill_WTF"].get("tools", []))
+            selected_log_types = set(routing_map["System_Kill_WTF"].get("log_types", []))
+        is_hard_matched = True
+
+    elif any(keyword in query_lower for keyword in [
+        "anr", "crash/anr", "crash", "크래시", "앱 죽음", "앱 강제종료", "앱 강제 종료", "죽었",
+        "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog",
+        "native crash", "네이티브 크래시", "tombstone", "fatal signal", "sigsegv", "sigabrt"
     ]):
         selected_intents = {"Crash_ANR"}
         if "Crash_ANR" in routing_map:
@@ -70,7 +114,7 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = set(routing_map["Crash_ANR"].get("log_types", []))
         is_hard_matched = True
 
-    elif any(keyword in query_lower for keyword in ["인터넷", "먹통", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network", "setupdatacall"]):
+    elif any(keyword in query_lower for keyword in ["인터넷 먹통", "인터넷", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network", "setupdatacall"]):
         selected_intents = {"Internet_Stall"}
         if "Internet_Stall" in routing_map:
             selected_tools = set(routing_map["Internet_Stall"].get("tools", []))
@@ -93,7 +137,12 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = set(routing_map["Radio_Power"].get("log_types", []))
         is_hard_matched = True
 
-    elif any(keyword in query_lower for keyword in ["dns", "패킷", "ping", "핑", "네트워크 지연", "데이터 느림"]):
+    elif any(keyword in query_lower for keyword in [
+        "dns", "도메인", "name resolution", "resolve", "lookup", "패킷", "ping", "핑",
+        "네트워크 지연", "데이터 느림", "dns 정책", "정책 차단", "effective_policy",
+        "is_blocked", "battery_saver", "battery saver", "절전 정책", "백그라운드 데이터 제한",
+        "app_standby", "app_background", "reject", "rejected"
+    ]):
         selected_intents = {"DNS_Latency"}
         if "DNS_Latency" in routing_map:
             selected_tools = set(routing_map["DNS_Latency"].get("tools", []))
@@ -114,7 +163,11 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = set(routing_map["Tiantong_Satellite"].get("log_types", []))
         is_hard_matched = True
 
-    elif any(keyword in query_lower for keyword in ["nitz", "타임존", "시간대", "시간 변경", "핑퐁"]):
+    elif any(keyword in query_lower for keyword in [
+        "nitz", "타임존", "timezone", "time zone", "시간대", "시간 변경",
+        "시간 보정", "시간 동기화", "utc", "utc+", "utc offset", "offset",
+        "핑퐁", "ping-pong", "pingpong", "네트워크 시간"
+    ]):
         selected_intents = {"Nitz_Time_Analysis"}
         selected_tools = set()
         selected_log_types = {"Nitz_Time_Event"}
@@ -147,6 +200,27 @@ def get_semantic_routing(query, routing_map, embed_model):
         selected_intents.update(["Crash_ANR", "Network_OOS"])
         selected_tools.update(["get_crash_anr_analytics", "get_network_oos_analytics"])
         selected_log_types.update(["OOS_Event", "Native_Crash_Event", "RILJ_Transaction"])
+
+    if (
+        any(keyword in query_lower for keyword in ["oos", "망 이탈", "통신이 멈", "통신 멈춤", "음영", "기지국"])
+        and any(keyword in query_lower for keyword in [
+            "binder", "바인더", "am_kill", "am_wtf", "system_kill", "system_wtf",
+            "proxy leak", "프록시 누수", "바인더 누수", "too many binders"
+        ])
+    ):
+        selected_intents.update(["System_Kill_WTF", "Network_OOS"])
+        selected_tools.update(["get_binder_warning_analytics", "get_network_oos_analytics"])
+        selected_log_types.update(["System_Kill_Wtf_Event", "Binder_Warning", "RCA_Event", "OOS_Event", "RILJ_Transaction"])
+
+    if _is_crash_rca_query(query_lower):
+        selected_log_types.add("RCA_Event")
+        if any(keyword in query_lower for keyword in [
+            "binder", "바인더", "am_kill", "am_wtf", "system_kill", "system_wtf",
+            "proxy leak", "프록시 누수", "바인더 누수", "too many binders", "ipc", "병목", "bottleneck"
+        ]):
+            selected_intents.add("System_Kill_WTF")
+            selected_tools.add("get_binder_warning_analytics")
+            selected_log_types.update(["System_Kill_Wtf_Event", "Binder_Warning"])
 
     if (
         any(keyword in query_lower for keyword in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])

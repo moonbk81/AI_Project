@@ -20,7 +20,7 @@ st.set_page_config(page_title="RIL RAG Dashboard", layout="wide")
 
 if 'active_model' not in st.session_state:
     is_mac_mps = torch.backends.mps.is_available()
-    default_model = "gemma3:4b" if torch.cuda.is_available() else "gemma4:e4b"
+    default_model = "gemma3:4b" if torch.cuda.is_available() else "gemma4:e4b" if is_mac_mps else "gemma3:12b"
     st.session_state['active_model'] = default_model
 
 if 'active_routing_mode' not in st.session_state:
