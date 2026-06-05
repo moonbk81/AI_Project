@@ -7,6 +7,8 @@ router_prompt: |
 
   사용 가능한 intent:
   - Call_Analysis
+  - Call_Drop_Trap
+  - Time_Context_Inference
   - Network_OOS
   - DNS_Latency
   - Internet_Stall
@@ -29,11 +31,13 @@ router_prompt: |
 
   라우팅 주의사항:
   - 질문에 am_kill, am_wtf, SYSTEM_KILL, SYSTEM_WTF, binder, 바인더, proxy leak, 프록시 누수, Too many Binders sent to SYSTEM, IPC, 병목이 포함되면 Crash_ANR이 아니라 System_Kill_WTF로 라우팅하라.
-  - 질문이 Native Crash, Fatal signal, tombstone, FATAL EXCEPTION, ANR, 앱 응답 없음의 존재 여부를 묻는 경우에는 Crash_ANR만 선택하고 Binder_Warning, System_Kill_Wtf_Event, RCA_Event를 섞지 마라.
+  - 질문이 Native Crash, Fatal signal, tombstone, FATAL EXCEPTION, Java Crash, Crash_Event, ANR, ANR_Context, 앱 응답 없음의 존재 여부만 묻거나 "외에", "동반", "있는지만", "없으면", "확장하지 말고" 같은 범위 제한 표현을 포함하는 경우에는 Crash_ANR만 선택하고 Binder_Warning, System_Kill_Wtf_Event, Binder_Context, RCA_Event를 섞지 마라.
   - 단, 질문이 Crash/ANR/Native Crash의 원인, Root Cause, RCA, 왜 발생했는지, 관련성/상관관계 분석을 묻는 경우에는 Crash_ANR과 함께 RCA_Event를 포함하라.
   - "강제 종료"가 am_kill/System Kill 문맥이면 System_Kill_WTF, Java/Fatal Exception 문맥이면 Crash_ANR로 분리하라.
   - 질문에 DNS 정책 차단, effective_policy, is_blocked, BATTERY_SAVER, REJECT, APP_STANDBY, APP_BACKGROUND, 절전 정책, 백그라운드 데이터 제한이 포함되면 DNS_Latency로 라우팅하고 Network_DNS_Issue를 포함하라.
   - 질문에 NITZ, UTC, timezone, 타임존, 시간대, 시간 보정, 핑퐁, ping-pong이 포함되면 Nitz_Time_Analysis로 라우팅하고 Nitz_Time_Event를 포함하라.
+  - 질문에 SIP_480, 504_CODE_USER_DECLINE, is_user_reject, 수신 거부, user reject, NORMAL_RELEASE만 보고 Call Drop/망 장애인지 묻는 경우 Call_Drop_Trap으로 라우팅하고 log_types는 Call_Session만 포함하라.
+  - 질문에 airplane_mode_on 현재값만으로 과거 통화 종료 원인을 판단하는지 묻거나, Call_Session과 Radio_Power_Event/OOS_Event의 시간 순서 비교를 요구하는 경우 Time_Context_Inference로 라우팅하고 Call_Session, Radio_Power_Event, OOS_Event, Device_Property_State를 모두 포함하라.
 
   사용자 질문:
   {query}
@@ -48,6 +52,23 @@ routing_map:
       - Call_Session
       - IMS_SIP_Message
       - RILJ_Transaction
+      - Device_Property_State
+  Call_Drop_Trap:
+    desc: "SIP_480, 504_CODE_USER_DECLINE, NORMAL_RELEASE, is_user_reject, 수신 거부, user reject, 통화 거절, Call Drop인지 확인, SIP_480만 보고 망 장애 판단 가능 여부"
+    tools:
+      - get_ps_ims_call_analytics
+    log_types:
+      - Call_Session
+  Time_Context_Inference:
+    desc: "airplane_mode_on 현재값만으로 과거 원인 판단 금지, Call_Session 종료 시점과 Radio_Power_Event/OOS_Event 시간 비교, 비행기 모드 때문에 끊긴 것인지 확인, 통화 종료 이후 라디오 전원 차단/OOS 진입 여부 교차 검증"
+    tools:
+      - get_ps_ims_call_analytics
+      - get_radio_power_analytics
+      - get_network_oos_analytics
+    log_types:
+      - Call_Session
+      - Radio_Power_Event
+      - OOS_Event
       - Device_Property_State
   Network_OOS:
     desc: "안테나가 안떠요, 기지국 연결 끊김, 서비스 안됨, 망을 이탈했어요, OOS, 신호가 약해요, 음영 지역, 셀 재선택, RLF, 네트워크 복구 안됨, 망 복구 실패, 비행기 모드 해제 후 서비스 없음, 비행기 모드 해제 후 네트워크 미복구"
@@ -101,12 +122,13 @@ routing_map:
       - Native_Crash_Event
       - Device_Property_State
   System_Kill_WTF:
-    desc: "폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, IPC, 병목, bottleneck, 바인더, binder, am_kill, am_wtf, 프록시 누수, proxy leak, 바인더 누수, Too many Binders sent to SYSTEM, SYSTEM_KILL, SYSTEM_WTF, system server 강제 종료, ActivityManager 강제 종료"
+    desc: "폰 멈춤, 화면 멈춤, 시스템 멈춤, 프리징, 먹통, 기기 먹통, 터치 먹통, 검은 화면, IPC, IPC 지연, 병목, bottleneck, Bottleneck 감지, 내부 시스템 병목, 바인더, binder, Binder thread pool starvation, THREAD_EXHAUSTION, Binder thread pool 고갈, Starvation, am_kill, am_wtf, 프록시 누수, proxy leak, 바인더 누수, Too many Binders sent to SYSTEM, SYSTEM_KILL, SYSTEM_WTF, system server 강제 종료, ActivityManager 강제 종료. 단, 사용자가 Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻고 Binder/IPC/System_Kill_WTF로 확장하지 말라고 명시한 경우에는 이 intent를 선택하지 말 것"
     tools:
       - get_binder_warning_analytics
     log_types:
       - System_Kill_Wtf_Event
       - Binder_Warning
+      - Binder_Context
       - RCA_Event
       - Device_Property_State
   Radio_Power:
@@ -228,7 +250,8 @@ prompts:
 
     🚨 [핵심 제약 사항 - Mandatory]
     1. [No Hallucination 및 아는 척 금지]: 로그에 없는 수치, 에러 코드 임의 창작 절대 금지. 데이터 부재 시 "관련 이력 없음"으로만 답변하라. 🚨 절대 사전 학습된 지식을 이용해 에러 코드(예: SIP 480 등)의 일반적/이론적 의미를 설명하거나 망 불안정성 등을 유추하지 마라!
-    2. [스마트 TMI 통제]: 사용자가 질문한 특정 장애(예: Crash)가 없을 때 묻지 않은 주변 에러를 언급하지 마라. 단, 사용자가 명시적으로 "IPC", "병목(Bottleneck)", "지연", "시스템 멈춤", "am_kill", "am_wtf", "바인더"를 질문한 경우에는 Crash/ANR 카운트가 0이더라도 절대 무시하지 말고 `System_Kill_Wtf_Event`, `Binder_Warning`, `RCA_Event` 로그를 최우선으로 찾아 팩트를 보고하라.
+    2. [스마트 TMI 통제]: 사용자가 질문한 특정 장애(예: Crash)가 없을 때 묻지 않은 주변 에러를 언급하지 마라. 특히 Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나 "외에", "동반", "있는지만", "없으면", "확장하지 말고"처럼 범위를 제한한 질문에서는 `System_Kill_Wtf_Event`, `Binder_Warning`, `Binder_Context`, `RCA_Event`를 답변 근거로 사용하지 말고, 질문 대상 로그 타입의 존재/부재만 명확히 답하라. 단, 사용자가 명시적으로 "IPC", "병목(Bottleneck)", "지연", "시스템 멈춤", "am_kill", "am_wtf", "바인더" 자체를 질문한 경우에는 Crash/ANR 카운트가 0이더라도 `System_Kill_Wtf_Event`, `Binder_Warning`, `RCA_Event` 로그를 최우선으로 찾아 팩트를 보고하라.
+    2-1. [예/아니오 단답 금지]: 사용자가 "감지된 흔적이 있나요?", "확인되나요?", "있나요?", "있습니까?"처럼 존재 여부를 물어도 절대 "네" 또는 "아니오"만 답하지 마라. 검색 결과에 근거 로그가 있으면 반드시 log_type, type, 발생 시간, 핵심 수치(ms/count 등), 판단 결론을 함께 요약하라. 특히 Binder_Warning의 THREAD_EXHAUSTION은 Binder thread pool 고갈, Starvation 시간(ms), 단말 내부 IPC 병목 여부, 망 문제 아님을 명시하라.
     3. [질문 전제(Premise) 존중]: 질문 내 특정 조건("비행기 모드가 켜져 있는데")이 검색된 DB 데이터와 다르더라도, 반드시 사용자의 질문 조건을 최우선 전제로 삼아 답변하라.
     4. [간결성]: 서론/결론/역질문 금지. 평문 3~4문장 내외로 타임스탬프(HH:MM:SS), 에러 코드, 프로세스명 위주로 작성.
     5. [교정 모드]: "이것을 근거로 ~결론 내리면 돼?" 형태의 논리 검증 질문에는 주변 에러(예: GET_CELL_INFO_LIST 등)를 끌어오지 말고, 해당 논리의 참/거짓만 핀포인트로 교정하라.
@@ -237,7 +260,8 @@ prompts:
     8. [단말 강제 종료 분석 규칙 (am_kill)]: `System_Kill_Wtf_Event`의 SYSTEM_KILL / am_kill 이력이 발견되었다면, 단순 앱 크래시나 Native Crash로 판단하지 마라. 강제 종료 사유가 `Too many Binders sent to SYSTEM`이거나 동시간대 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`가 검색된 경우에는 바인더 프록시 누수에 따른 시스템 리소스 고갈을 최우선 Root Cause 후보로 판단하라.
     9. [SystemUI 환각 절대 금지]: 안드로이드 시스템 에러(Crash, am_kill 등)를 분석할 때, 검색된 로그에 명시되지 않은 'SystemUI', '안드로이드 OS 오류', '소프트웨어 충돌' 등의 추상적이고 일반적인 단어로 뭉뚱그려 요약하지 마라.
     10. [다중 에러 나열 규칙]: 여러 프로세스가 동시에 강제 종료(am_kill)된 로그가 검색되었다면, 임의로 하나만 고르거나 요약하지 말고 "com.android.phone, com.samsung.crane 등 N개의 프로세스가 종료되었습니다"라고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
-    11. [RCA_Event 우선 규칙]: 검색 결과에 `log_type: RCA_Event`가 포함되면, 해당 RCA_Event의 `rca_type`, `process`, `root_cause`, `kill_event`, `kill_reason`, `leaked_descriptor`, `max_proxy_count`, `developer_action`을 최우선 근거로 사용하라. 단, 사용자가 Crash/ANR/Native Crash의 존재 여부만 묻는 질문에서는 RCA_Event를 Crash_Event나 ANR_Context의 대체 근거로 사용하지 마라. RCA_Event와 충돌하지 않는 한 주변 Raw Event보다 RCA_Event 결론을 우선하며, OS 업데이트/캐시 삭제/안전 모드/공장 초기화 같은 일반 사용자 조치 설명은 금지하라.
+    11. [RCA_Event 우선 규칙]: 검색 결과에 `log_type: RCA_Event`가 포함되면, 해당 RCA_Event의 `rca_type`, `process`, `root_cause`, `kill_event`, `kill_reason`, `leaked_descriptor`, `max_proxy_count`, `developer_action`을 최우선 근거로 사용하라. 특히 `rca_type: BINDER_PROXY_LEAK_RCA`가 있으면 `System_Kill_Wtf_Event`의 am_wtf/am_kill 원본보다 RCA_Event를 우선하고, Binder proxy leak, 누수 인터페이스명, 최대 누수 개수, kill 사유, 개발자 조치를 반드시 포함하라. 단, 사용자가 Crash/ANR/Native Crash/Java Crash/Crash_Event/ANR_Context의 존재 여부만 묻거나 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 RCA_Event를 Crash_Event나 ANR_Context의 대체 근거로 사용하지 마라. RCA_Event와 충돌하지 않는 한 주변 Raw Event보다 RCA_Event 결론을 우선하며, OS 업데이트/캐시 삭제/안전 모드/공장 초기화 같은 일반 사용자 조치 설명은 금지하라.
+    12. [Negative Binder Leak 판정 규칙]: 사용자가 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 존재 여부를 묻고 "없으면 없다고", "확인되지 않으면"처럼 부재 확인을 요구한 경우, `System_Kill_Wtf_Event`의 am_wtf 원본만으로 Binder proxy leak이나 am_kill을 추론하지 마라. `BINDER_PROXY_HISTOGRAM`, `BINDER_PROXY_LEAK_RCA`, `kill_reason: Too many Binders sent to SYSTEM`, `kill_event: am_kill` 중 명확한 근거가 없으면 "Binder proxy leak 확인되지 않음", "Too many Binders sent to SYSTEM 없음", "am_kill 강제 종료 근거 없음"을 명시하라.
 
   root_cause_synthesis: |
     - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 관련 ERROR/FAILURE/EXHAUSTION이 감지되면 해당 이벤트를 참고하되, 질문 대상과 시간/프로세스/원인 연결성이 명확한 경우에만 Root Cause로 판단한다. Crash/ANR 존재 여부 확인 질문에서는 System_Kill_Wtf_Event, Binder_Warning, RCA_Event를 Crash/ANR의 대체 근거로 사용하지 않는다.
@@ -301,19 +325,25 @@ log_guidelines:
     System_Kill_Wtf_Event: |
       - SYSTEM_KILL(am_kill)은 일반 앱 크래시나 Native Crash가 아니라 시스템 서버(ActivityManager)에 의한 강제 종료 이벤트이다.
       - SYSTEM_WTF(am_wtf)는 심각한 시스템 상태 이상 신호이지만, 그 자체를 Crash/ANR로 단정하지 마라.
+      - SYSTEM_WTF(am_wtf) 단독 로그는 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 근거가 아니다. Binder proxy leak 여부를 묻는 부재 확인 질문에서는 BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/Too many Binders kill 근거가 없으면 없다고 답하라.
       - 강제 종료 사유 문구(예: `Too many Binders sent to SYSTEM`)는 생략하거나 요약하지 말고 원문 그대로 답변에 포함하라.
       - `Too many Binders sent to SYSTEM` 또는 동시간대 BINDER_PROXY_HISTOGRAM / BINDER_PROXY_LEAK_RCA가 있으면 Binder proxy leak을 최우선 Root Cause 후보로 판단하라.
       - 여러 프로세스가 동시에 SYSTEM_KILL 되었다면 임의로 하나만 고르지 말고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
-      - Crash/ANR 존재 여부만 묻는 질문에서는 System_Kill_Wtf_Event를 Crash_Event나 ANR_Context의 대체 근거로 사용하지 마라.
+      - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 System_Kill_Wtf_Event를 답변에 언급하지 말고 Crash_Event/ANR_Context의 대체 근거로도 사용하지 마라.
 
     Binder_Warning: |
       - TRANSACTION_DELAY (1000ms 이상 지연): 동시간대 ANR, Watchdog, 사망 여부 결합 분석.
       - THREAD_EXHAUSTION: Binder thread pool 포화(Starvation). ANR/Freezing 원인으로 지목하되 선행 transaction 확인.
+      - THREAD_EXHAUSTION이 검색 결과에 있으면 절대 단답으로 답하지 말고, Binder_Warning, THREAD_EXHAUSTION, Binder thread pool 고갈, Starvation 대기 시간(ms), 발생 시간대를 반드시 포함하라. 여러 THREAD_EXHAUSTION 이벤트가 있으면 가장 큰 ms 값을 핵심 수치로 사용하라.
+      - IPC/Bottleneck/병목 질문에서 THREAD_EXHAUSTION이 확인되면 이는 망 문제가 아니라 단말 내부 IPC 처리 스레드 부족에 의한 시스템 성능 저하로 결론 내라.
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
+      - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 Binder_Warning/Binder_Context를 답변에 언급하지 마라.
       - 🚨 [BINDER_PROXY_HISTOGRAM / LEAK 감지 시 최우선 규칙]: 바인더 프록시 객체가 수천 개 단위로 누수된 히스토그램이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver 등)를 확인하고 "해당 인터페이스의 등록(Register) 후 해제(Unregister) 누락에 의한 메모리 릭"을 시스템 마비 및 am_kill의 근본 원인(Root Cause)으로 지목하라.
         * 맞춤형 가이드: 누수 객체가 'IIntentReceiver'라면 반드시 "동적 BroadcastReceiver 해제(unregister) 누락"을 원인으로 지목하고 앱의 생명주기 로직을 점검하라고 가이드하라.
       - 🚨 [데이터 참조 우선순위]: 'am_wtf' 로그의 발생 횟수보다 'BINDER_PROXY_HISTOGRAM'에서 추출된 'max_count' 값을 장애의 규모를 나타내는 가장 정확한 팩트로 간주하라. am_wtf는 현상이고 max_count 가 누수의 실체이다.
-
+      - am_wtf 대량 발생/프록시 객체 누수/최대 개수 질문에서는 System_Kill_Wtf_Event 원본 몇 건만으로 발생 횟수나 누수 개수를 판단하지 마라. 반드시 BINDER_PROXY_HISTOGRAM 또는 BINDER_PROXY_LEAK_RCA의 leaked_descriptor/max_count 값을 우선 사용하고, 누수 인터페이스명과 최대 count 값을 답변에 포함하라.
+      - BINDER_PROXY_LEAK_RCA가 검색 결과에 있으면 System_Kill_Wtf_Event의 am_wtf/am_kill 원본보다 RCA_Event를 우선 사용하라. 답변에는 process, root_cause, leaked_descriptor, max_proxy_count, kill_event, kill_reason, developer_action을 포함하라.
+      - Negative Binder leak 확인 질문에서는 am_wtf 또는 일반 Binder 경고만으로 leak 가능성을 언급하지 마라. BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/Too many Binders sent to SYSTEM/am_kill 근거가 없으면 Binder proxy leak 및 강제 종료 근거 없음으로 결론 내라.
     RILJ_Transaction: |
       - TIMEOUT: 모뎀 칩셋 Freeze 치명 상태. 통화/데이터 실패 근본 원인 100% 확정.
       - SLOW (>500ms): 모뎀 처리 지연. 프레임워크 블로킹 및 체감 통신 지연 원인.
@@ -332,10 +362,12 @@ log_guidelines:
 
     RCA_Event: |
       - RCA_Event는 여러 Raw Event를 결합한 상위 원인 분석 결과이다.
-      - 검색 결과에 RCA_Event가 포함되면, 동일 시간대 Raw Event보다 RCA_Event를 최우선 근거로 사용하라. 단, Crash/ANR/Native Crash 존재 여부만 묻는 질문에서는 RCA_Event를 Crash/ANR 발생 근거로 대체 사용하지 마라.
-      - RCA_Event의 rca_type, process, root_cause, kill_reason, max_proxy_count, leaked_descriptor, developer_action 값을 반드시 답변에 포함하라.
-      - BINDER_PROXY_LEAK_RCA가 검색되면 결론은 반드시 "Binder proxy leak"으로 작성하라.
-      - BINDER_PROXY_LEAK_RCA에서 leaked_descriptor가 android.content.IIntentReceiver이면 개발 조치는 반드시 "동적 BroadcastReceiver unregister 누락 점검"으로 작성하라.
+      - 검색 결과에 RCA_Event가 포함되면, 동일 시간대 Raw Event보다 RCA_Event를 최우선 근거로 사용하라. 단, Crash/ANR/Native Crash/Java Crash/Crash_Event/ANR_Context 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 RCA_Event를 Crash/ANR 발생 근거로 대체 사용하지 말고 답변에서도 언급하지 마라.
+      - RCA_Event의 rca_type, process, root_cause, kill_event, kill_reason, max_proxy_count, leaked_descriptor, developer_action 값을 반드시 답변에 포함하라.
+      - BINDER_PROXY_LEAK_RCA가 검색되면 결론은 반드시 "Binder proxy leak"으로 작성하고, System_Kill_Wtf_Event의 am_wtf/am_kill 원본 로그보다 RCA_Event의 구조화된 결론을 우선하라.
+      - 반대로 Binder proxy leak 부재 확인 질문에서 BINDER_PROXY_LEAK_RCA가 검색되지 않으면 RCA_Event가 없는 상태를 leak 근거로 꾸며내지 마라. System_Kill_Wtf_Event의 am_wtf 원본만 검색된 경우에는 leak 확정 또는 가능성 언급을 금지한다.
+      - BINDER_PROXY_LEAK_RCA에서 leaked_descriptor가 android.content.IIntentReceiver이면 개발 조치는 반드시 "동적 BroadcastReceiver register 후 unregister 누락 점검"으로 작성하라.
+      - max_proxy_count 또는 max_count가 있으면 am_wtf 원본 로그 개수보다 해당 값을 장애 규모의 핵심 수치로 사용하라.
       - RCA_Event가 있을 때 일반론적 표현인 "시스템 리소스 부족", "소프트웨어 버그", "OS 업데이트", "공장 초기화" 같은 사용자 조치 중심 답변을 금지한다.
 # ==========================================
 # 4. 위성 통신(NTN) 분석 프롬프트 템플릿

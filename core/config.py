@@ -47,7 +47,7 @@ MODEL_CONFIG = {
         "stop": ["<unused", "<|im_end|>", "<eos>"],
         "max_doc_chars": 1200,
         "max_meta_chars": 2000,
-        "top_k": 3,
+        "top_k": 4,
     },
     "batiai/gemma4-e2b:q4": {
         "num_ctx": 8192,
@@ -59,7 +59,7 @@ MODEL_CONFIG = {
         "stop": ["<unused", "<|im_end|>", "<eos>"],
         "max_doc_chars": 1000,
         "max_meta_chars": 1500,
-        "top_k": 3,
+        "top_k": 4,
     },
     "gemma3:12b": {
         "num_ctx": 32768,
@@ -83,7 +83,7 @@ MODEL_CONFIG = {
         "stop": ["<unused", "<|im_end|>", "<eos>"],
         "max_doc_chars": 1200,
         "max_meta_chars": 2000,
-        "top_k": 3,
+        "top_k": 4,
     },
     "qwen2.5-coder:7b": {
         "num_ctx": 4096,        # 회사 제한 사양 반영

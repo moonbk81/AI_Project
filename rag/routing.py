@@ -10,20 +10,27 @@ import ollama
 def _is_crash_absence_check_query(query_lower: str) -> bool:
     has_crash_scope = any(k in query_lower for k in [
         "crash", "크래시", "native crash", "네이티브 크래시", "fatal exception",
-        "anr", "응답 없음", "앱 응답 없음", "시스템 크래시"
+        "java crash", "java exception", "native_crash_event",
+        "crash_event", "anr", "anr_context", "응답 없음", "앱 응답 없음", "시스템 크래시"
     ])
     has_absence_intent = any(k in query_lower for k in [
-        "있", "없", "발생", "이력", "확인", "존재", "여부"
+        "없", "없으면", "없는", "없었", "없다",
+        "동반", "동반되", "외에", "제외", "말고",
+        "확인", "존재", "있는지", "있는지만", "여부"
     ])
     has_rca_intent = any(k in query_lower for k in [
-        "root cause", "근본 원인", "원인", "왜", "rca", "분석해", "분석"
+        "root cause", "근본 원인", "왜", "rca", "분석해", "분석"
     ])
-    has_system_kill_scope = any(k in query_lower for k in [
-        "am_kill", "system_kill", "am_wtf", "system_wtf", "wtf",
-        "binder", "바인더", "proxy", "프록시", "누수", "leak",
-        "강제 종료", "강제종료", "too many binders"
+    has_explicit_system_kill_query = any(k in query_lower for k in [
+        "am_kill", "system_kill", "am_wtf", "system_wtf",
+        "too many binders", "binder leak", "proxy leak"
     ])
-    return has_crash_scope and has_absence_intent and not has_system_kill_scope and not has_rca_intent
+    return (
+        has_crash_scope
+        and has_absence_intent
+        and not has_explicit_system_kill_query
+        and not has_rca_intent
+    )
 
 
 def _is_crash_rca_query(query_lower: str) -> bool:
@@ -37,6 +44,42 @@ def _is_crash_rca_query(query_lower: str) -> bool:
     return has_crash_scope and has_rca_intent and not _is_crash_absence_check_query(query_lower)
 
 
+def _is_call_drop_trap_query(query_lower: str) -> bool:
+    has_call_scope = any(k in query_lower for k in [
+        "call_session", "call session", "volte", "ims call", "ps call",
+        "call drop", "콜드랍", "통화", "호 종료", "수신", "착신", "발신"
+    ])
+    has_release_or_reject_evidence = any(k in query_lower for k in [
+        "normal_release", "code_user_decline", "code_user_terminated",
+        "is_user_reject", "user_reject", "user reject", "user decline",
+        "수신 거부", "통화 거절", "사용자 종료", "정상 종료", "정상적인 호 종료"
+    ])
+    has_misclassification_check = any(k in query_lower for k in [
+        "sip_480", "temporarily unavailable", "망 장애", "망장애",
+        "call drop", "콜드랍", "장애로 판단", "판단해도", "만 보고",
+        "단정", "오판", "trap"
+    ])
+    return has_call_scope and has_misclassification_check and has_release_or_reject_evidence
+
+
+def _is_time_context_inference_query(query_lower: str) -> bool:
+    has_call_scope = any(k in query_lower for k in [
+        "call_session", "call session", "volte", "ims call", "ps call",
+        "통화", "호 종료", "콜", "call"
+    ])
+    has_time_reasoning_scope = any(k in query_lower for k in [
+        "시간순", "전후", "이전", "이후", "시점", "동시간", "타임라인",
+        "교차 검증", "비교", "현재값만으로", "과거 원인", "과거 통화",
+        "before", "after", "timeline", "correlate", "correlation"
+    ])
+    has_state_transition_scope = any(k in query_lower for k in [
+        "radio_power_event", "radio power", "radio_power", "라디오 전원",
+        "oos_event", "oos", "망 이탈", "비행기 모드", "airplane_mode_on",
+        "airplane mode", "device_property_state", "device property"
+    ])
+    return has_call_scope and has_time_reasoning_scope and has_state_transition_scope
+
+
 def extract_json_object(text: str) -> dict:
     if not text:
         raise ValueError("empty LLM routing response")
@@ -48,7 +91,6 @@ def extract_json_object(text: str) -> dict:
     if not match:
         raise ValueError(f"No JSON object found in response: {text[:300]}")
     return json.loads(match.group(0))
-
 
 def get_semantic_routing(query, routing_map, embed_model):
     chunks = [chunk.strip() for chunk in re.split(r'[\n\.]', query) if len(chunk.strip()) > 5]
@@ -77,16 +119,30 @@ def get_semantic_routing(query, routing_map, embed_model):
     is_hard_matched = False
     query_lower = query.lower()
 
-    if any(keyword in query_lower for keyword in ["cs call", "cs 통화", "cs 발신", "cs 수신", "cs csfb"]):
+    if _is_call_drop_trap_query(query_lower):
+        selected_intents = {"Call_Drop_Trap"}
+        if "Call_Drop_Trap" in routing_map:
+            selected_tools = set(routing_map["Call_Drop_Trap"].get("tools", []))
+            selected_log_types = set(routing_map["Call_Drop_Trap"].get("log_types", []))
+        else:
+            selected_tools = {"get_ps_ims_call_analytics"}
+            selected_log_types = {"Call_Session"}
+        is_hard_matched = True
+
+    elif _is_time_context_inference_query(query_lower):
+        selected_intents = {"Time_Context_Inference"}
+        if "Time_Context_Inference" in routing_map:
+            selected_tools = set(routing_map["Time_Context_Inference"].get("tools", []))
+            selected_log_types = set(routing_map["Time_Context_Inference"].get("log_types", []))
+        else:
+            selected_tools = {"get_ps_ims_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"}
+            selected_log_types = {"Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"}
+        is_hard_matched = True
+
+    elif any(keyword in query_lower for keyword in ["cs call", "cs 통화", "cs 발신", "cs 수신", "cs csfb"]):
         selected_intents = {"Call_Analysis"}
         selected_tools = {"get_cs_call_analytics"}
         selected_log_types = {"Call_Session", "RILJ_Transaction"}
-        is_hard_matched = True
-
-    elif any(keyword in query_lower for keyword in ["ps call", "ps 통화", "volte", "ims", "sip", "보이스오버"]):
-        selected_intents = {"Call_Analysis"}
-        selected_tools = {"get_ps_ims_call_analytics"}
-        selected_log_types = {"Call_Session", "IMS_SIP_Message", "RILJ_Transaction"}
         is_hard_matched = True
 
     if any(keyword in query_lower for keyword in [
@@ -222,13 +278,16 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_tools.add("get_binder_warning_analytics")
             selected_log_types.update(["System_Kill_Wtf_Event", "Binder_Warning"])
 
-    if (
-        any(keyword in query_lower for keyword in ["비행기 모드", "airplane", "airplane_mode", "radio power", "라디오 전원", "모뎀 전원"])
-        and any(keyword in query_lower for keyword in ["통화", "call", "call_session", "종료", "끊", "시간순", "12:", "code_user_terminated"])
-    ):
-        selected_intents.update(["Radio_Power", "Call_Analysis", "Network_OOS"])
-        selected_tools.update(["get_radio_power_analytics", "get_ps_ims_call_analytics", "get_network_oos_analytics"])
-        selected_log_types.update(["Device_Property_State", "Call_Session", "Radio_Power_Event", "OOS_Event", "IMS_SIP_Message"])
+    if _is_time_context_inference_query(query_lower):
+        selected_intents.difference_update(["Radio_Power", "Call_Analysis", "Network_OOS"])
+        selected_intents.add("Time_Context_Inference")
+        if "Time_Context_Inference" in routing_map:
+            selected_tools.update(routing_map["Time_Context_Inference"].get("tools", []))
+            selected_log_types.update(routing_map["Time_Context_Inference"].get("log_types", []))
+        else:
+            selected_tools.update(["get_radio_power_analytics", "get_ps_ims_call_analytics", "get_network_oos_analytics"])
+            selected_log_types.update(["Device_Property_State", "Call_Session", "Radio_Power_Event", "OOS_Event"])
+        selected_log_types.discard("IMS_SIP_Message")
 
     if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
         selected_log_types.add("RILJ_Transaction")

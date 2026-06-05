@@ -37,6 +37,7 @@ from rag.ingest import (
     reset_db as reset_collection_db,
 )
 from rag.prompt_builder import build_rag_prompt
+from rag.answer_guardrails import try_build_guardrail_answer
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
@@ -307,6 +308,40 @@ class RilRagChat:
         target_log_types = routing_result.get("log_types", [])
         intents = routing_result.get("intents", [])
 
+        # Hard intent normalization:
+        # Hybrid routing can union multiple intents/log_types. For trap/time-context
+        # cases, keep the search scope narrow and deterministic.
+        if "Call_Drop_Trap" in intents:
+            intents = ["Call_Drop_Trap"]
+            selected_tools = self.routing_map.get("Call_Drop_Trap", {}).get(
+                "tools",
+                ["get_ps_ims_call_analytics"],
+            )
+            target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get(
+                "log_types",
+                ["Call_Session"],
+            )
+
+        elif "Time_Context_Inference" in intents:
+            intents = ["Time_Context_Inference"]
+            selected_tools = self.routing_map.get("Time_Context_Inference", {}).get(
+                "tools",
+                [
+                    "get_ps_ims_call_analytics",
+                    "get_radio_power_analytics",
+                    "get_network_oos_analytics",
+                ],
+            )
+            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get(
+                "log_types",
+                [
+                    "Call_Session",
+                    "Radio_Power_Event",
+                    "OOS_Event",
+                    "Device_Property_State",
+                ],
+            )
+
         if "Tiantong_Satellite" in intents:
             selected_tools = ["get_tiantong_satellite_analytics"]
             target_log_types = ["Satellite_AT_Command"]
@@ -347,6 +382,25 @@ class RilRagChat:
 
         # 🚨 [방어 코드 주입 2] ChromaDB에서 서치해온 원본 로그 스니펫 및 뭉텅이 데이터 정제
         formatted_logs = self._clean_log_payload(formatted_logs)
+
+        # Deterministic guardrail renderer:
+        # retrieval metadata만으로 결론이 명확한 고위험 케이스는 LLM 단답/오판을 방지한다.
+        guardrail_answer = try_build_guardrail_answer(user_query, results)
+        if guardrail_answer:
+            doc_ids = results['ids'][0] if results and results.get('ids') else []
+            meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
+            try:
+                combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
+                log_rag_for_evaluation(
+                    query=user_query,
+                    context=combined_context,
+                    answer=guardrail_answer,
+                    guideline=domain_guidelines,
+                    model_name=f"{self.llm_model_name}+guardrail"
+                )
+            except Exception:
+                pass
+            return guardrail_answer, doc_ids, meta_list, ""
 
         # Structured Event Direct Renderer:
         # parser/payload가 만든 Summary/RCA_Event는 LLM에 재해석시키지 않고 공통 렌더러로 우선 처리한다.
