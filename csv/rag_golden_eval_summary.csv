@@ -1,2 +1,2 @@
 ﻿total_test_cases,failed_evals,must_not_clean_rate,avg_accuracy_score,avg_evidence_coverage,avg_must_have_coverage,avg_must_not_violation,avg_hallucination_safety,avg_overall_score
-1,0,1.0,0.95,0.85,1.0,0.0,1.0,0.93
+24,0,0.792,0.7,0.665,0.781,0.208,0.754,0.703
