@@ -114,10 +114,12 @@ def retrieve_and_rerank(
             "ANR_Context",
         ]
     elif is_call_release_misclassification_query(query_lower):
-        effective_target_log_types = ["Call_Session"]
+        effective_target_log_types = ["Call_Session", "CS_Call_Session", "PS_Call_Session"]
     elif is_time_context_inference_query(query_lower):
         effective_target_log_types = [
             "Call_Session",
+            "CS_Call_Session",
+            "PS_Call_Session",
             "Radio_Power_Event",
             "OOS_Event",
             "Device_Property_State",

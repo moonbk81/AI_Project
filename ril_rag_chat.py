@@ -330,13 +330,19 @@ class RilRagChat:
 
         if "Call_Drop_Trap" in intents:
             intents = ["Call_Drop_Trap"]
-            selected_tools = self.routing_map.get("Call_Drop_Trap", {}).get("tools", ["get_ps_ims_call_analytics"])
-            target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get("log_types", ["Call_Session"])
+            selected_tools = self.routing_map.get("Call_Drop_Trap", {}).get(
+                "tools",
+                ["get_ps_ims_call_analytics", "get_cs_call_analytics"],
+            )
+            target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get(
+                "log_types",
+                ["Call_Session", "CS_Call_Session", "PS_Call_Session"],
+            )
 
         elif "Time_Context_Inference" in intents:
             intents = ["Time_Context_Inference"]
-            selected_tools = self.routing_map.get("Time_Context_Inference", {}).get("tools", ["get_ps_ims_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"])
-            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
+            selected_tools = self.routing_map.get("Time_Context_Inference", {}).get("tools", ["get_ps_ims_call_analytics", "get_cs_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"])
+            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "CS_Call_Session", "PS_Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
 
         if "Tiantong_Satellite" in intents:
             selected_tools = ["get_tiantong_satellite_analytics"]
@@ -422,22 +428,15 @@ class RilRagChat:
 
         direct_structured_answer = StructuredEventRenderer.render(results, user_query)
         if direct_structured_answer:
-            doc_ids = results['ids'][0] if results and results.get('ids') else []
-            meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
-            try:
-                combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-                log_rag_for_evaluation(
-                    query=user_query,
-                    context=combined_context,
-                    answer=direct_structured_answer,
-                    guideline=domain_guidelines,
-                    model_name=f"{self.llm_model_name}+direct_structured"
-                )
-            except Exception:
-                pass
-            return direct_structured_answer, doc_ids, meta_list, ""
+            structured_injection = (
+                f"🚨 [시스템 사전 분석 결론 - 최우선 반영할 것]:\n"
+                f"{direct_structured_answer}\n"
+                f"(※ 위 사전 분석 결과를 바탕으로, 사용자가 요청한 출력 양식에 맞게 렌더링하십시오.)"
+            )
+            tool_facts = f"{structured_injection}\n\n{tool_facts}"
 
-        # 💡 [핵심 수정 1] build_rag_prompt에서는 user_query 파라미터를 제외하고,
+            print("[RAG_INFO] StructuredEventRenderer의 결과를 LLM 프롬프트에 주입했습니다.")
+
         # 시스템 롤 프롬프트(system_prompt)만 순수하게 빌드합니다.
         system_prompt = build_rag_prompt(
             system_role_prompt=self.system_role_prompt,
