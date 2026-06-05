@@ -69,6 +69,22 @@ def is_call_release_misclassification_query(query_lower: str) -> bool:
     ])
     return has_call_scope and has_misclassification_check and has_release_or_reject_evidence
 
+def is_call_drop_check_query(query_lower: str) -> bool:
+    has_call_scope = any(k in query_lower for k in [
+        "call_session", "call session", "volte", "ims call", "ps call",
+        "통화", "호", "콜", "음성", "call", "voice call", "cs call", "cs 통화"
+    ])
+    has_drop_scope = any(k in query_lower for k in [
+        "call drop", "콜드랍", "drop", "dropped", "끊김", "끊겼", "통화 끊김",
+        "통화종료", "통화 종료", "normal release", "normal_release", "release cause",
+        "sip", "거절 사유", "종료 사유", "drop 기록", "drop 이력"
+    ])
+    has_fact_only_scope = any(k in query_lower for k in [
+        "지어내지", "팩트", "존재하는 사실", "간결", "확인", "요약", "출력"
+    ])
+    return has_call_scope and has_drop_scope and (
+        has_fact_only_scope or "call drop" in query_lower or "콜드랍" in query_lower
+    )
 
 def is_time_context_inference_query(query_lower: str) -> bool:
     has_call_scope = any(k in query_lower for k in [

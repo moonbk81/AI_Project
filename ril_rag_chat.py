@@ -59,8 +59,8 @@ class RilRagChat:
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
-        # 3. LLM 로드 (Gemma4-e4b 적용)
-        self.llm_model_name = 'gemma4:e4b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+        # 3. LLM 로드 (Gemma3:12b 적용)
+        self.llm_model_name = 'gemma3:12b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         if device == "cuda":
             self.llm_model_name = 'gemma3:4b'
 
@@ -115,10 +115,7 @@ class RilRagChat:
             }
 
     def _load_log_guidelines_from_yaml(self):
-        """config.yaml 최상위 log_guidelines를 로드한다.
-        core.config의 PROMPTS에는 prompts 하위만 들어갈 수 있으므로,
-        log_guidelines가 실제 프롬프트에 누락되지 않도록 직접 fallback 로드한다.
-        """
+        """config.yaml 최상위 log_guidelines를 로드한다."""
         try:
             import yaml
             current_path = os.path.dirname(os.path.abspath(__file__))
@@ -220,7 +217,7 @@ class RilRagChat:
             gc.collect()
         print(f"\nVector DB 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
-    def _get_domain_specific_guideline(self, query, intents, target_log_types):
+    def _get_domain_specific_guideline(self, query, intents, retrieved_log_types):
         guidelines = []
         query_lower = query.lower()
 
@@ -228,7 +225,6 @@ class RilRagChat:
             guidelines.append("### [CS Call 전용 분석]\n이 분석은 CS 통화에 집중합니다. "
                               "VoLTE나 SIP 관련 로그 대신, CS 통화의 거절 사유(Release Cause)를 우선적으로 찾아 요약하십시오.")
 
-        # 💡 [SLM 최적화] '제외하라', '오직 하나만' 등의 복잡한 제약 대신, 명확한 타겟팅 제시
         elif "ps call" in query_lower or "volte" in query_lower or "ims" in query_lower:
             guidelines.append("### [PS(VoLTE) Call 전용 분석]\n이 분석은 PS(VoLTE/IMS) 통화 장애에 집중합니다. "
                               "정상 종료(예: 510_CODE_USER_TERMINATED)는 요약에서 생략하고, 비정상 종료(예: 504_CODE_USER_DECLINE, SIP 에러)가 발생한 문제 통화의 시간과 에러 코드만 추출하십시오.")
@@ -243,9 +239,9 @@ class RilRagChat:
             base_p = self.prompts.get('base_persona', "")
             if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
 
-        # log_guidelines는 config.yaml 최상위에 있으므로 self.prompts만 보면 누락될 수 있다.
+        # 💡 [핵심 최적화] target_log_types 대신 '실제 검색된' retrieved_log_types만 순회합니다.
         log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
-        for log_type in target_log_types:
+        for log_type in retrieved_log_types:
             if log_type in log_guidelines_dict:
                 guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
@@ -256,19 +252,43 @@ class RilRagChat:
         return "\n\n".join(guidelines)
 
     def _clean_log_payload(self, text: str) -> str:
-        """JSON 특수문자, 대괄호 노이즈 및 과도한 raw_logs 블록을 날려
-        2B 모델의 어텐션 붕괴를 영구 방어합니다.
-        """
+        """JSON 특수문자, 대괄호 노이즈 및 LLM의 어텐션을 붕괴시키는 대량의 반복 로그를 영구 방어합니다."""
         if not text:
             return ""
 
-        # 1. raw_logs 패턴 원천 차단 (배열/오브젝트 구조 통째로 제거)
+        # 1. raw_logs 패턴 원천 차단
         text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
         text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
 
+        # 💡 [어텐션 붕괴 방어벽 1] 가장 심각한 토큰 도둑: Internet Stall의 key_related_events 다이어트
+        # 대괄호 안의 무수한 이벤트 나열을 한 줄로 압축합니다.
+        stall_pattern = r"(?:\'|\")?key_related_events(?:\'|\")?\s*:\s*\[.*?\]"
+        text = re.sub(stall_pattern, "key_related_events: [OMITTED_FOR_COMPRESSION]", text, flags=re.DOTALL)
+
+        # 💡 [어텐션 붕괴 방어벽 2] SYSTEM_WTF 찌꺼기 완벽 제거
+        # 괄호나 따옴표 유무에 상관없이 매칭
+        wtf_pattern = r"(?:\'|\"|\[)?\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}(?:\]|\'|\")?\s*SYSTEM_WTF:\s*.*?교차 확인해야 합니다\.(?:\'|\")?"
+        wtf_count = len(re.findall(wtf_pattern, text))
+        if wtf_count > 0:
+            text = re.sub(wtf_pattern, "", text)
+            # 메인 summary에 이미 압축 내용이 있으므로 본문에서는 완전히 날립니다.
+
+        # 💡 [어텐션 붕괴 방어벽 3] NITZ 시간 보정 로그 완벽 제거
+        # log_time: 2026-03... 부터 dst_status: 미적용 까지 포맷 무관하게 매칭
+        nitz_pattern = r"(?:\{|\'|\")?\s*log_time\s*:\s*.*?dst_status\s*:\s*[^\,\}\]]+(?:\}|\'|\"|\])*"
+        nitz_count = len(re.findall(nitz_pattern, text, flags=re.DOTALL))
+        if nitz_count > 0:
+            text = re.sub(nitz_pattern, "", text, flags=re.DOTALL)
+            text = f"💡 [RAG_DIET_SYSTEM] NITZ 시간 보정 로그 {nitz_count}건이 감지되어 압축 처리되었습니다.\n" + text
+
+        # 🧹 [진공 청소기] 요소가 삭제되고 남은 빈 콤마( , , , ) 찌꺼기 싹쓸이
+        text = re.sub(r'(\s*,\s*){2,}', ', ', text)  # 여러 개의 콤마를 하나로
+        text = re.sub(r'\[\s*,\s*', '[', text)       # [, 형태 정리
+        text = re.sub(r'\s*,\s*\]', ']', text)       # ,] 형태 정리
+        text = re.sub(r'\{\s*,\s*', '{', text)       # {, 형태 정리
+
         # 2. 분석 팩트 등 날것의 JSON 형태가 잔존할 경우 가독성 높은 텍스트화
         try:
-            # 완벽한 JSON일 경우 가볍게 파싱 후 - key: value 전환
             data = json.loads(text)
             if isinstance(data, dict):
                 return "\n".join([f"- {k}: {v}" for k, v in data.items() if v and k != "raw_logs"])
@@ -280,8 +300,8 @@ class RilRagChat:
 
         # 4. 연속된 줄바꿈 및 의미 없는 공백 압축
         text = re.sub(r'\n\s*\n', '\n', text).strip()
-        return text
 
+        return text
 
     def ask(self, user_query, current_file=None, chat_history=None, top_k=None, health_kpi=None, is_bench=False):
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
@@ -308,45 +328,48 @@ class RilRagChat:
         target_log_types = routing_result.get("log_types", [])
         intents = routing_result.get("intents", [])
 
-        # Hard intent normalization:
-        # Hybrid routing can union multiple intents/log_types. For trap/time-context
-        # cases, keep the search scope narrow and deterministic.
         if "Call_Drop_Trap" in intents:
             intents = ["Call_Drop_Trap"]
-            selected_tools = self.routing_map.get("Call_Drop_Trap", {}).get(
-                "tools",
-                ["get_ps_ims_call_analytics"],
-            )
-            target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get(
-                "log_types",
-                ["Call_Session"],
-            )
+            selected_tools = self.routing_map.get("Call_Drop_Trap", {}).get("tools", ["get_ps_ims_call_analytics"])
+            target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get("log_types", ["Call_Session"])
 
         elif "Time_Context_Inference" in intents:
             intents = ["Time_Context_Inference"]
-            selected_tools = self.routing_map.get("Time_Context_Inference", {}).get(
-                "tools",
-                [
-                    "get_ps_ims_call_analytics",
-                    "get_radio_power_analytics",
-                    "get_network_oos_analytics",
-                ],
-            )
-            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get(
-                "log_types",
-                [
-                    "Call_Session",
-                    "Radio_Power_Event",
-                    "OOS_Event",
-                    "Device_Property_State",
-                ],
-            )
+            selected_tools = self.routing_map.get("Time_Context_Inference", {}).get("tools", ["get_ps_ims_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"])
+            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
 
         if "Tiantong_Satellite" in intents:
             selected_tools = ["get_tiantong_satellite_analytics"]
             target_log_types = ["Satellite_AT_Command"]
 
-        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, target_log_types)
+        # 💡 [순서 변경] DB 검색(Retrieval)을 가이드라인 생성보다 먼저 실행합니다.
+        where_filter = build_where_filter(
+            current_file=current_file,
+            target_log_types=target_log_types,
+        )
+
+        results = retrieve_and_rerank(
+            collection=self.collection,
+            embed_model=self.embed_model,
+            search_query=search_query,
+            top_k=top_k,
+            current_file=current_file,
+            target_log_types=target_log_types,
+        )
+
+        # 💡 [핵심] 검색된 결과에서 '실제 등장한 로그 타입'만 추출합니다.
+        retrieved_log_types = set()
+        if results and results.get('metadatas') and results['metadatas'][0]:
+            for meta in results['metadatas'][0]:
+                if meta and meta.get("log_type"):
+                    retrieved_log_types.add(meta["log_type"])
+
+        # 라우터가 3개 이하로 좁혀준 명확한 질문이면, 검색결과가 없어도 부재(Absence) 판별을 위해 템플릿 포함
+        if len(target_log_types) <= 3:
+            retrieved_log_types.update(target_log_types)
+
+        # 💡 추출된 알짜배기 로그 타입만 넘겨서 불필요한 템플릿을 제거합니다.
+        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, retrieved_log_types)
 
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
@@ -360,7 +383,6 @@ class RilRagChat:
         tool_facts = self._clean_log_payload(tool_facts)
 
         if health_kpi:
-            # KPI 스탯도 안전하게 정제해서 병합
             sanitized_kpi = self._clean_log_payload(health_kpi)
             tool_facts = f"=== [단말 전반 KPI 상태] ===\n{sanitized_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
@@ -379,13 +401,9 @@ class RilRagChat:
         )
 
         formatted_logs = self._format_results(results)
-
-        # 🚨 [방어 코드 주입 2] ChromaDB에서 서치해온 원본 로그 스니펫 및 뭉텅이 데이터 정제
         formatted_logs = self._clean_log_payload(formatted_logs)
 
-        # Deterministic guardrail renderer:
-        # retrieval metadata만으로 결론이 명확한 고위험 케이스는 LLM 단답/오판을 방지한다.
-        guardrail_answer = try_build_guardrail_answer(user_query, results)
+        guardrail_answer = try_build_guardrail_answer(user_query, results, tool_facts=tool_facts,)
         if guardrail_answer:
             doc_ids = results['ids'][0] if results and results.get('ids') else []
             meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
@@ -402,8 +420,6 @@ class RilRagChat:
                 pass
             return guardrail_answer, doc_ids, meta_list, ""
 
-        # Structured Event Direct Renderer:
-        # parser/payload가 만든 Summary/RCA_Event는 LLM에 재해석시키지 않고 공통 렌더러로 우선 처리한다.
         direct_structured_answer = StructuredEventRenderer.render(results, user_query)
         if direct_structured_answer:
             doc_ids = results['ids'][0] if results and results.get('ids') else []
@@ -421,16 +437,15 @@ class RilRagChat:
                 pass
             return direct_structured_answer, doc_ids, meta_list, ""
 
-        prompt = build_rag_prompt(
+        # 💡 [핵심 수정 1] build_rag_prompt에서는 user_query 파라미터를 제외하고,
+        # 시스템 롤 프롬프트(system_prompt)만 순수하게 빌드합니다.
+        system_prompt = build_rag_prompt(
             system_role_prompt=self.system_role_prompt,
             domain_guidelines=domain_guidelines,
             tool_facts=tool_facts,
             formatted_logs=formatted_logs,
-            user_query=user_query,
         )
 
-        # DEBUG: 실제 LLM에 전달되는 prompt/context 확인용.
-        # 환경변수 RAG_DEBUG_PROMPT=1 일 때만 파일로 저장한다.
         if os.getenv("RAG_DEBUG_PROMPT", "0") == "1":
             try:
                 debug_dir = os.path.join(os.getcwd(), "debug_prompts")
@@ -439,8 +454,9 @@ class RilRagChat:
                 debug_path = os.path.join(debug_dir, f"{safe_base}_last_prompt.txt")
                 debug_meta_path = os.path.join(debug_dir, f"{safe_base}_last_retrieval.json")
 
+                # 로깅용으로는 보기 편하게 합쳐서 저장합니다.
                 with open(debug_path, "w", encoding="utf-8") as f:
-                    f.write(prompt)
+                    f.write(system_prompt + f"\n\n사용자 질문: {user_query}")
 
                 debug_payload = {
                     "user_query": user_query,
@@ -466,8 +482,8 @@ class RilRagChat:
             except Exception as e:
                 print(f"[RAG_DEBUG] failed to save prompt debug files: {e}")
 
-        # 🚨 튜플 반환으로 생각 과정(Thinking) 함께 받기
-        answer, thinking = self._call_llm(prompt, is_bench=is_bench)
+        # 💡 [핵심 수정 2] _call_llm 호출 시 system_prompt와 user_query를 분리해서 넘겨줍니다.
+        answer, thinking = self._call_llm(system_prompt=system_prompt, user_query=user_query, is_bench=is_bench)
 
         doc_ids = results['ids'][0] if results and results.get('ids') else []
         meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
@@ -477,7 +493,6 @@ class RilRagChat:
             log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines, model_name=self.llm_model_name)
         except Exception: pass
 
-        # 🚨 UI 전달을 위해 4번째 인자로 thinking 반환
         return answer, doc_ids, meta_list, thinking
 
     def get_all_files(self):
@@ -504,9 +519,11 @@ class RilRagChat:
             formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n[메타정보]\n{meta_lines}\n\n[요약]\n{doc}\n\n[원본 로그 스니펫]\n{snippet}")
         return "\n\n".join(formatted)
 
-    def _call_llm(self, prompt: str, is_bench=False) -> tuple[str, str]:
+    # 💡 [핵심 수정 3] 래퍼 함수 파라미터 분리 동기화
+    def _call_llm(self, system_prompt: str, user_query: str, is_bench=False) -> tuple[str, str]:
         return call_llm(
-            prompt=prompt,
+            system_prompt=system_prompt,
+            user_query=user_query,
             model_name=self.llm_model_name,
             model_config_registry=self.model_config_registry,
             is_bench=is_bench,

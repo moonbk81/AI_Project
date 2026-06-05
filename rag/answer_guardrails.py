@@ -5,10 +5,12 @@ but a small/local LLM may collapse to a short answer or ignore RCA/absence rules
 Keep this file domain-generic: no Golden TC IDs, no fixed test-only timestamps, and no hard-coded expected counts.
 """
 
+import ast
 import re
 
 from rag.query_classifiers import (
     is_binder_proxy_count_query,
+    is_call_drop_check_query,
     is_crash_absence_check,
     is_negative_binder_leak_check_query,
 )
@@ -54,13 +56,18 @@ def _guess_requested_process(query_lower: str) -> str | None:
     return None
 
 
-def try_build_guardrail_answer(user_query: str, results) -> str | None:
+def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str | None:
     """Return a deterministic answer when retrieved metadata is decisive.
 
     Returns None when the normal LLM/structured renderer should handle the answer.
     """
     query_lower = user_query.lower()
     meta_list = iter_result_meta(results)
+
+    # 💡 [개입 축소] 기존에 tool_facts만 보고 바로 리턴해버리던
+    # _build_call_drop_answer_from_tool_facts 와 _is_general_call_issue_query 방어벽을 제거했습니다.
+    # 이제 일반적인 Call Drop 질의는 LLM이 tool_facts를 읽고 직접 분석합니다.
+
     if not meta_list:
         return None
 
@@ -93,7 +100,55 @@ def try_build_guardrail_answer(user_query: str, results) -> str | None:
                 "일반 앱 Crash/ANR 원인으로 확장하지 않습니다."
             )
 
-    # 2) Binder THREAD_EXHAUSTION / IPC bottleneck: avoid one-word answers.
+    # 2) Call Drop fact-only check: (골든셋 함정 방어용 최소 개입)
+    # LLM이 Normal Release를 Call Drop으로 환각하는 것만 잡아냅니다.
+    if is_call_drop_check_query(query_lower):
+        call_sessions = []
+        for meta in meta_list:
+            log_type = str(meta.get("log_type", ""))
+            meta_text = " ".join([
+                log_type, str(meta.get("type", "")), str(meta.get("status", "")),
+                str(meta.get("fail_reason", "")), str(meta.get("release_cause", "")),
+                str(meta.get("sip_code", "")), str(meta.get("desc", "")),
+                str(meta.get("raw_info", "")), str(meta.get("raw_logs", "")),
+            ]).lower()
+            if (
+                log_type in ["Call_Session", "CS_Call_Session", "PS_Call_Session", "Call_Event", "CS_Call_Event", "PS_Call_Event"]
+                or "call" in log_type.lower()
+                or "normal_release" in meta_text or "normal release" in meta_text
+                or "release cause" in meta_text or "release_cause" in meta_text
+                or "sip_" in meta_text or "code_user" in meta_text
+                or "mo_call" in meta_text or "mt_call" in meta_text
+            ):
+                call_sessions.append(meta)
+
+        if call_sessions:
+            drop_sessions = []
+            is_all_normal = True
+            for meta in call_sessions:
+                status = str(meta.get("status", "")).upper()
+                fail_reason = str(meta.get("fail_reason", "")).upper()
+                release_cause = str(meta.get("release_cause", "")).upper()
+                combined = " ".join([status, fail_reason, release_cause])
+
+                is_normal_release = (
+                    "NORMAL_RELEASE" in combined or "NORMAL RELEASE" in combined
+                    or status == "NORMAL" or " DISCONNECTED / NORMAL" in combined
+                    or "RELEASE_CAUSE_NORMAL" in combined or "CODE_USER" in combined
+                )
+
+                if not is_normal_release:
+                    is_all_normal = False
+                    if any(k in combined for k in ["CALL_DROP", "DROPPED", "ABNORMAL", "RADIO_LOST", "OOS", "ERROR", "FAIL"]):
+                        drop_sessions.append(meta)
+
+            # 💡 [핵심] 모두 Normal Release라서 "Call Drop이 아니다"라고 교정해줘야 하는 경우만 가드레일 작동
+            if is_all_normal and not drop_sessions:
+                return "명시적인 Call Drop 이력은 없으며 정상 종료(Normal Release/User Terminated)되었습니다."
+
+            # 그 외에 진짜 장애가 섞여 있다면 LLM에게 렌더링을 맡김 (return None)
+
+    # 3) Binder THREAD_EXHAUSTION / IPC bottleneck
     thread_exhaustion_events = [
         meta for meta in meta_list
         if meta.get("log_type") == "Binder_Warning"
@@ -111,7 +166,7 @@ def try_build_guardrail_answer(user_query: str, results) -> str | None:
             "이는 기지국/망 장애가 아니라 단말 내부 Binder IPC 처리 스레드 부족에 따른 시스템 성능 저하로 판단됩니다."
         )
 
-    # 3) Binder proxy leak RCA: RCA_Event beats raw am_wtf/am_kill rows.
+    # 4) Binder proxy leak RCA
     binder_rca_events = [
         meta for meta in meta_list
         if meta.get("log_type") == "RCA_Event"
@@ -124,88 +179,30 @@ def try_build_guardrail_answer(user_query: str, results) -> str | None:
         max_count = rca.get("max_proxy_count", rca.get("max_count", "확인 필요"))
         kill_event = rca.get("kill_event", "am_kill")
         kill_reason = rca.get("kill_reason", "Too many Binders sent to SYSTEM")
-        developer_action = rca.get(
-            "developer_action",
-            "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함",
-        )
+        developer_action = rca.get("developer_action", "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함")
 
-        if any(k in query_lower for k in [
-            "연관", "관련", "가이드", "고쳐", "개발자", "root cause", "근본 원인",
-            "죽", "강제 종료", "am_kill",
-        ]):
+        if any(k in query_lower for k in ["연관", "관련", "가이드", "고쳐", "개발자", "root cause", "근본 원인", "죽", "강제 종료", "am_kill"]):
             return (
                 f"네, 서로 연관되어 있습니다. `{process}`에서 `{leaked_descriptor}` Binder proxy leak이 발생했고, "
                 f"최대 {max_count}개까지 누수되었습니다. 이 누수로 인해 시스템 리소스가 고갈되었고, "
                 f"ActivityManager가 `{kill_reason}` 사유로 `{kill_event}` 강제 종료를 수행한 것으로 판단됩니다. "
-                f"개발자는 {developer_action}. 누수 descriptor가 BroadcastReceiver 계열(`IIntentReceiver`)이면 "
-                "동적 BroadcastReceiver register/unregister 생명주기 해제 누락을 우선 점검하고, 다른 descriptor라면 "
-                "해당 Binder proxy 객체를 생성·등록한 컴포넌트의 해제 경로를 점검해야 합니다."
+                f"개발자는 {developer_action}."
             )
 
-    # 4) Binder proxy count / histogram fact retrieval.
-    # Do not count a few raw am_wtf rows as the occurrence count. Use structured
-    # histogram/RCA max_count-style fields as the source of truth for scale.
-    if is_binder_proxy_count_query(query_lower):
-        histogram_events = [
-            meta for meta in meta_list
-            if str(meta.get("type", "")).upper() == "BINDER_PROXY_LEAK_SUMMARY"
-            or "binder proxy 객체 상태 덤프" in str(meta.get("raw_info", "")).lower()
-            or "binder proxy" in str(meta.get("raw_info", "")).lower()
-        ]
-        binder_rca_events_for_count = [
-            meta for meta in meta_list
-            if meta.get("log_type") == "RCA_Event"
-            and str(meta.get("rca_type", "")) == "BINDER_PROXY_LEAK_RCA"
-        ]
-
-        structured_events = binder_rca_events_for_count + histogram_events
-        if structured_events:
-            primary = max(
-                structured_events,
-                key=lambda meta: int(meta.get("max_proxy_count", meta.get("max_count", 0)) or 0),
-            )
-            process = primary.get("process") or _guess_requested_process(query_lower) or "관련 프로세스"
-            descriptor = primary.get("leaked_descriptor") or primary.get("descriptor") or "Binder proxy"
-            max_count = primary.get("max_proxy_count", primary.get("max_count", "확인 필요"))
-
-            am_wtf_part = (
-                f"am_wtf 이상 징후는 `{process}` 관련 구조화 근거와 함께 해석해야 합니다. "
-                "raw `System_Kill_Wtf_Event` 몇 건만으로 발생 횟수를 산정하지 않고, "
-                f"Histogram/RCA의 최대 count 값({max_count})을 장애 규모의 핵심 수치로 사용합니다."
-            )
-
-            return (
-                f"{am_wtf_part} Binder Proxy Histogram 기준으로 `{descriptor}` 프록시 객체가 최대 {max_count}개까지 "
-                "누수된 것이 확인됩니다. 따라서 이 질문의 수치 판단은 raw `System_Kill_Wtf_Event` 개수보다 "
-                "`BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`의 구조화된 count 값을 우선해야 합니다."
-            )
-
-    # 5) Negative Binder leak check: raw am_wtf is not leak evidence.
+    # 5) Negative Binder leak check (환각 방지)
     if is_negative_binder_leak_check_query(query_lower):
         has_positive_leak = any(
-            (
-                meta.get("log_type") == "RCA_Event"
-                and str(meta.get("rca_type", "")) == "BINDER_PROXY_LEAK_RCA"
-            )
-            or "too many binders sent to system" in " ".join([
-                str(meta.get("kill_reason", "")),
-                str(meta.get("raw_info", "")),
-                str(meta.get("desc", "")),
-            ]).lower()
-            or "am_kill" in " ".join([
-                str(meta.get("kill_event", "")),
-                str(meta.get("raw_info", "")),
-            ]).lower()
+            (meta.get("log_type") == "RCA_Event" and str(meta.get("rca_type", "")) == "BINDER_PROXY_LEAK_RCA")
+            or "too many binders sent to system" in " ".join([str(meta.get("kill_reason", "")), str(meta.get("raw_info", "")), str(meta.get("desc", ""))]).lower()
+            or "am_kill" in " ".join([str(meta.get("kill_event", "")), str(meta.get("raw_info", ""))]).lower()
             for meta in meta_list
         )
-        # A small Binder proxy summary/dump alone is not enough for this negative check.
-        # The user explicitly asks for Binder proxy leak / Too many Binders / am_kill evidence.
         if not has_positive_leak:
             return (
                 "Binder proxy leak 확인되지 않음. 검색 결과에서 `BINDER_PROXY_LEAK_RCA`가 확인되지 않고, "
-                "Binder Proxy Histogram 기반의 leak 근거도 확인되지 않습니다. 또한 `Too many Binders sent to SYSTEM` "
-                "사유의 `am_kill` 강제 종료 근거도 없습니다. 따라서 이 로그에서는 Binder proxy leak에 의한 "
+                "Binder Proxy Histogram 기반의 leak 근거도 확인되지 않습니다. 따라서 이 로그에서는 Binder proxy leak에 의한 "
                 "시스템 리소스 고갈 또는 프로세스 강제 종료로 판단하면 안 됩니다."
             )
 
+    # 💡 위 조건에 걸리지 않는 대부분의 질의는 LLM에게 넘어갑니다!
     return None

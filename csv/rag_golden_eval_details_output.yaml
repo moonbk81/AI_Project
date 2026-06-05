@@ -1,3 +1,1410 @@
+- "\uFEFFtest_id": TC-001
+  category: RILJ_Request_Failed
+  query: SEND_SMS 요청이 실패한 정확한 에러 원인을 알려줘.
+  target_log_file: log_for_evaluation/request_failed.txt
+  expected_decision: SEND_SMS 요청 실패 원인은 NETWORK_ERR 입니다.
+  root_cause: 모뎀이 SEND_SMS 요청에 대해 NETWORK_ERR 에러 응답을 반환했습니다.
+  ground_truth: SEND_SMS 요청에 대해 모뎀이 에러 응답을 내렸으며, 구체적인 실패 원인은 NETWORK_ERR 로 확인됩니다.
+  must_have: '["SEND_SMS 요청 실패", "NETWORK_ERR"]'
+  evidence_should_include: '["SEND_SMS", "NETWORK_ERR"]'
+  must_not_claim: '["SMS 전송 성공", "사용자 취소", "원인 확인 불가"]'
+  trap_type: ''
+  severity: medium
+  rag_answer: SEND_SMS 요청은 두 차례에 걸쳐 실패한 것으로 확인됨. 05-22 15:41:47.305와 05-22 15:40:55.139
+    시점에 각각 발생했으며, 명령어는 SEND_SMS임. 두 경우 모두 RILJ_Transaction 상태가 ERROR로 기록되었고, 구체적인
+    에러 원인은 NETWORK_ERR임. 지연 시간은 각각 40018ms와 15021ms로 측정되어 모뎀 응답 과정에서 심각한 처리 지연이 발생했음.
+  doc_ids: '["request_failed_payload_4", "request_failed_payload_7", "request_failed_payload_6",
+    "request_failed_payload_5"]'
+  retrieved_meta: '[{"log_type": "RILJ_Transaction", "latency_ms": 40018, "status":
+    "ERROR", "command": "SEND_SMS", "source_file": "request_failed_payload.json",
+    "error_msg": "NETWORK_ERR", "time": "05-22 15:41:47.305"}, {"log_type": "RILJ_Transaction",
+    "status": "ERROR", "source_file": "request_failed_payload.json", "latency_ms":
+    15021, "error_msg": "NETWORK_ERR", "time": "05-22 15:40:55.139", "command": "SEND_SMS"},
+    {"status": "ERROR", "latency_ms": 1, "source_file": "request_failed_payload.json",
+    "log_type": "RILJ_Transaction", "error_msg": "63", "time": "05-22 15:41:10.642",
+    "command": "GET_CELL_INFO_LIST"}, {"time": "05-22 15:41:12.808", "command": "GET_CELL_INFO_LIST",
+    "error_msg": "63", "status": "ERROR", "log_type": "RILJ_Transaction", "latency_ms":
+    2, "source_file": "request_failed_payload.json"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '["모뎀 응답 과정에서 심각한 처리 지연이 발생했음."]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the root cause (NETWORK_ERR) and provides
+    supporting evidence (RILJ_Transaction ERROR, SEND_SMS). It covers all 'must_have'
+    elements. The mention of delay time is extra information that doesn't detract
+    from the core finding but isn’t strictly required by the rubric. Minor deduction
+    for not explicitly stating it was a modem error response.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": ["\ubaa8\ub380 \uc751\ub2f5
+    \uacfc\uc815\uc5d0\uc11c \uc2ec\uac01\ud55c \ucc98\ub9ac \uc9c0\uc5f0\uc774 \ubc1c\uc0dd\ud588\uc74c."],
+    "violated_must_not_claim": [], "reason": "The answer correctly identifies the
+    root cause (NETWORK_ERR) and provides supporting evidence (RILJ_Transaction ERROR,
+    SEND_SMS). It covers all ''must_have'' elements. The mention of delay time is
+    extra information that doesn''t detract from the core finding but isn\u2019t strictly
+    required by the rubric. Minor deduction for not explicitly stating it was a modem
+    error response."}'
+  error: ''
+- "\uFEFFtest_id": TC-002
+  category: Call_Fail (CS)
+  query: 03-25 17시 38분 무렵에 발생한 CS Call 통화 실패(에러) 원인을 상세히 분석해 줘.
+  target_log_file: log_for_evaluation/cs_call_failed.log
+  expected_decision: 17:38경 CS Call은 사용자 거절이 아니라 CALL DROP으로 실패했습니다.
+  root_cause: 'slot 0의 통화 TC@119_1이 callFailCause: 49, vendorCause: 24로 종료되었습니다.'
+  ground_truth: '첫번째 SIM slot(slot 0)에서 17:38:25에 시작하여 17:39:16까지 약 51초 동안 진행된 통화(ID:
+    TC@119_1)가 CALL DROP 상태로 종료되었습니다. 사용자에 의한 거절(is_user_reject: false)은 아니며, 상세 실패
+    원인은 callFailCause: 49, vendorCause: 24로 확인됩니다.'
+  must_have: '["TC@119_1", "CALL DROP", "callFailCause: 49", "vendorCause: 24", "is_user_reject:
+    false"]'
+  evidence_should_include: '["17:38:25", "TC@119_1", "callFailCause: 49", "vendorCause:
+    24"]'
+  must_not_claim: '["사용자 거절", "정상 종료", "callFailCause: 31", "망 이슈 확인 불가"]'
+  trap_type: ''
+  severity: high
+  rag_answer: '03-25 17:38:25.149에 시작된 CS 통화는 CALL_DROP 상태로 종료됨이 확인됨. 해당 세션의 최종 실패
+    원인은 `callFailCause: 49`와 `vendorCause: 24`로 기록되어 있음. 로그 스니펫을 통해 마지막 호출 실패 사유(LAST_CALL_FAIL_CAUSE)가
+    명확하게 이 코드로 보고되었음이 확인됨. 전반적인 통화 과정은 DIAL 시도 후 약 50초 경과 시점에 연결이 끊긴 것으로 분석됨.'
+  doc_ids: '["cs_call_failed_payload_2", "cs_call_failed_payload_3", "cs_call_failed_payload_5",
+    "cs_call_failed_payload_4"]'
+  retrieved_meta: '[{"end_time": "03-25 17:39:16.112", "status": "CALL DROP", "fail_reason":
+    "callFailCause: 49, vendorCause: 24", "raw_logs": "[\"==> [BOUND from Connection
+    History]: 2026-03-25T17:39:16.123837 - [TC@119_1] (03-25)(CS) MO / (17:38:25)DIALING
+    -> (17:39:16)DISCONNECTED / ETC_5(duration: 0) <-- CONGESTION(callFailCause: 49,
+    vendorCause: 24)\", \"[03-25 17:38:25.149] START: [8155]> DIAL\", \"[03-25 17:38:25.196]
+    [8155]< DIAL\", \"[03-25 17:38:25.199] [8158]< GET_CURRENT_CALLS {[id=1,DIALING,toa=129,norm,mo,0,voc,noevp,,cli=1,,1,audioQuality=1]
+    }\", \"[03-25 17:39:16.112] [8172]< GET_CURRENT_CALLS {}\", \"[03-25 17:39:16.116]
+    [8173]< LAST_CALL_FAIL_CAUSE com.android.internal.telephony.LastCallFailCause@834bcd3
+    causeCode: 49 vendorCause: 24\"]", "is_user_reject": false, "log_type": "Call_Session",
+    "slot": "0", "type": "CS", "start_time": "03-25 17:38:25.149", "source_file":
+    "cs_call_failed_payload.json", "id": "TC@119_1", "time": "03-25 17:38:25.149"},
+    {"raw_logs": "[\"==> [BOUND from Connection History]: 2026-03-25T17:32:41.712712
+    - [TC@118_1] (03-25)(CS) MO / (17:32:06)DIALING -> (17:32:41)DISCONNECTED / LOCAL(cause:
+    0, null)(duration: 0)\", \"[03-25 17:32:06.367] START: [7860]> DIAL\", \"[03-25
+    17:32:06.376] [7860]< DIAL\", \"[03-25 17:32:06.387] [7863]< GET_CURRENT_CALLS
+    {[id=1,DIALING,toa=129,norm,mo,0,voc,noevp,,cli=1,,1,audioQuality=1] }\", \"[03-25
+    17:32:41.687] [7890]> HANGUP gsmIndex = 1\", \"[03-25 17:32:41.704] [7890]< HANGUP\",
+    \"[03-25 17:32:41.709] [7892]< GET_CURRENT_CALLS {}\"]", "time": "03-25 17:32:06.367",
+    "end_time": "03-25 17:32:41.709", "slot": "0", "log_type": "Call_Session", "fail_reason":
+    "0", "source_file": "cs_call_failed_payload.json", "id": "TC@118_1", "status":
+    "CALL DROP", "is_user_reject": false, "type": "CS", "start_time": "03-25 17:32:06.367"},
+    {"start_time": "03-25 17:03:03.071", "fail_reason": "501_CODE_USER_TERMINATED
+    (SIP_200_null)", "is_user_reject": false, "status": "NORMAL_RELEASE", "time":
+    "03-25 17:03:03.071", "type": "PS(VoLTE)", "id": "objId:122485215", "end_time":
+    "03-25 17:03:03.071", "source_file": "cs_call_failed_payload.json", "raw_logs":
+    "[\"[03-25 17:03:03.071] [IPCT2]< CallListener.onCallTerminated {ImsReasonInfo
+    :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:122485215 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=19, audioDirection=3, audioCodecAttribute={ bitrateKbps=24.4, bitrateRangeKbps=[5.9,
+    24.4], bandwidthKhz=16.0, bandwidthRangeKhz=[0.02, 16.0] }, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:190640254 callId:84] transientSession:null]}\"]", "log_type": "Call_Session"},
+    {"source_file": "cs_call_failed_payload.json", "fail_reason": "501_CODE_USER_TERMINATED
+    (SIP_200_null)", "time": "03-25 17:04:43.680", "end_time": "03-25 17:04:43.680",
+    "raw_logs": "[\"[03-25 17:04:43.680] [IPCT2]< CallListener.onCallTerminated {ImsReasonInfo
+    :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:197684944 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=19, audioDirection=3, audioCodecAttribute={ bitrateKbps=24.4, bitrateRangeKbps=[5.9,
+    24.4], bandwidthKhz=16.0, bandwidthRangeKhz=[0.02, 16.0] }, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:76828307 callId:85] transientSession:null]}\"]", "status": "NORMAL_RELEASE",
+    "type": "PS(VoLTE)", "id": "objId:197684944", "is_user_reject": false, "start_time":
+    "03-25 17:04:43.680", "log_type": "Call_Session"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 1.0
+  overall_score: 0.95
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: 'The answer correctly identifies the CALL DROP and provides the correct
+    callFailCause and vendorCause. It also mentions the approximate duration of the
+    call (around 50 seconds), which aligns with the golden rubric. The ''is_user_reject:
+    false'' was not explicitly mentioned, but it is implied by stating that it was
+    a CALL DROP rather than user rejection. No must-not claims were violated.'
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the CALL DROP and provides the
+    correct callFailCause and vendorCause. It also mentions the approximate duration
+    of the call (around 50 seconds), which aligns with the golden rubric. The ''is_user_reject:
+    false'' was not explicitly mentioned, but it is implied by stating that it was
+    a CALL DROP rather than user rejection. No must-not claims were violated."}'
+  error: ''
+- "\uFEFFtest_id": TC-003
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신이 실패했는데, SIP 에러 코드와 명칭을 확인해 줘.
+  target_log_file: log_for_evaluation/ps_call_369_failed.txt
+  expected_decision: VoLTE 발신 실패의 SIP/IMS 에러는 369 CODE_SIP_REQUEST_URI_TOO_LARGE 입니다.
+  root_cause: 기지국/망으로 전달된 호 설정 요청에 대해 369 CODE_SIP_REQUEST_URI_TOO_LARGE 응답이 수신되어
+    실패했습니다.
+  ground_truth: Call 발신이 기지국으로 전달되었으나, 369 (CODE_SIP_REQUEST_URI_TOO_LARGE) 에러 응답을
+    수신하여 호 설정에 실패했습니다.
+  must_have: '["369", "CODE_SIP_REQUEST_URI_TOO_LARGE", "호 설정 실패"]'
+  evidence_should_include: '["369", "CODE_SIP_REQUEST_URI_TOO_LARGE", "Call 발신", "에러
+    응답"]'
+  must_not_claim: '["504 CODE_USER_DECLINE", "480 Temporarily Unavailable", "사용자 거절",
+    "정상 종료"]'
+  trap_type: ''
+  severity: high
+  rag_answer: 발신 시도 과정에서 `369_CODE_SIP_REQUEST_URI_TOO_LARGE` 에러가 반복적으로 확인됨. 해당 오류는
+    SIP 프로토콜 레벨의 요청 URI 길이가 너무 길어(SIP_414_REQUEST URI TOO LARGE) 통화 시작 단계에서 실패했음을
+    나타냄. 05-23 14:41:26.728 및 05-23 15:38:56.456 시점에 동일한 원인으로 발신이 중단된 이력이 확인됨.
+  doc_ids: '["ps_call_369_failed_payload_8", "ps_call_369_failed_payload_5", "ps_call_369_failed_payload_0",
+    "ps_call_369_failed_payload_3"]'
+  retrieved_meta: '[{"fail_reason": "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)",
+    "log_type": "Call_Session", "status": "NORMAL_RELEASE", "is_user_reject": false,
+    "time": "05-23 13:21:14.374", "id": "TC@34_1 (objId:97685709)", "type": "PS(VoLTE)",
+    "raw_logs": "[\"==> [BOUND from Connection History]: 2026-05-23T13:21:17.994670
+    - [TC@34_1] (05-23)(PS) MT / (13:21:14)INCOMING -> (13:21:17)DISCONNECTED / ETC_1(duration:
+    0) <-- INCOMING_MISSED(ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE,
+    210, null})\", \"[05-23 13:21:14.374] [IPCT]< onIncomingCall {callId: null}\",
+    \"[05-23 13:21:14.378] [IPCT]> takeCall {}\", \"[05-23 13:21:14.384] [IPCT]< takeCall
+    {[ImsCall objId:97685709 onHold:N mute:N mCallProfile:{ serviceType=1, callType=2,
+    restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3, audioCodecAttribute=null,
+    videoQuality=0, videoDirection=3, rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0,
+    emergencyUrns=[], emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:228324964 callId:[UNINITIALIZED]] transientSession:null]}\", \"[05-23 13:21:17.971]
+    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE,
+    210, null}, [ImsCall objId:97685709 onHold:N mute:N mCallProfile:{ serviceType=1,
+    callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
+    audioCodecAttribute={ bitrateKbps=0.0, bitrateRangeKbps=[0.0, 0.0], bandwidthKhz=7.0,
+    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:228324964
+    callId:33] transientSession\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "end_time":
+    "05-23 13:21:17.971", "start_time": "05-23 13:21:14.374", "source_file": "ps_call_369_failed_payload.json"},
+    {"is_user_reject": false, "fail_reason": "369_CODE_SIP_REQUEST_URI_TOO_LARGE (SIP_414_REQUEST
+    URI TOO LARGE)", "type": "PS(VoLTE)", "status": "FAIL", "start_time": "05-23 14:41:26.728",
+    "end_time": "05-23 14:41:26.728", "time": "05-23 14:41:26.728", "source_file":
+    "ps_call_369_failed_payload.json", "id": "TC@37_1 (objId:6646076)", "log_type":
+    "Call_Session", "raw_logs": "[\"==> [BOUND from Connection History]: 2026-05-23T14:41:26.784243
+    - [TC@37_1] (05-23)(PS) MO / (14:41:26)DIALING -> (14:41:26)DISCONNECTED / ETC_36(duration:
+    0) <-- ERROR_UNSPECIFIED(ImsReasonInfo :: {369 : CODE_SIP_REQUEST_URI_TOO_LARGE,
+    414, REQUEST URI TOO LARGE})\", \"[05-23 14:41:26.728] [IPCT]< CallListener.onCallStartFailed
+    {ImsReasonInfo :: {369 : CODE_SIP_REQUEST_URI_TOO_LARGE, 414, REQUEST URI TOO
+    LARGE}, [ImsCall objId:6646076 onHold:N mute:N mCallProfile:{ serviceType=1, callType=2,
+    restrictCause=0, mediaProfile={ audioQuality=0, audioDirection=0, audioCodecAttribute={
+    bitrateKbps=24.4, bitrateRangeKbps=[9.6, 24.4], bandwidthKhz=16.0, bandwidthRangeKhz=[0.02,
+    16.0] }, videoQuality=0, videoDirection=3, rttMode=0, hasRttAudioSpeech=false
+    }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0, emergencyCallTesting=false,
+    hasKnownUserIntentEmergency=false, mRestrictCause=0, mCallerNumberVerstat= 0,
+    mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE merging:N
+    merge action pending:N merged:N cachedMultiParty:N confHost:N buried term:N isVideo:
+    N wasVideo: N isWifi: N session:[ImsCallSession objId:7356207 callId:36] transientSession:null]}\"]"},
+    {"id": "TC@42_1 (objId:7705404)", "status": "FAIL", "end_time": "05-23 15:38:56.456",
+    "raw_logs": "[\"==> [BOUND from Connection History]: 2026-05-23T15:38:56.529371
+    - [TC@42_1] (05-23)(PS) MO / (15:38:55)DIALING -> (15:38:56)DISCONNECTED / ETC_36(duration:
+    0) <-- ERROR_UNSPECIFIED(ImsReasonInfo :: {369 : CODE_SIP_REQUEST_URI_TOO_LARGE,
+    414, REQUEST URI TOO LARGE})\", \"[05-23 15:38:56.456] 05-23 15:38:56.456 radio  2818  2818
+    D IPF     : [IPCT]< CallListener.onCallStartFailed {ImsReasonInfo :: {369 : CODE_SIP_REQUEST_URI_TOO_LARGE,
+    414, REQUEST URI TOO LARGE}, [ImsCall objId:7705404 onHold:N mute:N mCallProfile:{
+    serviceType=1, callType=2, restrictCause=0, mediaProfile={ audioQuality=0, audioDirection=0,
+    audioCodecAttribute={ bitrateKbps=24.4, bitrateRangeKbps=[9.6, 24.4], bandwidthKhz=16.0,
+    bandwidthRangeKhz=[0.02, 16.0] }, videoQuality=0, videoDirection=3, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:123654447
+    callId:41] transientSession:null]}\", \"[05-23 15:38:56.456] [IPCT]< CallListener.onCallStartFailed
+    {ImsReasonInfo :: {369 : CODE_SIP_REQUEST_URI_TOO_LARGE, 414, REQUEST URI TOO
+    LARGE}, [ImsCall objId:7705404 onHold:N mute:N mCallProfile:{ serviceType=1, callType=2,
+    restrictCause=0, mediaProfile={ audioQuality=0, audioDirection=0, audioCodecAttribute={
+    bitrateKbps=24.4, bitrateRangeKbps=[9.6, 24.4], bandwidthKhz=16.0, bandwidthRangeKhz=[0.02,
+    16.0] }, videoQuality=0, videoDirection=3, rttMode=0, hasRttAudioSpeech=false
+    }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0, emergencyCallTesting=false,
+    hasKnownUserIntentEmergency=false, mRestrictCause=0, mCallerNumberVerstat= 0,
+    mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE merging:N
+    mer\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "time": "05-23 15:38:56.456", "fail_reason":
+    "369_CODE_SIP_REQUEST_URI_TOO_LARGE (SIP_414_REQUEST URI TOO LARGE)", "log_type":
+    "Call_Session", "source_file": "ps_call_369_failed_payload.json", "type": "PS(VoLTE)",
+    "is_user_reject": false, "start_time": "05-23 15:38:56.456"}, {"type": "PS(VoLTE)",
+    "is_user_reject": false, "end_time": "05-23 14:52:25.585", "status": "NORMAL_RELEASE",
+    "log_type": "Call_Session", "id": "TC@39_1 (objId:169892479)", "start_time": "05-23
+    14:48:43.917", "fail_reason": "501_CODE_USER_TERMINATED (SIP_200_null)", "raw_logs":
+    "[\"==> [BOUND from Connection History]: 2026-05-23T14:52:25.621937 - [TC@39_1]
+    (05-23)(PS) MT / (14:48:43)INCOMING -> (14:48:53)ACTIVE -> (14:52:25)DISCONNECTED
+    / LOCAL(reasonInfo: 501, 200)(duration: 212.217sec)\", \"[05-23 14:48:43.917]
+    [IPCT]< onIncomingCall {callId: null}\", \"[05-23 14:48:43.917] [IPCT]> takeCall
+    {}\", \"[05-23 14:48:43.919] [IPCT]< takeCall {[ImsCall objId:169892479 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=19, audioDirection=3, audioCodecAttribute=null, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:102035358 callId:[UNINITIALIZED]] transientSession:null]}\", \"[05-23 14:48:53.387]
+    [IPCT]> accept {callType: 2, [ImsCall objId:169892479]}\", \"[05-23 14:52:25.585]
+    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {501 : CODE_USER_TERMINATED,
+    200, null}, [ImsCall objId:169892479 onHold:N mute:N mCallProfile:{ serviceType=1,
+    callType=2, restrictCause=0, mediaProfile={ audioQuality=19, audioDirection=3,
+    audioCodecAttribute={ bitrateKbps=24.4, bitrateRangeKbps=[9.6, 24.4], bandwidthKhz=16.0,
+    bandwidthRangeKhz=[0.02, 16.0] }, videoQuality=0, videoDirection=3, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession ob\n...[TRUNCATED_BY_SYSTEM:
+    TOO_LONG]", "time": "05-23 14:48:43.917", "source_file": "ps_call_369_failed_payload.json"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '["Call 발신", "에러 응답"]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the 369 CODE_SIP_REQUEST_URI_TOO_LARGE error
+    as the root cause of VoLTE call failure. It also provides timestamps for repeated
+    failures, demonstrating good evidence coverage. While it mentions the error's
+    meaning (request URI too large), it doesn't explicitly state '호 설정 실패'. The answer
+    is safe and does not violate any must-not claims.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": ["Call \ubc1c\uc2e0", "\uc5d0\ub7ec
+    \uc751\ub2f5"], "violated_must_not_claim": [], "reason": "The answer correctly
+    identifies the 369 CODE_SIP_REQUEST_URI_TOO_LARGE error as the root cause of VoLTE
+    call failure. It also provides timestamps for repeated failures, demonstrating
+    good evidence coverage. While it mentions the error''s meaning (request URI too
+    large), it doesn''t explicitly state ''\ud638 \uc124\uc815 \uc2e4\ud328''. The
+    answer is safe and does not violate any must-not claims."}'
+  error: ''
+- "\uFEFFtest_id": TC-004
+  category: Call_Fail (PS)
+  query: PS(VoLTE) 통화 발신 종료가 되었는데, sip error 등으로 인한 망 이슈인지 아니면 상대방 거절인지 확인해줘.
+  target_log_file: log_for_evaluation/ps_call_504_unavailable.log
+  expected_decision: 망 장애보다는 상대측 reject/decline에 의한 종료입니다.
+  root_cause: SIP 480 Temporarily Unavailable과 IMS 내부 504 CODE_USER_DECLINE이 함께 확인되어
+    상대측 거절로 판단됩니다.
+  ground_truth: 상대측 reject으로 콜이 종료되었습니다. 네트워크 측으로부터 480 Temporarily Unavailable SIP
+    code가 수신되었으며, 이에 따라 안드로이드 IMS 내부적으로도 504 (CODE_USER_DECLINE) 코드가 함께 확인됩니다.
+  must_have: '["상대측 reject", "480 Temporarily Unavailable", "504 CODE_USER_DECLINE",
+    "NORMAL_RELEASE"]'
+  evidence_should_include: '["480", "Temporarily Unavailable", "504", "CODE_USER_DECLINE"]'
+  must_not_claim: '["기지국 장애", "단말 응답 불가", "Call Drop", "원인 불명"]'
+  trap_type: call_end_reason_disambiguation
+  severity: high
+  rag_answer: 명시적인 Call Drop 이력은 없으며 정상 종료(Normal Release/User Terminated)되었습니다.
+  doc_ids: '["ps_call_504_unavailable_payload_4", "ps_call_504_unavailable_payload_5",
+    "ps_call_504_unavailable_payload_3", "ps_call_504_unavailable_payload_6"]'
+  retrieved_meta: '[{"fail_reason": "501_CODE_USER_TERMINATED (SIP_200_null)", "is_user_reject":
+    false, "log_type": "Call_Session", "source_file": "ps_call_504_unavailable_payload.json",
+    "start_time": "04-09 12:06:23.541", "id": "objId:131787086", "end_time": "04-09
+    12:06:23.541", "status": "NORMAL_RELEASE", "time": "04-09 12:06:23.541", "raw_logs":
+    "[\"[04-09 12:06:23.541] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
+    :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:131787086 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6,
+    12.65], bandwidthKhz=7.0, bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:123620425 callId:3] transientSession:null]}\"]", "type": "PS(VoLTE)"}, {"raw_logs":
+    "[\"[04-09 12:04:11.972] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
+    :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:231535345 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6,
+    12.65], bandwidthKhz=7.0, bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:260029080 callId:2] transientSession:null]}\"]", "source_file": "ps_call_504_unavailable_payload.json",
+    "status": "NORMAL_RELEASE", "is_user_reject": false, "fail_reason": "501_CODE_USER_TERMINATED
+    (SIP_200_null)", "id": "objId:231535345", "log_type": "Call_Session", "start_time":
+    "04-09 12:04:11.972", "end_time": "04-09 12:04:11.972", "type": "PS(VoLTE)", "time":
+    "04-09 12:04:11.972"}, {"time": "04-09 12:07:00.876", "type": "PS(VoLTE)", "id":
+    "objId:87635467", "end_time": "04-09 12:07:00.876", "log_type": "Call_Session",
+    "is_user_reject": true, "source_file": "ps_call_504_unavailable_payload.json",
+    "start_time": "04-09 12:07:00.876", "status": "NORMAL_RELEASE", "raw_logs": "[\"[04-09
+    12:07:00.876] 04-09 12:07:00.876 radio  4210  4210 D IPF     : [IPCT]< CallListener.onCallTerminated
+    {ImsReasonInfo :: {504 : CODE_USER_DECLINE, 480, Temporarily Unavailable}, [ImsCall
+    objId:87635467 onHold:N mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0,
+    mediaProfile={ audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65,
+    bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0, bandwidthRangeKhz=[0.05, 7.0]
+    }, videoQuality=0, videoDirection=-1, rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0,
+    emergencyUrns=[], emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:144249306 callId:4] transientSession:null]}\", \"[04-09 12:07:00.876] [IPCT]<
+    CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE, 480,
+    Temporarily Unavailable}, [ImsCall objId:87635467 onHold:N mute:N mCallProfile:{
+    serviceType=1, callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
+    audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
+    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=-1, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:144249306
+    callId:4] transientSession:null]}\"]", "fail_reason": "504_CODE_USER_DECLINE (SIP_480_Temporarily
+    Unavailable)"}, {"raw_logs": "[\"==> [BOUND from Connection History]: 2026-04-09T11:38:24.668601
+    - [TC@1_1] (04-09)(PS) MT / (11:37:21)INCOMING -> (11:37:23)ACTIVE -> (11:38:24)DISCONNECTED
+    / NORMAL(reasonInfo: 510, 210)(duration: 60.872sec)\", \"[04-09 11:37:21.707]
+    [IPCT]< onIncomingCall {callId: null}\", \"[04-09 11:37:21.707] [IPCT]> takeCall
+    {}\", \"[04-09 11:37:21.708] [IPCT]< takeCall {[ImsCall objId:143489638 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=2, audioDirection=3, audioCodecAttribute=null, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:56267457 callId:[UNINITIALIZED]] transientSession:null]}\", \"[04-09 11:37:23.376]
+    [IPCT]> accept {callType: 2, [ImsCall objId:143489638]}\", \"[04-09 11:38:24.665]
+    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE,
+    210, null}, [ImsCall objId:143489638 onHold:N mute:N mCallProfile:{ serviceType=1,
+    callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
+    audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
+    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSess\n...[TRUNCATED_BY_SYSTEM:
+    TOO_LONG]", "type": "PS(VoLTE)", "source_file": "ps_call_504_unavailable_payload.json",
+    "id": "TC@1_1 (objId:143489638)", "end_time": "04-09 11:38:24.665", "log_type":
+    "Call_Session", "fail_reason": "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)",
+    "time": "04-09 11:37:21.707", "status": "NORMAL_RELEASE", "is_user_reject": false,
+    "start_time": "04-09 11:37:21.707"}]'
+  thinking: ''
+  accuracy_score: 0.3
+  evidence_coverage: 0.2
+  must_have_coverage: 0.4
+  must_not_violation: 0.0
+  hallucination_safety: 0.5
+  overall_score: 0.3
+  missing_must_have: '["480 Temporarily Unavailable", "504 CODE_USER_DECLINE"]'
+  missing_evidence: '["480", "Temporarily Unavailable", "504", "CODE_USER_DECLINE"]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies a normal release but fails to identify the
+    core root cause (SIP 480 and IMS 504 codes indicating reject). It misses key must-have
+    elements. The 'must_not_claim' is not violated, however, it doesn't provide any
+    supporting evidence for its claim of a normal release. Accuracy is low due to
+    missing the critical rejection reason.
+  judge_raw: '{"accuracy_score": 0.3, "evidence_coverage": 0.2, "must_have_coverage":
+    0.4, "must_not_violation": 1.0, "hallucination_safety": 0.5, "overall_score":
+    0.3, "missing_must_have": ["480 Temporarily Unavailable", "504 CODE_USER_DECLINE"],
+    "missing_evidence": ["480", "Temporarily Unavailable", "504", "CODE_USER_DECLINE"],
+    "violated_must_not_claim": [], "reason": "The answer correctly identifies a normal
+    release but fails to identify the core root cause (SIP 480 and IMS 504 codes indicating
+    reject). It misses key must-have elements. The ''must_not_claim'' is not violated,
+    however, it doesn''t provide any supporting evidence for its claim of a normal
+    release. Accuracy is low due to missing the critical rejection reason."}'
+  error: ''
+- "\uFEFFtest_id": TC-005
+  category: ANR
+  query: ANR이 발생한 정확한 프로세스와 처리가 지연된 인텐트(Intent) 액션명을 알려줘.
+  target_log_file: log_for_evaluation/log_anr.txt
+  expected_decision: ANR 프로세스는 com.android.phone이며 지연된 액션은 com.samsung.intent.action.IMEI_STATE_CHANGED
+    Broadcast 입니다.
+  root_cause: IMEI_STATE_CHANGED Broadcast 처리 지연으로 com.android.phone ANR이 발생했습니다.
+  ground_truth: com.android.phone 프로세스에서 ANR이 발생했으며, com.samsung.intent.action.IMEI_STATE_CHANGED
+    인텐트의 Broadcast 처리가 지연된 것이 원인입니다.
+  must_have: '["com.android.phone", "com.samsung.intent.action.IMEI_STATE_CHANGED",
+    "Broadcast 처리 지연", "ANR"]'
+  evidence_should_include: '["com.android.phone", "IMEI_STATE_CHANGED", "Broadcast"]'
+  must_not_claim: '["rild Native Crash", "Java NullPointerException", "원인 확인 불가"]'
+  trap_type: ''
+  severity: high
+  rag_answer: 'ANR은 03-25 00:05:58.802에 com.android.phone 프로세스(PID: 4529)에서 발생함이 확인됨.
+    ANR의 직접적인 원인은 Intent Broadcast 처리 중 Lock Contention임. 지연을 유발한 인텐트 액션명은 `com.samsung.intent.action.IMEI_STATE_CHANGED`이며,
+    이는 IMEI 상태 변경과 관련된 브로드캐스트임을 알 수 있음.'
+  doc_ids: '["log_anr_payload_14", "log_anr_payload_7", "log_anr_payload_8", "log_anr_payload_5"]'
+  retrieved_meta: '[{"analysis_summary_has_cpu_hint": true, "process_info_name": "com.android.phone",
+    "lock_chain_waiting_thread": "1", "time": "03-25 00:05:58.802", "analysis_summary_has_active_binder":
+    false, "reason": "Broadcast of Intent { act=com.samsung.intent.action.IMEI_STATE_CHANGED
+    flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1
+    (has extras) }", "main_tid": "1", "raw_log": "03-25 00:05:58.802  1000  3146  9642
+    E ActivityManager: ANR in com.android.phone\n03-25 00:05:58.802  1000  3146  9642
+    E ActivityManager: PID: 4529\n03-25 00:05:58.802  1000  3146  9642 E ActivityManager:
+    Reason: Broadcast of Intent { act=com.samsung.intent.action.IMEI_STATE_CHANGED
+    flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1
+    (has extras) }\n", "analysis_summary_has_lock_contention": true, "raw_context_analysis_system_server_logs":
+    "[''03-25 00:05:58.802  1000  3146  9642 E ActivityManager: Reason: Broadcast
+    of Intent { act=com.samsung.intent.action.IMEI_STATE_CHANGED flg=0x10000010 cmp=com.android.phone/com.android.internal.telephony.SemGsmCdmaPhone$1
+    (has extras) }'', ''03-25 00:05:58.802  1000  3146  9642 E ActivityManager:   28%
+    4529/com.android.phone: 22% user + 5.8% kernel / faults: 16900 minor 16 major'',
+    ''03-25 00:05:58.802  1000  3146  9642 E ActivityManager:   3.5% 4529/com.android.phone:
+    1.7% user + 1.7% kernel / faults: 224 minor'', ''03-25 00:05:58.814  1000  3146  9642
+    D ActivityManager: Completed ANR of com.android.phone in 5210ms, latency 4ms (expired,
+    only dump ANR app)'', ''03-25 00:05:58.829  1000  3146  3269 D WindowManager:
+    Changing focus from Window{9203fbc u0 com.salab.act/com.salab.act.Main} to Window{8a0ce19
+    u0 Application Not Responding: com.android.phone} displayId=0 Callers=com.android.server.wm.WindowManagerService.addWindowInner:622
+    com.android.server.wm.WindowManagerService.addWindow:2025 com.android.server.wm.Session.addToDisplayAsUser:14
+    android.view.ViewRootImpl.setView:2138'', ''03-25 00:05:58.831  1000  3146  3269
+    D InsetsSourceProvider: updateControlForTarget: control=InsetsSourceControl: {1e800000
+    mType=statusBars initiallyVisible mSurfacePosition=Point(0, 0) mInsetsHint=Insets{left=0,
+    top=108, right=0, bottom=0} mLeash=Surface(name=Surface(name=bb7e4ad StatusBar#92)/@0x2096d3a
+    - animation-leash of insets_animation#173)/@0x6abbaea}, target=Window{8a0ce19
+    u0 Application Not Responding: com.android.phone}, from=com.android.server.wm.InsetsStateController.onControlTargetChanged:81
+    com.android.server.wm.InsetsPolicy.updateBarControlTarget:237 com.android.server.wm.DisplayPolicy.updateSystemBarAttributes:423
+    com.android.server.wm.WindowManagerService.updateFocusedWindowLocked:368 com.android.server.wm.WindowManagerService.addWindowInner:622'',
+    ''03-25 00:05:58.832  1000  3146  3269 D InsetsSourceProvider: updateControlForTarget:
+    control=InsetsSourceControl: {10200001 mType=\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]",
+    "process_info_pid": "4529", "log_type": "ANR_Context", "analysis_summary_evidence_level":
+    "TRACE_INCLUDED", "process": "com.android.phone", "analysis_summary_has_pre_anr_logcat":
+    true, "analysis_summary_has_system_server_hint": true, "lock_chain_lock_address":
+    "0x03b8032a", "raw_context_analysis_io_logs": "[''03-25 00:06:16.461 radio 14911
+    16087 D CSC_UPDATE: [k(CscParser.java:38)] update(): /optics/configs/carriers/VZW/conf/customer.xml
+    file exist'', ''03-25 00:06:16.463 radio 14911 16087 D CSC_UPDATE: [b(CscParser.java:125)]
+    RingTone: null'', ''03-25 00:06:16.463 radio 14911 16087 W CSCSettings: [e(CscSettings.java:119)]
+    carrier ringtone type : 128'', ''03-25 00:06:16.463 radio 14911 16087 W CSCSettings:
+    [e(CscSettings.java:138)] Cannot fine carrier ringtone type : 128'', ''03-25 00:06:16.463
+    radio 14911 16087 W CSCSettings: [e(CscSettings.java:162)] Cannot fine carrier
+    ringtone default : 128'', ''03-25 00:06:16.463 radio 14911 16087 D CSC_UPDATE:
+    [b(CscParser.java:125)] RingTone: VZW Airwaves'', ''03-25 00:06:16.463 radio 14911
+    16087 D CSC_UPDATE: [b(CscParser.java:125)] RingTone: true'', ''03-25 00:06:16.463
+    radio 14911 16087 W CSCSettings: [e(CscSettings.java:221)] [reCheck] carrier ringtone
+    type : 128'', \"03-25 00:06:16.463 radio 14911 16087 D CSCSettings: [e(CscSettings.java:292)]
+    Current carrier''s ringtone is : VZW Airwaves\", \"03-25 00:06:16.463 radio 14911
+    16087 D CSCSettings: [e(CscSettings.java:309)] Current carrier''s ringtone default
+    is : true\", ''03-25 00:06:16.464 radio 14911 16087 D RingtoneManager: getActualDefaultRingtoneUri  type    :128'',
+    ''03-25 00:06:16.464 radio 14911 16087 D Settings: GET_req(/system/ringtone_2)
+    userId:0, myUserId:0, isInSystemServer:false, isSelf:true, useCache:true, callingPackage:com.samsung.sec.android.application.csc'',
+    ''03-25 00:06:16.464 radio 14911 16087 D Settings: GET_ret(/system/ringtone_2)
+    value:content://0@media/internal/audio/media/136?title=Atomic%20Bell&canonical=1,
+    userId:0, by user:0, callingPackage:com.samsung.sec.android.application.csc (ProviderCall)'',
+    ''03-25 00:06:16.464 radio 14911 16087 I RingtoneManager: Ringtone value : content://0@media/internal/audio/media/136?title=Atomic%20Bell&canonical=1'',
+    ''03-25 00:06:16.464 radio 14911 16087 D Settings: GET_ret(/system/ringtone_2)
+    value:content://0@media/internal/audio/media/136?t\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]",
+    "lock_chain_blocker_thread": "83", "pre_anr_logcat": "[''03-25 00:05:58.787 10118
+    11158 11244 D MakeSimDBService: [C] [SEC] @@ lazyInitialize!!!  subId = -1, slotId
+    : 0'', ''03-25 00:05:58.787 10118 11158 11158 I MakeSimDBService: [C] @@ enqueueFinish
+    !PersistableBundle[{slot_id=1, sim_present=true, op=1111}]'', ''03-25 00:05:58.787
+    10118 11158 11158 I SimBroadcastReceiverDataSource: [C] [SEC] ACTION_SIM_STATE_LISTENCHANGE'',
+    ''03-25 00:05:58.787 10118 11158 11244 I TelephonyDataSource: [C] getSimState(0)
+    : 1'', ''03-25 00:05:58.787 10118 11158 11244 I MakeSimDBService: [C] [SEC] simState
+    = 1'', ''03-25 00:05:58.787 10118 11158 11244 I EsimUtil: [C] esimState MEP :
+    Finally not esim, slot = 0'', ''03-25 00:05:58.787 10118 11158 11244 D Settings:
+    GET_req(/global/sim_db_ready) userId:0, myUserId:0, isInSystemServer:false, isSelf:true,
+    useCache:true, callingPackage:com.samsung.android.app.contacts'', ''03-25 00:05:58.788
+    10118 11158 11244 D Settings: GET_ret(/global/sim_db_ready) value:null, userId:0,
+    by user:0, callingPackage:com.samsung.android.app.contacts (ProviderCall)'', ''03-25
+    00:05:58.788 10118 11158 11244 D MakeSimDBService: [C] [SEC]  @@ doCheckSimState
+    opCode = 7777, slotId : 0'', ''03-25 00:05:58.788 10118 11158 11244 I TelephonyDataSource:
+    [C] getSimState(0) : 1'', ''03-25 00:05:58.788 10118 11158 11244 D Settings: GET_req(/global/airplane_mode_on)
+    userId:0, myUserId:0, isInSystemServer:false, isSelf:true, useCache:true, callingPackage:com.samsung.android.app.contacts'',
+    ''03-25 00:05:58.789 10120 11238 11238 D nativeloader: Load libframework-connectivity-tiramisu-jni.so
+    using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar:
+    ok'', ''03-25 00:05:58.789 10118 11158 11230 I AccountReloadObserver: [C] request
+    reload: 1'', \"03-25 00:05:58.789  1000  3146  4052 E JobScheduler.Background:
+    Couldn''t determine stopped state for unknown package: com.facebook.appmanager\",
+    ''03-25 00:05:58.789 10223 11099 11099 I SmartCapture: SolutionConfigRepository
+    readSmartCapturePolicy(): No SCPM policy\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]",
+    "analysis_summary_is_confirmed_anr": true, "source_file": "log_anr_payload.json",
+    "raw_context_analysis_cpu_logs": "[''03-25 00:05:58.802  1000  3146  9642 E ActivityManager:
+    Load: 11.4 / 2.79 / 0.93'', ''03-25 00:05:58.802  1000  3146  9642 E ActivityManager:
+    CPU usage from 1998ms to -5148ms ago (2026-03-25 00:05:51.606 to 2026-03-25 00:05:58.752):'',
+    ''03-25 00:05:58.802  1000  3146  9642 E ActivityManager: CPU usage from 4243ms
+    to 5034ms later (2026-03-25 00:05:57.847 to 2026-03-25 00:05:58.638):'']", "intent_action":
+    "com.samsung.intent.action.IMEI_STATE_CHANGED", "analysis_summary_has_io_hint":
+    true}, {"command": "iccIO", "log_type": "RILJ_Transaction", "source_file": "log_anr_payload.json",
+    "latency_ms": 43, "time": "03-25 00:06:14.696", "error_msg": "1", "status": "ERROR"},
+    {"status": "ERROR", "error_msg": "17", "latency_ms": 29, "time": "03-25 00:06:14.690",
+    "log_type": "RILJ_Transaction", "source_file": "log_anr_payload.json", "command":
+    "SIM_OPEN_CHANNEL"}, {"source_file": "log_anr_payload.json", "latency_ms": 1,
+    "error_msg": "1", "status": "ERROR", "log_type": "RILJ_Transaction", "time": "03-25
+    00:06:14.753", "command": "SET_SIGNAL_STRENGTH_REPORTING_CRITERIA"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the ANR process (com.android.phone) and
+    the delayed intent action (com.samsung.intent.action.IMEI_STATE_CHANGED). It also
+    accurately states that the root cause is Intent Broadcast processing delay due
+    to Lock Contention, which aligns with the golden rubric's description of IMEI_STATE_CHANGED
+    broadcast handling issues. Evidence coverage is slightly reduced because it mentions
+    'Lock Contention', which isn't explicitly in the golden rubric but doesn't detract
+    from the core accuracy.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the ANR process (com.android.phone)
+    and the delayed intent action (com.samsung.intent.action.IMEI_STATE_CHANGED).
+    It also accurately states that the root cause is Intent Broadcast processing delay
+    due to Lock Contention, which aligns with the golden rubric''s description of
+    IMEI_STATE_CHANGED broadcast handling issues. Evidence coverage is slightly reduced
+    because it mentions ''Lock Contention'', which isn''t explicitly in the golden
+    rubric but doesn''t detract from the core accuracy."}'
+  error: ''
+- "\uFEFFtest_id": TC-006
+  category: Fatal_Exception
+  query: 메인 프로세스에서 발생한 Fatal Exception의 종류와 마지막으로 호출된 콜스택(메소드)은 무엇인가?
+  target_log_file: log_for_evaluation/dumpstate_fatal.txt
+  expected_decision: Fatal Exception은 java.lang.ArrayIndexOutOfBoundsException이며 마지막
+    주요 메소드는 CoverAuthHandler.handleMessage 입니다.
+  root_cause: CoverAuthenticator$CoverAuthHandler.handleMessage 처리 중 length=0 배열의
+    index=0 접근으로 ArrayIndexOutOfBoundsException이 발생했습니다.
+  ground_truth: java.lang.ArrayIndexOutOfBoundsException (length=0; index=0) 에러가 발생했으며,
+    마지막 콜스택은 com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage
+    로 확인됩니다.
+  must_have: '["java.lang.ArrayIndexOutOfBoundsException", "length=0; index=0", "CoverAuthHandler.handleMessage"]'
+  evidence_should_include: '["ArrayIndexOutOfBoundsException", "CoverAuthenticator$CoverAuthHandler.handleMessage"]'
+  must_not_claim: '["Native Crash", "SIGSEGV", "ANR", "rild crash"]'
+  trap_type: ''
+  severity: high
+  rag_answer: 메인 프로세스에서 발생한 Fatal Exception은 `java.lang.ArrayIndexOutOfBoundsException`이며,
+    구체적으로는 `length=0; index=0` 오류가 확인됨. 해당 예외는 `system_server` 프로세스의 `com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage`
+    메서드에서 발생함. 콜스택 스니펫에는 `android.os.Looper.loop(Looper.java:363)` 호출이 기록되어 있음.
+  doc_ids: '["dumpstate_fatal_payload_6138", "dumpstate_fatal_payload_6140", "dumpstate_fatal_payload_6139"]'
+  retrieved_meta: '[{"log_type": "Crash_Event", "exception_info": "java.lang.ArrayIndexOutOfBoundsException:
+    length=0; index=0 ", "source_file": "dumpstate_fatal_payload.json", "process":
+    "system_server", "raw_context": "[\"[ 1244.626745] [5:        qrtr_ns:  203] qrtr:
+    ctrl_cmd_del_client(): del client cmd failed: [0x3c:0x1] 0x4073 -28\", \"[ 1244.628067]
+    [5:        qrtr_ns:  203] qrtr: ctrl_cmd_del_client(): del client cmd failed:
+    [0x3c:0x1] 0x4073 -28\", \"[ 1245.061355] [2:            iod: 1096] !@   8,0 r
+    592449 27672028 w 120953 1771476 d 88076 73866304 f 337 816 iot 83104 0 th 0 0
+    0 pt 0 inp 0 0 1245.060\", \"[ 1245.061394] [2:            iod: 1096] !@ Read_top(KB):
+    pp.clockpackage:high(10124) 17232 id.app.routines:high(10158) 5292 .shealth:remote:low(9187)
+    2544\", \"[ 1245.061399] [2:            iod: 1096] !@ Write_top(KB): f2fs_ckpt-254:6:/(1358)
+    672 kworker/u17:7:/(6533) 532 droid.rubin.app:low(10340) 328\"]", "top_method":
+    "com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage",
+    "time": "00-00 00:00:00.000", "trigger": "[ 1245.309560] [4:  system_server: 2910]
+    !@*** FATAL EXCEPTION IN SYSTEM PROCESS: main"}, {"exception_info": "12-29 08:42:12.933
+    radio  3946  3946 E AndroidRuntime: DeadSystemException: The system died; earlier
+    logs will point to the root cause 12-29 08:42:12.934 radio  3946  3946 D DIAGMON_SDK[605042]:
+    Agreement for ueHandler : true 12-29 08:42:12.934 radio  3946  3946 D DIAGMON_SDK[605042]:
+    Agreement for ueHandler : D 12-29 08:42:12.934 radio  3946  3946 D DIAGMON_SDK[605042][tszxp6r9tl]
+    : [Falcon_DiagMonSDK][0][DiagMonLogger] 12-29 08:42:12.934 radio  3946  3946 D
+    DIAGMON_SDK[605042][tszxp6r9tl] : Storage size threshold : 1073741824 bytes 12-29
+    08:42:12.934 radio  3946  3946 D DIAGMON_SDK[605042][tszxp6r9tl] : [Falcon_DiagMonSDK][1][DiagMonLogger]
+    12-29 08:42:12.934 radio  3946  3946 D DIAGMON_SDK[605042][tszxp6r9tl] : The directory
+    doesn''t exist. 12-29 08:42:12.935 radio  3946  3946 E IPCThreadState: Binder
+    transaction failure. id: 1239811, BR_*: 29189, error: -3 (No such process) 12-29
+    08:42:12.935 radio  3946  3946 D ActivityThread: Too many transaction errors,
+    throttling freezer binder callback. 12-29 08:42:12.935 radio  3946  3946 I Process
+    : Sending signal. PID: 3946 SIG: 9 12-29 08:42:12.948 radio  2516  2516 E IPCThreadState:
+    attemptIncStrongHandle(12): Not supported 12-29 08:42:12.948 radio  2516  2516
+    E IPCThreadState: attemptIncStrongHandle(8): Not supported 12-29 08:42:12.950  root  1669  1669
+    I Zygote  : Process 3946 exited due to signal 9 (Killed) 12-29 08:42:12.952  1000  4446  5748
+    I ImsServiceStub: Phone Crashed. Cleanup IMS 12-29 08:42:12.952  1000  4446  5748
+    I RegiMgr<0>: sendDeregister: reason=6 12-29 08:42:12.953 radio  2516  2516 E
+    IPCThreadState: attemptIncStrongHandle(10): Not supported ", "raw_context": "[\"12-29
+    08:42:12.933 radio  3946  4139 D SatelliteController: isInCarrierRoamingNbIotNtn:
+    satellite is disabled\", \"12-29 08:42:12.933 radio  3946  3946 E IPCThreadState:
+    Binder transaction failure. id: 1239809, BR_*: 29189, error: -3 (No such process)\",
+    \"12-29 08:42:12.933 radio  3946  3946 E IPCThreadState: Binder transaction failure.
+    id: 1239810, BR_*: 29189, error: -3 (No such process)\", \"12-29 08:42:12.933
+    radio  3946  3946 D ActivityThread: Too many transaction errors, throttling freezer
+    binder callback.\", \"12-29 08:42:12.933 radio  3946  3946 D AndroidRuntime: Shutting
+    down VM\"]", "process": "com.android.phone", "time": "12-29 08:42:12.933", "source_file":
+    "dumpstate_fatal_payload.json", "log_type": "Crash_Event", "trigger": "12-29 08:42:12.933
+    radio  3946  3946 E AndroidRuntime: FATAL EXCEPTION: main", "top_method": "Unknown"},
+    {"log_type": "Crash_Event", "time": "12-29 08:42:12.830", "raw_context": "[\"12-29
+    08:42:12.830   nfc  4435 10288 D [NFC_SE]SamsungTransportManager: onVendorNciResponse
+    payload:0x05\", \"12-29 08:42:12.830   nfc  4435  4473 I [NFC_SE]SamsungTransportManager:
+    Response: 05\", \"12-29 08:42:12.830   nfc  4435  4473 D [NFC_SE]NfcCoverManager:
+    sendStartCoverAuth response = 0x\", \"12-29 08:42:12.830 10346  9187 15280 I SHEALTH#DA#Service#ActivityQueryHelper:
+    No value in goal DB, default value return. type: STEPS, startTime: 2025-11-03(Mon)
+    00:00:00.000 (1762128000000). gender: M\", \"--------- beginning of crash\"]",
+    "trigger": "12-29 08:42:12.830  1000  2910  2910 E Zygote  : System zygote died
+    with fatal exception", "top_method": "com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage",
+    "exception_info": "12-29 08:42:12.830  1000  2910  2910 E Zygote  : java.lang.ArrayIndexOutOfBoundsException:
+    length=0; index=0 \n[Chain Crash] 12-29 08:42:12.831  1000  2910  2910 E AndroidRuntime:
+    !@*** FATAL EXCEPTION IN SYSTEM PROCESS: main ", "process": "system_server", "source_file":
+    "dumpstate_fatal_payload.json"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '["콜스택 스니펫에는 `android.os.Looper.loop(Looper.java:363)` 호출이 기록되어
+    있음."]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the exception type (ArrayIndexOutOfBoundsException)
+    and the relevant method (CoverAuthHandler.handleMessage). It also includes the
+    'length=0; index=0' detail, fulfilling all must-have criteria. The mention of
+    Looper.loop is extra information not directly required by the rubric and slightly
+    reduces evidence coverage.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": ["\ucf5c\uc2a4\ud0dd \uc2a4\ub2c8\ud3ab\uc5d0\ub294
+    `android.os.Looper.loop(Looper.java:363)` \ud638\ucd9c\uc774 \uae30\ub85d\ub418\uc5b4
+    \uc788\uc74c."], "violated_must_not_claim": [], "reason": "The answer correctly
+    identifies the exception type (ArrayIndexOutOfBoundsException) and the relevant
+    method (CoverAuthHandler.handleMessage). It also includes the ''length=0; index=0''
+    detail, fulfilling all must-have criteria. The mention of Looper.loop is extra
+    information not directly required by the rubric and slightly reduces evidence
+    coverage."}'
+  error: ''
+- "\uFEFFtest_id": TC-007
+  category: Native_Crash
+  query: rild 데몬 크래시(Native)의 시그널 번호와 발생한 C++ 함수 위치를 찾아줘.
+  target_log_file: log_for_evaluation/log_native.log
+  expected_decision: rild Native Crash는 signal 11 SIGSEGV / SEGV_MAPERR이며 libsec-ril.so의
+    DataCallManager::NotifyDataCallState에서 발생했습니다.
+  root_cause: rild가 libsec-ril.so 내부 DataCallManager::NotifyDataCallState 경로에서 메모리
+    참조 오류로 사망/리셋되었습니다.
+  ground_truth: libsec-ril.so 모듈 내 DataCallManager::NotifyDataCallState 함수에서 메모리 참조
+    오류인 signal 11 (SIGSEGV), code 1 (SEGV_MAPERR)이 발생하여 rild가 리셋되었습니다. 콜스택을 더 들여다보면
+    ContextActivationDca::OnDataCallDisconnected, ContextActivationDca::OnDataCallStateChanged,
+    Dca::HandleEvent, EventScheduler::DoSchedule() 로 진행됐습니다.
+  must_have: '["rild", "signal 11", "SIGSEGV", "SEGV_MAPERR", "libsec-ril.so", "DataCallManager::NotifyDataCallState"]'
+  evidence_should_include: '["signal 11", "SIGSEGV", "SEGV_MAPERR", "libsec-ril.so",
+    "NotifyDataCallState"]'
+  must_not_claim: '["Java Exception", "ANR", "사용자 종료", "기지국 음영"]'
+  trap_type: ''
+  severity: critical
+  rag_answer: 'rild 데몬의 Native Crash는 일관되게 `signal: SIGSEGV`가 확인됨. 크래시 발생 지점은 주로 `libsec-ril.so`
+    라이브러리 내에서 발생함. 가장 상위 호출 스택(top_callstack)을 기준으로, `DataCallManager::NotifyDataCallState(Dca*,
+    DataCall*, int, int)` 함수가 오류를 유발한 핵심 위치임. 이 외에도 `ContextActivationDca::OnDataCallDisconnected`
+    및 `Dca::HandleEvent` 등 관련 무선 통신 처리 로직에서 크래시가 반복적으로 발생함.'
+  doc_ids: '["log_native_payload_90", "log_native_payload_88", "log_native_payload_104",
+    "log_native_payload_95"]'
+  retrieved_meta: '[{"log_type": "Native_Crash_Event", "source_file": "log_native_payload.json",
+    "signal": "SIGSEGV", "process": "rild", "time": "04-28 08:27:10.206", "abort_message":
+    "none", "crash_type": "NATIVE_CRASH"}, {"time": "04-28 08:26:50.977", "source_file":
+    "log_native_payload.json", "log_type": "Native_Crash_Event", "signal": "SIGSEGV",
+    "abort_message": "none", "process": "rild", "crash_type": "NATIVE_CRASH"}, {"log_type":
+    "Native_Crash_Event", "signal": "SIGSEGV", "abort_message": "none", "crash_type":
+    "NATIVE_CRASH", "time": "04-28 08:29:57.090", "source_file": "log_native_payload.json",
+    "process": "rild"}, {"abort_message": "none", "time": "04-28 08:28:11.141", "signal":
+    "SIGSEGV", "process": "rild", "source_file": "log_native_payload.json", "crash_type":
+    "NATIVE_CRASH", "log_type": "Native_Crash_Event"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 1.0
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the signal (SIGSEGV), library (libsec-ril.so),
+    and function (DataCallManager::NotifyDataCallState) as the root cause of the rild
+    Native Crash, aligning with the golden rubric. It also mentions related functions
+    in the call stack. No must-not claims are present. The accuracy score is slightly
+    reduced due to not explicitly mentioning SEGV_MAPERR.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the signal (SIGSEGV), library (libsec-ril.so),
+    and function (DataCallManager::NotifyDataCallState) as the root cause of the rild
+    Native Crash, aligning with the golden rubric. It also mentions related functions
+    in the call stack. No must-not claims are present. The accuracy score is slightly
+    reduced due to not explicitly mentioning SEGV_MAPERR."}'
+  error: ''
+- "\uFEFFtest_id": TC-008
+  category: SetupDataCall_Failed
+  query: E-PDN 데이터 호(SetupDataCall) 연결 시도가 실패한 명시적인 거절 사유를 알려줘.
+  target_log_file: log_for_evaluation/data_call_setup.log
+  expected_decision: E-PDN SetupDataCall 실패의 명시 사유는 NOT_SPECIFIED 및 NO CARRIER / User
+    authentication failed 입니다.
+  root_cause: 기지국 측에서 User authentication failed를 포함한 NO CARRIER 사유로 E-PDN 연결을 거절했습니다.
+  ground_truth: E-PDN 연결을 시도했으나 NOT_SPECIFIED 상태로 실패했으며, 상세 거절 원인은 기지국 측의 NO CARRIER
+    / User authentication failed 입니다.
+  must_have: '["E-PDN", "SetupDataCall 실패", "NOT_SPECIFIED", "User authentication
+    failed"]'
+  evidence_should_include: '["NOT_SPECIFIED", "NO CARRIER", "User authentication failed"]'
+  must_not_claim: '["데이터 연결 성공", "DNS 문제", "Battery Saver 차단", "원인 확인 불가"]'
+  trap_type: ''
+  severity: high
+  rag_answer: '제공된 로그 데이터만으로는 E-PDN 데이터 호(SetupDataCall) 연결 실패에 대한 명시적인 거절 사유 코드는
+    확인되지 않음. 다만, 데이터 통신 장애가 발생한 구간에서 다음과 같은 네트워크 접근 제한 및 유효성 검증 실패 이력이 다수 관찰됨.
+
+
+    1.  **DNS 정책 차단:** 04-10 10:43:50.952에 `com.samsung.android.dkey` 패키지에서 DNS 접속
+    시도가 발생했으나, `effective_policy: APP_BACKGROUND`에 의해 데이터 접근이 강제적으로 차단된 이력이 확인됨.
+
+    2.  **네트워크 유효성 검증 실패:** 04-10 10:40:43.722 등 여러 시점에서 DNS 이슈와 함께 `NETWORK_VALIDATION`
+    실패가 동반되어 데이터 연결에 장애를 일으킨 것이 관찰됨. 이는 네트워크 계층의 유효성 검사 단계에서 문제가 발생했음을 의미함.'
+  doc_ids: '["data_call_setup_payload_20", "data_call_setup_payload_19", "data_call_setup_payload_8",
+    "data_call_setup_payload_757"]'
+  retrieved_meta: '[{"log_type": "Network_DNS_Issue", "result": "FAIL", "is_blocked":
+    true, "net_id": "109", "suspected_reason": "Blocked by APP_BACKGROUND", "effective_policy":
+    "APP_BACKGROUND", "package": "com.samsung.android.dkey", "time": "04-10 10:43:50.952",
+    "uid": "10072", "source_file": "data_call_setup_payload.json"}, {"command": "GET_CELL_INFO_LIST",
+    "status": "ERROR", "latency_ms": 9, "log_type": "RILJ_Transaction", "error_msg":
+    "66", "source_file": "data_call_setup_payload.json", "time": "04-10 10:42:48.534"},
+    {"operator": "Unknown (Unknown)", "root_cause_candidate": "SIGNAL_LOSS_OR_SHADOW_AREA",
+    "source_file": "data_call_setup_payload.json", "event_type": "OOS_STATE_CHANGE",
+    "log_type": "OOS_Event", "time": "04-10 10:41:56.026", "slotId": "0", "raw_context":
+    "[\"04-10 10:41:56.013 radio  1269  1454 D RILD    : cellInfoRat: 2, LTE(vops:
+    2, imsEmerCallSupp: 2) NR(emf: 0, emc: 0, emcAuth: 0, smsRegi: 0, endc: 0, dcnr:
+    0, nrAvailable: 0)\", \"04-10 10:41:56.013 radio  1269  1379 D RILD    : NET-MGR(6):
+    evt(100)\", \"04-10 10:41:56.013 radio  1269  1379 D RILD    : RefreshHandler()\",
+    \"04-10 10:41:56.013 radio  1269  1379 D RILD    : IsRegistered - Feature: 0x0B\",
+    \"04-10 10:41:56.014 radio  1269  1379 D RILD    : ConvertNetRegStateToCellIdentity
+    - cellInfoType: 1 (Rat: 2, MobileRat: 2, CellInfoRat: 2)\", \"04-10 10:41:56.014
+    radio  1269  1379 D RILD    : SetEmergencyState(): mState= 3 mMcc = 208\", \"04-10
+    10:41:56.014 radio  1269  1379 D RILD    : SetEmergencyState(): Use default value
+    Feature::QmiSupported(0) : 0\", \"04-10 10:41:56.015 radio  1269  1379 D RILD    :
+    RequestComplete - req : 20, peek : 20\", \"04-10 10:41:56.015 radio  1902  1902
+    D SST-0   : EVENT_GET_EXTENDED_REGISTRATION_STATE\", \"04-10 10:41:56.016 radio  1902  1996
+    D RILJ    : [1249]< VOICE_REGISTRATION_STATE {.regState = REG_DENIED_EM, .rat
+    = EDGE, .reasonForDenial = NONE, .cellIdentity = {.gsm = {.base = {.base = {.mcc
+    = 208, .mnc = 10, .lac = <MASKED>, .cid = <MASKED>, .arfcn = 113, .bsic = 6},
+    .operatorNames = {.alphaLong = SFR, .alphaShort = SFR}}, .additionalPlmns = []}},
+    .registeredPlmn = 20810, .accessTechnologySpecificInfo = {.geranDtmSupported =
+    false}} [PHONE0]\", \"04-10 10:41:56.018 radio  1902  1902 D SST-0   : handlePollStateResultMessage:
+    CS cellular. NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=DENIED
+    networkRegistrationState=DENIED roamingType=NOT_ROAMING accessNetworkTechnology=EDGE
+    rejectCause=0 emergencyEnabled=true availableServices=[EMERGENCY] cellIdentity=CellIdentityGsm:{
+    mLac=[****] mCid=[****] mArfcn=[****] mBsic=0x[****] mMcc=208 mMnc=10 mAlphaLong=SFR
+    mAlphaShort=SFR mAdditionalPlmns={}} voiceSpecificInfo=VoiceSpecificRegistrationInfo
+    { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator\n...[TRUNCATED_BY_SYSTEM:
+    TOO_LONG]", "rat": "2(EDGE)", "data_reg": "1(OUT_OF_SERVICE)", "slot": "0", "emergency":
+    "true", "voice_reg": "1(OUT_OF_SERVICE)", "rej_cause": "0"}, {"raw_info": "wcdmaLevel=3",
+    "slot": "0", "details_WCDMA": "{''RSSI'': ''20'', ''RSCP'': ''--72 dBm'', ''EcNo'':
+    ''10'', ''raw'': ''W:(20, 99, -72, 10)''}", "level": 3, "details_GSM": "{''RSSI'':
+    ''Unknown'', ''raw'': ''G:(99, 99)''}", "log_type": "Signal_Level", "details_LTE":
+    "{''RSRP'': ''Unknown'', ''RSRQ'': ''Unknown'', ''SINR'': ''Unknown'', ''raw'':
+    ''L:(99, 2147483647, 2147483647, 2147483647, 2147483647)''}", "time": "04-10 10:42:44.506",
+    "source_file": "data_call_setup_payload.json", "rat": "WCDMA"}]'
+  thinking: ''
+  accuracy_score: 0.2
+  evidence_coverage: 0.3
+  must_have_coverage: 0.4
+  must_not_violation: 1.0
+  hallucination_safety: 0.1
+  overall_score: 0.2
+  missing_must_have: '["NOT_SPECIFIED", "User authentication failed"]'
+  missing_evidence: '["NO CARRIER"]'
+  violated_must_not_claim: '["원인 확인 불가"]'
+  reason: The answer completely misses the core root cause (NO CARRIER / User authentication
+    failed) and incorrectly attributes the failure to DNS policy blocking and network
+    validation failures. It also claims '원인 확인 불가' implicitly by stating that no explicit
+    rejection code was found, violating a must_not_claim. The hallucination safety
+    is low due to inventing an alternative explanation not supported by the rubric.
+  judge_raw: '{"accuracy_score": 0.2, "evidence_coverage": 0.3, "must_have_coverage":
+    0.4, "must_not_violation": 1.0, "hallucination_safety": 0.1, "overall_score":
+    0.2, "missing_must_have": ["NOT_SPECIFIED", "User authentication failed"], "missing_evidence":
+    ["NO CARRIER"], "violated_must_not_claim": ["\uc6d0\uc778 \ud655\uc778 \ubd88\uac00"],
+    "reason": "The answer completely misses the core root cause (NO CARRIER / User
+    authentication failed) and incorrectly attributes the failure to DNS policy blocking
+    and network validation failures. It also claims ''\uc6d0\uc778 \ud655\uc778 \ubd88\uac00''
+    implicitly by stating that no explicit rejection code was found, violating a must_not_claim.
+    The hallucination safety is low due to inventing an alternative explanation not
+    supported by the rubric."}'
+  error: ''
+- "\uFEFFtest_id": TC-009
+  category: DataStall
+  query: Data Stall 감지 시점과 Recovery 동작이 완전히 종료되어 복구된 시간을 분석해 줘.
+  target_log_file: log_for_evaluation/data_stall.log
+  expected_decision: Data Stall은 10:18:29경 감지되었고 Recovery는 10:18:47경 종료되어 복구되었습니다.
+  root_cause: Data Stall 감지 후 Recovery 로직이 실행되어 약 18초 뒤 정상 복구되었습니다.
+  ground_truth: 10:18:29 무렵 Data Stall이 감지되어 Recovery 로직이 진입하였고, 10:18:47 경에 Recovery
+    동작이 종료되며 정상적으로 망 복구가 완료되었습니다.
+  must_have: '["10:18:29", "Data Stall 감지", "Recovery 진입", "10:18:47", "복구 완료"]'
+  evidence_should_include: '["10:18:29", "Recovery", "10:18:47"]'
+  must_not_claim: '["복구 실패", "장시간 미복구", "크래시 발생", "원인 확인 불가"]'
+  trap_type: ''
+  severity: medium
+  rag_answer: Data Stall 감지 및 Recovery 동작은 총 3회 발생함. 첫 번째 이벤트는 2026-05-21T10:18:29.047502에
+    Data Stall이 감지되어 Recovery 로직 진입을 시작했음을 확인됨. 이후 Recovery 동작은 2026-05-21T10:18:47.605251에
+    종료되었으며, 이 과정에서 정상적으로 망 복구가 완료된 것으로 판정됨. 전체 복구 소요 시간은 약 18.558초로 측정되어 일시적인 데이터
+    연결 장애였음이 확인됨.
+  doc_ids: '["data_stall_payload_10", "data_stall_payload_8169", "data_stall_payload_8164",
+    "data_stall_payload_8127"]'
+  retrieved_meta: '[{"raw_context": "[\"05-22 10:26:47.455 10378 15335 15532 I dvm_lock_sample:
+    [com.ktcs.whowho,0,DefaultDispatcher-worker-8,17,,5,void kotlinx.coroutines.scheduling.CoroutineScheduler$c.t(),-,31,void
+    kotlinx.coroutines.scheduling.CoroutineScheduler$c.t(),3]\", \"05-22 10:26:47.512  1000  2536  2536
+    I power_partial_wake_state: [DIS,20566614,119,*alarm*:android(enabled),1000,2536,WorkSource{10385}]\",
+    \"05-22 10:26:47.512  1000  2536  2536 I power_partial_wake_state: [REL,20566614,119,*alarm*:android,1000,2536,WorkSource{10385}]\",
+    \"------ 0.068s was the duration of ''EVENT LOG'' ------\", \"------ STATS LOG
+    (logcat -b stats -v threadtime -v printable -v uid -d *:v) ------\", \"------
+    0.004s was the duration of ''STATS LOG'' ------\", \"05-22 08:50:46.658 radio  4254  4254
+    D SST-0   : EVENT_GET_EXTENDED_REGISTRATION_STATE\", \"05-22 08:50:46.658 radio  4254  4254
+    D SST-0   : handlePollStateResultMessage: PS cellular. NetworkRegistrationInfo{
+    domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME
+    roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false
+    availableServices=[DATA,MMS] cellIdentity=CellIdentityLte:{ mCi=[****] mPci=[****]
+    mTac=[****] mEarfcn=[****] mBands=[3] mBandwidth=2147483647 mMcc=450 mMnc=08 mAlphaLong=KT
+    mAlphaShort=KT mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo
+    :{ maxDataCalls = 16 isDcNrRestricted = true isNrAvailable = true isEnDcAvailable
+    = true mLteAttachResultType = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport
+    = 2 mEmcBearerSupport = 2 } nrState=**** rRplmn=45008 isUsingCarrierAggregation=false
+    isNonTerrestrialNetwork=TERRESTRIAL}\", \"05-22 08:50:46.658 radio  4254  4611
+    D RILJ    : [5525]< DATA_REGISTRATION_STATE RegStateResult{regState: REG_HOME,
+    rat: LTE_CA, reasonForDenial: NONE, cellIdentity: CellIdentity.lte(CellIdentityLte{mcc:
+    450, mnc: 08, ci: <MASKED>, pci: <MASKED>, tac: <MASKED>, earfcn: 1550, operatorNames:
+    OperatorInf\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "operator": "KT (KT)", "slot":
+    "0", "root_cause_candidate": "None", "emergency": "false", "rat": "14(LTE)", "event_type":
+    "OOS_RECOVER", "source_file": "data_stall_payload.json", "log_type": "OOS_Event",
+    "slotId": "0", "time": "05-22 08:50:46.662", "rej_cause": "0", "voice_reg": "0(IN_SERVICE)",
+    "data_reg": "0(IN_SERVICE)"}, {"raw_info": "lteLevel=4", "rat": "LTE", "slot":
+    "0", "time": "05-22 10:26:14.124", "log_type": "Signal_Level", "level": 4, "source_file":
+    "data_stall_payload.json"}, {"time": "05-22 10:25:39.112", "rat": "LTE", "log_type":
+    "Signal_Level", "slot": "0", "level": 4, "raw_info": "lteLevel=4", "source_file":
+    "data_stall_payload.json"}, {"level": 4, "time": "05-22 10:22:52.395", "rat":
+    "LTE", "slot": "0", "source_file": "data_stall_payload.json", "log_type": "Signal_Level",
+    "raw_info": "lteLevel=4"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.9
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the Data Stall detection time (10:18:29)
+    and Recovery completion time (10:18:47), aligning with the expected decision and
+    root cause. It also accurately describes the recovery process and calculates the
+    total recovery time. The response covers all 'must_have' elements and avoids any
+    forbidden claims. Minor deduction for mentioning 3 events when only one was requested,
+    but this doesn't significantly impact accuracy.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.9, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the Data Stall detection time (10:18:29)
+    and Recovery completion time (10:18:47), aligning with the expected decision and
+    root cause. It also accurately describes the recovery process and calculates the
+    total recovery time. The response covers all ''must_have'' elements and avoids
+    any forbidden claims. Minor deduction for mentioning 3 events when only one was
+    requested, but this doesn''t significantly impact accuracy."}'
+  error: ''
+- "\uFEFFtest_id": TC-010
+  category: Crash_ANR_Absence
+  query: 해당 시간대(03-25 17시 38분경)에 단말이 멈추거나 재부팅되는 치명적인 시스템 크래시(Native Crash)나 ANR(앱
+    응답 없음)이 발생했는지 분석해 줘.
+  target_log_file: log_for_evaluation/cs_call_failed.log
+  expected_decision: 해당 시간대에는 Native Crash나 ANR 이력이 없습니다.
+  root_cause: 통화 실패 로그에는 치명적인 시스템 크래시/ANR 근거가 없으며 시스템 멈춤 또는 재부팅으로 볼 수 없습니다.
+  ground_truth: 제공된 로그에는 치명적인 시스템 크래시(Native Crash)나 ANR(응답 없음) 이력이 존재하지 않습니다. 단말
+    소프트웨어 시스템은 정상적으로 동작 중이었습니다.
+  must_have: '["Native Crash 없음", "ANR 없음", "치명적 시스템 크래시 이력 없음"]'
+  evidence_should_include: '["Crash_Event 없음", "ANR_Context 없음", "03-25 17:38경"]'
+  must_not_claim: '["rild Native Crash 발생", "ANR 발생", "단말 재부팅", "시스템 멈춤", "Fatal Exception
+    발생"]'
+  trap_type: absence_check
+  severity: medium
+  rag_answer: 제공된 분석 팩트 및 검색 결과에 따르면, 해당 시간대(03-25 17시 38분경)에는 치명적인 시스템 크래시(Native
+    Crash)나 ANR(앱 응답 없음)이 발생한 기록은 확인되지 않음. `crash_count`는 0이며, `native_crash_count`와
+    `anr_count` 역시 모두 0으로 보고됨. 또한, 해당 시간대 및 장애 유형과 관련된 추가적인 로그 이력도 검색되지 않았습니다.
+  doc_ids: '[]'
+  retrieved_meta: '[]'
+  thinking: ''
+  accuracy_score: 1.0
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 1.0
+  overall_score: 0.95
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the absence of Native Crash and ANR events
+    within the specified timeframe. It cites relevant log data (`crash_count`, `native_crash_count`,
+    `anr_count`) to support its conclusion, demonstrating good evidence coverage.
+    No forbidden claims are present, ensuring high hallucination safety.
+  judge_raw: '{"accuracy_score": 1.0, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the absence of Native Crash and
+    ANR events within the specified timeframe. It cites relevant log data (`crash_count`,
+    `native_crash_count`, `anr_count`) to support its conclusion, demonstrating good
+    evidence coverage. No forbidden claims are present, ensuring high hallucination
+    safety."}'
+  error: ''
+- "\uFEFFtest_id": TC-011
+  category: nitz_time_analysis
+  query: 로그상에서 NITZ 시간 정보나 타임존이 어떻게 수신되었는지, 급격한 변화가 있는지 분석해.
+  target_log_file: log_for_evaluation/cs_call_failed.log
+  expected_decision: NITZ는 UTC+0 상태로 유지되었고 타임존 급변/핑퐁 현상은 없습니다.
+  root_cause: NITZ 수신 이력에서 UTC+0 외의 변경이나 반복 전환이 관찰되지 않았습니다.
+  ground_truth: NITZ 수신 이력을 확인한 결과, UTC+0에서 변경사항 없이 유지되었습니다. 타임존 변경이나 핑퐁 현상은 관찰되지
+    않았습니다.
+  must_have: '["UTC+0", "타임존 변경 없음", "핑퐁 현상 없음"]'
+  evidence_should_include: '["NITZ", "UTC+0", "변경 없음"]'
+  must_not_claim: '["타임존 급변", "핑퐁 발생", "시간 오류로 통화 실패"]'
+  trap_type: absence_check
+  severity: low
+  rag_answer: NITZ 시간 정보는 UTC+0시간으로 수신되었으며, 로그 추출 시점까지 타임존 변경 이력은 확인되지 않음. 감지된 NITZ
+    이벤트들은 모두 UTC+0 오프셋을 유지하고 있어 급격한 시간대 변화나 핑퐁 현상은 관찰되지 않았음.
+  doc_ids: '["cs_call_failed_payload_599", "cs_call_failed_payload_600", "cs_call_failed_payload_561",
+    "cs_call_failed_payload_596"]'
+  retrieved_meta: '[{"dst_status": "미적용", "source_file": "cs_call_failed_payload.json",
+    "timezone": "UTC+0시간", "nitz_raw": "NITZ: 26/03/25,17:31:26+00,00", "log_time":
+    "2026-03-25 17:33:27", "log_type": "Nitz_Time_Event"}, {"nitz_raw": "NITZ: 26/03/25,17:31:37+00,00",
+    "timezone": "UTC+0시간", "source_file": "cs_call_failed_payload.json", "log_time":
+    "2026-03-25 17:33:37", "log_type": "Nitz_Time_Event", "dst_status": "미적용"}, {"nitz_raw":
+    "NITZ: 26/03/25,09:24:29+00,00", "source_file": "cs_call_failed_payload.json",
+    "timezone": "UTC+0시간", "dst_status": "미적용", "log_type": "Nitz_Time_Event", "log_time":
+    "2026-03-25 09:26:29"}, {"dst_status": "미적용", "log_time": "2026-03-25 14:33:52",
+    "timezone": "UTC+0시간", "log_type": "Nitz_Time_Event", "nitz_raw": "NITZ: 26/03/25,14:31:52+00,00",
+    "source_file": "cs_call_failed_payload.json"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 1.0
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the NITZ time information as UTC+0 and confirms
+    the absence of timezone changes or ping-pong effects. It covers all 'must_have'
+    elements and avoids any forbidden claims. Evidence coverage is slightly reduced
+    because it doesn't explicitly mention 'NITZ 수신 이력' but the core meaning is conveyed.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the NITZ time information as UTC+0
+    and confirms the absence of timezone changes or ping-pong effects. It covers all
+    ''must_have'' elements and avoids any forbidden claims. Evidence coverage is slightly
+    reduced because it doesn''t explicitly mention ''NITZ \uc218\uc2e0 \uc774\ub825''
+    but the core meaning is conveyed."}'
+  error: ''
+- "\uFEFFtest_id": TC-012
+  category: nitz_time_analysis
+  query: 이 로그에서 NITZ 타임존이 비정상적으로 튀거나 핑퐁 현상을 보인 구간이 있어?
+  target_log_file: log_for_evaluation/request_failed.txt
+  expected_decision: NITZ 수신 이력이 없어 타임존 핑퐁 여부를 판단할 수 없습니다.
+  root_cause: request_failed 로그에는 Nitz_Time_Event가 존재하지 않습니다.
+  ground_truth: 해당 로그에는 NITZ 시간 정보 수신 이력(Nitz_Time_Event)이 존재하지 않습니다. 따라서 타임존 변경이나
+    핑퐁 현상 여부를 확인할 수 없습니다.
+  must_have: '["Nitz_Time_Event 없음", "수신 이력 없음", "확인할 수 없음"]'
+  evidence_should_include: '["Nitz_Time_Event", "존재하지 않"]'
+  must_not_claim: '["타임존 핑퐁 발생", "UTC 변경 발생", "NITZ 급변 확인"]'
+  trap_type: absence_check
+  severity: low
+  rag_answer: 제공된 분석 팩트 및 로그에는 NITZ 타임존의 시간대 변화나 비정상적인 핑퐁 현상을 확인할 수 있는 데이터가 존재하지 않음.
+    현재 검색된 관련 로그 이력 또한 없어 해당 현상의 유무를 판단할 근거가 없음.
+  doc_ids: '[]'
+  retrieved_meta: '[]'
+  thinking: ''
+  accuracy_score: 0.8
+  evidence_coverage: 0.7
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.9
+  overall_score: 0.85
+  missing_must_have: '[]'
+  missing_evidence: '["Nitz_Time_Event"]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the absence of NITZ time information and
+    states that it cannot determine timezone ping-pong. It aligns with the expected
+    decision and root cause. However, it doesn't explicitly mention 'Nitz_Time_Event',
+    which is a key piece of evidence. The hallucination safety is high as it avoids
+    making any claims about timezone changes or NITZ variations.
+  judge_raw: '{"accuracy_score": 0.8, "evidence_coverage": 0.7, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.9, "overall_score":
+    0.85, "missing_must_have": [], "missing_evidence": ["Nitz_Time_Event"], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the absence of NITZ time information
+    and states that it cannot determine timezone ping-pong. It aligns with the expected
+    decision and root cause. However, it doesn''t explicitly mention ''Nitz_Time_Event'',
+    which is a key piece of evidence. The hallucination safety is high as it avoids
+    making any claims about timezone changes or NITZ variations."}'
+  error: ''
+- "\uFEFFtest_id": TC-013
+  category: Radio_Power
+  query: '현재 시스템 프로퍼티를 보니 비행기 모드(airplane_mode_on: 1)가 켜져 있는데, 이것을 근거로 이전에 발생했던 통화
+    실패나 데이터 끊김이 모두 사용자의 의도적인 전원 차단 때문이었다고 결론 내리면 돼?'
+  target_log_file: log_for_evaluation/dumpState_0.log
+  expected_decision: 현재 시스템 프로퍼티만으로 과거 통화 실패/데이터 끊김 원인을 비행기 모드로 단정하면 안 됩니다.
+  root_cause: 'airplane_mode_on: 1과 radio_power: 0은 로그 추출 시점의 Device_Property_State일
+    뿐이며, 과거 장애 원인 판단에는 Radio_Power_Event 등 타임스탬프 기반 이벤트와의 교차 검증이 필요합니다.'
+  ground_truth: '아닙니다. Device_Property_State에서 확인된 비행기 모드 켜짐(1) 및 라디오 전원 꺼짐(0) 상태는
+    ''로그 추출 시점''의 단말 상태일 뿐입니다. 과거 발생한 통신 장애의 원인을 이 프로퍼티만으로 단정 지을 수 없으며, 정확한 인과관계를
+    파악하려면 타임스탬프가 기록된 이벤트 로그(예: Radio_Power_Event)와의 교차 검증이 필요합니다.'
+  must_have: '["로그 추출 시점", "과거 장애 원인 단정 불가", "타임스탬프 이벤트 교차 검증 필요", "Radio_Power_Event
+    확인 필요"]'
+  evidence_should_include: '["Device_Property_State", "airplane_mode_on: 1", "radio_power:
+    0", "Radio_Power_Event"]'
+  must_not_claim: '["모든 통화 실패가 비행기 모드 때문", "사용자의 의도적 전원 차단으로 확정", "프로퍼티만으로 원인 확정",
+    "과거 데이터 끊김 원인은 airplane mode"]'
+  trap_type: time_context_inference
+  severity: high
+  rag_answer: '아닙니다. 제공된 로그만으로는 모든 통화 실패나 데이터 끊김이 사용자의 의도적인 전원 차단 때문이라고 단정할 수 없습니다.
+
+
+    `get_network_oos_analytics`에 기록된 20:48:45.930 시점의 OOS 이벤트는 `data_reg: 1(OUT_OF_SERVICE)`
+    상태를 보여줍니다. 해당 로그의 `root_cause_candidate`가 명확하게 **SIGNAL_LOSS_OR_SHADOW_AREA**로
+    기록되어 있습니다. 이는 통신 단절의 원인이 사용자의 전원 차단이 아닌, 신호 손실 또는 음영 지역에 기인했음을 나타냅니다.'
+  doc_ids: '["dumpState_0_payload_3", "dumpState_0_payload_1", "dumpState_0_payload_2",
+    "dumpState_0_payload_0"]'
+  retrieved_meta: '[{"slot": "1", "slotId": "1", "operator": "Unknown (Unknown)",
+    "rat": "0(Unknown)", "data_reg": "1(OUT_OF_SERVICE)", "emergency": "false", "root_cause_candidate":
+    "SIGNAL_LOSS_OR_SHADOW_AREA", "rej_cause": "0", "raw_context": "[\"03-30 20:48:45.925
+    radio  4156  5089 D RILJ    : [2361]< OPERATOR {T-Mobile, T-Mobile, 310260} [PHONE0]\",
+    \"03-30 20:48:45.925 radio  4156  4156 D SST-0   : EVENT_POLL_STATE_NETWORK_SELECTION_MODE\",
+    \"03-30 20:48:45.926 radio  4156  5089 D RILJ    : [2362]< QUERY_NETWORK_SELECTION_MODE
+    {0} [PHONE0]\", \"03-30 20:48:45.926 radio  4156  4156 D SST-0   : EVENT_POLL_STATE_NETWORK_SELECTION_MODE\",
+    \"03-30 20:48:45.927 radio  4156  4156 D SST-1   : EVENT_GET_EXTENDED_REGISTRATION_STATE\",
+    \"03-30 20:48:45.928 radio  2301  3100 E RILD    : Serving cell rsrp: -1230. rsrq:
+    -129. rssi: -961. srxlev: 1. signal Strength: 9\", \"03-30 20:48:45.928 radio  4156  5089
+    D RILJ    : [2358]< VOICE_REGISTRATION_STATE RegStateResult{regState: NOT_REG_MT_SEARCHING_OP,
+    rat: UNKNOWN, reasonForDenial: NONE, cellIdentity: CellIdentity.noinit(false),
+    registeredPlmn: , accessTechnologySpecificInfo: AccessTechnologySpecificInfo.noinit(false)}
+    [PHONE1]\", \"03-30 20:48:45.928 radio  4156  4156 D SST-1   : Could not set ServiceState
+    channel number. CellIdentity null\", \"03-30 20:48:45.928 radio  4156  4156 D
+    SST-1   : handlePollStateResultMessage: CS cellular. NetworkRegistrationInfo{
+    domain=CS transportType=WWAN registrationState=NOT_REG_SEARCHING networkRegistrationState=NOT_REG_SEARCHING
+    roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false
+    availableServices=[] cellIdentity=null voiceSpecificInfo=VoiceSpecificRegistrationInfo
+    { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0}
+    dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL}\",
+    \"03-30 20:48:45.928 radio  4156  4156 D SST-1   : combinePsRegistrationStates:
+    {mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE), mChannelNumber=-1,
+    duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=, mOperatorAlphaShort=,
+    isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown),
+    getRilDataRadioTechnol\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "event_type": "OOS_STATE_CHANGE",
+    "source_file": "dumpState_0_payload.json", "log_type": "OOS_Event", "time": "03-30
+    20:48:45.930", "voice_reg": "1(OUT_OF_SERVICE)"}, {"data_reg": "0(IN_SERVICE)",
+    "rat": "0(Unknown)", "raw_context": "[\"03-30 20:51:35.412 radio  2301  3118 E
+    RILD    : UpdateDataRte: mDataRte(0), Confidence(4)\", \"03-30 20:51:35.412 radio  2301  3118
+    E RILD    : UpdateImsRte: mImsRte(0), Confidence(4)\", \"03-30 20:51:35.412 radio  4156  4156
+    D SST-0   : handlePollStateResultMessage: PS cellular. NetworkRegistrationInfo{
+    domain=PS transportType=WWAN registrationState=NOT_REG_SEARCHING networkRegistrationState=NOT_REG_SEARCHING
+    roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false
+    availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo
+    :{ maxDataCalls = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable
+    = false mLteAttachResultType = 0 mLteAttachExtraInfo = 0 null } nrState=**** rRplmn=
+    isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL}\", \"03-30
+    20:51:35.412 radio  4156  4528 D RILJ    : [2555]< DATA_REGISTRATION_STATE RegStateResult{regState:
+    NOT_REG_MT_SEARCHING_OP, rat: UNKNOWN, reasonForDenial: NONE, cellIdentity: CellIdentity.noinit(false),
+    registeredPlmn: , accessTechnologySpecificInfo: AccessTechnologySpecificInfo.noinit(false)}
+    [PHONE0]\", \"03-30 20:51:35.413 radio  4156  4156 D SST-0   : EVENT_GET_EXTENDED_REGISTRATION_STATE\",
+    \"03-30 20:51:35.414 radio  4156  4156 D SST-0   : Could not set ServiceState
+    channel number. CellIdentity null\", \"03-30 20:51:35.414 radio  4156  4156 D
+    SST-0   : handlePollStateResultMessage: CS cellular. NetworkRegistrationInfo{
+    domain=CS transportType=WWAN registrationState=NOT_REG_SEARCHING networkRegistrationState=NOT_REG_SEARCHING
+    roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN rejectCause=0 emergencyEnabled=false
+    availableServices=[] cellIdentity=null voiceSpecificInfo=VoiceSpecificRegistrationInfo
+    { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0}
+    dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL}\",
+    \"03-\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "rej_cause": "0", "voice_reg": "1(OUT_OF_SERVICE)",
+    "log_type": "OOS_Event", "slotId": "0", "time": "03-30 20:51:35.416", "slot":
+    "0", "emergency": "false", "event_type": "OOS_ENTER", "source_file": "dumpState_0_payload.json",
+    "root_cause_candidate": "None", "operator": "Unknown (Unknown)"}, {"source_file":
+    "dumpState_0_payload.json", "event_type": "OOS_RECOVER", "raw_context": "[\"03-30
+    20:48:45.930 radio  4156  4156 D SST-1   : Could not set ServiceState channel
+    number. CellIdentity null\", \"03-30 20:48:45.930 radio  4156  4156 D SST-1   :
+    Poll ServiceState done: oldSS={mVoiceRegState=1(OUT_OF_SERVICE), mDataRegState=1(OUT_OF_SERVICE),
+    mChannelNumber=-1, duplexMode()=0, mCellBandwidths=[], mOperatorAlphaLong=, mOperatorAlphaShort=,
+    isManualNetworkSelection=false(automatic), getRilVoiceRadioTechnology=0(Unknown),
+    getRilDataRadioTechnology=0(Unknown), mCssIndicator=unsupported, NonCellular=false,
+    Snap=0, PsOnly=false, OptRadioTech=0, MsimSubmode=0, IsVoiceCallAvailable=false,
+    mIsEmergencyOnly=false, isUsingCarrierAggregation=false, mArfcnRsrpBoost=0, mNetworkRegistrationInfos=[NetworkRegistrationInfo{
+    domain=PS transportType=WLAN registrationState=UNKNOWN networkRegistrationState=UNKNOWN
+    roamingType=NOT_ROAMING accessNetworkTechnology=IWLAN rejectCause=0 emergencyEnabled=false
+    availableServices=[] cellIdentity=null voiceSpecificInfo=null dataSpecificInfo=null
+    nrState=**** rRplmn= isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL},
+    NetworkRegistrationInfo{ domain=CS transportType=WWAN registrationState=NOT_REG_SEARCHING
+    networkRegistrationState=NOT_REG_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN
+    rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=VoiceSpecificRegistrationInfo
+    { mCssSupported=false mRoamingIndicator=0 mSystemIsInPrl=0 mDefaultRoamingIndicator=0}
+    dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL},
+    NetworkRegistrationInfo{ domain=PS transportType=WWAN registrationState=NOT_REG_SEARCHING
+    networkRegistrationState=NOT_REG_SEARCHING roamingType=NOT_ROAMING accessNetworkTechnology=UNKNOWN
+    rejectCause=0 emergencyEnabled=false availableServices=[] cellIdentity=null voiceSpecificInfo=null
+    dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls
+    = 16 isDcNrRestricted = false \n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "emergency":
+    "false", "log_type": "OOS_Event", "data_reg": "0(IN_SERVICE)", "rej_cause": "0",
+    "slotId": "0", "root_cause_candidate": "None", "operator": "T-Mobile (T-Mobile)",
+    "voice_reg": "0(IN_SERVICE)", "slot": "0", "time": "03-30 20:48:45.934", "rat":
+    "14(LTE)"}, {"slot": "0", "rat": "14(LTE)", "data_reg": "0(IN_SERVICE)", "voice_reg":
+    "0(IN_SERVICE)", "event_type": "OOS_RECOVER", "log_type": "OOS_Event", "source_file":
+    "dumpState_0_payload.json", "rej_cause": "0", "time": "03-30 20:51:40.843", "raw_context":
+    "[\"03-30 20:51:40.840 radio  4156  4863 D RILJ    : [2574]> VOICE_REGISTRATION_STATE
+    [PHONE0]\", \"03-30 20:51:40.840 radio  4156  4863 D RILJ    : getVoiceRegistrationState:
+    overrideHalVersion=null [PHONE0]\", \"03-30 20:51:40.841 radio  2301  3100 E RILD    :
+    Serving cell rsrp: -1226. rsrq: -129. rssi: -958. srxlev: 1. signal Strength:
+    9\", \"03-30 20:51:40.841 radio  4156  4156 D SST-0   : handlePollStateResultMessage:
+    PS IWLAN. NetworkRegistrationInfo{ domain=PS transportType=WLAN registrationState=HOME
+    networkRegistrationState=HOME roamingType=NOT_ROAMING accessNetworkTechnology=IWLAN
+    rejectCause=0 emergencyEnabled=false availableServices=[DATA] cellIdentity=null
+    voiceSpecificInfo=null dataSpecificInfo=null nrState=**** rRplmn= isUsingCarrierAggregation=false
+    isNonTerrestrialNetwork=TERRESTRIAL}\", \"03-30 20:51:40.841 radio  4156  4156
+    D SST-0   : handlePollStateResultMessage: PS cellular. NetworkRegistrationInfo{
+    domain=PS transportType=WWAN registrationState=HOME networkRegistrationState=HOME
+    roamingType=NOT_ROAMING accessNetworkTechnology=LTE rejectCause=0 emergencyEnabled=false
+    availableServices=[DATA,MMS] cellIdentity=CellIdentityLte:{ mCi=[****] mPci=[****]
+    mTac=[****] mEarfcn=[****] mBands=[12] mBandwidth=2147483647 mMcc=310 mMnc=260
+    mAlphaLong=T-Mobile mAlphaShort=T-Mobile mAdditionalPlmns={} mCsgInfo=null} voiceSpecificInfo=null
+    dataSpecificInfo=android.telephony.DataSpecificRegistrationInfo :{ maxDataCalls
+    = 16 isDcNrRestricted = false isNrAvailable = false isEnDcAvailable = false mLteAttachResultType
+    = 0 mLteAttachExtraInfo = 0 LteVopsSupportInfo :  mVopsSupport = 2 mEmcBearerSupport
+    = 2 } nrState=**** rRplmn=310260 isUsingCarrierAggregation=false isNonTerrestrialNetwork=TERRESTRIAL}\",
+    \"03-30 20:51:40.841 radio  4156  4156 D SST-0   : EVENT_GET_EXTENDED_REGISTRATION_STATE\",
+    \"03-30 20:51:40.841 radio  4156  4168 D RILJ    : [2572]< DATA_REGISTRATION_STATE
+    RegStateResult{regState: REG_HOME, rat: LTE, reasonForDenial: NONE, cellIdentity:
+    CellIdentity.lte(CellId\n...[TRUNCATED_BY_SYSTEM: TOO_LONG]", "slotId": "0", "emergency":
+    "false", "root_cause_candidate": "None", "operator": "T-Mobile (T-Mobile)"}]'
+  thinking: ''
+  accuracy_score: 0.8
+  evidence_coverage: 0.7
+  must_have_coverage: 0.9
+  must_not_violation: 0.0
+  hallucination_safety: 0.6
+  overall_score: 0.75
+  missing_must_have: '[]'
+  missing_evidence: '["Device_Property_State", "airplane_mode_on: 1", "radio_power:
+    0"]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly refutes the initial claim and provides a plausible
+    alternative cause (SIGNAL_LOSS_OR_SHADOW_AREA). However, it fails to mention Device_Property_State
+    information (airplane mode/radio power) which is crucial for context. The must-not
+    claims are not violated. Hallucination safety is reduced because it introduces
+    an OOS event without referencing the initial prompt's focus on airplane mode and
+    radio state.
+  judge_raw: '{"accuracy_score": 0.8, "evidence_coverage": 0.7, "must_have_coverage":
+    0.9, "must_not_violation": 1.0, "hallucination_safety": 0.6, "overall_score":
+    0.75, "missing_must_have": [], "missing_evidence": ["Device_Property_State", "airplane_mode_on:
+    1", "radio_power: 0"], "violated_must_not_claim": [], "reason": "The answer correctly
+    refutes the initial claim and provides a plausible alternative cause (SIGNAL_LOSS_OR_SHADOW_AREA).
+    However, it fails to mention Device_Property_State information (airplane mode/radio
+    power) which is crucial for context. The must-not claims are not violated. Hallucination
+    safety is reduced because it introduces an OOS event without referencing the initial
+    prompt''s focus on airplane mode and radio state."}'
+  error: ''
+- "\uFEFFtest_id": TC-014
+  category: Internet_Stall
+  query: 이 로그 구간에서 모뎀(RIL)이 안드로이드 프레임워크의 명령어에 응답하지 않고 뻗어버린(TIMEOUT) 치명적인 이력이 있나? 없다면
+    모뎀과 시스템 쪽에 어떤 다른 에러가 감지되었는지 팩트만 요약해.
+  target_log_file: log_for_evaluation/dumpState_0.log
+  expected_decision: RIL TIMEOUT 이력은 없고, GET_CELL_INFO_LIST ERROR 63 및 Binder THREAD_EXHAUSTION/BINDER_TRANSACTION_FAILURE가
+    확인됩니다.
+  root_cause: 모뎀 미응답 TIMEOUT이 아니라 GET_CELL_INFO_LIST 실패와 Binder IPC 병목이 주요 감지 이벤트입니다.
+  ground_truth: 제공된 로그에서 모뎀이 응답하지 않는 'TIMEOUT' 이력은 확인되지 않습니다. 다만, 모뎀 트랜잭션에서 GET_CELL_INFO_LIST
+    명령어 실행 시 'ERROR' (에러 코드 63)가 반복적으로 발생했습니다. 또한, 동시간대에 THREAD_EXHAUSTION 및 BINDER_TRANSACTION_FAILURE가
+    다수 감지되어 IPC 처리 스레드 부족에 의한 시스템 병목 현상이 확인됩니다.
+  must_have: '["TIMEOUT 없음", "GET_CELL_INFO_LIST", "ERROR code 63", "THREAD_EXHAUSTION",
+    "BINDER_TRANSACTION_FAILURE"]'
+  evidence_should_include: '["GET_CELL_INFO_LIST", "ERROR", "63", "THREAD_EXHAUSTION",
+    "BINDER_TRANSACTION_FAILURE", "IPC 처리 스레드 부족"]'
+  must_not_claim: '["RIL TIMEOUT 발생", "모뎀이 뻗었다", "치명적인 모뎀 미응답 발생", "에러 없음"]'
+  trap_type: absence_plus_alternative_evidence
+  severity: high
+  rag_answer: '제공된 로그 구간에서 모뎀(RIL)이 프레임워크 명령어에 응답하지 않아 발생한 `TIMEOUT` 치명적 이력은 확인되지
+    않음.
+
+
+    모뎀 관련 에러로는 03-30 22:32:00.655, 03-30 22:52:00.687 등 여러 시점에 명령어 `GET_CELL_INFO_LIST`
+    실행 중 `status: ERROR`, `error_msg: 63`이 반복적으로 감지됨.
+
+
+    시스템 전반의 불안정성으로는 Binder 관련 오류가 다수 확인됨.
+
+    1.  **Binder 통신 실패:** `android.os.DeadObjectException`을 포함한 `BINDER_TRANSACTION_FAILURE`
+    로그가 빈번하게 발생함 (예: 03-30 22:34:44.243, 03-30 22:59:35.098).
+
+    2.  **IPC 병목 현상:** `THREAD_EXHAUSTION` 이벤트가 감지되었으며, 특히 03-30 22:59:42.103 시점에는
+    IPC 처리 스레드가 부족하여 2512ms(약 2.5초) 동안 대기하는 Binder thread pool starvation이 발생함.
+
+    3.  **데이터 전송 오류:** `BINDER_BUFFER_ERROR`가 다수 감지되었으며, 이는 대용량 parcel 또는 buffer 부족으로
+    인한 `TransactionTooLargeException` 가능성을 시사함 (예: 03-30 22:58:46.600).
+
+    4.  **시스템 강제 종료:** 여러 앱 프로세스(com.google.android.webview, com.samsung.wearable.watch7plugin
+    등)에서 `SYSTEM_KILL` 이벤트가 감지되었으며, 사유는 각각 `isolated not needed`, `Cant deliver broadcast`,
+    `excessive cpu` 등으로 다양함.'
+  doc_ids: '["dumpState_0_payload_6", "dumpState_0_payload_4", "dumpState_0_payload_8",
+    "dumpState_0_payload_5"]'
+  retrieved_meta: '[{"latency_ms": 5, "status": "ERROR", "time": "03-30 22:32:00.655",
+    "error_msg": "63", "command": "GET_CELL_INFO_LIST", "source_file": "dumpState_0_payload.json",
+    "log_type": "RILJ_Transaction"}, {"latency_ms": 5, "status": "ERROR", "error_msg":
+    "63", "time": "03-30 22:52:00.687", "command": "GET_CELL_INFO_LIST", "source_file":
+    "dumpState_0_payload.json", "log_type": "RILJ_Transaction"}, {"time": "03-30 22:07:08.164",
+    "log_type": "RILJ_Transaction", "status": "ERROR", "error_msg": "63", "latency_ms":
+    2, "source_file": "dumpState_0_payload.json", "command": "GET_CELL_INFO_LIST"},
+    {"source_file": "dumpState_0_payload.json", "status": "ERROR", "latency_ms": 5,
+    "log_type": "RILJ_Transaction", "command": "GET_CELL_INFO_LIST", "time": "03-30
+    22:42:00.665", "error_msg": "63"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 1.0
+  hallucination_safety: 0.6
+  overall_score: 0.96
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '["`TIMEOUT` 치명적 이력은 확인되지 않음."]'
+  reason: The answer correctly identifies the absence of RIL TIMEOUT and highlights
+    GET_CELL_INFO_LIST ERROR 63, THREAD_EXHAUSTION, and BINDER_TRANSACTION_FAILURE.
+    It provides detailed evidence for each issue, including timestamps and specific
+    error messages. The only minor deduction is due to the initial claim that 'TIMEOUT'
+    was not found, which while technically correct, contradicts the prompt's request
+    to summarize findings *if* a TIMEOUT wasn't present. This phrasing could be slightly
+    improved.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 0.98, "overall_score":
+    0.96, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    ["`TIMEOUT` \uce58\uba85\uc801 \uc774\ub825\uc740 \ud655\uc778\ub418\uc9c0 \uc54a\uc74c."],
+    "reason": "The answer correctly identifies the absence of RIL TIMEOUT and highlights
+    GET_CELL_INFO_LIST ERROR 63, THREAD_EXHAUSTION, and BINDER_TRANSACTION_FAILURE.
+    It provides detailed evidence for each issue, including timestamps and specific
+    error messages. The only minor deduction is due to the initial claim that ''TIMEOUT''
+    was not found, which while technically correct, contradicts the prompt''s request
+    to summarize findings *if* a TIMEOUT wasn''t present. This phrasing could be slightly
+    improved."}'
+  error: ''
+- "\uFEFFtest_id": TC-015
+  category: DNS_Latency
+  query: Network_DNS_Issue 로그에서 특정 앱의 DNS 실패가 5G/LTE 망 장애인지, 아니면 effective_policy
+    값(BATTERY_SAVER 또는 REJECT 등)으로 인한 단말 내부 정책 차단인지 구분해서 분석해. effective_policy, is_blocked,
+    suspected_reason 근거를 반드시 포함해.
+  target_log_file: log_for_evaluation/dumpState_0.log
+  expected_decision: 인터넷 실패 원인은 5G/LTE 망 문제가 아니라 Battery Saver/REJECT 정책에 의한 DNS 차단입니다.
+  root_cause: 단말 내부 effective_policy가 BATTERY_SAVER 또는 REJECT로 적용되어 특정 앱 DNS 쿼리가 차단되었습니다.
+  ground_truth: 'Network_DNS_Issue 분석 결과, 네트워크 자체의 5G/LTE 망 장애가 아니라 단말 내부 정책에 의한 DNS
+    쿼리 차단입니다. 근거는 Network_DNS_Issue 로그의 effective_policy 값이 BATTERY_SAVER 또는 REJECT
+    계열 정책으로 적용되고, is_blocked: true 상태로 DNS 요청이 차단된 점입니다. 따라서 DNS 서버 장애나 기지국 장애가 아니라
+    Battery Saver/REJECT 등 단말 내부 정책에 의한 정상적인 차단 동작으로 판단해야 합니다.'
+  must_have: '["Network_DNS_Issue", "effective_policy", "BATTERY_SAVER 또는 REJECT",
+    "is_blocked: true", "DNS 쿼리 차단", "단말 내부 정책", "5G/LTE 망 장애 아님"]'
+  evidence_should_include: '["Network_DNS_Issue", "effective_policy", "BATTERY_SAVER",
+    "REJECT", "is_blocked", "DNS", "차단"]'
+  must_not_claim: '["5G/LTE 망 장애로 확정", "기지국 장애로 확정", "모뎀 TIMEOUT", "DNS 서버 장애로 확정",
+    "단말 정책 차단 아님"]'
+  trap_type: network_vs_device_policy
+  severity: high
+  rag_answer: 제공된 Network_DNS_Issue 로그는 특정 앱의 DNS 실패가 망 장애에 의한 것이 아님을 명확히 보여줍니다. 모든
+    기록에서 `is_blocked` 값이 True이며, `effective_policy` 값으로 인해 데이터 접속이 차단되었음이 확인됩니다. 예를
+    들어, com.delta.mobile.android는 APP_STANDBY|APP_BACKGROUND 정책에 의해, com.android.chrome은
+    APP_BACKGROUND 정책에 의해 DNS Blocked Event가 발생했습니다. 이는 단말 내부의 절전 모드 또는 백그라운드 데이터
+    제한 정책에 따른 정상적인 강제 차단 동작으로 분석됩니다.
+  doc_ids: '["dumpState_0_payload_166", "dumpState_0_payload_196", "dumpState_0_payload_290",
+    "dumpState_0_payload_154"]'
+  retrieved_meta: '[{"suspected_reason": "Blocked by APP_STANDBY|APP_BACKGROUND",
+    "source_file": "dumpState_0_payload.json", "effective_policy": "APP_STANDBY|APP_BACKGROUND",
+    "time": "03-30 22:50:15.863", "package": "com.delta.mobile.android", "result":
+    "FAIL", "is_blocked": true, "log_type": "Network_DNS_Issue", "net_id": "106",
+    "uid": "10430"}, {"source_file": "dumpState_0_payload.json", "time": "03-30 22:58:55.266",
+    "uid": "10273", "is_blocked": true, "package": "com.android.chrome", "effective_policy":
+    "APP_BACKGROUND", "net_id": "106", "result": "FAIL", "suspected_reason": "Blocked
+    by APP_BACKGROUND", "log_type": "Network_DNS_Issue"}, {"net_id": "106", "source_file":
+    "dumpState_0_payload.json", "suspected_reason": "Blocked by APP_BACKGROUND", "uid":
+    "10273", "package": "com.android.chrome", "time": "03-30 22:59:52.296", "effective_policy":
+    "APP_BACKGROUND", "is_blocked": true, "result": "FAIL", "log_type": "Network_DNS_Issue"},
+    {"effective_policy": "APP_BACKGROUND", "is_blocked": true, "time": "03-30 22:46:05.884",
+    "uid": "10273", "package": "com.android.chrome", "result": "FAIL", "log_type":
+    "Network_DNS_Issue", "suspected_reason": "Blocked by APP_BACKGROUND", "source_file":
+    "dumpState_0_payload.json", "net_id": "106"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.95
+  missing_must_have: '[]'
+  missing_evidence: '[]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the root cause as device policy (effective_policy)
+    causing DNS blocking and provides supporting evidence like 'is_blocked' and specific
+    policies. It avoids forbidden claims. Minor deduction for not explicitly mentioning
+    BATTERY_SAVER or REJECT, but it is implied by the description of effective_policy.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 0.0, "hallucination_safety": 0.95, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the root cause as device policy
+    (effective_policy) causing DNS blocking and provides supporting evidence like
+    ''is_blocked'' and specific policies. It avoids forbidden claims. Minor deduction
+    for not explicitly mentioning BATTERY_SAVER or REJECT, but it is implied by the
+    description of effective_policy."}'
+  error: ''
+- "\uFEFFtest_id": TC-016
+  category: Crash_ANR
+  query: OOS_Event에 SIGNAL_LOSS_OR_SHADOW_AREA 후보가 보이더라도, 같은 구간의 Native_Crash_Event(rild
+    SIGSEGV)와 비교해서 실제 Root Cause가 음영지역/기지국 장애인지 단말 내부 rild Native Crash인지 확정해 줘.
+  target_log_file: log_for_evaluation/log_native.log
+  expected_decision: OOS/통신 멈춤의 원인은 음영지역/기지국 문제가 아니라 rild Native Crash에 의한 단말 내부 시스템
+    장애입니다.
+  root_cause: rild 프로세스가 SIGSEGV Native Crash로 반복 사망하면서 모뎀 제어 기능이 상실되어 통신 장애가 발생했습니다.
+  ground_truth: 통신 단절의 근본 원인은 안테나 신호 저하(음영지역)나 기지국 장애가 아닙니다. OOS_Event에는 SIGNAL_LOSS_OR_SHADOW_AREA
+    후보가 보일 수 있지만, 같은 구간에서 단말 내부 통신 데몬 rild가 Native Crash(SIGSEGV)로 반복 사망한 근거가 더 결정적입니다.
+    rild 사망으로 모뎀 제어 기능이 상실되어 OOS/통신 멈춤이 발생한 단말 내부 시스템 장애입니다.
+  must_have: '["음영지역 아님", "기지국 장애 아님", "SIGNAL_LOSS_OR_SHADOW_AREA 후보보다 rild Native
+    Crash 우선", "rild", "Native Crash", "SIGSEGV", "반복 사망", "모뎀 제어 기능 상실", "단말 내부 시스템
+    장애"]'
+  evidence_should_include: '["OOS_Event", "SIGNAL_LOSS_OR_SHADOW_AREA", "rild", "SIGSEGV",
+    "Native Crash", "사망", "OOS", "모뎀 제어", "음영지역/기지국 장애가 아님"]'
+  must_not_claim: '["신호 약함이 근본 원인", "음영지역으로 확정", "기지국 장애로 확정", "사용자 비행기 모드가 원인", "원인
+    확인 불가"]'
+  trap_type: root_cause_disambiguation
+  severity: critical
+  rag_answer: '제공된 로그 분석 결과, 서비스 단절(OOS)의 근본 원인은 음영 지역이나 기지국 장애가 아닌 단말 내부 `rild` 데몬의
+    Native Crash로 확인됨.
+
+
+    모든 OOS_STATE_CHANGE 이벤트는 발생 직전에 `rild` 프로세스에서 `SIGSEGV` 신호에 의한 Native Crash가 감지된
+    것과 명확하게 연계되어 있음. 이는 모뎀 제어 기능(RIL)을 담당하는 데몬 자체가 불안정하여 강제 종료되면서 서비스 연결이 끊기는 패턴임.
+
+
+    크래시의 원인은 `libsec-ril.so` 라이브러리 내 특정 함수 호출 과정에서 발생한 메모리 접근 오류(`SIGSEGV`)로 추적됨.
+    따라서, OOS가 발생하는 직접적인 트리거는 외부 네트워크 환경 문제가 아닌 단말 내부 모뎀 드라이버 계층의 치명적인 시스템 장애임.'
+  doc_ids: '["log_native_payload_74", "log_native_payload_94", "log_native_payload_77",
+    "log_native_payload_90"]'
+  retrieved_meta: '[{"abort_message": "none", "time": "04-28 08:23:59.610", "log_type":
+    "Native_Crash_Event", "process": "rild", "signal": "SIGSEGV", "source_file": "log_native_payload.json",
+    "crash_type": "NATIVE_CRASH"}, {"crash_type": "NATIVE_CRASH", "signal": "SIGSEGV",
+    "source_file": "log_native_payload.json", "process": "rild", "abort_message":
+    "none", "time": "04-28 08:27:57.831", "log_type": "Native_Crash_Event"}, {"abort_message":
+    "none", "log_type": "Native_Crash_Event", "crash_type": "NATIVE_CRASH", "source_file":
+    "log_native_payload.json", "process": "rild", "time": "04-28 08:24:49.312", "signal":
+    "SIGSEGV"}, {"process": "rild", "abort_message": "none", "crash_type": "NATIVE_CRASH",
+    "log_type": "Native_Crash_Event", "signal": "SIGSEGV", "source_file": "log_native_payload.json",
+    "time": "04-28 08:27:10.206"}]'
+  thinking: ''
+  accuracy_score: 0.95
+  evidence_coverage: 0.85
+  must_have_coverage: 0.95
+  must_not_violation: 0.0
+  hallucination_safety: 0.95
+  overall_score: 0.93
+  missing_must_have: '[]'
+  missing_evidence: '["모뎀 제어 기능 상실"]'
+  violated_must_not_claim: '[]'
+  reason: The answer correctly identifies the root cause as rild Native Crash and
+    explicitly excludes external network issues like shadow areas or base station
+    problems. It mentions SIGSEGV, Native Crash, and links them to OOS events. The
+    response is well-aligned with the golden rubric's expected decision and root cause.
+    A minor deduction for not explicitly mentioning '모뎀 제어 기능 상실'.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
+    0.95, "must_not_violation": 1.0, "hallucination_safety": 0.95, "overall_score":
+    0.93, "missing_must_have": [], "missing_evidence": ["\ubaa8\ub380 \uc81c\uc5b4
+    \uae30\ub2a5 \uc0c1\uc2e4"], "violated_must_not_claim": [], "reason": "The answer
+    correctly identifies the root cause as rild Native Crash and explicitly excludes
+    external network issues like shadow areas or base station problems. It mentions
+    SIGSEGV, Native Crash, and links them to OOS events. The response is well-aligned
+    with the golden rubric''s expected decision and root cause. A minor deduction
+    for not explicitly mentioning ''\ubaa8\ub380 \uc81c\uc5b4 \uae30\ub2a5 \uc0c1\uc2e4''."}'
+  error: ''
 - "\uFEFFtest_id": TC-017
   category: Crash_ANR_Absence
   query: rild Native Crash 외에 일반 앱 Java Crash(Crash_Event)나 ANR_Context가 동반되었는지만 확인해.
@@ -25,39 +1432,37 @@
     앱 ANR 동반 없음으로 판단됩니다. Binder/IPC 경고 등 다른 시스템 이벤트는 일반 앱 Crash/ANR 원인으로 확장하지 않습니다.
   doc_ids: '["log_native_payload_94", "log_native_payload_98", "log_native_payload_100",
     "log_native_payload_87"]'
-  retrieved_meta: '[{"time": "04-28 08:27:57.831", "crash_type": "NATIVE_CRASH", "source_file":
-    "log_native_payload.json", "process": "rild", "log_type": "Native_Crash_Event",
-    "signal": "SIGSEGV", "abort_message": "none"}, {"time": "04-28 08:28:44.891",
-    "abort_message": "none", "source_file": "log_native_payload.json", "signal": "SIGSEGV",
-    "log_type": "Native_Crash_Event", "process": "rild", "crash_type": "NATIVE_CRASH"},
-    {"log_type": "Native_Crash_Event", "time": "04-28 08:29:09.237", "abort_message":
-    "none", "signal": "SIGSEGV", "process": "rild", "source_file": "log_native_payload.json",
-    "crash_type": "NATIVE_CRASH"}, {"abort_message": "none", "time": "04-28 08:26:37.807",
-    "crash_type": "NATIVE_CRASH", "process": "rild", "signal": "SIGSEGV", "source_file":
-    "log_native_payload.json", "log_type": "Native_Crash_Event"}]'
+  retrieved_meta: '[{"signal": "SIGSEGV", "source_file": "log_native_payload.json",
+    "process": "rild", "crash_type": "NATIVE_CRASH", "time": "04-28 08:27:57.831",
+    "abort_message": "none", "log_type": "Native_Crash_Event"}, {"crash_type": "NATIVE_CRASH",
+    "process": "rild", "log_type": "Native_Crash_Event", "abort_message": "none",
+    "signal": "SIGSEGV", "source_file": "log_native_payload.json", "time": "04-28
+    08:28:44.891"}, {"crash_type": "NATIVE_CRASH", "source_file": "log_native_payload.json",
+    "process": "rild", "signal": "SIGSEGV", "log_type": "Native_Crash_Event", "time":
+    "04-28 08:29:09.237", "abort_message": "none"}, {"abort_message": "none", "process":
+    "rild", "crash_type": "NATIVE_CRASH", "signal": "SIGSEGV", "source_file": "log_native_payload.json",
+    "log_type": "Native_Crash_Event", "time": "04-28 08:26:37.807"}]'
   thinking: ''
   accuracy_score: 0.95
-  evidence_coverage: 0.85
+  evidence_coverage: 0.9
   must_have_coverage: 1.0
   must_not_violation: 0.0
   hallucination_safety: 1.0
-  overall_score: 0.93
+  overall_score: 0.95
   missing_must_have: '[]'
   missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the absence of Java Exceptions and ANR contexts
-    alongside the rild Native Crash. It also explicitly states that other system events
-    like Binder/IPC warnings should not be considered as causes for general app crashes
-    or ANRs, aligning perfectly with the golden rubric's instructions. All 'must_have'
-    elements are covered.
-  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
-    1.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
-    0.93, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
-    [], "reason": "The answer correctly identifies the absence of Java Exceptions
-    and ANR contexts alongside the rild Native Crash. It also explicitly states that
-    other system events like Binder/IPC warnings should not be considered as causes
-    for general app crashes or ANRs, aligning perfectly with the golden rubric''s
-    instructions. All ''must_have'' elements are covered."}'
+  reason: The answer correctly identifies the root cause (rild Native Crash without
+    Java Exception or ANR) and covers all must-have elements. It also explicitly avoids
+    claiming any forbidden statements, demonstrating excellent hallucination safety.
+    Evidence coverage is high as it mentions key log artifacts.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the root cause (rild Native Crash
+    without Java Exception or ANR) and covers all must-have elements. It also explicitly
+    avoids claiming any forbidden statements, demonstrating excellent hallucination
+    safety. Evidence coverage is high as it mentions key log artifacts."}'
   error: ''
 - "\uFEFFtest_id": TC-018
   category: Call_Drop_Trap
@@ -80,16 +1485,15 @@
     장애로 인한 실패", "OOS 원인", "SIP_480만으로 망 장애 판단"]'
   trap_type: call_drop_trap
   severity: critical
-  rag_answer: '12시 07분 00초에 종료된 VoLTE Call_Session 로그를 분석한 결과, 해당 세션은 `NORMAL_RELEASE`
-    상태로 정상적으로 해제됨이 확인됩니다. 실패 원인은 `504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)`이며,
-    이 과정에서 사용자의 거부(is_user_reject: True)가 발생했음이 명확히 기록되어 있습니다. 따라서 해당 로그만으로는 통신망의
-    물리적 장애나 강제적인 Call Drop을 판단하기 어려우며, SIP 레벨에서의 일시적 연결 불가로 인한 사용자 측 종료 처리 과정으로 요약함.'
+  rag_answer: 명시적인 Call Drop 이력은 없으며 정상 종료(Normal Release/User Terminated)되었습니다.
   doc_ids: '["ps_call_504_unavailable_payload_3", "ps_call_504_unavailable_payload_5",
     "ps_call_504_unavailable_payload_4", "ps_call_504_unavailable_payload_6"]'
-  retrieved_meta: '[{"id": "objId:87635467", "end_time": "04-09 12:07:00.876", "raw_logs":
-    "[\"[04-09 12:07:00.876] 04-09 12:07:00.876 radio  4210  4210 D IPF     : [IPCT]<
-    CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE, 480,
-    Temporarily Unavailable}, [ImsCall objId:87635467 onHold:N mute:N mCallProfile:{
+  retrieved_meta: '[{"end_time": "04-09 12:07:00.876", "status": "NORMAL_RELEASE",
+    "log_type": "Call_Session", "type": "PS(VoLTE)", "fail_reason": "504_CODE_USER_DECLINE
+    (SIP_480_Temporarily Unavailable)", "is_user_reject": true, "time": "04-09 12:07:00.876",
+    "raw_logs": "[\"[04-09 12:07:00.876] 04-09 12:07:00.876 radio  4210  4210 D IPF     :
+    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE,
+    480, Temporarily Unavailable}, [ImsCall objId:87635467 onHold:N mute:N mCallProfile:{
     serviceType=1, callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
     audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
     bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=-1, rttMode=0,
@@ -108,12 +1512,10 @@
     mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
     networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
     confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
-    objId:144249306 callId:4] transientSession:null]}\"]", "is_user_reject": true,
-    "start_time": "04-09 12:07:00.876", "fail_reason": "504_CODE_USER_DECLINE (SIP_480_Temporarily
-    Unavailable)", "type": "PS(VoLTE)", "log_type": "Call_Session", "status": "NORMAL_RELEASE",
-    "source_file": "ps_call_504_unavailable_payload.json", "time": "04-09 12:07:00.876"},
-    {"source_file": "ps_call_504_unavailable_payload.json", "type": "PS(VoLTE)", "raw_logs":
-    "[\"[04-09 12:04:11.972] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
+    objId:144249306 callId:4] transientSession:null]}\"]", "start_time": "04-09 12:07:00.876",
+    "id": "objId:87635467", "source_file": "ps_call_504_unavailable_payload.json"},
+    {"is_user_reject": false, "fail_reason": "501_CODE_USER_TERMINATED (SIP_200_null)",
+    "raw_logs": "[\"[04-09 12:04:11.972] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
     :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:231535345 onHold:N
     mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
     audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6,
@@ -123,12 +1525,13 @@
     mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
     networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
     confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
-    objId:260029080 callId:2] transientSession:null]}\"]", "log_type": "Call_Session",
-    "fail_reason": "501_CODE_USER_TERMINATED (SIP_200_null)", "is_user_reject": false,
-    "end_time": "04-09 12:04:11.972", "id": "objId:231535345", "start_time": "04-09
-    12:04:11.972", "status": "NORMAL_RELEASE", "time": "04-09 12:04:11.972"}, {"source_file":
-    "ps_call_504_unavailable_payload.json", "time": "04-09 12:06:23.541", "raw_logs":
-    "[\"[04-09 12:06:23.541] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
+    objId:260029080 callId:2] transientSession:null]}\"]", "source_file": "ps_call_504_unavailable_payload.json",
+    "end_time": "04-09 12:04:11.972", "time": "04-09 12:04:11.972", "type": "PS(VoLTE)",
+    "log_type": "Call_Session", "start_time": "04-09 12:04:11.972", "status": "NORMAL_RELEASE",
+    "id": "objId:231535345"}, {"source_file": "ps_call_504_unavailable_payload.json",
+    "is_user_reject": false, "end_time": "04-09 12:06:23.541", "fail_reason": "501_CODE_USER_TERMINATED
+    (SIP_200_null)", "id": "objId:131787086", "start_time": "04-09 12:06:23.541",
+    "raw_logs": "[\"[04-09 12:06:23.541] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
     :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:131787086 onHold:N
     mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
     audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6,
@@ -138,16 +1541,18 @@
     mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
     networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
     confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
-    objId:123620425 callId:3] transientSession:null]}\"]", "fail_reason": "501_CODE_USER_TERMINATED
-    (SIP_200_null)", "start_time": "04-09 12:06:23.541", "type": "PS(VoLTE)", "is_user_reject":
-    false, "end_time": "04-09 12:06:23.541", "status": "NORMAL_RELEASE", "id": "objId:131787086",
-    "log_type": "Call_Session"}, {"type": "PS(VoLTE)", "time": "04-09 11:37:21.707",
-    "log_type": "Call_Session", "raw_logs": "[\"==> [BOUND from Connection History]:
-    2026-04-09T11:38:24.668601 - [TC@1_1] (04-09)(PS) MT / (11:37:21)INCOMING -> (11:37:23)ACTIVE
-    -> (11:38:24)DISCONNECTED / NORMAL(reasonInfo: 510, 210)(duration: 60.872sec)\",
-    \"[04-09 11:37:21.707] [IPCT]< onIncomingCall {callId: null}\", \"[04-09 11:37:21.707]
-    [IPCT]> takeCall {}\", \"[04-09 11:37:21.708] [IPCT]< takeCall {[ImsCall objId:143489638
-    onHold:N mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    objId:123620425 callId:3] transientSession:null]}\"]", "time": "04-09 12:06:23.541",
+    "status": "NORMAL_RELEASE", "type": "PS(VoLTE)", "log_type": "Call_Session"},
+    {"fail_reason": "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "is_user_reject":
+    false, "end_time": "04-09 11:38:24.665", "id": "TC@1_1 (objId:143489638)", "log_type":
+    "Call_Session", "source_file": "ps_call_504_unavailable_payload.json", "status":
+    "NORMAL_RELEASE", "start_time": "04-09 11:37:21.707", "time": "04-09 11:37:21.707",
+    "type": "PS(VoLTE)", "raw_logs": "[\"==> [BOUND from Connection History]: 2026-04-09T11:38:24.668601
+    - [TC@1_1] (04-09)(PS) MT / (11:37:21)INCOMING -> (11:37:23)ACTIVE -> (11:38:24)DISCONNECTED
+    / NORMAL(reasonInfo: 510, 210)(duration: 60.872sec)\", \"[04-09 11:37:21.707]
+    [IPCT]< onIncomingCall {callId: null}\", \"[04-09 11:37:21.707] [IPCT]> takeCall
+    {}\", \"[04-09 11:37:21.708] [IPCT]< takeCall {[ImsCall objId:143489638 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
     audioQuality=2, audioDirection=3, audioCodecAttribute=null, videoQuality=0, videoDirection=3,
     rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
     emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
@@ -166,34 +1571,32 @@
     mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
     merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
     term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSess\n...[TRUNCATED_BY_SYSTEM:
-    TOO_LONG]", "is_user_reject": false, "end_time": "04-09 11:38:24.665", "source_file":
-    "ps_call_504_unavailable_payload.json", "status": "NORMAL_RELEASE", "fail_reason":
-    "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "start_time": "04-09 11:37:21.707",
-    "id": "TC@1_1 (objId:143489638)"}]'
+    TOO_LONG]"}]'
   thinking: ''
-  accuracy_score: 0.95
-  evidence_coverage: 0.95
-  must_have_coverage: 1.0
+  accuracy_score: 0.6
+  evidence_coverage: 0.7
+  must_have_coverage: 0.8
   must_not_violation: 0.0
-  hallucination_safety: 1.0
-  overall_score: 0.95
-  missing_must_have: '[]'
-  missing_evidence: '[]'
+  hallucination_safety: 0.8
+  overall_score: 0.6
+  missing_must_have: '["수신 거부", "정상적인 호 종료"]'
+  missing_evidence: '["12시 07분 00초", "504_CODE_USER_DECLINE", "SIP_480_Temporarily
+    Unavailable"]'
   violated_must_not_claim: '[]'
-  reason: 'The answer correctly identifies the root cause as user rejection and includes
-    all necessary evidence (NORMAL_RELEASE, 504_CODE_USER_DECLINE, is_user_reject:
-    True). It avoids any forbidden claims. The phrasing ''SIP 레벨에서의 일시적 연결 불가로 인한
-    사용자 측 종료 처리 과정으로 요약함'' is a minor stylistic difference but doesn''t detract from
-    the accuracy.'
-  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.95, "must_have_coverage":
-    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
-    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
-    [], "reason": "The answer correctly identifies the root cause as user rejection
-    and includes all necessary evidence (NORMAL_RELEASE, 504_CODE_USER_DECLINE, is_user_reject:
-    True). It avoids any forbidden claims. The phrasing ''SIP \ub808\ubca8\uc5d0\uc11c\uc758
-    \uc77c\uc2dc\uc801 \uc5f0\uacb0 \ubd88\uac00\ub85c \uc778\ud55c \uc0ac\uc6a9\uc790
-    \uce21 \uc885\ub8cc \ucc98\ub9ac \uacfc\uc815\uc73c\ub85c \uc694\uc57d\ud568''
-    is a minor stylistic difference but doesn''t detract from the accuracy."}'
+  reason: The answer correctly identifies the call as a normal release/user terminated,
+    but it misses key elements like '수신 거부', '정상적인 호 종료' and specific log details
+    (504, SIP 480, timestamp). The must_not_claim is not violated. However, the lack
+    of detail significantly reduces accuracy and coverage.
+  judge_raw: '{"accuracy_score": 0.6, "evidence_coverage": 0.7, "must_have_coverage":
+    0.8, "must_not_violation": 1.0, "hallucination_safety": 0.8, "overall_score":
+    0.6, "missing_must_have": ["\uc218\uc2e0 \uac70\ubd80", "\uc815\uc0c1\uc801\uc778
+    \ud638 \uc885\ub8cc"], "missing_evidence": ["12\uc2dc 07\ubd84 00\ucd08", "504_CODE_USER_DECLINE",
+    "SIP_480_Temporarily Unavailable"], "violated_must_not_claim": [], "reason": "The
+    answer correctly identifies the call as a normal release/user terminated, but
+    it misses key elements like ''\uc218\uc2e0 \uac70\ubd80'', ''\uc815\uc0c1\uc801\uc778
+    \ud638 \uc885\ub8cc'' and specific log details (504, SIP 480, timestamp). The
+    must_not_claim is not violated. However, the lack of detail significantly reduces
+    accuracy and coverage."}'
   error: ''
 - "\uFEFFtest_id": TC-019
   category: Time_Context_Inference
@@ -225,35 +1628,32 @@
     확정", "RILJ_Transaction ERROR를 통화 종료 원인으로 확정"]'
   trap_type: time_context_inference
   severity: critical
-  rag_answer: '12:04:11.972에 종료된 통화는 `fail_reason: 501_CODE_USER_TERMINATED`로, 사용자
-    측에서 정상적으로 연결을 해제한 기록임이 확인됨.
+  rag_answer: '12:04~12:08:04 사이 종료된 세 건의 통화는 모두 정상적으로 해제(status: NORMAL_RELEASE)되었으며,
+    각 통화의 종료 원인은 다음과 같이 확인됨.
 
-    12:07:00.876에 종료된 통화는 `is_user_reject: True`, `fail_reason: 504_CODE_USER_DECLINE`으로,
-    사용자가 전화를 거절하여 정상적으로 호가 종료되었음이 확인됨.
+    *   **12:04:11.972 (objId:231535345):** `fail_reason`이 501\_CODE\_USER\_TERMINATED
+    (SIP\_200\_null)로, 통화가 사용자 측에서 종료되었음을 나타냄.
 
-    12:08:04.608에 종료된 통화는 `fail_reason: 510_CODE_USER_TERMINATED_BY_REMOTE`로, 원격 측에서
-    사용자가 전화를 끊어 연결이 해제된 기록임이 확인됨.
+    *   **12:07:00.876 (objId:87635467):** `fail_reason`이 504\_CODE\_USER\_DECLINE
+    (SIP\_480\_Temporarily Unavailable)이며, `is_user_reject: True`로 기록되어 사용자가 전화를 거절한
+    정상적인 호 종료임.
+
+    *   **12:08:04.608 (objId:106017275):** `fail_reason`이 510\_CODE\_USER\_TERMINATED\_BY\_REMOTE
+    (SIP\_210\_null)로, 원격 사용자 측에서 통화가 종료되었음을 나타냄.
 
 
-    전체 기간 동안의 OOS 이벤트(12:07:00.947 및 12:08:10.356)는 `reject_cause: 0`으로, 통신 단절 원인이
-    명확하지 않으며 주변 로그 분석 결과 Radio Power OFF나 Native Crash와 연관성이 없는 것으로 판정됨.
-
-    따라서 해당 기간의 모든 Call_Session 종료는 비행기 모드 활성화에 의한 강제 장애가 아닌, 각 세션별로 정의된 사용자 또는 원격
-    측의 정상적인 통화 해제 사유(User Terminated/User Decline/Remote Terminated)를 따름이 확인됨.'
+    OOS 이벤트는 마지막 통화 종료 시점(12:08:04.608) 이후인 12:08:10.356에 발생함. 해당 OOS_RECOVER/STATE_CHANGE
+    로그에는 `classification: NO_RADIO_POWER_CORRELATION`으로 기록되어 있으며, OOS 시점 근처에서 Radio
+    Power OFF 또는 비행기 모드와 관련된 흔적은 발견되지 않음. 따라서 세 건의 통화 종료는 모두 사용자 행위(501, 504) 또는 원격
+    측 종료(510)에 기인한 정상적인 호 해제이며, 이후 발생한 OOS 이벤트 역시 무선 전원 차단이나 비행기 모드와 직접적인 인과관계가 확인되지
+    않음.'
   doc_ids: '["ps_call_504_unavailable_payload_2", "ps_call_504_unavailable_payload_6",
     "ps_call_504_unavailable_payload_3", "ps_call_504_unavailable_payload_5"]'
-  retrieved_meta: '[{"raw_logs": "[\"[04-09 12:08:04.608] 04-09 12:08:04.608 radio  4210  4210
-    D IPF     : [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE,
-    210, null}, [ImsCall objId:106017275 onHold:N mute:N mCallProfile:{ serviceType=1,
-    callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
-    audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
-    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3, rttMode=0,
-    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
-    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
-    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
-    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
-    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:24594314
-    callId:5] transientSession:null]}\", \"[04-09 12:08:04.608] [IPCT]< CallListener.onCallTerminated
+  retrieved_meta: '[{"is_user_reject": false, "start_time": "04-09 12:08:04.608",
+    "end_time": "04-09 12:08:04.608", "time": "04-09 12:08:04.608", "log_type": "Call_Session",
+    "source_file": "ps_call_504_unavailable_payload.json", "type": "PS(VoLTE)", "fail_reason":
+    "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "raw_logs": "[\"[04-09 12:08:04.608]
+    04-09 12:08:04.608 radio  4210  4210 D IPF     : [IPCT]< CallListener.onCallTerminated
     {ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE, 210, null}, [ImsCall
     objId:106017275 onHold:N mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0,
     mediaProfile={ audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65,
@@ -263,14 +1663,20 @@
     mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
     networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
     confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
-    objId:24594314 callId:5] transientSession:null]}\"]", "source_file": "ps_call_504_unavailable_payload.json",
-    "start_time": "04-09 12:08:04.608", "status": "NORMAL_RELEASE", "time": "04-09
-    12:08:04.608", "end_time": "04-09 12:08:04.608", "is_user_reject": false, "fail_reason":
-    "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "log_type": "Call_Session",
-    "type": "PS(VoLTE)", "id": "objId:106017275"}, {"type": "PS(VoLTE)", "is_user_reject":
-    false, "fail_reason": "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "id":
-    "TC@1_1 (objId:143489638)", "end_time": "04-09 11:38:24.665", "start_time": "04-09
-    11:37:21.707", "time": "04-09 11:37:21.707", "raw_logs": "[\"==> [BOUND from Connection
+    objId:24594314 callId:5] transientSession:null]}\", \"[04-09 12:08:04.608] [IPCT]<
+    CallListener.onCallTerminated {ImsReasonInfo :: {510 : CODE_USER_TERMINATED_BY_REMOTE,
+    210, null}, [ImsCall objId:106017275 onHold:N mute:N mCallProfile:{ serviceType=1,
+    callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
+    audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
+    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3, rttMode=0,
+    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
+    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
+    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
+    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
+    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:24594314
+    callId:5] transientSession:null]}\"]", "status": "NORMAL_RELEASE", "id": "objId:106017275"},
+    {"start_time": "04-09 11:37:21.707", "status": "NORMAL_RELEASE", "is_user_reject":
+    false, "id": "TC@1_1 (objId:143489638)", "raw_logs": "[\"==> [BOUND from Connection
     History]: 2026-04-09T11:38:24.668601 - [TC@1_1] (04-09)(PS) MT / (11:37:21)INCOMING
     -> (11:37:23)ACTIVE -> (11:38:24)DISCONNECTED / NORMAL(reasonInfo: 510, 210)(duration:
     60.872sec)\", \"[04-09 11:37:21.707] [IPCT]< onIncomingCall {callId: null}\",
@@ -294,11 +1700,15 @@
     mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
     merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
     term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSess\n...[TRUNCATED_BY_SYSTEM:
-    TOO_LONG]", "status": "NORMAL_RELEASE", "log_type": "Call_Session", "source_file":
-    "ps_call_504_unavailable_payload.json"}, {"start_time": "04-09 12:07:00.876",
-    "is_user_reject": true, "source_file": "ps_call_504_unavailable_payload.json",
-    "raw_logs": "[\"[04-09 12:07:00.876] 04-09 12:07:00.876 radio  4210  4210 D IPF     :
-    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE,
+    TOO_LONG]", "source_file": "ps_call_504_unavailable_payload.json", "fail_reason":
+    "510_CODE_USER_TERMINATED_BY_REMOTE (SIP_210_null)", "time": "04-09 11:37:21.707",
+    "type": "PS(VoLTE)", "log_type": "Call_Session", "end_time": "04-09 11:38:24.665"},
+    {"id": "objId:87635467", "is_user_reject": true, "time": "04-09 12:07:00.876",
+    "source_file": "ps_call_504_unavailable_payload.json", "fail_reason": "504_CODE_USER_DECLINE
+    (SIP_480_Temporarily Unavailable)", "type": "PS(VoLTE)", "status": "NORMAL_RELEASE",
+    "end_time": "04-09 12:07:00.876", "log_type": "Call_Session", "start_time": "04-09
+    12:07:00.876", "raw_logs": "[\"[04-09 12:07:00.876] 04-09 12:07:00.876 radio  4210  4210
+    D IPF     : [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE,
     480, Temporarily Unavailable}, [ImsCall objId:87635467 onHold:N mute:N mCallProfile:{
     serviceType=1, callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
     audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
@@ -318,50 +1728,47 @@
     mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
     networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
     confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
-    objId:144249306 callId:4] transientSession:null]}\"]", "status": "NORMAL_RELEASE",
-    "type": "PS(VoLTE)", "id": "objId:87635467", "log_type": "Call_Session", "end_time":
-    "04-09 12:07:00.876", "time": "04-09 12:07:00.876", "fail_reason": "504_CODE_USER_DECLINE
-    (SIP_480_Temporarily Unavailable)"}, {"time": "04-09 12:04:11.972", "status":
-    "NORMAL_RELEASE", "log_type": "Call_Session", "raw_logs": "[\"[04-09 12:04:11.972]
-    [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {501 : CODE_USER_TERMINATED,
-    200, null}, [ImsCall objId:231535345 onHold:N mute:N mCallProfile:{ serviceType=1,
-    callType=2, restrictCause=0, mediaProfile={ audioQuality=2, audioDirection=3,
-    audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6, 12.65], bandwidthKhz=7.0,
-    bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3, rttMode=0,
-    hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[], emergencyCallRouting=0,
-    emergencyCallTesting=false, hasKnownUserIntentEmergency=false, mRestrictCause=0,
-    mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] } networkType:13 updateRequest:NONE
-    merging:N merge action pending:N merged:N cachedMultiParty:N confHost:N buried
-    term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession objId:260029080
-    callId:2] transientSession:null]}\"]", "id": "objId:231535345", "fail_reason":
-    "501_CODE_USER_TERMINATED (SIP_200_null)", "is_user_reject": false, "type": "PS(VoLTE)",
-    "source_file": "ps_call_504_unavailable_payload.json", "start_time": "04-09 12:04:11.972",
-    "end_time": "04-09 12:04:11.972"}]'
+    objId:144249306 callId:4] transientSession:null]}\"]"}, {"log_type": "Call_Session",
+    "status": "NORMAL_RELEASE", "source_file": "ps_call_504_unavailable_payload.json",
+    "id": "objId:231535345", "fail_reason": "501_CODE_USER_TERMINATED (SIP_200_null)",
+    "raw_logs": "[\"[04-09 12:04:11.972] [IPCT]< CallListener.onCallTerminated {ImsReasonInfo
+    :: {501 : CODE_USER_TERMINATED, 200, null}, [ImsCall objId:231535345 onHold:N
+    mute:N mCallProfile:{ serviceType=1, callType=2, restrictCause=0, mediaProfile={
+    audioQuality=2, audioDirection=3, audioCodecAttribute={ bitrateKbps=12.65, bitrateRangeKbps=[6.6,
+    12.65], bandwidthKhz=7.0, bandwidthRangeKhz=[0.05, 7.0] }, videoQuality=0, videoDirection=3,
+    rttMode=0, hasRttAudioSpeech=false }, emergencyServiceCategories=0, emergencyUrns=[],
+    emergencyCallRouting=0, emergencyCallTesting=false, hasKnownUserIntentEmergency=false,
+    mRestrictCause=0, mCallerNumberVerstat= 0, mAcceptedRtpHeaderExtensions= [] }
+    networkType:13 updateRequest:NONE merging:N merge action pending:N merged:N cachedMultiParty:N
+    confHost:N buried term:N isVideo: N wasVideo: N isWifi: N session:[ImsCallSession
+    objId:260029080 callId:2] transientSession:null]}\"]", "end_time": "04-09 12:04:11.972",
+    "start_time": "04-09 12:04:11.972", "is_user_reject": false, "type": "PS(VoLTE)",
+    "time": "04-09 12:04:11.972"}]'
   thinking: ''
   accuracy_score: 0.95
   evidence_coverage: 0.9
-  must_have_coverage: 0.95
+  must_have_coverage: 1.0
   must_not_violation: 0.0
-  hallucination_safety: 0.95
-  overall_score: 0.93
+  hallucination_safety: 1.0
+  overall_score: 0.95
   missing_must_have: '[]'
-  missing_evidence: '["airplane_mode_on: 1"]'
+  missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: 'The answer correctly identifies the root cause as user-terminated calls
-    and excludes airplane mode as a factor. It accurately describes the CODE_USER_TERMINATED,
-    User Decline, and Remote Terminated scenarios for each Call Session. The OOS events
-    are also correctly interpreted as occurring after call termination. However, it
-    fails to mention ''airplane_mode_on: 1'' which is an important piece of evidence
-    in the golden rubric.'
+  reason: The answer correctly identifies that the three Call Sessions ended due to
+    user actions (CODE_USER_TERMINATED/DECLINE) and not airplane mode or radio power
+    issues. It accurately states that OOS events occurred after the call terminations,
+    reinforcing the conclusion. All 'must_have' elements are covered. There is no
+    violation of 'must_not_claim'. The answer demonstrates excellent accuracy, evidence
+    coverage, and safety.
   judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
-    0.95, "must_not_violation": 1.0, "hallucination_safety": 0.95, "overall_score":
-    0.93, "missing_must_have": [], "missing_evidence": ["airplane_mode_on: 1"], "violated_must_not_claim":
-    [], "reason": "The answer correctly identifies the root cause as user-terminated
-    calls and excludes airplane mode as a factor. It accurately describes the CODE_USER_TERMINATED,
-    User Decline, and Remote Terminated scenarios for each Call Session. The OOS events
-    are also correctly interpreted as occurring after call termination. However, it
-    fails to mention ''airplane_mode_on: 1'' which is an important piece of evidence
-    in the golden rubric."}'
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies that the three Call Sessions ended
+    due to user actions (CODE_USER_TERMINATED/DECLINE) and not airplane mode or radio
+    power issues. It accurately states that OOS events occurred after the call terminations,
+    reinforcing the conclusion. All ''must_have'' elements are covered. There is no
+    violation of ''must_not_claim''. The answer demonstrates excellent accuracy, evidence
+    coverage, and safety."}'
   error: ''
 - "\uFEFFtest_id": TC-020
   category: System_Bottleneck
@@ -387,23 +1794,24 @@
     단말 내부 Binder IPC 처리 스레드 부족에 따른 시스템 성능 저하로 판단됩니다.
   doc_ids: '["ps_call_504_unavailable_payload_699", "ps_call_504_unavailable_payload_698",
     "ps_call_504_unavailable_payload_697", "ps_call_504_unavailable_payload_20"]'
-  retrieved_meta: '[{"source_file": "ps_call_504_unavailable_payload.json", "desc":
-    "Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 229ms(약 0.2초) 대기했습니다. ANR/Watchdog/system_server
-    지연과 시간 상관관계 확인이 필요합니다.", "raw_info": "04-09 12:08:08.933   uwb  2059  2059 E libbinder.IPCThreadState:
-    binder thread pool (1 threads) starved for 229 ms", "type": "THREAD_EXHAUSTION",
-    "time": "04-09 12:08:08.933", "log_type": "Binder_Warning"}, {"raw_info": "04-09
-    12:08:09.172  1002  2018  2056 E libbinder.IPCThreadState: binder thread pool
-    (1 threads) starved for 200 ms", "type": "THREAD_EXHAUSTION", "source_file": "ps_call_504_unavailable_payload.json",
-    "time": "04-09 12:08:09.172", "desc": "Binder thread pool starvation 감지: IPC 처리
-    스레드가 부족하여 200ms(약 0.2초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다.",
-    "log_type": "Binder_Warning"}, {"log_type": "Binder_Warning", "source_file": "ps_call_504_unavailable_payload.json",
-    "type": "THREAD_EXHAUSTION", "raw_info": "04-09 12:09:32.004  wifi  2115 13854
-    E libbinder.IPCThreadState: binder thread pool (1 threads) starved for 2509 ms",
-    "time": "04-09 12:09:32.004", "desc": "Binder thread pool starvation 감지: IPC 처리
-    스레드가 부족하여 2509ms(약 2.5초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."},
-    {"log_type": "RILJ_Transaction", "source_file": "ps_call_504_unavailable_payload.json",
-    "time": "04-09 12:08:10.392", "latency_ms": 1, "status": "ERROR", "error_msg":
-    "1", "command": "SET_SIGNAL_STRENGTH_REPORTING_CRITERIA"}]'
+  retrieved_meta: '[{"type": "THREAD_EXHAUSTION", "source_file": "ps_call_504_unavailable_payload.json",
+    "raw_info": "04-09 12:08:08.933   uwb  2059  2059 E libbinder.IPCThreadState:
+    binder thread pool (1 threads) starved for 229 ms", "time": "04-09 12:08:08.933",
+    "log_type": "Binder_Warning", "desc": "Binder thread pool starvation 감지: IPC 처리
+    스레드가 부족하여 229ms(약 0.2초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."},
+    {"type": "THREAD_EXHAUSTION", "log_type": "Binder_Warning", "desc": "Binder thread
+    pool starvation 감지: IPC 처리 스레드가 부족하여 200ms(약 0.2초) 대기했습니다. ANR/Watchdog/system_server
+    지연과 시간 상관관계 확인이 필요합니다.", "source_file": "ps_call_504_unavailable_payload.json",
+    "raw_info": "04-09 12:08:09.172  1002  2018  2056 E libbinder.IPCThreadState:
+    binder thread pool (1 threads) starved for 200 ms", "time": "04-09 12:08:09.172"},
+    {"type": "THREAD_EXHAUSTION", "desc": "Binder thread pool starvation 감지: IPC 처리
+    스레드가 부족하여 2509ms(약 2.5초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다.",
+    "log_type": "Binder_Warning", "time": "04-09 12:09:32.004", "raw_info": "04-09
+    12:09:32.004  wifi  2115 13854 E libbinder.IPCThreadState: binder thread pool
+    (1 threads) starved for 2509 ms", "source_file": "ps_call_504_unavailable_payload.json"},
+    {"source_file": "ps_call_504_unavailable_payload.json", "log_type": "RILJ_Transaction",
+    "latency_ms": 1, "time": "04-09 12:08:10.392", "error_msg": "1", "status": "ERROR",
+    "command": "SET_SIGNAL_STRENGTH_REPORTING_CRITERIA"}]'
   thinking: ''
   accuracy_score: 0.95
   evidence_coverage: 0.9
@@ -446,19 +1854,16 @@
   rag_answer: 네, 서로 연관되어 있습니다. `com.android.phone`에서 `android.content.IIntentReceiver`
     Binder proxy leak이 발생했고, 최대 7262개까지 누수되었습니다. 이 누수로 인해 시스템 리소스가 고갈되었고, ActivityManager가
     `Too many Binders sent to SYSTEM` 사유로 `am_kill` 강제 종료를 수행한 것으로 판단됩니다. 개발자는 동적
-    BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함. 누수 descriptor가 BroadcastReceiver
-    계열(`IIntentReceiver`)이면 동적 BroadcastReceiver register/unregister 생명주기 해제 누락을 우선
-    점검하고, 다른 descriptor라면 해당 Binder proxy 객체를 생성·등록한 컴포넌트의 해제 경로를 점검해야 합니다.
+    BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함.
   doc_ids: '["binder_leak_am_kill_payload_32"]'
-  retrieved_meta: '[{"max_proxy_count": 7262, "kill_event": "am_kill", "trigger":
-    "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
-    many Binders sent to SYSTEM,235536]", "leaked_descriptor": "android.content.IIntentReceiver",
-    "developer_action": "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함",
-    "process": "com.android.phone", "kill_reason": "Too many Binders sent to SYSTEM",
+  retrieved_meta: '[{"process": "com.android.phone", "kill_event": "am_kill", "am_wtf_count_observed":
+    0, "trigger": "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
+    many Binders sent to SYSTEM,235536]", "time": "06-01 15:13:17.330", "developer_action":
+    "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함", "source_file": "binder_leak_am_kill_payload.json",
     "rca_type": "BINDER_PROXY_LEAK_RCA", "log_type": "RCA_Event", "root_cause": "IIntentReceiver
-    Binder proxy leak", "symptom_keywords": "폰 죽음, 갑자기 죽음, 강제 종료, 시스템 크래시, SYSTEM_KILL,
-    am_kill, crash, kill", "time": "06-01 15:13:17.330", "source_file": "binder_leak_am_kill_payload.json",
-    "am_wtf_count_observed": 0}]'
+    Binder proxy leak", "kill_reason": "Too many Binders sent to SYSTEM", "leaked_descriptor":
+    "android.content.IIntentReceiver", "symptom_keywords": "폰 죽음, 갑자기 죽음, 강제 종료, 시스템
+    크래시, SYSTEM_KILL, am_kill, crash, kill", "max_proxy_count": 7262}]'
   thinking: ''
   accuracy_score: 0.95
   evidence_coverage: 0.9
@@ -469,19 +1874,21 @@
   missing_must_have: '[]'
   missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the root cause (binder proxy leak in com.android.phone
-    leading to am_kill) and includes key evidence like '7262' and mentions 'IIntentReceiver'.
-    It also provides actionable advice for developers. The only minor deduction is
-    due to mentioning 'IIntentReceiver' which isn't explicitly stated in the golden
-    rubric, but it aligns with the described issue.
+  reason: The answer correctly identifies the root cause (binder proxy leak leading
+    to am_kill) and includes key evidence like 'com.android.phone', '7262' and mentions
+    'unregister 누락 여부 점검'. It also avoids any must-not claims. The slight deduction
+    in hallucination safety is due to mentioning `android.content.IIntentReceiver`
+    which isn't explicitly stated in the golden rubric, but doesn't detract significantly
+    from the overall correctness.
   judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
     1.0, "must_not_violation": 1.0, "hallucination_safety": 0.95, "overall_score":
     0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
     [], "reason": "The answer correctly identifies the root cause (binder proxy leak
-    in com.android.phone leading to am_kill) and includes key evidence like ''7262''
-    and mentions ''IIntentReceiver''. It also provides actionable advice for developers.
-    The only minor deduction is due to mentioning ''IIntentReceiver'' which isn''t
-    explicitly stated in the golden rubric, but it aligns with the described issue."}'
+    leading to am_kill) and includes key evidence like ''com.android.phone'', ''7262''
+    and mentions ''unregister \ub204\ub77d \uc5ec\ubd80 \uc810\uac80''. It also avoids
+    any must-not claims. The slight deduction in hallucination safety is due to mentioning
+    `android.content.IIntentReceiver` which isn''t explicitly stated in the golden
+    rubric, but doesn''t detract significantly from the overall correctness."}'
   error: ''
 - "\uFEFFtest_id": TC-022
   category: System_Bottleneck
@@ -500,60 +1907,64 @@
   must_not_claim: '["am_wtf 이력 없음", "누수 개수 확인 불가", "7262회를 am_wtf 발생 횟수로 단정"]'
   trap_type: fact_retrieval
   severity: high
-  rag_answer: am_wtf 이상 징후는 `관련 프로세스` 관련 구조화 근거와 함께 해석해야 합니다. raw `System_Kill_Wtf_Event`
-    몇 건만으로 발생 횟수를 산정하지 않고, Histogram/RCA의 최대 count 값(7262)을 장애 규모의 핵심 수치로 사용합니다. Binder
-    Proxy Histogram 기준으로 `android.content.IIntentReceiver` 프록시 객체가 최대 7262개까지 누수된
-    것이 확인됩니다. 따라서 이 질문의 수치 판단은 raw `System_Kill_Wtf_Event` 개수보다 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`의
-    구조화된 count 값을 우선해야 합니다.
+  rag_answer: 'am_wtf 이상 징후 발생 이력은 system 1회로 확인됨. 동시간대 Binder Proxy Histogram에서는
+    android.content.IIntentReceiver 객체가 최대 7262개까지 누수된 것으로 확인됨. 근거 원문 요약: Binder Proxy
+    객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
+    (1434개), android.database.IContentObserver (917개), android.app.IServiceConnection
+    (298개), android.app.IApplicationThread (211개), android.view.contentcapture.IContentCaptureOptionsCallback
+    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개) 따라서 수치형
+    질문은 Raw Event 추론보다 Summary/Histogram의 구조화된 count 값을 우선 사용함.'
   doc_ids: '["binder_leak_am_kill_payload_1", "binder_leak_am_kill_payload_13", "binder_leak_am_kill_payload_24",
     "binder_leak_am_kill_payload_25"]'
-  retrieved_meta: '[{"leaked_descriptor": "android.content.IIntentReceiver", "type":
-    "BINDER_PROXY_LEAK_SUMMARY", "time": "06-01 15:13:17.312", "source_file": "binder_leak_am_kill_payload.json",
+  retrieved_meta: '[{"max_proxy_count": 7262, "source_file": "binder_leak_am_kill_payload.json",
     "raw_info": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
     (1434개), android.database.IContentObserver (917개), android.app.IServiceConnection
     (298개), android.app.IApplicationThread (211개), android.view.contentcapture.IContentCaptureOptionsCallback
-    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "log_type":
-    "Binder_Warning", "max_proxy_count": 7262}, {"source_file": "binder_leak_am_kill_payload.json",
-    "log_type": "System_Kill_Wtf_Event", "process": "system", "raw_info": "06-01 16:03:29.922  3179  3387
-    I am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending non-protected broadcast
-    com.samsung.intent.action.ONGOING_ACTIVITY_LIST_CHANGED from system 3179:system/1000
-    pkg android]", "desc": "시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상 프로세스: system.
-    심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.", "time": "06-01
-    16:03:29.922", "type": "SYSTEM_WTF"}, {"raw_info": "06-01 15:13:17.978  4747 21185
-    E EPDG-0  : [EpdgModem] handleSendIpc: android.os.DeadObjectException", "log_type":
-    "Binder_Warning", "source_file": "binder_leak_am_kill_payload.json", "type": "BINDER_TRANSACTION_FAILURE",
-    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스
-    재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "time": "06-01 15:13:17.978"},
-    {"time": "06-01 15:13:17.570", "raw_info": "06-01 15:13:17.570 17540 17540 E RCS-CapabilityCommon:
-    [D] RemoteException", "type": "BINDER_TRANSACTION_FAILURE", "log_type": "Binder_Warning",
-    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스
-    재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "source_file": "binder_leak_am_kill_payload.json"}]'
+    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "type":
+    "BINDER_PROXY_LEAK_SUMMARY", "log_type": "Binder_Warning", "time": "06-01 15:13:17.312",
+    "leaked_descriptor": "android.content.IIntentReceiver"}, {"log_type": "System_Kill_Wtf_Event",
+    "time": "06-01 16:03:29.922", "process": "system", "desc": "시스템 WTF(What a Terrible
+    Failure) 이벤트 감지. 대상 프로세스: system. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지
+    말고 전후 로그와 교차 확인해야 합니다.", "raw_info": "06-01 16:03:29.922  3179  3387 I am_wtf  :
+    [0,3179,system_server,-1,ActivityManager,Sending non-protected broadcast com.samsung.intent.action.ONGOING_ACTIVITY_LIST_CHANGED
+    from system 3179:system/1000 pkg android]", "source_file": "binder_leak_am_kill_payload.json",
+    "type": "SYSTEM_WTF"}, {"time": "06-01 15:13:17.978", "desc": "Binder transaction
+    failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스 재시작, IPC 실패 가능성이 있어 전후 Crash/ANR
+    로그 확인이 필요합니다.", "raw_info": "06-01 15:13:17.978  4747 21185 E EPDG-0  : [EpdgModem]
+    handleSendIpc: android.os.DeadObjectException", "source_file": "binder_leak_am_kill_payload.json",
+    "type": "BINDER_TRANSACTION_FAILURE", "log_type": "Binder_Warning"}, {"time":
+    "06-01 15:13:17.570", "desc": "Binder transaction failure/RemoteException 계열 로그
+    감지. 대상 프로세스 종료, 서비스 재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.", "type": "BINDER_TRANSACTION_FAILURE",
+    "log_type": "Binder_Warning", "raw_info": "06-01 15:13:17.570 17540 17540 E RCS-CapabilityCommon:
+    [D] RemoteException", "source_file": "binder_leak_am_kill_payload.json"}]'
   thinking: ''
-  accuracy_score: 0.95
-  evidence_coverage: 0.85
-  must_have_coverage: 1.0
-  must_not_violation: 0.0
-  hallucination_safety: 0.95
-  overall_score: 0.93
-  missing_must_have: '[]'
-  missing_evidence: '["am_wtf", "BINDER_PROXY_HISTOGRAM"]'
-  violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the root cause (Binder Proxy Histogram,
-    IIntentReceiver leak count of 7262) and emphasizes its importance over raw am_wtf
-    event counts. It also avoids any forbidden claims. While it mentions 'related
-    processes' without specifying com.android.phone, this is a minor omission. The
-    answer could be improved by explicitly mentioning the process name (com.android.phone)
-    and including specific log artifacts for better evidence coverage.
-  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.85, "must_have_coverage":
-    1.0, "must_not_violation": 1.0, "hallucination_safety": 0.95, "overall_score":
-    0.93, "missing_must_have": [], "missing_evidence": ["am_wtf", "BINDER_PROXY_HISTOGRAM"],
-    "violated_must_not_claim": [], "reason": "The answer correctly identifies the
-    root cause (Binder Proxy Histogram, IIntentReceiver leak count of 7262) and emphasizes
-    its importance over raw am_wtf event counts. It also avoids any forbidden claims.
-    While it mentions ''related processes'' without specifying com.android.phone,
-    this is a minor omission. The answer could be improved by explicitly mentioning
-    the process name (com.android.phone) and including specific log artifacts for
-    better evidence coverage."}'
+  accuracy_score: 0.5
+  evidence_coverage: 0.7
+  must_have_coverage: 0.8
+  must_not_violation: 1.0
+  hallucination_safety: 0.3
+  overall_score: 0.4
+  missing_must_have: '["am_wtf 대량 발생 (com.android.phone 프로세스)"]'
+  missing_evidence: '["am_wtf 발생 횟수: 7262회 (com.android.phone 프로세스)"]'
+  violated_must_not_claim: '["am_wtf 이력 없음 (system 1회로 확인됨)"]'
+  reason: The answer incorrectly states 'am_wtf 이상 징후 발생 이력은 system 1회로 확인됨' which
+    violates the must_not_claim and contradicts the ground truth. It correctly identifies
+    the Binder Proxy Histogram and IIntentReceiver count (7262), but fails to mention
+    that am_wtf occurred in com.android.phone process, and incorrectly states it happened
+    only once in system. The accuracy score is penalized heavily due to this critical
+    error.
+  judge_raw: '{"accuracy_score": 0.5, "evidence_coverage": 0.7, "must_have_coverage":
+    0.8, "must_not_violation": 1.0, "hallucination_safety": 0.3, "overall_score":
+    0.4, "missing_must_have": ["am_wtf \ub300\ub7c9 \ubc1c\uc0dd (com.android.phone
+    \ud504\ub85c\uc138\uc2a4)"], "missing_evidence": ["am_wtf \ubc1c\uc0dd \ud69f\uc218:
+    7262\ud68c (com.android.phone \ud504\ub85c\uc138\uc2a4)"], "violated_must_not_claim":
+    ["am_wtf \uc774\ub825 \uc5c6\uc74c (system 1\ud68c\ub85c \ud655\uc778\ub428)"],
+    "reason": "The answer incorrectly states ''am_wtf \uc774\uc0c1 \uc9d5\ud6c4 \ubc1c\uc0dd
+    \uc774\ub825\uc740 system 1\ud68c\ub85c \ud655\uc778\ub428'' which violates the
+    must_not_claim and contradicts the ground truth. It correctly identifies the Binder
+    Proxy Histogram and IIntentReceiver count (7262), but fails to mention that am_wtf
+    occurred in com.android.phone process, and incorrectly states it happened only
+    once in system. The accuracy score is penalized heavily due to this critical error."}'
   error: ''
 - "\uFEFFtest_id": TC-023
   category: Root_Cause_Correlation
@@ -575,66 +1986,61 @@
   must_not_claim: '["서로 무관함", "단순 일시적 오류", "기지국 문제", "원인 불명"]'
   trap_type: root_cause_correlation
   severity: critical
-  rag_answer: am_wtf 이상 징후는 `com.android.phone` 관련 구조화 근거와 함께 해석해야 합니다. raw `System_Kill_Wtf_Event`
-    몇 건만으로 발생 횟수를 산정하지 않고, Histogram/RCA의 최대 count 값(7262)을 장애 규모의 핵심 수치로 사용합니다. Binder
-    Proxy Histogram 기준으로 `android.content.IIntentReceiver` 프록시 객체가 최대 7262개까지 누수된
-    것이 확인됩니다. 따라서 이 질문의 수치 판단은 raw `System_Kill_Wtf_Event` 개수보다 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`의
-    구조화된 count 값을 우선해야 합니다.
+  rag_answer: 네, 서로 연관되어 있습니다. `com.android.phone`에서 `android.content.IIntentReceiver`
+    Binder proxy leak이 발생했고, 최대 7262개까지 누수되었습니다. 이 누수로 인해 시스템 리소스가 고갈되었고, ActivityManager가
+    `Too many Binders sent to SYSTEM` 사유로 `am_kill` 강제 종료를 수행한 것으로 판단됩니다. 개발자는 동적
+    BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함.
   doc_ids: '["binder_leak_am_kill_payload_32", "binder_leak_am_kill_payload_16", "binder_leak_am_kill_payload_1",
     "binder_leak_am_kill_payload_23"]'
-  retrieved_meta: '[{"rca_type": "BINDER_PROXY_LEAK_RCA", "process": "com.android.phone",
-    "source_file": "binder_leak_am_kill_payload.json", "max_proxy_count": 7262, "symptom_keywords":
-    "폰 죽음, 갑자기 죽음, 강제 종료, 시스템 크래시, SYSTEM_KILL, am_kill, crash, kill", "trigger":
-    "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
+  retrieved_meta: '[{"trigger": "06-01 15:13:17.330  3179 23269 I am_kill : [0,4442,com.android.phone,-800,Too
     many Binders sent to SYSTEM,235536]", "leaked_descriptor": "android.content.IIntentReceiver",
-    "am_wtf_count_observed": 0, "time": "06-01 15:13:17.330", "root_cause": "IIntentReceiver
-    Binder proxy leak", "kill_reason": "Too many Binders sent to SYSTEM", "developer_action":
-    "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함", "kill_event": "am_kill",
-    "log_type": "RCA_Event"}, {"desc": "시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상
-    프로세스: system. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.",
-    "raw_info": "06-01 16:03:29.327  3179  3387 I am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending
-    non-protected broadcast com.samsung.action.kpiscanner from system 23387:com.android.phone/1001
-    pkg com.android.phone]", "time": "06-01 16:03:29.327", "process": "system", "source_file":
-    "binder_leak_am_kill_payload.json", "log_type": "System_Kill_Wtf_Event", "type":
-    "SYSTEM_WTF"}, {"time": "06-01 15:13:17.312", "max_proxy_count": 7262, "raw_info":
-    "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개), android.content.IContentProvider
-    (1434개), android.database.IContentObserver (917개), android.app.IServiceConnection
-    (298개), android.app.IApplicationThread (211개), android.view.contentcapture.IContentCaptureOptionsCallback
-    (210개), android.os.IMessenger (158개), android.app.job.IJobService (90개)", "leaked_descriptor":
-    "android.content.IIntentReceiver", "type": "BINDER_PROXY_LEAK_SUMMARY", "source_file":
+    "max_proxy_count": 7262, "kill_reason": "Too many Binders sent to SYSTEM", "kill_event":
+    "am_kill", "symptom_keywords": "폰 죽음, 갑자기 죽음, 강제 종료, 시스템 크래시, SYSTEM_KILL, am_kill,
+    crash, kill", "root_cause": "IIntentReceiver Binder proxy leak", "process": "com.android.phone",
+    "source_file": "binder_leak_am_kill_payload.json", "developer_action": "동적 BroadcastReceiver
+    register 후 unregister 누락 여부를 점검해야 함", "rca_type": "BINDER_PROXY_LEAK_RCA", "am_wtf_count_observed":
+    0, "log_type": "RCA_Event", "time": "06-01 15:13:17.330"}, {"desc": "시스템 WTF(What
+    a Terrible Failure) 이벤트 감지. 대상 프로세스: system. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로
+    단정하지 말고 전후 로그와 교차 확인해야 합니다.", "source_file": "binder_leak_am_kill_payload.json",
+    "time": "06-01 16:03:29.327", "log_type": "System_Kill_Wtf_Event", "process":
+    "system", "type": "SYSTEM_WTF", "raw_info": "06-01 16:03:29.327  3179  3387 I
+    am_wtf  : [0,3179,system_server,-1,ActivityManager,Sending non-protected broadcast
+    com.samsung.action.kpiscanner from system 23387:com.android.phone/1001 pkg com.android.phone]"},
+    {"type": "BINDER_PROXY_LEAK_SUMMARY", "raw_info": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver
+    (7262개), android.content.IContentProvider (1434개), android.database.IContentObserver
+    (917개), android.app.IServiceConnection (298개), android.app.IApplicationThread
+    (211개), android.view.contentcapture.IContentCaptureOptionsCallback (210개), android.os.IMessenger
+    (158개), android.app.job.IJobService (90개)", "max_proxy_count": 7262, "leaked_descriptor":
+    "android.content.IIntentReceiver", "time": "06-01 15:13:17.312", "source_file":
     "binder_leak_am_kill_payload.json", "log_type": "Binder_Warning"}, {"desc": "Binder
     transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스 재시작, IPC 실패 가능성이
-    있어 전후 Crash/ANR 로그 확인이 필요합니다.", "log_type": "Binder_Warning", "source_file": "binder_leak_am_kill_payload.json",
-    "type": "BINDER_TRANSACTION_FAILURE", "raw_info": "06-01 15:13:18.764 23387 23387
-    D SecImsManager: getFeatureValue : exceptionandroid.os.RemoteException: ImsServiceProxy
-    is not ready to accept commands.", "time": "06-01 15:13:18.764"}]'
+    있어 전후 Crash/ANR 로그 확인이 필요합니다.", "type": "BINDER_TRANSACTION_FAILURE", "raw_info":
+    "06-01 15:13:18.764 23387 23387 D SecImsManager: getFeatureValue : exceptionandroid.os.RemoteException:
+    ImsServiceProxy is not ready to accept commands.", "source_file": "binder_leak_am_kill_payload.json",
+    "time": "06-01 15:13:18.764", "log_type": "Binder_Warning"}]'
   thinking: ''
-  accuracy_score: 0.6
-  evidence_coverage: 0.7
-  must_have_coverage: 0.8
+  accuracy_score: 0.95
+  evidence_coverage: 0.9
+  must_have_coverage: 1.0
   must_not_violation: 0.0
-  hallucination_safety: 0.8
-  overall_score: 0.7
-  missing_must_have: '["BroadcastReceiver 해제(unregister) 누락", "생명주기 점검 가이드"]'
-  missing_evidence: '["am_kill", "Too many Binders"]'
+  hallucination_safety: 1.0
+  overall_score: 0.95
+  missing_must_have: '[]'
+  missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer correctly identifies the `IIntentReceiver` proxy leak as a key
-    factor, and emphasizes the importance of structured data (`BINDER_PROXY_HISTOGRAM`).
-    However, it misses crucial elements like the unregistering issue (the root cause),
-    the am_kill event, and the 'Too many Binders' message. The answer also doesn't
-    provide guidance on checking lifecycle management.  The must_not_claim is not
-    violated but key information is missing.
-  judge_raw: '{"accuracy_score": 0.6, "evidence_coverage": 0.7, "must_have_coverage":
-    0.8, "must_not_violation": 1.0, "hallucination_safety": 0.8, "overall_score":
-    0.7, "missing_must_have": ["BroadcastReceiver \ud574\uc81c(unregister) \ub204\ub77d",
-    "\uc0dd\uba85\uc8fc\uae30 \uc810\uac80 \uac00\uc774\ub4dc"], "missing_evidence":
-    ["am_kill", "Too many Binders"], "violated_must_not_claim": [], "reason": "The
-    answer correctly identifies the `IIntentReceiver` proxy leak as a key factor,
-    and emphasizes the importance of structured data (`BINDER_PROXY_HISTOGRAM`). However,
-    it misses crucial elements like the unregistering issue (the root cause), the
-    am_kill event, and the ''Too many Binders'' message. The answer also doesn''t
-    provide guidance on checking lifecycle management.  The must_not_claim is not
-    violated but key information is missing."}'
+  reason: The answer correctly identifies the core issue (BroadcastReceiver unregister
+    failure leading to Binder proxy leak and subsequent am_kill). It accurately connects
+    all three events. The response includes key terms like 'IIntentReceiver', 'unregister'
+    and 'am_kill'. All must-have elements are present, and no forbidden claims are
+    made. Evidence coverage is high as it mentions the core log artifacts.
+  judge_raw: '{"accuracy_score": 0.95, "evidence_coverage": 0.9, "must_have_coverage":
+    1.0, "must_not_violation": 1.0, "hallucination_safety": 1.0, "overall_score":
+    0.95, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
+    [], "reason": "The answer correctly identifies the core issue (BroadcastReceiver
+    unregister failure leading to Binder proxy leak and subsequent am_kill). It accurately
+    connects all three events. The response includes key terms like ''IIntentReceiver'',
+    ''unregister'' and ''am_kill''. All must-have elements are present, and no forbidden
+    claims are made. Evidence coverage is high as it mentions the core log artifacts."}'
   error: ''
 - "\uFEFFtest_id": TC-024
   category: Negative_Binder_Leak_Check
@@ -658,37 +2064,36 @@
   trap_type: negative_binder_leak_absence_check
   severity: high
   rag_answer: Binder proxy leak 확인되지 않음. 검색 결과에서 `BINDER_PROXY_LEAK_RCA`가 확인되지 않고,
-    Binder Proxy Histogram 기반의 leak 근거도 확인되지 않습니다. 또한 `Too many Binders sent to SYSTEM`
-    사유의 `am_kill` 강제 종료 근거도 없습니다. 따라서 이 로그에서는 Binder proxy leak에 의한 시스템 리소스 고갈 또는
-    프로세스 강제 종료로 판단하면 안 됩니다.
+    Binder Proxy Histogram 기반의 leak 근거도 확인되지 않습니다. 따라서 이 로그에서는 Binder proxy leak에
+    의한 시스템 리소스 고갈 또는 프로세스 강제 종료로 판단하면 안 됩니다.
   doc_ids: '["ps_call_504_unavailable_payload_676", "ps_call_504_unavailable_payload_691",
     "ps_call_504_unavailable_payload_679", "ps_call_504_unavailable_payload_689"]'
-  retrieved_meta: '[{"log_type": "Binder_Warning", "raw_info": "Binder Proxy 객체 상태
-    덤프: android.content.IIntentSender (47개), android.window.IWindowContainerToken
+  retrieved_meta: '[{"max_proxy_count": 47, "source_file": "ps_call_504_unavailable_payload.json",
+    "log_type": "Binder_Warning", "time": "BinderProxy descri", "raw_info": "Binder
+    Proxy 객체 상태 덤프: android.content.IIntentSender (47개), android.window.IWindowContainerToken
     (26개), BBinder (9개), android.window.IRemoteTransition (6개), android.media.IPlayer
     (5개), android.content.IContentProvider (5개), android.media.session.ISessionController
-    (2개)", "leaked_descriptor": "android.content.IContentProvider", "type": "BINDER_PROXY_LEAK_SUMMARY",
-    "time": "BinderProxy descri", "source_file": "ps_call_504_unavailable_payload.json",
-    "max_proxy_count": 47}, {"raw_info": "04-09 12:07:24.596  1000  3135  3472 I am_wtf  :
-    [0,3135,system_server,-1,ActivityTaskManager,Activity start ONLY allowed by BAL_ALLOW_NON_APP_VISIBLE_WINDOW
-    uid has non-app visible window {2015=1}: [callingPackage: android.uid.system:1000;
-    callingPackageTargetSdk: -1; callingUid: 1000; callingPid: 3135; appSwitchState:
-    1; callingUidHasVisibleActivity: false; callingUidHasVisibleNotPinnedActivity:
-    false; callingUidHasNonAppVisibleWindow: true; callingUidProcState: PERSISTENT;
-    isCallingUidPersistentSystemProcess: true; allowBalExemptionForSystemProcess:
-    false; intent: null; callerApp: null; balAllowedByPiCreator: BSP.ALLOW_BAL; resultIfPiCreatorAllowsBal:
-    BAL_ALLOW_NON_APP_VISIBLE_WINDOW; callerStartMode: MODE_BACKGROUND_ACTIVITY_START_SYSTEM_DEFINED;
-    hasRealCaller: false; isCallForResult: false; isPendingIntent: false; autoOptInReason:
-    notPendingIntent; balDontBringExistingBackgroundTaskStackToFg: true]]", "type":
-    "SYSTEM_WTF", "time": "04-09 12:07:24.596", "log_type": "System_Kill_Wtf_Event",
-    "desc": "시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상 프로세스: system_server. 심각한
-    시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.", "source_file":
-    "ps_call_504_unavailable_payload.json", "process": "system_server"}, {"type":
-    "SYSTEM_WTF", "raw_info": "04-09 12:08:22.277  1000  3135  3472 I am_wtf  : [0,3135,system_server,-1,ActivityTaskManager,Activity
+    (2개)", "leaked_descriptor": "android.content.IContentProvider", "type": "BINDER_PROXY_LEAK_SUMMARY"},
+    {"log_type": "System_Kill_Wtf_Event", "time": "04-09 12:07:24.596", "source_file":
+    "ps_call_504_unavailable_payload.json", "type": "SYSTEM_WTF", "raw_info": "04-09
+    12:07:24.596  1000  3135  3472 I am_wtf  : [0,3135,system_server,-1,ActivityTaskManager,Activity
     start ONLY allowed by BAL_ALLOW_NON_APP_VISIBLE_WINDOW uid has non-app visible
-    window {2000=1, 2013=1, 2019=1, 2040=1, 2604=1}: [callingPackage: com.sec.modem.settings;
-    callingPackageTargetSdk: 36; callingUid: 1000; callingPid: -1; appSwitchState:
-    2; callingUidHasVisibleActivity: false; callingUidHasVisibleNotPinnedActivity:
+    window {2015=1}: [callingPackage: android.uid.system:1000; callingPackageTargetSdk:
+    -1; callingUid: 1000; callingPid: 3135; appSwitchState: 1; callingUidHasVisibleActivity:
+    false; callingUidHasVisibleNotPinnedActivity: false; callingUidHasNonAppVisibleWindow:
+    true; callingUidProcState: PERSISTENT; isCallingUidPersistentSystemProcess: true;
+    allowBalExemptionForSystemProcess: false; intent: null; callerApp: null; balAllowedByPiCreator:
+    BSP.ALLOW_BAL; resultIfPiCreatorAllowsBal: BAL_ALLOW_NON_APP_VISIBLE_WINDOW; callerStartMode:
+    MODE_BACKGROUND_ACTIVITY_START_SYSTEM_DEFINED; hasRealCaller: false; isCallForResult:
+    false; isPendingIntent: false; autoOptInReason: notPendingIntent; balDontBringExistingBackgroundTaskStackToFg:
+    true]]", "process": "system_server", "desc": "시스템 WTF(What a Terrible Failure)
+    이벤트 감지. 대상 프로세스: system_server. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고
+    전후 로그와 교차 확인해야 합니다."}, {"time": "04-09 12:08:22.277", "type": "SYSTEM_WTF", "log_type":
+    "System_Kill_Wtf_Event", "raw_info": "04-09 12:08:22.277  1000  3135  3472 I am_wtf  :
+    [0,3135,system_server,-1,ActivityTaskManager,Activity start ONLY allowed by BAL_ALLOW_NON_APP_VISIBLE_WINDOW
+    uid has non-app visible window {2000=1, 2013=1, 2019=1, 2040=1, 2604=1}: [callingPackage:
+    com.sec.modem.settings; callingPackageTargetSdk: 36; callingUid: 1000; callingPid:
+    -1; appSwitchState: 2; callingUidHasVisibleActivity: false; callingUidHasVisibleNotPinnedActivity:
     false; callingUidHasNonAppVisibleWindow: true; callingUidProcState: PERSISTENT;
     isCallingUidPersistentSystemProcess: true; allowBalExemptionForSystemProcess:
     true; intent: Intent { xflg=0x4 cmp=com.sec.android.app.servicemodeapp/.SysDump
@@ -698,14 +2103,14 @@
     null; realCallingPackage: com.android.systemui; realCallingPackageTargetSdk: 37;
     realCallingUid: 10044; realCallingPid: 4280; realCallingUidHasVis^", "process":
     "system_server", "desc": "시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상 프로세스: system_server.
-    심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.", "time": "04-09
-    12:08:22.277", "source_file": "ps_call_504_unavailable_payload.json", "log_type":
-    "System_Kill_Wtf_Event"}, {"log_type": "System_Kill_Wtf_Event", "process": "this",
-    "time": "04-09 12:07:31.173", "source_file": "ps_call_504_unavailable_payload.json",
-    "raw_info": "04-09 12:07:31.173  1000  3135  3472 I am_wtf  : [0,3135,system_server,-1,Binder,Outgoing
-    transactions from this process must be FLAG_ONEWAY]", "type": "SYSTEM_WTF", "desc":
-    "시스템 WTF(What a Terrible Failure) 이벤트 감지. 대상 프로세스: this. 심각한 시스템 상태 이상 신호이지만,
-    Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다."}]'
+    심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로 단정하지 말고 전후 로그와 교차 확인해야 합니다.", "source_file":
+    "ps_call_504_unavailable_payload.json"}, {"log_type": "System_Kill_Wtf_Event",
+    "source_file": "ps_call_504_unavailable_payload.json", "desc": "시스템 WTF(What a
+    Terrible Failure) 이벤트 감지. 대상 프로세스: this. 심각한 시스템 상태 이상 신호이지만, Native Crash/ANR로
+    단정하지 말고 전후 로그와 교차 확인해야 합니다.", "time": "04-09 12:07:31.173", "raw_info": "04-09
+    12:07:31.173  1000  3135  3472 I am_wtf  : [0,3135,system_server,-1,Binder,Outgoing
+    transactions from this process must be FLAG_ONEWAY]", "process": "this", "type":
+    "SYSTEM_WTF"}]'
   thinking: ''
   accuracy_score: 1.0
   evidence_coverage: 1.0
@@ -716,15 +2121,17 @@
   missing_must_have: '[]'
   missing_evidence: '[]'
   violated_must_not_claim: '[]'
-  reason: The answer perfectly aligns with the golden rubric. It correctly identifies
-    the absence of Binder proxy leak and Too many Binders sent to SYSTEM as root causes,
-    cites relevant evidence (BINDER_PROXY_LEAK_RCA, Binder Proxy Histogram), and avoids
-    any prohibited claims.
+  reason: The answer correctly identifies the absence of Binder proxy leak and Too
+    many Binders sent to SYSTEM based on the provided logs, aligning perfectly with
+    the golden rubric. It explicitly mentions the missing `BINDER_PROXY_LEAK_RCA`
+    and lack of evidence from Binder Proxy Histogram, fulfilling all must-have criteria
+    without violating any forbidden claims.
   judge_raw: '{"accuracy_score": 1.0, "evidence_coverage": 1.0, "must_have_coverage":
     1.0, "must_not_violation": 0.0, "hallucination_safety": 1.0, "overall_score":
     1.0, "missing_must_have": [], "missing_evidence": [], "violated_must_not_claim":
-    [], "reason": "The answer perfectly aligns with the golden rubric. It correctly
-    identifies the absence of Binder proxy leak and Too many Binders sent to SYSTEM
-    as root causes, cites relevant evidence (BINDER_PROXY_LEAK_RCA, Binder Proxy Histogram),
-    and avoids any prohibited claims."}'
+    [], "reason": "The answer correctly identifies the absence of Binder proxy leak
+    and Too many Binders sent to SYSTEM based on the provided logs, aligning perfectly
+    with the golden rubric. It explicitly mentions the missing `BINDER_PROXY_LEAK_RCA`
+    and lack of evidence from Binder Proxy Histogram, fulfilling all must-have criteria
+    without violating any forbidden claims."}'
   error: ''

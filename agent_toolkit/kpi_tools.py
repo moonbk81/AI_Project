@@ -1,6 +1,6 @@
-
 import json
 import os
+from collections import Counter # 💡 요약 카운트를 위해 추가
 
 import pandas as pd
 
@@ -224,7 +224,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         kpi_report["9_ril_sip_correlation"] = "RIL-SIP 간 직접적인 시간대 상관관계 특이사항 없음"
 
     # ==========================================
-    # 10. 💥 시스템 크래시 (FATAL EXCEPTION / ANR / Tombstone)
+    # 10. 💥 시스템 크래시 및 Binder 경고 요약
     # ==========================================
     crash_data = report_data.get("crash_context", [])
     native_crash_data = report_data.get("native_crash_context", [])
@@ -259,7 +259,6 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
 
     if anr_data:
         has_fatal_or_anr = True
-
         anr_events = []
         for a in anr_data:
             if not isinstance(a, dict):
@@ -267,100 +266,23 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
 
             process_info = a.get("process_info", {}) or {}
             analysis_summary = a.get("analysis_summary", {}) or {}
-            lock_chain = a.get("lock_chain", {}) or {}
-            main_info = a.get("main", {}) or {}
-            main_stack = main_info.get("stack", []) or []
-            binder_txs = a.get("active_binder_transactions", []) or []
-            context_analysis = a.get("context_analysis", {}) or {}
-            pre_anr_logcat = a.get("pre_anr_logcat", []) or []
-
-            root_cause_candidates = []
-            if analysis_summary.get("has_lock_contention"):
-                root_cause_candidates.append(
-                    f"Main thread lock wait: blocker_tid={lock_chain.get('blocker_thread')}, lock={lock_chain.get('lock_address')}"
-                )
-            if analysis_summary.get("has_active_binder"):
-                target_pids = sorted({str(tx.get("to_pid")) for tx in binder_txs if isinstance(tx, dict) and tx.get("to_pid")})
-                root_cause_candidates.append(
-                    f"Main thread outgoing Binder wait: target_pid={', '.join(target_pids) if target_pids else 'Unknown'}"
-                )
-            if analysis_summary.get("has_cpu_hint"):
-                root_cause_candidates.append("CPU usage/load 관련 힌트 존재")
-            if analysis_summary.get("has_system_server_hint"):
-                root_cause_candidates.append("system_server/InputDispatcher/ActivityManager 관련 힌트 존재")
-            if analysis_summary.get("has_io_hint"):
-                root_cause_candidates.append("I/O wait 또는 disk 관련 힌트 존재")
-
-            if not root_cause_candidates:
-                root_cause_candidates.append("명확한 lock/binder/CPU/system_server/I/O 원인 힌트 없음")
-
             anr_events.append({
                 "time": a.get("time"),
                 "process": a.get("process") or process_info.get("name", "Unknown"),
-                "pid": process_info.get("pid"),
                 "reason": a.get("reason", "Unknown ANR Reason"),
-                "summary_flags": {
-                    "has_main_stack": analysis_summary.get("has_main_stack", False),
-                    "has_lock_contention": analysis_summary.get("has_lock_contention", False),
-                    "has_active_binder": analysis_summary.get("has_active_binder", False),
-                    "has_cpu_hint": analysis_summary.get("has_cpu_hint", False),
-                    "has_system_server_hint": analysis_summary.get("has_system_server_hint", False),
-                    "has_io_hint": analysis_summary.get("has_io_hint", False),
-                    "has_pre_anr_logcat": analysis_summary.get("has_pre_anr_logcat", False)
-                },
-                "root_cause_candidates": root_cause_candidates,
-                "main_thread_top_stack": main_stack[:8],
-                "lock_chain": {
-                    "waiting_thread": lock_chain.get("waiting_thread"),
-                    "blocker_thread": lock_chain.get("blocker_thread"),
-                    "lock_address": lock_chain.get("lock_address")
-                },
-                "binder_targets": [
-                    {
-                        "to_pid": tx.get("to_pid"),
-                        "to_tid": tx.get("to_tid"),
-                        "code": tx.get("code")
-                    }
-                    for tx in binder_txs[:5]
-                    if isinstance(tx, dict)
-                ],
-                "context_log_counts": {
-                    "cpu": len(context_analysis.get("cpu_logs", []) or []),
-                    "system_server": len(context_analysis.get("system_server_logs", []) or []),
-                    "io": len(context_analysis.get("io_logs", []) or []),
-                    "pre_anr_logcat": len(pre_anr_logcat)
-                }
             })
-
         kpi_report["10_system_crash_and_fatal_errors"]["anr_events"] = anr_events
 
+    # 💡 [핵심 수정] 무지성 배열 덤프 제거 및 타입별 개수 압축 (SYSTEM_WTF 등 방어)
     binder_warnings = report_data.get("binder_warnings", [])
     if binder_warnings:
         has_fatal_or_anr = True
-        kpi_report["10_system_crash_and_fatal_errors"]["binder_warnings"] = [
-            f"[{b.get('time')}] {b.get('type')}: {b.get('desc')}" for b in binder_warnings
-            if isinstance(b, dict)
-        ]
+        warning_types = Counter([b.get('type', 'UNKNOWN') for b in binder_warnings if isinstance(b, dict)])
+        summary_strs = [f"{k}: {v}건" for k, v in warning_types.items()]
 
-    binder_context_summary = report_data.get("binder_context_summary", {})
-    if binder_context_summary:
-        has_fatal_or_anr = True
-        kpi_report["10_system_crash_and_fatal_errors"]["binder_context_summary"] = {
-            "signals": binder_context_summary.get("signals", {}),
-            "checklist": binder_context_summary.get("checklist", []),
-            "total_context_lines": binder_context_summary.get("total_context_lines", 0),
-        }
-
-    if has_fatal_or_anr and "anr_events" in kpi_report["10_system_crash_and_fatal_errors"]:
-        anr_events = kpi_report["10_system_crash_and_fatal_errors"].get("anr_events", [])
-        kpi_report["10_system_crash_and_fatal_errors"]["anr_summary"] = {
-            "total_anrs": len(anr_events),
-            "lock_contention_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_lock_contention")),
-            "binder_wait_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_active_binder")),
-            "cpu_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_cpu_hint")),
-            "system_server_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_system_server_hint")),
-            "io_hint_count": sum(1 for e in anr_events if e.get("summary_flags", {}).get("has_io_hint"))
-        }
+        kpi_report["10_system_crash_and_fatal_errors"]["binder_warnings_summary"] = (
+            f"총 {len(binder_warnings)}건 감지 ({', '.join(summary_strs)})"
+        )
 
     if not has_fatal_or_anr:
         kpi_report["10_system_crash_and_fatal_errors"] = "시스템 크래시/FATAL 에러 발생 이력 없음 (안정적)"
@@ -404,8 +326,19 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
                 "critical_errors_detected": critical_sat_errors if critical_sat_errors else "없음 (해당 기간 내 Call/SMS 정상 처리됨)"
             }
 
+    # ==========================================
+    # 12. 🕒 NITZ 시간 보정 로그 압축 (토큰 방어)
+    # ==========================================
     nitz_data = report_data.get("nitz_history", [])
     if nitz_data:
-        kpi_report["12_time_and_tniz_updates"] = nitz_data
+        # 💡 [핵심 수정] 50줄짜리 배열 덤프를 처음/마지막만 남기고 중략 처리
+        if len(nitz_data) > 3:
+            kpi_report["12_time_and_tniz_updates"] = [
+                nitz_data[0],
+                f"... (중략: 총 {len(nitz_data)}건의 NITZ 보정 발생) ...",
+                nitz_data[-1]
+            ]
+        else:
+            kpi_report["12_time_and_tniz_updates"] = nitz_data
 
     return json.dumps(kpi_report, indent=4, ensure_ascii=False)

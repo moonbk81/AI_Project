@@ -79,7 +79,7 @@ def render_ntn_advanced_fw_analyzer(current_base):
     chart_df = clean_df[clean_df['event_type'] != 'DATA_POLICY'].copy()
 
     if not chart_df.empty:
-        current_year = datetime.datetime.now().year
+        current_year = datetime.now().year
         chart_df['time_dt'] = pd.to_datetime(str(current_year) + "-" + chart_df['time'], errors='coerce')
         chart_df = chart_df.sort_values('time_dt')
 

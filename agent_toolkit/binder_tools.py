@@ -22,6 +22,9 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
     max_wait_ms = None
     proxy_leaks = [] # 💡 BINDER_PROXY_HISTOGRAM 수집용
 
+    # 💡 [핵심 추가] SYSTEM_WTF 압축을 위한 딕셔너리
+    wtf_groups = {}
+
     for warning in binder_warnings:
         # 문자열로 들어온 경우 안전하게 파싱
         if isinstance(warning, str):
@@ -57,16 +60,25 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
             })
             continue
 
+        # 💡 [핵심 수정] SYSTEM_WTF 무지성 append 방지 및 그룹화 압축
         if warning_type == "SYSTEM_WTF":
-            warning_facts.append({
-                "time": warning.get("time") or warning.get("timestamp"),
-                "type": warning_type,
-                "process": warning.get("process", "Unknown"),
-                "desc": desc,
-                "summary": desc,
-                "raw": raw,
-                "wait_ms": None,
-            })
+            proc = warning.get("process", "Unknown")
+            time_val = warning.get("time") or warning.get("timestamp") or "Unknown"
+
+            if proc not in wtf_groups:
+                wtf_groups[proc] = {
+                    "count": 0,
+                    "first_time": time_val,
+                    "last_time": time_val,
+                    "desc": desc
+                }
+
+            wtf_groups[proc]["count"] += 1
+            if time_val != "Unknown":
+                if wtf_groups[proc]["first_time"] == "Unknown":
+                    wtf_groups[proc]["first_time"] = time_val
+                # 로그가 시간순이라고 가정하고 계속 덮어씌워서 마지막 시간을 구함
+                wtf_groups[proc]["last_time"] = time_val
             continue
 
         else:
@@ -86,6 +98,26 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
                 "wait_ms": wait_ms,
                 "raw": raw,
             })
+
+    # 💡 [핵심 추가] 루프가 끝난 뒤 압축된 SYSTEM_WTF를 warning_facts에 한 줄씩만 삽입
+    for proc, info in wtf_groups.items():
+        count = info["count"]
+        t_first = info["first_time"]
+        t_last = info["last_time"]
+
+        # 1건이면 단일 시간, 여러 건이면 구간으로 표시
+        time_str = f"{t_first} ~ {t_last}" if count > 1 and t_first != t_last else t_first
+        compressed_desc = f"SYSTEM_WTF ({proc}): 동일한 시스템 상태 이상 에러 {count}건 감지 (발생 구간: {time_str})"
+
+        warning_facts.append({
+            "time": time_str,
+            "type": "SYSTEM_WTF",
+            "process": proc,
+            "desc": compressed_desc,
+            "summary": compressed_desc,
+            "raw": f"OMITTED_RAW_FOR_COMPRESSION (Count: {count})",
+            "wait_ms": None,
+        })
 
     signals = binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {}
     checklist = binder_context_summary.get("checklist", []) if isinstance(binder_context_summary, dict) else []
@@ -115,6 +147,8 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         for item in warning_facts
         if item.get("type") == "SYSTEM_KILL"
     ]
+
+    # 위에서 압축된 SYSTEM_WTF 데이터가 여기서 자동으로 깔끔하게 필터링되어 들어갑니다.
     system_wtfs = [
         {
             "time": item.get("time"),
