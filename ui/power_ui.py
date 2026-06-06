@@ -25,7 +25,7 @@ def render_battery_thermal_chart(df):
                 color='times', color_continuous_scale='Blues'
             )
             fig_wl.update_layout(xaxis_tickangle=-45, height=common_height, margin=common_margin, coloraxis_showscale=False)
-            st.plotly_chart(fig_wl, use_container_width=True)
+            st.plotly_chart(fig_wl, width="stretch")
         else:
             st.info("Wakelock data not found")
 
@@ -41,7 +41,7 @@ def render_battery_thermal_chart(df):
             )
             fig_th.add_hline(y=40, line_dash="dot", line_color="red", annotation_text="Warning Threshold (40°C)")
             fig_th.update_layout(xaxis_tickangle=-45, height=common_height, margin=common_margin, coloraxis_showscale=False)
-            st.plotly_chart(fig_th, use_container_width=True)
+            st.plotly_chart(fig_th, width="stretch")
         else:
             st.info("Thermal data not found")
 
@@ -58,6 +58,6 @@ def render_battery_thermal_chart(df):
                 hover_data={'process': True}
             )
             fig_cpu.update_layout(xaxis_tickangle=-45, height=common_height, margin=common_margin, coloraxis_showscale=False)
-            st.plotly_chart(fig_cpu, use_container_width=True)
+            st.plotly_chart(fig_cpu, width="stretch")
         else:
             st.info("CPU usage data not found")

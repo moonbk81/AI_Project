@@ -122,7 +122,7 @@ def render_data_usage_profiling(df):
                 app_df = du_df.groupby('app_name')['total_mb'].sum().reset_index().sort_values(by='total_mb', ascending=False).head(10)
                 fig_app = px.pie(app_df, values='total_mb', names='app_name', hole=0.4, title='Cumulative Data Usage Top 10 by Application (MB)')
                 fig_app.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_app, use_container_width=True)
+                st.plotly_chart(fig_app, width="stretch")
 
             with col_du2:
                 rat_df = du_df.groupby('rat')['total_mb'].sum().reset_index()
@@ -131,7 +131,7 @@ def render_data_usage_profiling(df):
                     color_discrete_map={'LTE':'#1f77b4', '5G (NR)':'#ff7f0e', 'Unknown':'#7f7f7f'}
                 )
                 fig_rat.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_rat, use_container_width=True)
+                st.plotly_chart(fig_rat, width="stretch")
 
             if 'time' in du_df.columns:
                 st.divider()
@@ -156,7 +156,7 @@ def render_data_usage_profiling(df):
                         legend=dict(orientation="h", yanchor="bottom", y=-0.4, xanchor="center", x=0.5)
                     )
                     fig_time.update_traces(marker_line_width=0)
-                    st.plotly_chart(fig_time, use_container_width=True)
+                    st.plotly_chart(fig_time, width="stretch")
                 else:
                     st.info("Time-series parsing failed for Data Usage logs.")
         else:
@@ -190,7 +190,7 @@ def render_data_usage_timeline(df):
         yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 def render_internet_stall_analyzer(current_base, result_dir="./result"):
     st.subheader("Data Stall & Internet Connectivity Analysis")

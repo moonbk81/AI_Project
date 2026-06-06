@@ -629,7 +629,7 @@ def render_nitz_timeline(nitz_data):
                            labels={'log_time_dt': '시간', 'offset_num': 'UTC 오프셋 (+/-)'})
         fig_line.update_traces(line_color='#2ca02c')
         fig_line.update_layout(height=350, margin=dict(t=30, b=20, l=10, r=10))
-        st.plotly_chart(fig_line, use_container_width=True)
+        st.plotly_chart(fig_line, width="stretch")
 
     with col_map:
         st.markdown("**타임존 기반 예상 체류 지역 (Estimated Region)**")
@@ -651,7 +651,7 @@ def render_nitz_timeline(nitz_data):
                 showocean=True, oceancolor="#e0f3f8"
             )
             fig_map.update_layout(height=350, margin=dict(t=0, b=0, l=0, r=0))
-            st.plotly_chart(fig_map, use_container_width=True)
+            st.plotly_chart(fig_map, width="stretch")
         else:
             st.info("지도에 표시할 좌표 데이터가 없습니다.")
 

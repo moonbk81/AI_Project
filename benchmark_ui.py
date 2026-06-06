@@ -223,7 +223,7 @@ def render_benchmark_dashboard():
     output_csv = "csv/rag_golden_eval_details.csv"
     summary_csv = "csv/rag_golden_eval_summary.csv"
 
-    if st.button("RAG 자동 채점 시작 (Golden Eval)", type="primary", use_container_width=True):
+    if st.button("RAG 자동 채점 시작 (Golden Eval)", type="primary", width="stretch"):
         if not os.path.exists(eval_dataset_path):
             st.error(f"데이터셋 파일을 찾을 수 없습니다: {eval_dataset_path}")
         else:
@@ -269,7 +269,7 @@ def render_benchmark_dashboard():
                 score_cols = [c for c in df_detail.columns if 'score' in c or 'coverage' in c or 'risk' in c]
                 st.dataframe(
                     df_detail.style.background_gradient(subset=score_cols, cmap="YlGn"),
-                    use_container_width=True
+                    width="stretch"
                 )
             except Exception as e:
                 st.error(f"상세 파일 로드 실패: {e}")

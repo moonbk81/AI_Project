@@ -38,7 +38,7 @@ def _render_system_kills(system_kills):
             "트리거 원문 (Raw)": k.get("raw", k.get("trigger", ""))
         })
     df_kill = pd.DataFrame(kill_rows)
-    st.dataframe(df_kill, use_container_width=True, hide_index=True)
+    st.dataframe(df_kill, width="stretch", hide_index=True)
 
 def _render_system_wtfs(system_wtfs):
     if not system_wtfs:
@@ -66,7 +66,7 @@ def _render_system_wtfs(system_wtfs):
         })
 
     df_wtf_summary = pd.DataFrame(summary_rows)
-    st.dataframe(df_wtf_summary, use_container_width=True, hide_index=True)
+    st.dataframe(df_wtf_summary, width="stretch", hide_index=True)
 
     with st.expander(f"🔍 최근 am_wtf 상세 로그 보기 (최신 20건 / 총 {len(system_wtfs)}건)"):
         wtf_rows = []
@@ -78,7 +78,7 @@ def _render_system_wtfs(system_wtfs):
             })
 
         df_wtf_recent = pd.DataFrame(wtf_rows)
-        st.dataframe(df_wtf_recent, use_container_width=True, hide_index=True)
+        st.dataframe(df_wtf_recent, width="stretch", hide_index=True)
 
 def _render_binder_events(report_data, binder_warnings):
     if not binder_warnings:
@@ -382,4 +382,4 @@ def render_binder_proxy_leaks(binder_warnings):
             )
             fig.update_traces(textposition='outside')
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")

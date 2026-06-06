@@ -1,5 +1,16 @@
 import os
 import json
+import warnings
+
+# 1. Hugging Face Transformers의 불필요한 로그 레벨 강제 다운
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # 토크나이저 관련 잔여 워닝 방지
+
+# 2. 파이썬 경고(Warning) 모듈을 사용해 __path__ 관련 메시지 싹쓸이 필터링
+warnings.filterwarnings("ignore", message=".*Accessing `__path__`.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="transformers.*")
+
 import glob
 import chromadb
 import torch
@@ -376,7 +387,19 @@ class RilRagChat:
 
         # 💡 추출된 알짜배기 로그 타입만 넘겨서 불필요한 템플릿을 제거합니다.
         domain_guidelines = self._get_domain_specific_guideline(search_query, intents, retrieved_log_types)
-
+        # ==============================================================
+        # ✅ [프롬프트 자동 검증 로직 (Sanity Check)]
+        # 실제로 검색된 로그 타입들의 템플릿이 문자열에 정상적으로 주입되었는지 확인
+        # ==============================================================
+        log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
+        for log_type in retrieved_log_types:
+            # config.yaml에 해당 로그 타입의 템플릿이 정의되어 있다면
+            if log_type in log_guidelines_dict:
+                expected_header = f"### [{log_type} 전용 출력 템플릿]"
+                if expected_header not in domain_guidelines:
+                    # 템플릿이 누락되었다면 콘솔에 경고 에러 출력 (또는 Exception 발생 가능)
+                    print(f"🚨 [PROMPT_ERROR] 치명적 오류: {expected_header}이(가) 프롬프트에 누락되었습니다!")
+        # ==============================================================
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
