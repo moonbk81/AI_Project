@@ -32,7 +32,6 @@ from agent_toolkit import (
     get_tiantong_satellite_analytics,
 )
 
-from tools.eval_logger import log_rag_for_evaluation
 from sentence_transformers import SentenceTransformer
 from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
 from rca import StructuredEventRenderer
@@ -401,13 +400,13 @@ class RilRagChat:
         # 5. 가드레일 검사
         guardrail_answer = try_build_guardrail_answer(user_query, results, tool_facts=tool_facts)
         if guardrail_answer:
-            doc_ids = results['ids'][0] if results and results.get('ids') else []
-            meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
-            try:
-                combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-                log_rag_for_evaluation(query=user_query, context=combined_context, answer=guardrail_answer, guideline=domain_guidelines, model_name=f"{self.llm_model_name}+guardrail")
-            except Exception: pass
-            return guardrail_answer, doc_ids, meta_list, ""
+            guardrail_injection = (
+                f"🚨 [가드레일 최고 등급 강제 지시사항 - 절대 준수]:\n"
+                f"{guardrail_answer}\n"
+                f"(※ 위 내용은 시스템이 검증한 '절대 팩트'입니다. 어떤 경우에도 위 결론을 뒤집거나 부정하지 말고, 사용자의 요청 양식과 페르소나에 맞게 자연스러운 문장으로만 다듬어서 최종 답변을 생성하십시오.)"
+            )
+            tool_facts = f"{guardrail_injection}\n\n{tool_facts}"
+            print("[RAG_INFO] 가드레일 확정 답변을 LLM 프롬프트 최우선 순위로 주입했습니다.")
 
         # 6. 시스템 프롬프트 빌드 및 디버깅 로그 저장
         system_prompt = build_rag_prompt(self.system_role_prompt, domain_guidelines, tool_facts, formatted_logs)
@@ -433,12 +432,6 @@ class RilRagChat:
 
         # 7. LLM 호출 및 결과 반환
         answer, thinking = self._call_llm(system_prompt=system_prompt, user_query=user_query, is_bench=is_bench)
-
-        try:
-            combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-            log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines, model_name=self.llm_model_name)
-        except Exception: pass
-
         return answer, results.get('ids', [[]])[0], results.get('metadatas', [[]])[0], thinking
 
     def get_all_files(self):

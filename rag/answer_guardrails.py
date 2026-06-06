@@ -15,12 +15,10 @@ from rag.query_classifiers import (
     is_negative_binder_leak_check_query,
 )
 
-
 def iter_result_meta(results) -> list:
     if not results or not results.get("metadatas"):
         return []
     return results.get("metadatas", [[]])[0] or []
-
 
 def _contains_process_name(events: list[dict], process_name: str) -> bool:
     process_name = process_name.lower()
@@ -34,7 +32,6 @@ def _contains_process_name(events: list[dict], process_name: str) -> bool:
         for meta in events
     )
 
-
 def _extract_ms(meta: dict) -> int:
     text = " ".join([
         str(meta.get("desc", "")),
@@ -42,7 +39,6 @@ def _extract_ms(meta: dict) -> int:
     ])
     match = re.search(r"(\d+)\s*ms", text, flags=re.IGNORECASE)
     return int(match.group(1)) if match else 0
-
 
 def _guess_requested_process(query_lower: str) -> str | None:
     for process_name in [
@@ -54,7 +50,6 @@ def _guess_requested_process(query_lower: str) -> str | None:
         if process_name in query_lower:
             return process_name
     return None
-
 
 def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str | None:
     """Return a deterministic answer when retrieved metadata is decisive.

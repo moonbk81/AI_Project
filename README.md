@@ -171,10 +171,6 @@ Android Dumpstate / Modem Log
  ┃ ┣ 📜 power_ui.py
  ┃ ┣ 📜 satellite_ui.py
  ┃ ┗ 📜 telephony_ui.py
- ┣ 📂 tools/
- ┃ ┣ 📜 eval_logger.py
- ┃ ┣ 📜 compare_routing_scores.py
- ┃ ┗ 📜 make_ppt.py
  ┣ 📂 tests/
  ┃ ┣ 📜 test_semantic_routing.py
  ┃ ┣ 📜 test_semantic_routing_fuzzy.py
