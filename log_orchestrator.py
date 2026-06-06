@@ -21,6 +21,7 @@ from parsers.native_crash_parser import NativeCrashParser
 from parsers.diagnostic_parser import BinderWarningParser
 from parsers.rilj_parser import RiljParser
 from parsers.system_property_parser import SystemPropertyParser
+from parsers.analysis_bucket_builder import AnalysisBucketBuilder
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -52,6 +53,8 @@ class LogOrchestrator:
         self.binder_parser = BinderWarningParser(self._get_surrounding_context_logs)
         self.rilj_parser = RiljParser()
         self.sys_prop_parser = SystemPropertyParser()
+
+        self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
 
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
@@ -86,212 +89,6 @@ class LogOrchestrator:
         end = min(len(lines), idx + window + 1)
         buckets[bucket_name].extend(lines[start:end])
 
-    def _build_analysis_buckets(self, lines):
-        """
-        parser마다 전체 dump를 반복 순회하지 않도록 1회 스캔으로 후보 라인 버킷을 만듭니다.
-        call/oos parser는 상태 흐름 누락 위험이 있어 run_batch에서 계속 전체 lines를 사용합니다.
-        """
-        buckets = {
-            'boot': [],
-            'signal': [],
-            'dns': [],
-            'usage': [],
-            'net_ts': [],
-            'crash': [],
-            'anr': [],
-            'radio_power': [],
-            'battery': [],
-            'battery_thermal': [],
-            'ntn': [],
-            'datacall': [],
-            'ims_sip': [],
-            'sat_at': [],
-            'internet_stall': [],
-            'nitz': [],
-            'native_crash': [],
-            'binder': [],
-            'binder_context': [],
-            'rilj': [],
-        }
-
-        crash_keywords = [
-            "FATAL EXCEPTION", "Fatal signal", "AndroidRuntime", "am_crash",
-            "force close", "Tombstone written to", "Build fingerprint:", "Abort message:",
-        ]
-        anr_keywords = [
-            "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
-            "Broadcast of Intent", "executing service", "traces.txt", "CPU usage from",
-        ]
-        radio_power_keywords = [
-            "setRadioPower", "setRadioPowerForReason", "RADIO_POWER", "RIL_REQUEST_RADIO_POWER",
-            "RADIO_OFF", "RADIO_ON", "airplane_mode_on", "AIRPLANE_MODE",
-        ]
-        battery_keywords = [
-            "Battery", "battery", "batterystats", "BatteryService", "HealthInfo",
-            "level=", "plugged=", "temperature=", "voltage=",
-        ]
-        thermal_context_keywords = [
-            "ThermalEvent", "ThermalService", "ThermalManager", "thermalservice",
-            "overheat", "throttling", "cooling device", "CoolingDevice",
-        ]
-        thermal_line_keywords = [
-            "temperature mValue", "skin-therm", "battery-therm", "sec-battery",
-            "WakeLock", "Wakelock", "wakelock held", "wake_lock",
-        ]
-        ntn_keywords = [
-            "NTN", "ntn", "satellite", "Satellite", "NonTerrestrial", "non-terrestrial",
-        ]
-        datacall_keywords = [
-            "DataCall", "data call", "SetupDataCall", "SETUP_DATA_CALL", "DEACTIVATE_DATA_CALL",
-            "DcTracker", "DataNetwork", "TelephonyNetworkFactory", "ApnContext",
-        ]
-        ims_sip_keywords = [
-            "SIP/2.0", "REGISTER sip:", "INVITE sip:", "BYE sip:", "CANCEL sip:",
-            "P-CSCF", "ImsReasonInfo", "ImsPhoneConnection", "ImsCallSession",
-            "createCallProfile", "onCallStarted", "onCallStartFailed",
-        ]
-        sat_at_keywords = [
-            "AT+", "AT^", "AT$", "> AT", "< AT",
-            "+CEREG", "+CREG", "+CGREG", "+COPS", "+CSQ",
-        ]
-        internet_stall_context_keywords = [
-            "Data Stall", "data stall", "validation failed",
-            "PARTIAL_CONNECTIVITY", "NO_INTERNET", "EVENT_NETWORK_TESTED",
-            "default network changed", "network lost",
-        ]
-        internet_stall_line_keywords = [
-            "TcpSocketTracker", "PrivateDns", "NET_CAPABILITY_VALIDATED", "NetworkAgentInfo",
-        ]
-        native_crash_keywords = ["Fatal signal", "Abort mesage:", "Abort message:", "backtrace:"]
-
-        # Binder UI 테이블에는 직접적인 Binder 문제 이벤트만 넣습니다.
-        # 주변 문맥(ANR/Watchdog/CPU 등)은 별도 binder_context 버킷으로 분리하여
-        # LLM RCA 보조 팩트에만 사용합니다. UI 테이블 폭증 방지가 목적입니다.
-        binder_keywords = [
-            "binder thread pool", "binder_sample", "Binder transaction to",
-            "DeadObjectException", "FAILED_TRANSACTION", "binder transaction failed",
-            "TransactionTooLargeException", "binder_alloc", "binder buffer",
-            "am_kill", "am_wtf",
-        ]
-        binder_context_keywords = [
-            "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
-            "Watchdog", "system_server", "slow dispatch", "slow delivery",
-            "lock contention", "monitor contention", "blocked on", "waiting to lock",
-            "DeadObjectException", "FAILED_TRANSACTION", "RemoteException", "Service not responding",
-            "CPU usage", "iowait", "lowmemorykiller", "lmkd", "memory pressure",
-            "RILJ", "rild", "radio", "telephony", "IMS", "DataCall", "OOS",
-        ]
-        binder_context_anchor_keywords = [
-            "binder thread pool", "binder_sample", "Binder transaction to",
-            "DeadObjectException", "FAILED_TRANSACTION", "TransactionTooLargeException",
-            "binder_alloc", "am_kill", "am_wtf",
-        ]
-
-        in_package_info = False  # 🚨 [신규 추가] 상태 추적 변수
-        rilj_tag_regex = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
-        in_proxy_histogram = False
-
-        for idx, line in enumerate(lines):
-            if line.startswith("!@Boot"):
-                buckets['boot'].append(line)
-
-            if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line or "NetworkSignalStrengthHandler" in line:
-                buckets['signal'].append(line)
-
-            if any(k in line for k in ["transports={0}", "metered=true", "st=", "rb=", "DNS Requested", "pkg,"]):
-                buckets['usage'].append(line)
-
-            if "DNS Requested" in line:
-                buckets['dns'].append(line)
-
-            if any(k in line for k in ["NetId", "DnsEvent", "TcpStats", "NetworkMonitor", "ConnectivityService"]):
-                buckets['net_ts'].append(line)
-
-            if any(k in line for k in crash_keywords):
-                self._add_context_window(buckets, 'crash', lines, idx, window=80)
-
-            if any(k in line for k in anr_keywords):
-                self._add_context_window(buckets, 'anr', lines, idx, window=180)
-
-            if any(k in line for k in radio_power_keywords):
-                self._add_context_window(buckets, 'radio_power', lines, idx, window=40)
-
-            if any(k in line for k in battery_keywords):
-                buckets['battery'].append(line)
-                buckets['battery_thermal'].append(line)
-
-            if any(k in line for k in thermal_context_keywords):
-                self._add_context_window(buckets, 'battery_thermal', lines, idx, window=8)
-            elif any(k in line for k in thermal_line_keywords):
-                buckets['battery_thermal'].append(line)
-
-            if any(k in line for k in ntn_keywords):
-                buckets['ntn'].append(line)
-
-            if any(k in line for k in datacall_keywords):
-                self._add_context_window(buckets, 'datacall', lines, idx, window=60)
-                buckets['internet_stall'].append(line)
-
-            if any(k in line for k in ims_sip_keywords):
-                self._add_context_window(buckets, 'ims_sip', lines, idx, window=30)
-
-            if any(k in line for k in sat_at_keywords):
-                buckets['sat_at'].append(line)
-
-            if any(k in line for k in internet_stall_context_keywords):
-                self._add_context_window(buckets, 'internet_stall', lines, idx, window=10)
-            elif any(k in line for k in internet_stall_line_keywords):
-                buckets['internet_stall'].append(line)
-
-            if "nitz_status" in line:
-                buckets['nitz'].append(line)
-
-            if any(k in line for k in native_crash_keywords):
-                self._add_context_window(buckets, 'native_crash', lines, idx, window=60)
-
-            lower_line = line.lower()
-            if "binderproxy descriptor histogram" in lower_line:
-                in_proxy_histogram = True
-
-            if in_proxy_histogram:
-                buckets['binder'].append(line)
-                if "critical dump took" in lower_line or "binderproxydumphelper" in lower_line or line.startswith("---------"):
-                    in_proxy_histogram = False
-
-            if any(k in line for k in binder_keywords):
-                 buckets['binder'].append(line)
-
-            # Binder context는 이벤트 주변의 제한된 문맥만 모읍니다.
-            # context 라인을 binder_warnings에 넣으면 UI 상세 테이블이 수천 행으로 불어납니다.
-            if any(k in line for k in binder_context_anchor_keywords):
-                start = max(0, idx - 20)
-                end = min(len(lines), idx + 21)
-                for ctx_line in lines[start:end]:
-                    if any(k.lower() in ctx_line.lower() for k in binder_context_keywords):
-                        buckets['binder_context'].append(ctx_line)
-            elif any(k.lower() in line.lower() for k in binder_context_keywords):
-                # 앵커 없이 전역으로 잡히는 context는 과다 수집 방지를 위해 직접 append하지 않습니다.
-                # ANR/Crash 전용 parser가 별도 bucket에서 처리합니다.
-                pass
-
-            if rilj_tag_regex.search(line):
-                buckets['rilj'].append(line)
-
-        for name, bucket_lines in buckets.items():
-            seen = set()
-            deduped = []
-            for bucket_line in bucket_lines:
-                if bucket_line not in seen:
-                    seen.add(bucket_line)
-                    deduped.append(bucket_line)
-            buckets[name] = deduped
-
-        print(
-            "📊 [PreFilter] "
-            + ", ".join(f"{name}={len(bucket_lines)}" for name, bucket_lines in buckets.items())
-        )
-        return buckets
-
     def run_batch(self, output_path):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
@@ -320,7 +117,7 @@ class LogOrchestrator:
                             global_uid_map[match.group(1)] = match.group(2).strip()
 
             # 1. 1회 스캔 기반 parser별 후보 라인 버킷 생성
-            buckets = self._build_analysis_buckets(lines)
+            buckets = self.bucket_builder.build(lines)
 
             result = {}
 

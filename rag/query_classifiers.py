@@ -1,11 +1,9 @@
 
-
 """Query classifier helpers for retrieval and routing.
 
 These functions intentionally use lightweight keyword heuristics.
 They should stay domain-generic and must not depend on Golden TC IDs or fixed test timestamps.
 """
-
 
 def is_crash_absence_check(query_lower: str) -> bool:
     has_crash_scope = any(k in query_lower for k in [
@@ -27,7 +25,6 @@ def is_crash_absence_check(query_lower: str) -> bool:
 
     return has_crash_scope and has_absence_intent and not has_explicit_system_kill_query
 
-
 def is_dns_policy_query(query_lower: str) -> bool:
     has_dns_scope = any(k in query_lower for k in [
         "dns", "도메인", "lookup", "resolve", "resolver"
@@ -37,7 +34,6 @@ def is_dns_policy_query(query_lower: str) -> bool:
         "battery_saver", "reject", "app_standby", "background", "백그라운드", "절전"
     ])
     return has_dns_scope and has_policy_scope
-
 
 def is_datacall_failure_query(query_lower: str) -> bool:
     has_datacall_scope = any(k in query_lower for k in [
@@ -50,7 +46,6 @@ def is_datacall_failure_query(query_lower: str) -> bool:
         "not_specified", "not specified", "원인", "사유"
     ])
     return has_datacall_scope or ("no carrier" in query_lower and has_failure_scope)
-
 
 def is_call_release_misclassification_query(query_lower: str) -> bool:
     has_call_scope = any(k in query_lower for k in [
@@ -130,7 +125,6 @@ def is_binder_proxy_count_query(query_lower: str) -> bool:
         "대량", "count", "누수 최대", "발생 횟수", "총", "회나"
     ])
     return has_binder_or_wtf_scope and has_count_scope
-
 
 def is_negative_binder_leak_check_query(query_lower: str) -> bool:
     has_binder_leak_scope = any(k in query_lower for k in [

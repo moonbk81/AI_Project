@@ -1,5 +1,4 @@
 
-
 """Forced top-k injection rules for retrieval reranking.
 
 This module keeps `_rerank_results()` in `retrieval.py` focused on generic scoring,
@@ -18,14 +17,12 @@ from rag.query_classifiers import (
     is_nitz_query,
 )
 
-
 def _stable_item_id(item: dict) -> str:
     return (
         item.get("id")
         or json.dumps(item.get("meta", {}), ensure_ascii=False, default=str)
         + str(item.get("doc", ""))[:80]
     )
-
 
 def _merge_top_results(forced_results: list, final_top_results: list, top_k: int) -> list:
     merged = []
@@ -37,7 +34,6 @@ def _merge_top_results(forced_results: list, final_top_results: list, top_k: int
         seen_ids.add(item_id)
         merged.append(item)
     return merged[:top_k]
-
 
 def apply_rerank_injections(
     reranked_results: list,

@@ -1,7 +1,6 @@
 import re
 from typing import Any
 
-
 class StructuredEventRenderer:
     """Render structured Summary/RCA events without asking the LLM to reinterpret them.
 

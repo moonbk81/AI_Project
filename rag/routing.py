@@ -6,7 +6,6 @@ import re
 import numpy as np
 import ollama
 
-
 def _is_crash_absence_check_query(query_lower: str) -> bool:
     has_crash_scope = any(k in query_lower for k in [
         "crash", "크래시", "native crash", "네이티브 크래시", "fatal exception",
@@ -32,7 +31,6 @@ def _is_crash_absence_check_query(query_lower: str) -> bool:
         and not has_rca_intent
     )
 
-
 def _is_crash_rca_query(query_lower: str) -> bool:
     has_crash_scope = any(k in query_lower for k in [
         "crash", "크래시", "native crash", "네이티브 크래시", "fatal exception",
@@ -42,7 +40,6 @@ def _is_crash_rca_query(query_lower: str) -> bool:
         "root cause", "근본 원인", "원인", "왜", "rca", "분석해", "분석", "상관", "관련"
     ])
     return has_crash_scope and has_rca_intent and not _is_crash_absence_check_query(query_lower)
-
 
 def _is_call_drop_trap_query(query_lower: str) -> bool:
     has_call_scope = any(k in query_lower for k in [
@@ -78,7 +75,6 @@ def _is_time_context_inference_query(query_lower: str) -> bool:
         "airplane mode", "device_property_state", "device property"
     ])
     return has_call_scope and has_time_reasoning_scope and has_state_transition_scope
-
 
 def extract_json_object(text: str) -> dict:
     if not text:
@@ -308,7 +304,6 @@ def get_semantic_routing(query, routing_map, embed_model):
         "top_matches": top_matches
     }
 
-
 def get_llm_routing(query: str, routing_map: dict, llm_model_name: str) -> dict:
     allowed_tools = set()
     allowed_log_types = set()
@@ -347,7 +342,6 @@ def get_llm_routing(query: str, routing_map: dict, llm_model_name: str) -> dict:
         }
     except Exception as e:
         return {"intents": [], "tools": [], "log_types": [], "reason": f"LLM routing failed: {e}", "raw": content if "content" in locals() else ""}
-
 
 def get_hybrid_routing(query: str, routing_map: dict, embed_model, llm_model_name: str) -> dict:
     semantic = get_semantic_routing(query, routing_map, embed_model)
