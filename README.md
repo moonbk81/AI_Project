@@ -185,7 +185,6 @@ Android Dumpstate / Modem Log
  ┣ 📜 agent_tools.py
  ┣ 📜 benchmark_ui.py
  ┣ 📜 run_golden_eval.py
- ┣ 📜 run_rag_eval_csv.py
  ┣ 📜 ui_components.py
  ┣ 📜 config.yaml
  ┗ 📜 requirements.txt
