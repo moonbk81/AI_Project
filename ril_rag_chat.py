@@ -49,6 +49,7 @@ from rag.ingest import (
 )
 from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
+from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
@@ -229,33 +230,25 @@ class RilRagChat:
         print(f"\nVector DB 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
     def _get_domain_specific_guideline(self, query, intents, retrieved_log_types):
-        guidelines = []
         query_lower = query.lower()
-
-        if "cs call" in query_lower or "cs 통화" in query_lower:
-            guidelines.append("### [CS Call 전용 분석]\n이 분석은 CS 통화에 집중합니다. "
-                              "VoLTE나 SIP 관련 로그 대신, CS 통화의 거절 사유(Release Cause)를 우선적으로 찾아 요약하십시오.")
-
-        elif "ps call" in query_lower or "volte" in query_lower or "ims" in query_lower:
-            guidelines.append("### [PS(VoLTE) Call 전용 분석]\n이 분석은 PS(VoLTE/IMS) 통화 장애에 집중합니다. "
-                              "정상 종료(예: 510_CODE_USER_TERMINATED)는 요약에서 생략하고, 비정상 종료(예: 504_CODE_USER_DECLINE, SIP 에러)가 발생한 문제 통화의 시간과 에러 코드만 추출하십시오.")
-
-        if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
-            spacex_rule = self.prompts.get('SpaceX', "")
-            if spacex_rule: guidelines.append(f"### [위성 통신 규칙 - SpaceX]\n{spacex_rule}")
-        elif any(k in query_lower for k in ["tiantong", "티엔통", "천통", "at command"]):
-            tiantong_rule = self.prompts.get('Tiantong', "")
-            if tiantong_rule: guidelines.append(f"### [위성 통신 규칙 - Tiantong]\n{tiantong_rule}")
-        else:
-            base_p = self.prompts.get('base_persona', "")
-            if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")
-
-        # 💡 [핵심 최적화] target_log_types 대신 '실제 검색된' retrieved_log_types만 순회합니다.
         log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
+
+        # 1. prompt_template.py에서 도메인 규칙 가져오기
+        guidelines = get_domain_guidelines(query_lower, self.log_guidelines, self.prompts)
+
+        # 2. 검색된 로그 기반 템플릿 주입 (자동화)
         for log_type in retrieved_log_types:
             if log_type in log_guidelines_dict:
                 guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
+        # 3. SYSTEM_WTF 통계 주입 (self._temp_tool_facts 활용)
+        if hasattr(self, '_temp_tool_facts') and self._temp_tool_facts:
+            wtf_stats = self._temp_tool_facts.get("wtf_stats_detailed", {})
+            wtf_guideline = format_system_wtf_stats(wtf_stats)
+            if wtf_guideline:
+                guidelines.append(wtf_guideline)
+
+        # 4. 근본 원인 종합 분석
         root_cause_synthesis = self.prompts.get('root_cause_synthesis', "")
         if root_cause_synthesis:
             guidelines.append(f"### [근본 원인 종합 분석]\n{root_cause_synthesis}")
@@ -347,24 +340,19 @@ class RilRagChat:
             )
             target_log_types = self.routing_map.get("Call_Drop_Trap", {}).get(
                 "log_types",
-                ["Call_Session", "CS_Call_Session", "PS_Call_Session"],
+                ["Call_Session"],
             )
 
         elif "Time_Context_Inference" in intents:
             intents = ["Time_Context_Inference"]
             selected_tools = self.routing_map.get("Time_Context_Inference", {}).get("tools", ["get_ps_ims_call_analytics", "get_cs_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"])
-            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "CS_Call_Session", "PS_Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
+            target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
 
         if "Tiantong_Satellite" in intents:
             selected_tools = ["get_tiantong_satellite_analytics"]
             target_log_types = ["Satellite_AT_Command"]
 
-        # 💡 [순서 변경] DB 검색(Retrieval)을 가이드라인 생성보다 먼저 실행합니다.
-        where_filter = build_where_filter(
-            current_file=current_file,
-            target_log_types=target_log_types,
-        )
-
+        # 1. DB 검색 (retrieval.py 내에서 is_datacall_failure_query에 의해 자동 확장됨)
         results = retrieve_and_rerank(
             collection=self.collection,
             embed_model=self.embed_model,
@@ -374,32 +362,11 @@ class RilRagChat:
             target_log_types=target_log_types,
         )
 
-        # 💡 [핵심] 검색된 결과에서 '실제 등장한 로그 타입'만 추출합니다.
-        retrieved_log_types = set()
-        if results and results.get('metadatas') and results['metadatas'][0]:
-            for meta in results['metadatas'][0]:
-                if meta and meta.get("log_type"):
-                    retrieved_log_types.add(meta["log_type"])
-
-        # 라우터가 3개 이하로 좁혀준 명확한 질문이면, 검색결과가 없어도 부재(Absence) 판별을 위해 템플릿 포함
+        retrieved_log_types = {meta.get("log_type") for meta in results.get('metadatas', [[]])[0] if meta and meta.get("log_type")}
         if len(target_log_types) <= 3:
             retrieved_log_types.update(target_log_types)
 
-        # 💡 추출된 알짜배기 로그 타입만 넘겨서 불필요한 템플릿을 제거합니다.
-        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, retrieved_log_types)
-        # ==============================================================
-        # ✅ [프롬프트 자동 검증 로직 (Sanity Check)]
-        # 실제로 검색된 로그 타입들의 템플릿이 문자열에 정상적으로 주입되었는지 확인
-        # ==============================================================
-        log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
-        for log_type in retrieved_log_types:
-            # config.yaml에 해당 로그 타입의 템플릿이 정의되어 있다면
-            if log_type in log_guidelines_dict:
-                expected_header = f"### [{log_type} 전용 출력 템플릿]"
-                if expected_header not in domain_guidelines:
-                    # 템플릿이 누락되었다면 콘솔에 경고 에러 출력 (또는 Exception 발생 가능)
-                    print(f"🚨 [PROMPT_ERROR] 치명적 오류: {expected_header}이(가) 프롬프트에 누락되었습니다!")
-        # ==============================================================
+        # 2. 팩트 데이터 추출
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
@@ -411,62 +378,39 @@ class RilRagChat:
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
         tool_facts = self._clean_log_payload(tool_facts)
 
+        # 💡 [핵심] JSON 데이터 임시 보관 (prompt_template 주입용)
+        self._temp_tool_facts = json.loads(tool_facts) if tool_facts.startswith('{') else {}
+
         if health_kpi:
             sanitized_kpi = self._clean_log_payload(health_kpi)
             tool_facts = f"=== [단말 전반 KPI 상태] ===\n{sanitized_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
-        where_filter = build_where_filter(
-            current_file=current_file,
-            target_log_types=target_log_types,
-        )
+        # 3. 가이드라인 및 프롬프트 생성
+        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, retrieved_log_types)
+        self._temp_tool_facts = None # 완료 후 초기화
 
-        results = retrieve_and_rerank(
-            collection=self.collection,
-            embed_model=self.embed_model,
-            search_query=search_query,
-            top_k=top_k,
-            current_file=current_file,
-            target_log_types=target_log_types,
-        )
+        # 4. 구조화된 분석 결론 주입 (StructuredEventRenderer)
+        direct_structured_answer = StructuredEventRenderer.render(results, user_query)
+        if direct_structured_answer:
+            from rag.prompt_template import format_structured_analysis
+            tool_facts = f"{format_structured_analysis(direct_structured_answer)}\n\n{tool_facts}"
 
         formatted_logs = self._format_results(results)
         formatted_logs = self._clean_log_payload(formatted_logs)
 
-        guardrail_answer = try_build_guardrail_answer(user_query, results, tool_facts=tool_facts,)
+        # 5. 가드레일 검사
+        guardrail_answer = try_build_guardrail_answer(user_query, results, tool_facts=tool_facts)
         if guardrail_answer:
             doc_ids = results['ids'][0] if results and results.get('ids') else []
             meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
             try:
                 combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
-                log_rag_for_evaluation(
-                    query=user_query,
-                    context=combined_context,
-                    answer=guardrail_answer,
-                    guideline=domain_guidelines,
-                    model_name=f"{self.llm_model_name}+guardrail"
-                )
-            except Exception:
-                pass
+                log_rag_for_evaluation(query=user_query, context=combined_context, answer=guardrail_answer, guideline=domain_guidelines, model_name=f"{self.llm_model_name}+guardrail")
+            except Exception: pass
             return guardrail_answer, doc_ids, meta_list, ""
 
-        direct_structured_answer = StructuredEventRenderer.render(results, user_query)
-        if direct_structured_answer:
-            structured_injection = (
-                f"🚨 [시스템 사전 분석 결론 - 최우선 반영할 것]:\n"
-                f"{direct_structured_answer}\n"
-                f"(※ 위 사전 분석 결과를 바탕으로, 사용자가 요청한 출력 양식에 맞게 렌더링하십시오.)"
-            )
-            tool_facts = f"{structured_injection}\n\n{tool_facts}"
-
-            print("[RAG_INFO] StructuredEventRenderer의 결과를 LLM 프롬프트에 주입했습니다.")
-
-        # 시스템 롤 프롬프트(system_prompt)만 순수하게 빌드합니다.
-        system_prompt = build_rag_prompt(
-            system_role_prompt=self.system_role_prompt,
-            domain_guidelines=domain_guidelines,
-            tool_facts=tool_facts,
-            formatted_logs=formatted_logs,
-        )
+        # 6. 시스템 프롬프트 빌드 및 디버깅 로그 저장
+        system_prompt = build_rag_prompt(self.system_role_prompt, domain_guidelines, tool_facts, formatted_logs)
 
         if os.getenv("RAG_DEBUG_PROMPT", "0") == "1":
             try:
@@ -475,47 +419,27 @@ class RilRagChat:
                 safe_base = re.sub(r"[^a-zA-Z0-9_.-]+", "_", current_base or "Unknown")
                 debug_path = os.path.join(debug_dir, f"{safe_base}_last_prompt.txt")
                 debug_meta_path = os.path.join(debug_dir, f"{safe_base}_last_retrieval.json")
-
-                # 로깅용으로는 보기 편하게 합쳐서 저장합니다.
-                with open(debug_path, "w", encoding="utf-8") as f:
-                    f.write(system_prompt + f"\n\n사용자 질문: {user_query}")
+                with open(debug_path, "w", encoding="utf-8") as f: f.write(system_prompt + f"\n\n사용자 질문: {user_query}")
 
                 debug_payload = {
-                    "user_query": user_query,
-                    "search_query": search_query,
-                    "current_file": current_file,
-                    "current_base": current_base,
-                    "routing_result": routing_result,
-                    "selected_tools": selected_tools,
-                    "target_log_types": target_log_types,
-                    "intents": intents,
-                    "where_filter": where_filter,
+                    "user_query": user_query, "search_query": search_query, "current_file": current_file,
+                    "routing_result": routing_result, "selected_tools": selected_tools,
+                    "target_log_types": target_log_types, "intents": intents,
                     "doc_ids": results['ids'][0] if results and results.get('ids') else [],
                     "retrieved_meta": results['metadatas'][0] if results and results.get('metadatas') else [],
-                    "formatted_logs_head": formatted_logs[:5000],
-                    "tool_facts_head": tool_facts[:5000],
-                    "domain_guidelines_head": domain_guidelines[:5000],
                 }
-                with open(debug_meta_path, "w", encoding="utf-8") as f:
-                    json.dump(debug_payload, f, ensure_ascii=False, indent=2, default=str)
+                with open(debug_meta_path, "w", encoding="utf-8") as f: json.dump(debug_payload, f, ensure_ascii=False, indent=2, default=str)
+            except Exception as e: print(f"[RAG_DEBUG] failed: {e}")
 
-                print(f"[RAG_DEBUG] prompt saved: {debug_path}")
-                print(f"[RAG_DEBUG] retrieval saved: {debug_meta_path}")
-            except Exception as e:
-                print(f"[RAG_DEBUG] failed to save prompt debug files: {e}")
-
-        # 💡 [핵심 수정 2] _call_llm 호출 시 system_prompt와 user_query를 분리해서 넘겨줍니다.
+        # 7. LLM 호출 및 결과 반환
         answer, thinking = self._call_llm(system_prompt=system_prompt, user_query=user_query, is_bench=is_bench)
-
-        doc_ids = results['ids'][0] if results and results.get('ids') else []
-        meta_list = results['metadatas'][0] if results and results.get('metadatas') else []
 
         try:
             combined_context = f"=== [분석 팩트 모음] ===\n{tool_facts}\n\n=== [검색된 관련 로그]===\n{formatted_logs}"
             log_rag_for_evaluation(query=user_query, context=combined_context, answer=answer, guideline=domain_guidelines, model_name=self.llm_model_name)
         except Exception: pass
 
-        return answer, doc_ids, meta_list, thinking
+        return answer, results.get('ids', [[]])[0], results.get('metadatas', [[]])[0], thinking
 
     def get_all_files(self):
         return get_all_ingested_files(self.collection)

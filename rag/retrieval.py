@@ -114,16 +114,17 @@ def retrieve_and_rerank(
             "ANR_Context",
         ]
     elif is_call_release_misclassification_query(query_lower):
-        effective_target_log_types = ["Call_Session", "CS_Call_Session", "PS_Call_Session"]
+        effective_target_log_types = ["Call_Session"]
     elif is_time_context_inference_query(query_lower):
         effective_target_log_types = [
             "Call_Session",
-            "CS_Call_Session",
-            "PS_Call_Session",
             "Radio_Power_Event",
             "OOS_Event",
             "Device_Property_State",
         ]
+    if is_datacall_failure_query(query_lower):
+        if "Data_Call_Setup_Event" not in effective_target_log_types:
+            effective_target_log_types.append("Data_Call_Setup_Event")
 
     where_filter = build_where_filter(
         current_file=current_file,

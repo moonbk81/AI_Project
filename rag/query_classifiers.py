@@ -103,13 +103,11 @@ def is_time_context_inference_query(query_lower: str) -> bool:
     ])
     return has_call_scope and has_time_reasoning_scope and has_state_transition_scope
 
-
 def is_nitz_query(query_lower: str) -> bool:
     return any(k in query_lower for k in [
         "nitz", "network identity and time zone", "time zone", "timezone",
         "타임존", "시간대", "시간 변경", "시간 보정", "시각 보정", "핑퐁"
     ])
-
 
 def is_binder_query(query_lower: str) -> bool:
     return any(k in query_lower for k in [

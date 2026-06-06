@@ -103,50 +103,13 @@ def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str
     # 2) Call Drop fact-only check: (골든셋 함정 방어용 최소 개입)
     # LLM이 Normal Release를 Call Drop으로 환각하는 것만 잡아냅니다.
     if is_call_drop_check_query(query_lower):
-        call_sessions = []
-        for meta in meta_list:
-            log_type = str(meta.get("log_type", ""))
-            meta_text = " ".join([
-                log_type, str(meta.get("type", "")), str(meta.get("status", "")),
-                str(meta.get("fail_reason", "")), str(meta.get("release_cause", "")),
-                str(meta.get("sip_code", "")), str(meta.get("desc", "")),
-                str(meta.get("raw_info", "")), str(meta.get("raw_logs", "")),
-            ]).lower()
-            if (
-                log_type in ["Call_Session", "CS_Call_Session", "PS_Call_Session", "Call_Event", "CS_Call_Event", "PS_Call_Event"]
-                or "call" in log_type.lower()
-                or "normal_release" in meta_text or "normal release" in meta_text
-                or "release cause" in meta_text or "release_cause" in meta_text
-                or "sip_" in meta_text or "code_user" in meta_text
-                or "mo_call" in meta_text or "mt_call" in meta_text
-            ):
-                call_sessions.append(meta)
-
-        if call_sessions:
-            drop_sessions = []
-            is_all_normal = True
-            for meta in call_sessions:
-                status = str(meta.get("status", "")).upper()
-                fail_reason = str(meta.get("fail_reason", "")).upper()
-                release_cause = str(meta.get("release_cause", "")).upper()
-                combined = " ".join([status, fail_reason, release_cause])
-
-                is_normal_release = (
-                    "NORMAL_RELEASE" in combined or "NORMAL RELEASE" in combined
-                    or status == "NORMAL" or " DISCONNECTED / NORMAL" in combined
-                    or "RELEASE_CAUSE_NORMAL" in combined or "CODE_USER" in combined
-                )
-
-                if not is_normal_release:
-                    is_all_normal = False
-                    if any(k in combined for k in ["CALL_DROP", "DROPPED", "ABNORMAL", "RADIO_LOST", "OOS", "ERROR", "FAIL"]):
-                        drop_sessions.append(meta)
-
-            # 💡 [핵심] 모두 Normal Release라서 "Call Drop이 아니다"라고 교정해줘야 하는 경우만 가드레일 작동
-            if is_all_normal and not drop_sessions:
-                return "명시적인 Call Drop 이력은 없으며 정상 종료(Normal Release/User Terminated)되었습니다."
-
-            # 그 외에 진짜 장애가 섞여 있다면 LLM에게 렌더링을 맡김 (return None)
+        if any(k in query_lower for k in ["거절", "reject", "decline", "망 이슈", "sip", "에러", "원인", "사유"]):
+            pass  # LLM에게 렌더링을 맡김 (return None)
+        else:
+            facts_str = str(tool_facts)
+            # KPI 데이터 상에 드랍이 0건이거나 "드랍 없음"이 확정된 경우에만 환각 방어 발동
+            if re.search(r"['\"]dropped_calls_count['\"]\s*:\s*0", facts_str) or "드랍 없음" in facts_str:
+                return "명시적인 Call Drop 이력은 없으며 정상 종료(Normal Release)되었습니다."
 
     # 3) Binder THREAD_EXHAUSTION / IPC bottleneck
     thread_exhaustion_events = [

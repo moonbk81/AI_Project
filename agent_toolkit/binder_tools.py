@@ -155,6 +155,7 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
             "process": item.get("process", "Unknown"),
             "summary": item.get("summary") or item.get("desc"),
             "raw_trigger": item.get("raw"),
+            "count": int(re.search(r"Count: (\d+)", str(item.get("raw"))).group(1)) if "Count: " in str(item.get("raw")) else 1
         }
         for item in warning_facts
         if item.get("type") == "SYSTEM_WTF"
@@ -167,6 +168,7 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         "proxy_leak_histograms": proxy_leaks, # 💡 LLM에게 바인더 누수 심각성 전달
         "system_kills_am_kill": system_kills, # 💡 LLM에게 강제 종료 원인 전달
         "system_wtfs_am_wtf": system_wtfs,    # 💡 LLM에게 이상징후 대량 발생 전달
+        "wtf_stats_detailed": wtf_groups,
         "warning_type_counts": dict(type_counter),
         "thread_exhaustion_count": len(thread_exhaustion_events),
         "binder_transaction_failure_count": len(transaction_failures),
