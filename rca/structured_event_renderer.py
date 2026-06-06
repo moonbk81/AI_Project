@@ -136,6 +136,8 @@ class StructuredEventRenderer:
             return None
 
         parts: list[str] = []
+        suppress_wtf_raw_count = wants_wtf and wants_proxy
+        has_proxy_histogram = False
 
         if wants_wtf:
             wtf_events = [
@@ -164,7 +166,11 @@ class StructuredEventRenderer:
                     "time": meta.get("time") or "Unknown",
                 })
 
-            if wtf_events:
+            if suppress_wtf_raw_count and (wtf_events or legacy_wtf_summaries):
+                parts.append(
+                    "am_wtf 이상 징후 로그가 대량으로 확인됨. 프로세스별 세부 수량은 Summary/Histogram 근거가 있을 때만 별도로 판단함."
+                )
+            elif wtf_events:
                 by_process: dict[str, int] = {}
                 for event in wtf_events:
                     process = event.get("process") or "Unknown"
@@ -205,6 +211,7 @@ class StructuredEventRenderer:
                 leaked_descriptor = proxy_meta.get("leaked_descriptor") or "Binder proxy object"
                 max_count = proxy_meta.get("max_proxy_count") or proxy_meta.get("max_count") or "Unknown"
                 raw_info = proxy_meta.get("raw_info") or proxy_meta.get("trigger") or ""
+                has_proxy_histogram = True
                 parts.append(
                     f"동시간대 Binder Proxy Histogram에서는 {leaked_descriptor} 객체가 최대 {max_count}개까지 누수된 것으로 확인됨."
                 )
@@ -216,7 +223,12 @@ class StructuredEventRenderer:
         if not parts:
             return None
 
-        parts.append("따라서 수치형 질문은 Raw Event 추론보다 Summary/Histogram의 구조화된 count 값을 우선 사용함.")
+        if suppress_wtf_raw_count and has_proxy_histogram:
+            parts.append(
+                "따라서 이 케이스의 핵심 수치는 Binder Proxy Histogram의 구조화된 proxy count 값으로 해석함."
+            )
+        else:
+            parts.append("따라서 수치형 질문은 Raw Event 추론보다 Summary/Histogram의 구조화된 count 값을 우선 사용함.")
         return " ".join(parts)
 
     @classmethod
