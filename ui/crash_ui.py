@@ -277,20 +277,51 @@ def _render_java_crashes(crash_data):
     st.error(f"Critical: {len(crash_data)} System Crash/FATAL exception(s) detected.")
 
     for crash in crash_data:
-        ts = crash.get('timestamp', 'Time Unknown')
+        # 💡 시간 필드 매칭 강화 (timestamp, time 모두 지원)
+        ts = crash.get('timestamp', crash.get('time', 'Time Unknown'))
         process = crash.get('process', 'Unknown Process')
-        crash_type = crash.get('crash_type', 'FATAL EXCEPTION')
+
+        # 💡 커널 패닉일 경우 타이틀 변경
+        is_kernel = crash.get('is_kernel', False)
+        if is_kernel:
+            crash_type = "🚨 KERNEL PANIC / MODEM CRASH"
+        else:
+            crash_type = crash.get('crash_type', crash.get('type', 'FATAL EXCEPTION'))
 
         with st.expander(f"[{ts}] {process} - {crash_type}"):
-            raw_logs_str = str(crash.get('cross_context_logs', crash.get('raw_line', ''))).lower()
+            # 1. Exception Info (패닉 사유)
+            exception_info = crash.get('exception_info')
+            if exception_info:
+                st.error(f"**Exception Info:** {exception_info}")
+
+            # 2. Top Method
+            top_method = crash.get('top_method')
+            if top_method and top_method != "Unknown":
+                st.warning(f"**Top Method:** {top_method}")
+
+            # 3. Pre-Crash Context (여기에 MNR 로그가 출력됩니다!)
+            pre_context = crash.get('context', [])
+            if pre_context:
+                st.markdown("**Pre-Crash Context (단서 로그):**")
+                st.code("\n".join(pre_context), language='log')
+
+            # 4. Call Stack
+            call_stack = crash.get('call_stack', [])
+            if call_stack:
+                st.markdown("**Call Stack:**")
+                st.code("\n".join(call_stack), language='log' if is_kernel else 'java')
+
+            # 기존 TransactionTooLarge 및 Cross Context 로직 유지
+            raw_logs_str = str(crash.get('cross_context_logs', crash.get('trigger', ''))).lower()
             if "transactiontoolargeexception" in raw_logs_str:
                 st.error("Diagnostic Cause: TransactionTooLargeException. Buffer overflow triggered by intent data exceeding 1MB limit.")
+
             if 'cross_context_logs' in crash and crash['cross_context_logs']:
                 st.markdown("**Surrounding Context Log:**")
                 st.code("\n".join(crash['cross_context_logs']), language='log')
-            elif 'raw_line' in crash:
-                st.markdown("**Raw Crash Log:**")
-                st.code(crash['raw_line'], language='log')
+            elif 'trigger' in crash:
+                st.markdown("**Raw Crash Trigger:**")
+                st.code(crash['trigger'], language='log')
 
 def render_crash_analyzer(report_data):
     st.subheader("System Crash & FATAL Error Analysis")

@@ -243,27 +243,38 @@ class DnsParser(BaseParser):
                     })
         return dns_events
 
-
 class CrashParser(BaseParser):
     def analyze(self, lines):
         crashes, is_cap, step, tmp = [], False, 0, None
-        pre_ctx = deque(maxlen=10)
+        # 💡 커널 패닉 직전의 MNR 등 풍부한 단서를 잡기 위해 maxlen을 20으로 증가
+        pre_ctx = deque(maxlen=20)
 
         for line in lines:
             clean_line = self.clean_line(line)
             if not clean_line: continue
 
+            # 1. 타임스탬프 추출 (Logcat 시간 vs 커널 KTime)
             ts_m = RE_TIME.search(clean_line)
-            ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
+            ktime_m = re.search(r'\[\s*(\d+\.\d+)\s*\]', clean_line)
 
-            is_fatal_app = DIAG_PATTERNS['FATAL_APP'].search(clean_line)
-            is_fatal_sys = DIAG_PATTERNS['FATAL_SYS'].search(clean_line)
+            if ts_m:
+                ts = ts_m.group(0)
+            elif ktime_m:
+                ts = f"KTime: {ktime_m.group(1)}"
+            else:
+                ts = "00-00 00:00:00.000"
 
-            if is_fatal_app or is_fatal_sys:
+            is_fatal_app = DIAG_PATTERNS['FATAL_APP'].search(clean_line) if 'FATAL_APP' in DIAG_PATTERNS else False
+            is_fatal_sys = DIAG_PATTERNS['FATAL_SYS'].search(clean_line) if 'FATAL_SYS' in DIAG_PATTERNS else False
+
+            # 💡 커널 패닉 감지 정규식
+            is_kernel_panic = re.search(r'Kernel panic(?: - not syncing:)?\s*(.*)', clean_line)
+
+            if is_fatal_app or is_fatal_sys or is_kernel_panic:
                 if is_cap and tmp:
-                    if tmp["time"][:14] == ts[:14]:
+                    # 동일 시간대 연속 크래시 방어
+                    if tmp["time"][:14] == ts[:14] or (ts.startswith("KTime:") and tmp["time"] == ts):
                         tmp["exception_info"] += f"\n[Chain Crash] {clean_line} "
-                        # 🚨 [수정 1] 의미 없는 zygote 오판 로직 삭제 (진짜 이름은 Process: 라인에서 찾음)
                         step = 1
                         fatal_info_count = 0
                         continue
@@ -275,61 +286,102 @@ class CrashParser(BaseParser):
                 step = 1
                 fatal_info_count = 0
 
-                # 🚨 [수정 2] 기본값을 "Unknown"으로 두고, zygote 하드코딩 삭제
-                tmp = {
-                    "time": ts,
-                    "trigger": clean_line,
-                    "process": "system_server" if is_fatal_sys else "Unknown",
-                    "exception_info": "",
-                    "top_method": "Unknown", # 🚨 [추가] 최상단 메소드를 담을 전용 필드 신설!
-                    "call_stack": [],
-                    "context": list(pre_ctx)[-5:]
-                }
+                if is_kernel_panic:
+                    panic_reason = is_kernel_panic.group(1).strip()
+
+                    # 💡 [핵심 최적화] 패닉 직전 문맥(pre_ctx)에서 MNR 단서가 있으면 사유로 즉시 끌어올림!
+                    mnr_hints = [l for l in pre_ctx if "Modem Not Responding" in l or "Force CP CRASH" in l]
+                    if mnr_hints:
+                        panic_reason = "[CP MNR 감지] " + panic_reason
+
+                    tmp = {
+                        "time": ts,
+                        "trigger": clean_line,
+                        "process": "Kernel / Modem",
+                        "exception_info": f"Kernel Panic: {panic_reason}",
+                        "top_method": panic_reason if panic_reason else "Kernel Panic",
+                        "call_stack": [],
+                        "context": list(pre_ctx),
+                        "is_kernel": True # 💡 명시적 플래그 (이름이 바뀌어도 로직 안 풀림)
+                    }
+                    step = 2
+                else:
+                    tmp = {
+                        "time": ts,
+                        "trigger": clean_line,
+                        "process": "system_server" if is_fatal_sys else "Unknown",
+                        "exception_info": "",
+                        "top_method": "Unknown",
+                        "call_stack": [],
+                        "context": list(pre_ctx)[-5:],
+                        "is_kernel": False
+                    }
                 continue
 
-            if is_cap:
-                if step == 1:
-                    if "Process:" in clean_line:
-                        # 🚨 [수정 3] 진짜 프로세스 이름을 추출 (Zygote 오판 방지)
-                        proc_match = re.search(r"Process:\s*([^\s,]+)", clean_line)
-                        if proc_match:
-                            new_proc = proc_match.group(1).strip()
-                            if new_proc != "zygote" and tmp["process"] == "Unknown":
-                                tmp["process"] = new_proc
-                            elif new_proc != "zygote" and new_proc not in tmp["process"]:
-                                tmp["process"] += f", {new_proc}"
-                        step = 2
-                        continue
-                    elif DIAG_PATTERNS['STACK_LINE'].search(clean_line) or clean_line.startswith("at ") or "Exception" in clean_line:
-                        step = 2
+            if is_cap and tmp:
+                # 💡 플래그를 통해 커널 로그 수집을 끝까지 유지
+                if tmp.get("is_kernel"):
+                    # 커널 패닉 프로세스 수집 (Comm: ESAR 등)
+                    if "Comm:" in clean_line and "Kernel" in tmp["process"]:
+                        comm_match = re.search(r'Comm:\s*([^\s]+)', clean_line)
+                        if comm_match:
+                            tmp["process"] = f"Kernel ({comm_match.group(1)})"
 
-                if step == 2:
-                    if DIAG_PATTERNS['STACK_LINE'].search(clean_line) or "at " in clean_line:
-                        # 🚨 [추가 4] 첫 번째 'at ' 라인을 최상단 메소드(top_method)로 저장!
-                        if tmp["top_method"] == "Unknown":
-                            method_match = re.search(r'at\s+([^\(]+)', clean_line)
-                            if method_match:
-                                tmp["top_method"] = method_match.group(1).strip()
+                    tmp["call_stack"].append(clean_line)
+                    fatal_info_count += 1
 
-                        tmp["call_stack"].append(clean_line)
-                        fatal_info_count = 0
-                    else:
-                        if len(tmp["call_stack"]) > 0:
-                            fatal_info_count += 1
-                            if fatal_info_count > 3:
-                                if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
-                                crashes.append(tmp)
-                                is_cap = False
+                    # 커널 로그는 end trace 가 있거나 30줄 정도 모으면 자름
+                    if fatal_info_count > 30 or "---[ end trace" in clean_line or "Rebooting in" in clean_line:
+                        if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                        crashes.append(tmp)
+                        is_cap = False
+                        tmp = None
+
+                else:
+                    # 기존 자바(앱/시스템) 크래시 스택 수집
+                    if step == 1:
+                        if "Process:" in clean_line:
+                            proc_match = re.search(r"Process:\s*([^\s,]+)", clean_line)
+                            if proc_match:
+                                new_proc = proc_match.group(1).strip()
+                                if new_proc != "zygote" and tmp["process"] == "Unknown":
+                                    tmp["process"] = new_proc
+                                elif new_proc != "zygote" and new_proc not in tmp["process"]:
+                                    tmp["process"] += f", {new_proc}"
+                            step = 2
+                            continue
+                        elif DIAG_PATTERNS['STACK_LINE'].search(clean_line) or clean_line.startswith("at ") or "Exception" in clean_line:
+                            step = 2
+
+                    if step == 2:
+                        if DIAG_PATTERNS['STACK_LINE'].search(clean_line) or "at " in clean_line:
+                            if tmp["top_method"] == "Unknown":
+                                method_match = re.search(r'at\s+([^\(]+)', clean_line)
+                                if method_match:
+                                    tmp["top_method"] = method_match.group(1).strip()
+
+                            tmp["call_stack"].append(clean_line)
+                            fatal_info_count = 0
                         else:
-                            tmp["exception_info"] += clean_line + " "
-                            fatal_info_count += 1
-                            if fatal_info_count > 15:
-                                if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
-                                crashes.append(tmp)
-                                is_cap = False
+                            if len(tmp["call_stack"]) > 0:
+                                fatal_info_count += 1
+                                if fatal_info_count > 3:
+                                    if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                                    crashes.append(tmp)
+                                    is_cap = False
+                                    tmp = None
+                            else:
+                                tmp["exception_info"] += clean_line + " "
+                                fatal_info_count += 1
+                                if fatal_info_count > 15:
+                                    if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
+                                    crashes.append(tmp)
+                                    is_cap = False
+                                    tmp = None
 
             pre_ctx.append(line.strip())
 
+        # 루프 종료 후 남은 크래시 담기
         if is_cap and tmp and (len(tmp["call_stack"]) > 0 or len(tmp["exception_info"]) > 0):
             if self.get_context_fn: tmp["cross_context_logs"] = self.get_context_fn(lines, tmp["time"])
             crashes.append(tmp)

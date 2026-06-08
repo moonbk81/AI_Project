@@ -27,6 +27,7 @@ class AnalysisBucketBuilder:
     CRASH_KEYWORDS = [
         "FATAL EXCEPTION", "Fatal signal", "AndroidRuntime", "am_crash",
         "force close", "Tombstone written to", "Build fingerprint:", "Abort message:",
+        "Force CP CRASH", "Kernel panic", "Modem Not Responding", "CP MNR", "Watchdog",
     ]
     ANR_KEYWORDS = [
         "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",

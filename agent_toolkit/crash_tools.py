@@ -14,16 +14,21 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
 
     crash_facts = []
     for c in crashes:
-        # 크래시 로그(콜스택 등)에 TransactionTooLarge 문자열이 있는지 확인
         raw_stack = str(c.get("stacktrace", "")).lower()
         is_binder_too_large = "transactiontoolargeexception" in raw_stack
+
         crash_facts.append({
             "time": c.get("timestamp") or c.get("time"),
             "process": c.get("process"),
-            "type": c.get("crash_type") or c.get("type"),
+            "type": "KERNEL_PANIC" if c.get("is_kernel") else (c.get("crash_type") or c.get("type") or "FATAL_EXCEPTION"),
             "binder_transaction_too_large": is_binder_too_large,
-            "exception_reason": c.get("exception_name") or c.get("top_method", "Unknown")
+            "exception_reason": c.get("exception_name") or c.get("top_method", "Unknown"),
+            # 💡 [핵심 추가] LLM이 MNR을 추론할 수 있도록 문맥과 정보를 제공!
+            "exception_info": c.get("exception_info", ""),
+            "pre_context": c.get("context", [])[-15:],
+            "call_stack": c.get("call_stack", [])[:10]
         })
+
 
     native_crash_facts = []
     for n in native_crashes:
