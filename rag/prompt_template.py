@@ -8,6 +8,15 @@ def get_domain_guidelines(query_lower: str, log_guidelines: dict, prompts: dict)
         rule = log_guidelines.get('Call_Drop_Rule') or prompts.get('Call_Drop_Rule', "")
         if rule: guidelines.append(f"### [Call Drop 판정 최우선 규칙]\n{rule}")
 
+    if any(k in query_lower for k in ["재부팅", "뻗", "크래시", "패닉", "panic", "crash"]):
+        rule = (
+            "### [시스템 크래시/재부팅 분석 최우선 규칙]\n"
+            "KERNEL_PANIC이나 FATAL 크래시가 감지되면, 단순히 발생 횟수나 유형만 나열하지 마십시오. "
+            "반드시 팩트 데이터에 포함된 'exception_info'와 'pre_context(단서 로그)'를 분석하여, "
+            "**왜 패닉이 발생했는지(예: 모뎀 미응답(MNR), 메모리 오류 등) 근본 원인(Root Cause)을 문장으로 상세히 설명**하십시오."
+        )
+        guidelines.append(rule)
+
     # [위성 통신 및 기본 페르소나]
     if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
         rule = prompts.get('SpaceX', "")

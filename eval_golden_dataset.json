@@ -358,5 +358,21 @@
     "must_not_claim": ["Binder proxy leak 발생", "BINDER_PROXY_LEAK_RCA 확인", "Too many Binders sent to SYSTEM 발생", "am_kill 강제 종료"],
     "trap_type": "negative_binder_leak_absence_check",
     "severity": "high"
+  },
+  {
+
+    "test_id": "TC-025",
+    "category": "Kernel_Panic_MNR",
+    "target_log_file": "log_for_evaluation/act_dumpstate_crash_kernel.txt",
+    "query": "단말이 갑자기 뻗으면서 재부팅된 것 같은데, 일반 앱 크래시인지 아니면 커널 패닉 등 치명적 시스템 오류인지 확인해 줘. 그리고 그 근본 원인(Root Cause)이 무엇인지 단서 로그와 함께 상세히 분석해 줘.",
+    "ground_truth": "단말 재부팅의 원인은 일반 앱 크래시가 아니라 치명적인 커널 패닉(Kernel Panic)입니다. 단서 로그(Pre-Crash Context)를 확인해 보면, RIL이 모뎀으로 QMI 메시지(예: QMI_GET_PB_CAPABILITIES)를 보냈으나 모뎀이 반복적으로 응답하지 않는 'Modem Not Responding (MNR)' 상태에 빠졌습니다. 이에 따라 RIL이 시스템 복구를 위해 강제로 모뎀 크래시(!@Force CP CRASH by MNR)를 유발했으며, 이로 인해 최종적으로 'Kernel panic - not syncing: RIL triggered modem crash by CP MNR'이 발생한 단말 내부 모뎀/통신 데몬 장애입니다.",
+    "eval_keywords": ["Kernel panic", "Modem Not Responding", "MNR", "CP CRASH", "RIL triggered modem crash"],
+    "expected_decision": "단말 뻗음 현상의 원인은 일반 앱 크래시가 아니라, 모뎀 미응답(MNR)으로 인해 RIL이 강제로 유발한 커널 패닉(Kernel Panic)입니다.",
+    "root_cause": "모뎀이 QMI 메시지에 응답하지 않아(MNR), RIL 프로세스가 시스템 복구를 위해 강제로 CP 크래시를 유발하여 Kernel Panic이 발생했습니다.",
+    "must_have": ["Kernel Panic", "Modem Not Responding", "MNR", "RIL triggered modem crash", "모뎀 미응답", "CP CRASH 강제 유발"],
+    "evidence_should_include": ["Kernel panic - not syncing", "Force CP CRASH by MNR", "Modem Not Responding for QMI svc"],
+    "must_not_claim": ["일반 애플리케이션 크래시", "Java Exception", "단순 기지국/망 장애", "원인 불명", "메모리 부족(OOM)"],
+    "trap_type": "root_cause_disambiguation",
+    "severity": "critical"
   }
 ]
