@@ -27,7 +27,8 @@ class ImsSipProcessor(BaseParser):
     def analyze(self, lines):
         self.parsed_data = []
         sip_pattern = re.compile(
-            r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?reSIProcate:.*?Sip(Req|Resp):\s*([a-zA-Z0-9]+).*?tid=([a-zA-Z0-9]+)\s+cseq=(\d+)\s+([a-zA-Z]+).*?from\((wire|tu)\)'
+            r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?reSIProcate:.*?Sip(Req|Resp):\s*([a-zA-Z0-9]+).*?tid=([^\s]+).*?cseq=(\d+)\s+([a-zA-Z]+).*?(?:from|to)\((wire|tu)\)',
+            re.IGNORECASE
         )
 
         # 💡 [신규 추가] Call-ID를 추출하기 위한 정규식
