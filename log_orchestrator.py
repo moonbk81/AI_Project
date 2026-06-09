@@ -147,8 +147,8 @@ class LogOrchestrator:
             if cpu_res := self.cpu_usage_parser.analyze(lines): result['cpu_usage_stats'] = cpu_res
             if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
-            if net_usage := self.data_usage_parser.analyze(buckets['usage'], global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage
-            if dns_res := self.dns_parser.analyze(buckets['dns'], global_uid_map=global_uid_map): result['dns_queries'] = dns_res
+            if net_usage := self.data_usage_parser.analyze(lines, global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage
+            if dns_res := self.dns_parser.analyze(lines, global_uid_map=global_uid_map): result['dns_queries'] = dns_res
             if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
                 result["battery_thermal_stats"] = battery_thermal_res
             if binder_res := self.binder_parser.analyze(buckets['binder']):

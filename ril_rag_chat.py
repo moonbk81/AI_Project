@@ -71,8 +71,8 @@ class RilRagChat:
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
-        # 3. LLM 로드 (Gemma3:12b 적용)
-        self.llm_model_name = 'gemma3:12b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
+        # 3. LLM 로드 (Gemma4:12b 적용)
+        self.llm_model_name = 'gemma4:12b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
         if device == "cuda":
             self.llm_model_name = 'gemma3:4b'
 

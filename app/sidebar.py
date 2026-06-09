@@ -30,7 +30,7 @@ def _render_engine_settings():
 
     available_models = get_installed_ollama_models()
     if available_models is None:
-        available_models = ["gemma4:e4b", "gemma3:12b", "qwen2.5-coder:7b"]
+        available_models = ["gemma4:e4b", "gemma3:12b", "gemma4:12b", "qwen2.5-coder:7b"]
 
     try:
         current_model_idx = available_models.index(st.session_state['active_model'])

@@ -136,12 +136,18 @@ class DataUsageParser(BaseParser):
             global_uid_map = {}
 
         usage_by_key = {}
-        # 전달받은 전역 맵을 베이스로 깔고 시작
         uid_map = global_uid_map.copy()
         current_app_id_in_log = None
         current_key = None
 
+        FAST_KEYWORDS = ["st=", "NetdEventListener", "DNS Requested", "App ID:", "Package:", "pkg,", "transports={0}"]
+
         for line in lines:
+            if not any(k in line for k in FAST_KEYWORDS):
+                continue
+            if "rb=0" in line and "tb=0" in line:
+                continue
+
             line_stripped = self.clean_line(line)
 
             # 1. 기존 UID 수집 로직 (혹시 누락된 최신 앱이 있을까봐 보조용으로 유지)
