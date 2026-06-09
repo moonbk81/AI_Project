@@ -40,4 +40,13 @@ def build_device_payloads(
         elif isinstance(props, dict):
             add_payload(props, "System_Property")
 
+    if "build_info" in report_data:
+        build_info = report_data["build_info"]
+
+        if isinstance(build_info, list):
+            for info in build_info:
+                add_payload(info, "Build_Info")
+        elif isinstance(build_info, dict):
+            add_payload(build_info, "Build_Info")
+
     return rag_payload

@@ -102,6 +102,27 @@ class RagPayloadBuilder:
 
         return metadata
 
+    def _inject_global_metadata(self, report_data, rag_payload):
+        """
+        report_data에 포함된 단말기 전역 정보(Build Info)를
+        생성된 모든 RAG 문서(payload)의 메타데이터에 일괄 주입합니다.
+        """
+        if "build_info" not in report_data or not isinstance(report_data["build_info"], dict):
+            return
+
+        b_info = report_data["build_info"]
+        global_meta = {
+            "model_name": b_info.get("model_name", "Unknown"),
+            "hardware": b_info.get("hardware", "Unknown"),
+            "android_sdk": b_info.get("android_sdk", "Unknown"),
+            "radio": b_info.get("radio", "Unknown"),
+            "kernel": b_info.get("kernel", "Unknown")
+        }
+
+        for payload in rag_payload:
+            if "metadata" not in payload:
+                payload["metadata"] = {}
+            payload["metadata"].update(global_meta)
 
     def build_payload(self, output_filename=None):
         if not os.path.exists(self.input_file):
@@ -126,6 +147,8 @@ class RagPayloadBuilder:
                 self._extract_metadata,
             )
         )
+
+        self._inject_global_metadata(report_data, rag_payload)
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")

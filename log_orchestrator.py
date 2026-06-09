@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser, OosParser
 from parsers.diagnostic_parser import (
     BootParser, SignalParser, DataUsageParser, DnsParser, CrashParser,
-    AnrParser, BatteryParser, RadioPowerParser, NitzParser
+    AnrParser, BatteryParser, RadioPowerParser, NitzParser, BuildInfoParser
 )
 from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from parsers.ntn_processor import NtnProcessor
@@ -53,6 +53,7 @@ class LogOrchestrator:
         self.binder_parser = BinderWarningParser(self._get_surrounding_context_logs)
         self.rilj_parser = RiljParser()
         self.sys_prop_parser = SystemPropertyParser()
+        self.build_info_parser = BuildInfoParser()
 
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
@@ -158,6 +159,7 @@ class LogOrchestrator:
             if rilj_res := self.rilj_parser.analyze(buckets['rilj']):
                 result['rilj_transactions'] = rilj_res
             result['system_properties'] = self.sys_prop_parser.analyze(lines)
+            result['build_info'] = self.build_info_parser.analyze(lines)
 
             # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
             self.ntn_processor.save_ui_report("./result", self.base_name)

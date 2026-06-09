@@ -1081,3 +1081,53 @@ class BinderWarningParser(BaseParser):
             summary["checklist"] = checklist
 
         return summary if summary["signals"] else {}
+
+class BuildInfoParser(BaseParser):
+    def analyze(self, lines):
+        build_info = {
+            "model_name": "Unknown",
+            "build_fingerprint": "Unknown",
+            "bootloader": "Unknown",
+            "radio": "Unknown",
+            "network": "Unknown",
+            "android_sdk": "Unknown",
+            "hardware": "Unknown",
+            "kernel": "Unknown"
+        }
+
+        for line in lines[:50]:
+            clean_line = line.strip()
+
+            if clean_line.startswith("Build fingerprint:"):
+                val = clean_line.split(":", 1)[1].strip().strip("‘’'\"")
+                build_info["build_fingerprint"] = val
+
+                # 핑거프린트에서 모델/프로젝트 코드명 추출 (예: samsung/h8qksx/...)
+                parts = val.split('/')
+                if len(parts) > 1:
+                    build_info["model_name"] = parts[1]
+
+            elif clean_line.startswith("Build:"):
+                build_info["build_id"] = clean_line.split(":", 1)[1].strip()
+
+            elif clean_line.startswith("Bootloader:"):
+                build_info["bootloader"] = clean_line.split(":", 1)[1].strip()
+
+            elif clean_line.startswith("Radio:"):
+                build_info["radio"] = clean_line.split(":", 1)[1].strip()
+
+            elif clean_line.startswith("Network:"):
+                build_info["network"] = clean_line.split(":", 1)[1].strip().strip(",")
+
+            elif clean_line.startswith("Android SDK version:"):
+                build_info["android_sdk"] = clean_line.split(":", 1)[1].strip()
+
+            elif clean_line.startswith("Kernel:"):
+                build_info["kernel"] = clean_line.split(":", 1)[1].strip()
+
+            elif "boot.hardware" in clean_line:
+                m = re.search(r'boot\.hardware\s*=\s*[“"”]?([a-zA-Z0-9_]+)', clean_line)
+                if m:
+                    build_info["hardware"] = m.group(1) # 결과: qcom
+
+        return build_info
