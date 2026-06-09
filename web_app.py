@@ -11,6 +11,7 @@ from app.tabs import (
     render_dashboard_tab,
     render_internet_tab,
     render_satellite_tab,
+    render_knowledge_tab,
 )
 from ril_rag_chat import RilRagChat
 
@@ -61,9 +62,9 @@ if "chat_history" not in st.session_state: st.session_state.chat_history = []
 st.title("Android RIL RAG Analysis Dashboard")
 st.markdown("단말 통신 로그를 업로드하여 AI 분석 파이프라인을 실행합니다.")
 
-tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark = st.tabs([
+tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge = st.tabs([
     "로그 분석 및 대화", "전사 로그 통계 대시보드", "부팅/Crash/ANR/NITZ",
-    "위성 통신 (NTN)", "인터넷 응답 지연", "모델 벤치마크"])
+    "위성 통신 (NTN)", "인터넷 응답 지연", "모델 벤치마크", "지식 베이스"])
 
 with st.sidebar:
     render_sidebar(engine, run_analysis_pipeline)
@@ -85,3 +86,6 @@ with tab_internet:
 
 with tab_benchmark:
     render_benchmark_tab()
+
+with tab_knowledge:
+    render_knowledge_tab(engine)

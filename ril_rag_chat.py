@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="transformers.*")
 
 import glob
 import chromadb
+from chromadb.config import Settings
 import torch
 
 import re
@@ -55,7 +56,7 @@ class RilRagChat:
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
 
         # 1. Vector DB 초기화
-        self.chroma_client = chromadb.PersistentClient(path=db_path)
+        self.chroma_client = chromadb.PersistentClient(path=db_path, settings=Settings(anonymized_telemetry=False))
         self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
         self.knowledge_collection = self.chroma_client.get_or_create_collection(name="engineer_knowledge_base")
 
@@ -438,7 +439,26 @@ class RilRagChat:
         return get_all_ingested_files(self.collection)
 
     def reset_db(self):
-        return reset_collection_db(self.collection)
+        print("[시스템] Vector DB (로그 & 지식 베이스) 강제 초기화를 시작합니다...")
+        try:
+            try:
+                self.chroma_client.delete_collection(self.collection.name)
+            except Exception:
+                pass # 이미 없으면 무시
+            self.collection = self.chroma_client.create_collection(name="ril_logs")
+
+            try:
+                self.chroma_client.delete_collection(self.knowledge_collection.name)
+            except Exception:
+                pass
+            self.knowledge_collection = self.chroma_client.create_collection(name="engineer_knowledge_base")
+
+            print("✅ 모든 Vector DB 컬렉션이새로 생성되었습니다.")
+            return True # 💡 정상적으로 True가 리턴되어야 UI가 폴더를 지웁니다!
+
+        except Exception as e:
+            print(f"❌ DB 초기화 중 치명적 오류 발생: {e}")
+            return False
 
     def _format_results(self, results) -> str:
         if not results or not results.get('documents') or not results['documents'][0]:
@@ -468,13 +488,36 @@ class RilRagChat:
             is_bench=is_bench,
         )
 
-    def save_knowledge(self, target_ids, feedback, severity="Normal", **kwargs):
+    def save_knowledge(self, target_ids, feedback, severity="Normal", build_info=None, **kwargs):
         try:
             import uuid
             doc_id = str(uuid.uuid4())
             target_ids_str = ",".join(target_ids) if isinstance(target_ids, list) else str(target_ids)
-            metadata = {"target_ids": target_ids_str, "solution": feedback, "severity": severity, "type": "expert_knowledge"}
-            self.knowledge_collection.add(documents=[feedback], metadatas=[metadata], ids=[doc_id])
+
+            # 1. 기본 메타데이터 세팅
+            metadata = {
+                "target_ids": target_ids_str,
+                "solution": feedback,
+                "severity": severity,
+                "type": "expert_knowledge"
+            }
+
+            # 2. 💡 [추가] 단말기 빌드/하드웨어 정보가 넘어왔다면 메타데이터에 병합
+            if build_info and isinstance(build_info, dict):
+                for k in ["model_name", "hardware", "android_sdk", "radio", "kernel"]:
+                    if k in build_info:
+                        metadata[k] = build_info[k]
+
+            # 3. 💡 [핵심 해결] 오프라인 환경의 SSL 에러 방지를 위해 직접 임베딩 벡터 생성
+            embedding = self.embed_model.encode([feedback], convert_to_numpy=True).tolist()
+
+            # 4. Vector DB에 임베딩 값과 함께 저장
+            self.knowledge_collection.add(
+                embeddings=embedding,
+                documents=[feedback],
+                metadatas=[metadata],
+                ids=[doc_id]
+            )
             print(f"💾 [Knowledge Save] 지식 DB 박제 완료! (ID: {doc_id}, Severity: {severity})")
             return True
         except Exception as e:

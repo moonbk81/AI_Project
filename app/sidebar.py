@@ -125,51 +125,6 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         else:
             run_analysis_pipeline(uploaded_files, use_slicing, start_time, end_time, engine)
 
-def _recommend_knowledge_category(text, categories):
-    mapping = {
-        "Call_Session": ["call", "드랍", "drop", "통화", "fail", "ims", "volte"],
-        "Battery_Drain_Report": ["배터리", "battery", "drain", "방전", "열", "thermal", "소모"],
-        "OOS_Event": ["oos", "이탈", "서비스", "service", "reg", "등록"],
-        "Signal_Level": ["신호", "signal", "안테나", "level", "수신"],
-        "Network_DNS_Issue": ["dns", "차단", "block", "인터넷", "지연", "latency"],
-    }
-    text_lower = text.lower()
-    for cat, keywords in mapping.items():
-        if any(kw in text_lower for kw in keywords):
-            return cat
-    return "Total_Report"
-
-def _render_knowledge_base(engine):
-    st.divider()
-    st.header("사내 지식 베이스 (Knowledge Base)")
-
-    if not (st.session_state.get("last_ids") and st.session_state.get("last_metas")):
-        return
-
-    retrieved_types = list(set(m.get('log_type', 'Unknown') for m in st.session_state.last_metas if m))
-    category_options = ["Total_Report"] + retrieved_types
-    feedback = st.text_area("해결 방안 및 분석 코멘트 입력:", height=100, key=f"fb_{st.session_state.feedback_key}")
-    recommended = _recommend_knowledge_category(feedback, category_options)
-    default_idx = category_options.index(recommended) if recommended in category_options else 0
-    target_type = st.selectbox("분류 카테고리 (자동 추천)", category_options, index=default_idx)
-    severity = st.radio("이슈 중요도 (Severity)", ["Critical", "Major", "Minor", "Info"], index=3, horizontal=True)
-
-    if st.button("지식 베이스에 사례 등록", width="stretch"):
-        if feedback.strip():
-            if target_type == "Total_Report":
-                target_ids = st.session_state.last_ids
-            else:
-                target_ids = [
-                    doc_id for doc_id, meta in zip(st.session_state.last_ids, st.session_state.last_metas)
-                    if meta and meta.get('log_type') == target_type
-                ]
-
-            if target_ids:
-                engine.save_knowledge(target_ids, feedback, severity=severity)
-                st.toast(f"{target_type} 카테고리에 {severity} 등급으로 등록되었습니다.")
-                st.session_state.feedback_key += 1
-                st.rerun()
-
 def _reset_analysis_context():
     st.session_state.messages = []
     st.session_state.last_ids = []
@@ -180,4 +135,3 @@ def render_sidebar(engine, run_analysis_pipeline):
     _render_engine_settings()
     _render_pipeline_controls(engine, run_analysis_pipeline)
     _render_file_session_manager(engine, _reset_analysis_context)
-    _render_knowledge_base(engine)
