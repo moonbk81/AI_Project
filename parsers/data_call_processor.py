@@ -64,6 +64,7 @@ class DataCallProcessor(BaseParser):
 
                     # 🚨 [수정됨] Payload 내부를 샅샅이 뒤져서 진짜 상태값들을 추출합니다.
                     cause_m = re.search(r'cause[:=]\s*([^,}\s]+)', payload, re.I)
+                    # 'link status'를 잡든 'status'를 잡든 안전하게 처리하도록 추출
                     status_m = re.search(r'status[:=]\s*([^,}\s]+)', payload, re.I)
                     cid_m = re.search(r'cid[:=]\s*([\d-]+)', payload, re.I)
 
@@ -71,11 +72,23 @@ class DataCallProcessor(BaseParser):
                     d_status = status_m.group(1) if status_m else "UNKNOWN"
                     cid = cid_m.group(1) if cid_m else "-1"
 
-                    # 🚨 [핵심] 가짜 SUCCESS 판별 로직 (status가 NOT_SPECIFIED이거나 cause가 에러 코드인 경우)
+                    # 💡 [핵심 수정] 가짜 SUCCESS / 가짜 FAIL 판별 로직 고도화
+                    cause_upper = cause.upper()
+                    # 1. NONE, 0, NONE(0x0) 등은 모두 정상(OK)으로 간주
+                    cause_is_ok = cause_upper.startswith("NONE") or "(0X0)" in cause_upper or cause_upper == "0"
+
                     is_success = True
-                    if d_status.upper() in ["NOT_SPECIFIED", "FAIL", "ERROR"] or (d_status.isdigit() and d_status != "0"):
+
+                    # [조건 1] cause가 에러 코드를 가리키면 무조건 실패
+                    if not cause_is_ok:
                         is_success = False
-                    if cause.upper() not in ["0", "NONE"]:
+
+                    # [조건 2] status 문자열이 명시적 실패(NOT_SPECIFIED, FAIL, ERROR)인 경우 실패
+                    if d_status.upper() in ["NOT_SPECIFIED", "FAIL", "ERROR"]:
+                        is_success = False
+
+                    # [조건 3] status가 숫자일 경우, 0(성공), 1(Active), 2(Dormant)는 정상 연결로 취급. 그 외 숫자는 에러.
+                    elif d_status.isdigit() and d_status not in ["0", "1", "2"]:
                         is_success = False
 
                     final_status = "SUCCESS" if is_success else "FAIL"
