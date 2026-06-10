@@ -21,7 +21,7 @@ class DataCallProcessor(BaseParser):
 
         last_rild_fail_cause = None
 
-        for line in lines:
+        for idx, line in enumerate(lines):
             clean_line = self.clean_line(line)
             if not clean_line: continue
 
@@ -52,8 +52,21 @@ class DataCallProcessor(BaseParser):
             if res_match:
                 res_time_str, token, payload = res_match.groups()
 
-                if token in pending_requests:
-                    req = pending_requests.pop(token)
+                req = pending_requests.pop(token, None)
+                if req is None:
+                    # Bucket/window 기반 입력에서는 SETUP_DATA_CALL 응답 라인만 들어오고
+                    # 같은 token의 요청 라인이 빠질 수 있다. 실패 응답은 이 경우에도 버리지 않고 이벤트화한다.
+                    net_match = re.search(r'accessNetworkType=([^,}\s]+)', payload, re.I)
+                    apn_match = re.search(r'(?:mDnn|dnn|apn)[:=]\s*([^,}\s]+)', payload, re.I)
+                    proto_match = re.search(r'(?:protocolType|type)[:=]\s*([^,}\s]+)', payload, re.I)
+                    req = {
+                        'req_time': res_time_str,
+                        'network': net_match.group(1).strip() if net_match else "UNKNOWN",
+                        'apn': apn_match.group(1).strip() if apn_match else "UNKNOWN",
+                        'protocol': proto_match.group(1).strip() if proto_match else "UNKNOWN",
+                    }
+                    latency_ms = -1
+                else:
                     fmt = "%m-%d %H:%M:%S.%f"
                     try:
                         t_req = datetime.strptime(req['req_time'], fmt)
@@ -62,71 +75,124 @@ class DataCallProcessor(BaseParser):
                     except:
                         latency_ms = -1
 
-                    # 🚨 [수정됨] Payload 내부를 샅샅이 뒤져서 진짜 상태값들을 추출합니다.
-                    cause_m = re.search(r'cause[:=]\s*([^,}\s]+)', payload, re.I)
-                    # 'link status'를 잡든 'status'를 잡든 안전하게 처리하도록 추출
-                    status_m = re.search(r'status[:=]\s*([^,}\s]+)', payload, re.I)
-                    cid_m = re.search(r'cid[:=]\s*([\d-]+)', payload, re.I)
+                # 🚨 [수정됨] Payload 내부를 샅샅이 뒤져서 진짜 상태값들을 추출합니다.
+                cause_m = re.search(r'cause[:=]\s*([^,}\s]+)', payload, re.I)
+                # 'link status'를 잡든 'status'를 잡든 안전하게 처리하도록 추출
+                status_m = re.search(r'status[:=]\s*([^,}\s]+)', payload, re.I)
+                cid_m = re.search(r'cid[:=]\s*([\d-]+)', payload, re.I)
 
-                    cause = cause_m.group(1) if cause_m else "NONE"
-                    d_status = status_m.group(1) if status_m else "UNKNOWN"
-                    cid = cid_m.group(1) if cid_m else "-1"
+                cause = cause_m.group(1) if cause_m else "NONE"
+                d_status = status_m.group(1) if status_m else "UNKNOWN"
+                cid = cid_m.group(1) if cid_m else "-1"
 
-                    # 💡 [핵심 수정] 가짜 SUCCESS / 가짜 FAIL 판별 로직 고도화
-                    cause_upper = cause.upper()
-                    # 1. NONE, 0, NONE(0x0) 등은 모두 정상(OK)으로 간주
-                    cause_is_ok = cause_upper.startswith("NONE") or "(0X0)" in cause_upper or cause_upper == "0"
+                # 💡 [핵심 수정] 가짜 SUCCESS / 가짜 FAIL 판별 로직 고도화
+                cause_upper = cause.upper()
+                # 1. NONE, 0, NONE(0x0) 등은 모두 정상(OK)으로 간주
+                cause_is_ok = cause_upper.startswith("NONE") or "(0X0)" in cause_upper or cause_upper == "0"
 
-                    is_success = True
+                is_success = True
 
-                    # [조건 1] cause가 에러 코드를 가리키면 무조건 실패
-                    if not cause_is_ok:
-                        is_success = False
+                # [조건 1] cause가 에러 코드를 가리키면 무조건 실패
+                if not cause_is_ok:
+                    is_success = False
 
-                    # [조건 2] status 문자열이 명시적 실패(NOT_SPECIFIED, FAIL, ERROR)인 경우 실패
-                    if d_status.upper() in ["NOT_SPECIFIED", "FAIL", "ERROR"]:
-                        is_success = False
+                # [조건 2] status 문자열이 명시적 실패(NOT_SPECIFIED, FAIL, ERROR)인 경우 실패
+                if d_status.upper() in ["NOT_SPECIFIED", "FAIL", "ERROR"]:
+                    is_success = False
 
-                    # [조건 3] status가 숫자일 경우, 0(성공), 1(Active), 2(Dormant)는 정상 연결로 취급. 그 외 숫자는 에러.
-                    elif d_status.isdigit() and d_status not in ["0", "1", "2"]:
-                        is_success = False
+                # [조건 3] status가 숫자일 경우, 0(성공), 1(Active), 2(Dormant)는 정상 연결로 취급. 그 외 숫자는 에러.
+                elif d_status.isdigit() and d_status not in ["0", "1", "2"]:
+                    is_success = False
 
-                    final_status = "SUCCESS" if is_success else "FAIL"
-                    detailed_cause = f"status={d_status}, cause={cause}"
+                final_status = "SUCCESS" if is_success else "FAIL"
+                detailed_cause = f"status={d_status}, cause={cause}"
 
-                    # 벤더 로그나 추가 설명에 NO CARRIER, Auth failed 등이 섞여있는지 확인 (TC-008 정답지 대응)
-                    vendor_err = []
-                    if re.search(r'NO CARRIER', payload, re.I): vendor_err.append("NO CARRIER")
-                    if re.search(r'authentication failed', payload, re.I): vendor_err.append("User authentication failed")
+                # 벤더 로그나 추가 설명에 NO CARRIER, Auth failed 등이 섞여있는지 확인 (TC-008 정답지 대응)
+                # SETUP_DATA_CALL 응답 한 줄에 원인이 없고, 직전/직후 RILD 로그에만 남는 경우가 있어 주변 문맥까지 확인한다.
+                vendor_err = []
+                context_start = max(0, idx - 20)
+                context_end = min(len(lines), idx + 21)
+                nearby_context = "\n".join(self.clean_line(ctx_line) for ctx_line in lines[context_start:context_end])
+                vendor_search_text = f"{payload}\n{nearby_context}"
 
-                    if last_rild_fail_cause:
-                        rild_fail_cause_str = RIL_DATA_FAIL_CAUSE_MAP.get(last_rild_fail_cause)
+                if re.search(r'NO\s+CARRIER', vendor_search_text, re.I):
+                    vendor_err.append("NO CARRIER")
+                if re.search(r'(?:User\s+)?authentication\s+failed', vendor_search_text, re.I):
+                    vendor_err.append("User authentication failed")
+
+                if last_rild_fail_cause:
+                    rild_fail_cause_str = RIL_DATA_FAIL_CAUSE_MAP.get(last_rild_fail_cause)
+                    if rild_fail_cause_str:
                         vendor_err.append(rild_fail_cause_str)
-                        last_rild_fail_cause = None
+                    else:
+                        vendor_err.append(f"RILD fail cause {last_rild_fail_cause}")
+                    last_rild_fail_cause = None
 
-                    if vendor_err:
-                        final_status = "FAIL" # 벤더 에러가 보이면 무조건 실패 처리
-                        detailed_cause += f" ({' / '.join(vendor_err)})"
+                # 중복 원인 문자열 제거. 순서는 보존한다.
+                vendor_err = list(dict.fromkeys(vendor_err))
 
-                    if final_status == "SUCCESS" and cid != "-1":
-                        active_sessions[cid] = {
-                            'apn': req['apn'],
-                            'setup_res_time': res_time_str
-                        }
+                if vendor_err:
+                    final_status = "FAIL" # 벤더 에러가 보이면 무조건 실패 처리
+                    detailed_cause += f" ({' / '.join(vendor_err)})"
 
-                    self.parsed_data.append({
-                        # 실패한 호 연결은 DATA_SETUP_FAIL로 명확히 이벤트 타입을 분리
-                        'event_type': 'DATA_SETUP_FAIL' if final_status == "FAIL" else 'DATA_SETUP',
-                        'req_time': req['req_time'],
-                        'res_time': res_time_str,
-                        'token': token,
-                        'cid': cid,
+                if final_status == "SUCCESS" and cid != "-1":
+                    active_sessions[cid] = {
                         'apn': req['apn'],
-                        'network': req['network'],
-                        'protocol': req['protocol'],
-                        'status': final_status,
+                        'setup_res_time': res_time_str
+                    }
+
+                self.parsed_data.append({
+                    # 실패한 호 연결은 DATA_SETUP_FAIL로 명확히 이벤트 타입을 분리
+                    'event_type': 'DATA_SETUP_FAIL' if final_status == "FAIL" else 'DATA_SETUP',
+                    'req_time': req['req_time'],
+                    'res_time': res_time_str,
+                    'token': token,
+                    'cid': cid,
+                    'apn': req['apn'],
+                    'network': req['network'],
+                    'protocol': req['protocol'],
+                    'status': final_status,
+                    'cause': detailed_cause,
+                    'latency_ms': latency_ms
+                })
+                continue
+
+            # SETUP_DATA_CALL 응답이 아닌 framework 상태 로그에도 실패 원인이 남는 경우 보강 처리
+            fw_fail_match = re.search(
+                r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?(?:fail cause|cause)[:=]\s*([^,}\s]+).*?(?:APN Setting|mDnn|dnn|apn)[:=]?\s*([^,}\s]+)?',
+                clean_line,
+                re.I,
+            )
+            if fw_fail_match:
+                time_str = fw_fail_match.group(1)
+                fail_cause = fw_fail_match.group(2).strip()
+                apn = fw_fail_match.group(3).strip() if fw_fail_match.group(3) else "UNKNOWN"
+                fail_upper = fail_cause.upper()
+                if fail_upper not in ["NONE", "NONE(0X0)", "0"]:
+                    context_start = max(0, idx - 20)
+                    context_end = min(len(lines), idx + 21)
+                    nearby_context = "\n".join(self.clean_line(ctx_line) for ctx_line in lines[context_start:context_end])
+                    vendor_err = []
+                    if re.search(r'NO\s+CARRIER', nearby_context, re.I):
+                        vendor_err.append("NO CARRIER")
+                    if re.search(r'(?:User\s+)?authentication\s+failed', nearby_context, re.I):
+                        vendor_err.append("User authentication failed")
+                    detailed_cause = f"status=UNKNOWN, cause={fail_cause}"
+                    if vendor_err:
+                        detailed_cause += f" ({' / '.join(dict.fromkeys(vendor_err))})"
+                    self.parsed_data.append({
+                        'event_type': 'DATA_SETUP_FAIL',
+                        'req_time': time_str,
+                        'res_time': time_str,
+                        'token': 'FW',
+                        'cid': '-1',
+                        'apn': apn,
+                        'network': 'UNKNOWN',
+                        'protocol': 'UNKNOWN',
+                        'status': 'FAIL',
                         'cause': detailed_cause,
-                        'latency_ms': latency_ms
+                        'latency_ms': 0,
+                        'raw_context': nearby_context,
                     })
                 continue
 

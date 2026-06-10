@@ -55,6 +55,8 @@ class AnalysisBucketBuilder:
     DATACALL_KEYWORDS = [
         "DataCall", "data call", "SetupDataCall", "SETUP_DATA_CALL", "DEACTIVATE_DATA_CALL",
         "DcTracker", "DataNetwork", "TelephonyNetworkFactory", "ApnContext",
+        "NO CARRIER", "authentication failed", "User authentication failed",
+        "NOT_SPECIFIED", "E-PDN", "EPDN", "E_PDN",
     ]
     IMS_SIP_KEYWORDS = [
         "SIP/2.0", "REGISTER sip:", "INVITE sip:", "BYE sip:", "CANCEL sip:",
@@ -173,7 +175,10 @@ class AnalysisBucketBuilder:
             buckets['ntn'].append(line)
 
         if self._contains_any(line, self.DATACALL_KEYWORDS):
-            self._add_context_window(buckets, 'datacall', lines, idx, window=10)
+            # DataCall failure cause strings such as NO CARRIER / User authentication failed
+            # can appear several lines away from SETUP_DATA_CALL, so keep a wider context.
+            self._add_context_window(buckets, 'datacall', lines, idx, window=20)
+            self._add_context_window(buckets, 'internet_stall', lines, idx, window=20)
 
         if self._contains_any(line, self.IMS_SIP_KEYWORDS):
             self._add_context_window(buckets, 'ims_sip', lines, idx, window=5)

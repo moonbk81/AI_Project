@@ -133,11 +133,16 @@ class LogOrchestrator:
             # section/state 기반 parser는 후보 라인만 주면 누락 위험이 커서 full lines를 유지합니다.
             result['network_timeseries'] = self.net_ts_analyzer.analyze(lines)
             result['ntn_data'] = self.ntn_processor.analyze(buckets['ntn'])
-            result['datacall_data'] = self.datacall_parser.analyze(lines)
+
+            # DataCall/InternetStall은 AnalysisBucketBuilder에서 context window를 포함해 선별한 라인을 사용합니다.
+            # full lines를 직접 넣으면 DNS/validation 등 주변 노이즈가 과도하게 섞여 SetupDataCall 실패 원인이 묻힐 수 있습니다.
+            datacall_lines = buckets.get('datacall') or lines
+            internet_stall_lines = buckets.get('internet_stall') or lines
+            result['datacall_data'] = self.datacall_parser.analyze(datacall_lines)
             result['ims_sip_data'] = self.ims_sip_parser.analyze(buckets['ims_sip'])
             result['sat_at_data'] = self.sat_at_parser.analyze(buckets['sat_at'])
             result['internet_stall'] = self.internet_stall_parser.analyze(
-                lines,
+                internet_stall_lines,
                 data_call_events=result.get('datacall_data', []),
                 report_data=result)
 

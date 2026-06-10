@@ -13,6 +13,7 @@ from agent_toolkit.network_tools import (
     get_internet_stall_analytics,
     get_internet_stall_kpi_for_integrated_report,
     get_recent_data_usage_analytics,
+    get_datacall_setup_analytics,
 )
 
 from agent_toolkit.battery_tools import (

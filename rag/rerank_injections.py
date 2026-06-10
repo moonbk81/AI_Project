@@ -1,4 +1,3 @@
-
 """Forced top-k injection rules for retrieval reranking.
 
 This module keeps `_rerank_results()` in `retrieval.py` focused on generic scoring,
@@ -101,27 +100,56 @@ def apply_rerank_injections(
             final_top_results = [call_candidates[0]] + final_top_results[:max(0, top_k - 1)]
 
     if is_datacall_failure_query(query_lower):
-        datacall_candidates = []
+        setup_failure_candidates = []
+        datacall_failure_candidates = []
+
         for result in reranked_results:
             meta = result.get("meta") or {}
             log_type = str(meta.get("log_type", ""))
+            status = str(meta.get("status", "")).upper()
+            event_type = str(meta.get("event_type", "")).upper()
             text = " ".join([
                 str(result.get("doc", "")),
                 json.dumps(meta, ensure_ascii=False, default=str),
             ]).lower()
-            if log_type in ["Data_Call_Failure", "Data_Call_Event", "DataCall_Failure", "DataCall_Event"] or any(k in text for k in [
-                "setupdatacall", "no carrier", "user authentication failed", "e-pdn", "epdn"
-            ]):
-                datacall_candidates.append(result)
+            text_upper = text.upper()
 
-        if datacall_candidates and not any(
-            (r.get("meta") or {}).get("log_type") in ["Data_Call_Failure", "Data_Call_Event", "DataCall_Failure", "DataCall_Event"]
-            or any(k in str(r.get("doc", "")).lower() for k in [
-                "setupdatacall", "no carrier", "user authentication failed", "e-pdn", "epdn"
-            ])
-            for r in final_top_results
-        ):
-            final_top_results = [datacall_candidates[0]] + final_top_results[:max(0, top_k - 1)]
+            is_explicit_setup_failure = (
+                log_type == "SetupDataCall_Failed"
+                or event_type == "DATA_SETUP_FAIL"
+                or status == "FAIL"
+                or "NOT_SPECIFIED" in text_upper
+                or "NO CARRIER" in text_upper
+                or "AUTHENTICATION FAILED" in text_upper
+            )
+            is_datacall_related = (
+                log_type in [
+                    "SetupDataCall_Failed",
+                    "Data_Call_Failure",
+                    "Data_Call_Event",
+                    "DataCall_Failure",
+                    "DataCall_Event",
+                ]
+                or any(k in text for k in [
+                    "setupdatacall", "setup_data_call", "data_setup_fail",
+                    "no carrier", "user authentication failed", "authentication failed",
+                    "not_specified", "e-pdn", "epdn"
+                ])
+            )
+
+            if is_explicit_setup_failure:
+                setup_failure_candidates.append(result)
+            elif is_datacall_related:
+                datacall_failure_candidates.append(result)
+
+        forced_results = []
+        if setup_failure_candidates:
+            forced_results.append(setup_failure_candidates[0])
+        elif datacall_failure_candidates:
+            forced_results.append(datacall_failure_candidates[0])
+
+        if forced_results:
+            final_top_results = _merge_top_results(forced_results, final_top_results, top_k)
 
     if is_nitz_query(query_lower):
         nitz_candidates = [

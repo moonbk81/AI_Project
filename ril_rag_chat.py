@@ -31,6 +31,7 @@ from agent_toolkit import (
     get_radio_power_analytics,
     get_recent_data_usage_analytics,
     get_tiantong_satellite_analytics,
+    get_datacall_setup_analytics,
 )
 
 from sentence_transformers import SentenceTransformer
@@ -97,6 +98,7 @@ class RilRagChat:
             "get_tiantong_satellite_analytics": get_tiantong_satellite_analytics,
             "get_recent_data_usage_analytics": get_recent_data_usage_analytics,
             "get_binder_warning_analytics": get_binder_warning_analytics,
+            "get_datacall_setup_analytics": get_datacall_setup_analytics,
         }
 
     def _load_config(self):

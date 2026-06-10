@@ -42,6 +42,7 @@ def build_network_timeseries_payloads(report_data, build_markdown_doc, extract_m
 
     return rag_payload
 
+
 def build_data_usage_payloads(report_data, input_file):
     rag_payload = []
     source_file = source_file_name(input_file)
@@ -69,6 +70,58 @@ def build_data_usage_payloads(report_data, input_file):
 
     return rag_payload
 
+
+# --- NEW FUNCTION: build_datacall_payloads ---
+def build_datacall_payloads(report_data, input_file):
+    rag_payload = []
+    source_file = source_file_name(input_file)
+
+    for event in report_data.get("datacall_data", []) or []:
+        if not isinstance(event, dict):
+            continue
+
+        status = event.get("status") or event.get("result") or event.get("fail_cause") or "Unknown"
+        cause = event.get("cause") or event.get("fail_reason") or event.get("reason") or event.get("detailed_cause") or "Unknown"
+        vendor_reason = event.get("vendor_reason") or event.get("vendor_error") or event.get("vendor_cause") or event.get("ril_fail_cause") or ""
+        apn = event.get("apn") or event.get("apn_type") or event.get("pdn") or event.get("type") or "Unknown"
+        time = event.get("time") or event.get("timestamp") or "시간 미상"
+        raw_context = event.get("raw_context") or event.get("raw_logs") or event.get("raw") or ""
+
+        lower_text = f"{status} {cause} {vendor_reason} {apn} {raw_context}".lower()
+        is_setup_failure = (
+            "setup" in lower_text
+            or "setup_data_call" in lower_text
+            or "setupdatacall" in lower_text
+            or "not_specified" in lower_text
+            or "no carrier" in lower_text
+            or "authentication failed" in lower_text
+        )
+
+        log_type = "SetupDataCall_Failed" if is_setup_failure else "DataCall_Event"
+
+        meta = dict(event)
+        meta.update({
+            "source_file": source_file,
+            "log_type": log_type,
+            "time": time,
+            "status": status,
+            "cause": cause,
+            "vendor_reason": vendor_reason,
+            "apn": apn,
+        })
+
+        text_content = (
+            f"[{time}] DataCall 이벤트: APN/PDN={apn}, status={status}, cause={cause}"
+        )
+        if vendor_reason:
+            text_content += f", vendor_reason={vendor_reason}"
+        if raw_context:
+            text_content += f"\n근거 로그:\n{raw_context}"
+
+        append_payload(rag_payload, text_content, meta)
+
+    return rag_payload
+
 def build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata):
     rag_payload = []
     stall_data = report_data.get("internet_stall", {}) or {}
@@ -89,5 +142,6 @@ def build_network_payloads(report_data, input_file, build_markdown_doc, extract_
     rag_payload = []
     rag_payload.extend(build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_data_usage_payloads(report_data, input_file))
+    rag_payload.extend(build_datacall_payloads(report_data, input_file))
     rag_payload.extend(build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata))
     return rag_payload

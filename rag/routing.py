@@ -59,6 +59,7 @@ def _is_call_drop_trap_query(query_lower: str) -> bool:
     return has_call_scope and has_misclassification_check and has_release_or_reject_evidence
 
 
+
 def _is_time_context_inference_query(query_lower: str) -> bool:
     has_call_scope = any(k in query_lower for k in [
         "call_session", "call session", "volte", "ims call", "ps call",
@@ -75,6 +76,19 @@ def _is_time_context_inference_query(query_lower: str) -> bool:
         "airplane mode", "device_property_state", "device property"
     ])
     return has_call_scope and has_time_reasoning_scope and has_state_transition_scope
+
+# DataCall Setup Failure explicit intent matcher
+def _is_datacall_setup_query(query_lower: str) -> bool:
+    has_datacall_scope = any(k in query_lower for k in [
+        "setupdatacall", "setup_data_call", "data call", "datacall",
+        "데이터 호", "데이터콜", "데이터 호 연결", "데이터 호 설정",
+        "e-pdn", "epdn", "apn 연결", "pdp context"
+    ])
+    has_failure_or_reason_intent = any(k in query_lower for k in [
+        "실패", "거절", "사유", "원인", "명시", "failed", "failure", "reject", "cause", "reason",
+        "not_specified", "no carrier", "authentication failed", "user authentication failed"
+    ])
+    return has_datacall_scope and has_failure_or_reason_intent
 
 def extract_json_object(text: str) -> dict:
     if not text:
@@ -135,10 +149,21 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = {"Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"}
         is_hard_matched = True
 
+
     elif any(keyword in query_lower for keyword in ["cs call", "cs 통화", "cs 발신", "cs 수신", "cs csfb"]):
         selected_intents = {"Call_Analysis"}
         selected_tools = {"get_cs_call_analytics"}
         selected_log_types = {"Call_Session", "RILJ_Transaction"}
+        is_hard_matched = True
+
+    elif _is_datacall_setup_query(query_lower):
+        selected_intents = {"Data_Call_Setup"}
+        if "Data_Call_Setup" in routing_map:
+            selected_tools = set(routing_map["Data_Call_Setup"].get("tools", []))
+            selected_log_types = set(routing_map["Data_Call_Setup"].get("log_types", []))
+        else:
+            selected_tools = {"get_datacall_setup_analytics"}
+            selected_log_types = {"SetupDataCall_Failed"}
         is_hard_matched = True
 
     if any(keyword in query_lower for keyword in [
@@ -166,7 +191,10 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = set(routing_map["Crash_ANR"].get("log_types", []))
         is_hard_matched = True
 
-    elif any(keyword in query_lower for keyword in ["인터넷 먹통", "인터넷", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안", "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network", "setupdatacall"]):
+    elif any(keyword in query_lower for keyword in [
+        "인터넷 먹통", "인터넷", "웹페이지", "데이터 안됨", "데이터가 안", "데이터 안 되고", "데이터가 안 되고", "데이터 멈춤", "데이터가 멈", "데이터 먹통", "데이터 접속 안",
+        "data stall", "스톨", "validation", "validation failed", "no internet", "partial connectivity", "private dns", "tcp timeout", "tls handshake", "라우팅", "default network"
+    ]):
         selected_intents = {"Internet_Stall"}
         if "Internet_Stall" in routing_map:
             selected_tools = set(routing_map["Internet_Stall"].get("tools", []))
@@ -352,6 +380,19 @@ def get_hybrid_routing(query: str, routing_map: dict, embed_model, llm_model_nam
     merged_intents.update(llm_route.get("intents", []))
     merged_tools.update(llm_route.get("tools", []))
     merged_log_types.update(llm_route.get("log_types", []))
+
+    # Hard override: SetupDataCall/DataCall explicit failure questions must not be diluted
+    # by Internet_Stall/DNS routing. Retrieval and tool context should focus on setup failure facts.
+    query_lower = query.lower()
+    if _is_datacall_setup_query(query_lower):
+        merged_intents = {"Data_Call_Setup"}
+        if "Data_Call_Setup" in routing_map:
+            merged_tools = set(routing_map["Data_Call_Setup"].get("tools", []))
+            merged_log_types = set(routing_map["Data_Call_Setup"].get("log_types", []))
+        else:
+            merged_tools = {"get_datacall_setup_analytics"}
+            merged_log_types = {"SetupDataCall_Failed"}
+
     return {
         "intents": sorted(merged_intents),
         "tools": sorted(merged_tools),

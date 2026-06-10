@@ -107,6 +107,77 @@ def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./r
         "stall_and_recovery_facts": analysis
     }, ensure_ascii=False)
 
+def get_datacall_setup_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """
+    SetupDataCall / DataCall 설정 실패만 추출합니다.
+    DNS/InternetStall/성공 DataCall을 제외하고, 명시적인 데이터 호 설정 실패 사유를 LLM에 제공합니다.
+    """
+    report_data = _load_report_json(base_name, result_dir)
+    datacall_events = report_data.get("datacall_data", []) or []
+
+    failure_events = []
+    for event in datacall_events:
+        if not isinstance(event, dict):
+            continue
+
+        event_type = str(event.get("event_type", "")).upper()
+        status = str(event.get("status", "")).upper()
+        cause = str(event.get("cause", ""))
+        raw_context = str(event.get("raw_context") or event.get("raw_logs") or event.get("raw") or "")
+        search_text = f"{event_type} {status} {cause} {raw_context}"
+
+        is_setup_failure = (
+            event_type == "DATA_SETUP_FAIL"
+            or status == "FAIL"
+            or "NOT_SPECIFIED" in search_text
+            or "NO CARRIER" in search_text.upper()
+            or "AUTHENTICATION FAILED" in search_text.upper()
+            or "SETUP_DATA_CALL" in search_text.upper()
+        )
+        if not is_setup_failure:
+            continue
+
+        explicit_reasons = []
+        if "NOT_SPECIFIED" in search_text:
+            explicit_reasons.append("NOT_SPECIFIED")
+        if "NO CARRIER" in search_text.upper():
+            explicit_reasons.append("NO CARRIER")
+        if "AUTHENTICATION FAILED" in search_text.upper():
+            explicit_reasons.append("User authentication failed")
+        explicit_reasons = list(dict.fromkeys(explicit_reasons))
+
+        failure_events.append({
+            "time": event.get("res_time") or event.get("req_time") or event.get("time"),
+            "event_type": event.get("event_type"),
+            "status": event.get("status"),
+            "cause": event.get("cause"),
+            "explicit_reasons": explicit_reasons,
+            "apn": event.get("apn"),
+            "network": event.get("network"),
+            "protocol": event.get("protocol"),
+            "cid": event.get("cid"),
+            "latency_ms": event.get("latency_ms"),
+            "raw_context": raw_context[:4000],
+        })
+
+    if not failure_events:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "SetupDataCall/DataCall 설정 실패 이벤트가 없습니다.",
+            "total_datacall_events": len(datacall_events),
+        }, ensure_ascii=False)
+
+    return json.dumps({
+        "status": "OK",
+        "total_datacall_events": len(datacall_events),
+        "setup_failure_count": len(failure_events),
+        "setup_failures": failure_events,
+        "analysis_rule": (
+            "SetupDataCall 실패 원인 질문에서는 Network_DNS_Issue, Internet_Stall_Analysis, "
+            "성공 DataCall_Event보다 이 setup_failures의 cause/explicit_reasons를 우선 근거로 사용해야 합니다."
+        )
+    }, ensure_ascii=False)
+
 def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -> str:
     """
     인터넷 멈춤 전용 분석 결과를 LLM이 사용하기 좋은 JSON으로 요약합니다.
