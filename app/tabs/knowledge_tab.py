@@ -80,7 +80,7 @@ def _render_search_ui(engine):
     if selected_severity != "전체": filtered_df = filtered_df[filtered_df["Severity"] == selected_severity]
 
     st.markdown(f"**총 {len(filtered_df)}건의 사례가 검색되었습니다.**")
-    st.dataframe(filtered_df[["단말 모델", "AP (HW)", "OS / SDK", "Severity", "분석 및 해결방안"]], use_container_width=True, hide_index=True)
+    st.dataframe(filtered_df[["단말 모델", "AP (HW)", "OS / SDK", "Severity", "분석 및 해결방안"]], width='stretch', hide_index=True)
 
     st.markdown("---")
     st.subheader("📖 상세 사례 목록")
@@ -143,12 +143,37 @@ def _render_registration_ui(engine):
                 ]
 
             if target_ids:
-                engine.save_knowledge(target_ids, feedback, severity=severity)
+                # 🚨 [수정] 현재 세션의 로그 메타데이터에서 단말 정보를 추출합니다.
+                base_meta = {}
+                for m in st.session_state.last_metas:
+                    if m:
+                        base_meta = m
+                        break
+
+                # RilRagChat 엔진이 요구하는 형식에 맞춰 build_info 딕셔너리 생성
+                build_info_dict = {
+                    "model_name": base_meta.get("model_name", "Unknown"),
+                    "hardware": base_meta.get("hardware", "Unknown"),
+                    "android_sdk": base_meta.get("android_sdk", "Unknown"),
+                    "radio": base_meta.get("radio", "Unknown"),
+                    "kernel": base_meta.get("kernel", "Unknown")
+                }
+
+                # 🚨 [수정] save_knowledge 호출 시 build_info 파라미터로 묶어서 전달
+                engine.save_knowledge(
+                    target_ids,
+                    feedback,
+                    severity=severity,
+                    build_info=build_info_dict
+                )
+
                 st.success(f"✅ [{target_type}] 카테고리에 {severity} 등급으로 지식이 성공적으로 등록되었습니다!")
 
                 # 등록 폼 초기화 트릭
                 st.session_state.feedback_key += 1
                 time.sleep(1.5)
                 st.rerun()
+
         else:
             st.error("분석 코멘트가 비어있습니다. 내용을 입력해주세요.")
+

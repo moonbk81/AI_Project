@@ -5,6 +5,7 @@ class AnalysisBucketBuilder:
         'boot',
         'signal',
         'dns',
+        'usage',
         'net_ts',
         'crash',
         'anr',
@@ -97,6 +98,7 @@ class AnalysisBucketBuilder:
         "binder_alloc", "am_kill", "am_wtf",
     ]
 
+    BASIC_USAGE_KEYWORDS = ["transports={0}", "metered=true", "DNS Requested", "pkg,"]
     NET_TS_KEYWORDS = ["NetId", "DnsEvent", "TcpStats", "NetworkMonitor", "ConnectivityService"]
     RILJ_TAG_REGEX = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
 
@@ -134,6 +136,9 @@ class AnalysisBucketBuilder:
         if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line or "NetworkSignalStrengthHandler" in line:
             buckets['signal'].append(line)
 
+        if self._contains_any(line, self.BASIC_USAGE_KEYWORDS):
+            buckets['usage'].append(line)
+
         if "DNS Requested" in line:
             buckets['dns'].append(line)
 
@@ -151,7 +156,7 @@ class AnalysisBucketBuilder:
             self._add_context_window(buckets, 'anr', lines, idx, window=180)
 
         if self._contains_any(line, self.RADIO_POWER_KEYWORDS):
-            buckets['radio_power'].append(line)
+            self._add_context_window(buckets, 'radio_power', lines, idx, window=10)
 
     def _collect_battery_thermal_buckets(self, buckets, lines, idx, line):
         if self._contains_any(line, self.BATTERY_KEYWORDS):
@@ -168,11 +173,10 @@ class AnalysisBucketBuilder:
             buckets['ntn'].append(line)
 
         if self._contains_any(line, self.DATACALL_KEYWORDS):
-            buckets['datacall'].append(line)
-            buckets['internet_stall'].append(line)
+            self._add_context_window(buckets, 'datacall', lines, idx, window=10)
 
         if self._contains_any(line, self.IMS_SIP_KEYWORDS):
-            buckets['ims_sip'].append(line)
+            self._add_context_window(buckets, 'ims_sip', lines, idx, window=5)
 
         if self._contains_any(line, self.SAT_AT_KEYWORDS):
             buckets['sat_at'].append(line)

@@ -181,14 +181,20 @@ class RilRagChat:
                 data = json.load(f)
             if not data: continue
 
+            global_metas = {}
+            if isinstance(data, dict):
+                global_metas = data.get("global_metadata", {}) or {}
+                data = data.get("payloads", [])
+
             base_id = os.path.splitext(filename)[0]
             raw_documents = [item["document"] for item in data]
             raw_metadatas = [item["metadata"] for item in data]
 
             safe_documents = []
             safe_metadatas = []
-            MAX_DOC_CHARS = 4000
-            MAX_META_CHARS = 5000
+            model_config = self.model_config_registry.get(self.llm_model_name, self.model_config_registry.get("default", {}))
+            MAX_DOC_CHARS = model_config.get("max_doc_chars", 1200)
+            MAX_META_CHARS = model_config.get("max_meta_chars", 2000)
 
             for doc, meta in zip(raw_documents, raw_metadatas):
                 safe_documents.append(str(doc)[:MAX_DOC_CHARS])
@@ -261,8 +267,8 @@ class RilRagChat:
             return ""
 
         # 1. raw_logs 패턴 원천 차단
-        text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
-        text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+        #text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+        #text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
 
         # 💡 [어텐션 붕괴 방어벽 1] 가장 심각한 토큰 도둑: Internet Stall의 key_related_events 다이어트
         # 대괄호 안의 무수한 이벤트 나열을 한 줄로 압축합니다.
@@ -300,7 +306,7 @@ class RilRagChat:
             pass
 
         # 3. 중괄호, 큰따옴표 등 2B 모델 토큰 지연 유발하는 구조물 정제
-        text = text.replace("{", "").replace("}", "").replace('"', "").replace("'", "")
+        # text = text.replace("{", "").replace("}", "").replace('"', "").replace("'", "")
 
         # 4. 연속된 줄바꿈 및 의미 없는 공백 압축
         text = re.sub(r'\n\s*\n', '\n', text).strip()
@@ -366,6 +372,8 @@ class RilRagChat:
         if len(target_log_types) <= 3:
             retrieved_log_types.update(target_log_types)
 
+        past_knowledge_context = self._get_past_knowledge_context(search_query, top_k=2)
+
         # 2. 팩트 데이터 추출
         tool_facts_list = []
         if current_base != "Unknown" and selected_tools:
@@ -377,6 +385,9 @@ class RilRagChat:
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
         tool_facts = self._clean_log_payload(tool_facts)
+
+        if past_knowledge_context:
+            tool_facts = f"{past_knowledge_context}\n\n{tool_facts}"
 
         # 💡 [핵심] JSON 데이터 임시 보관 (prompt_template 주입용)
         self._temp_tool_facts = json.loads(tool_facts) if tool_facts.startswith('{') else {}
@@ -471,12 +482,49 @@ class RilRagChat:
             try:
                 raw_list = json.loads(raw_data) if isinstance(raw_data, str) else []
                 real_logs = [l for l in raw_list if "중략됨" not in l and l.strip()]
-                if real_logs: snippet = "\n".join(real_logs[-5:])
+                if real_logs:
+                    if len(real_logs) > 30:
+                        snippet = "\n".join(real_logs[:15]) + "\n...[중략]...\n" + "\n".join(real_logs[-15:])
+                    else:
+                        snippet = "\n".join(real_logs)
             except: pass
 
             meta_lines = "\n".join([f"  - {k}: {v}" for k, v in clean_meta.items()])
             formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n[메타정보]\n{meta_lines}\n\n[요약]\n{doc}\n\n[원본 로그 스니펫]\n{snippet}")
         return "\n\n".join(formatted)
+
+    def _get_past_knowledge_context(self, query: str, top_k: int = 2) -> str:
+        """사용자 질의와 유사한 과거 장애 사례를 사내 지식 베이스에서 검색하여 포맷팅합니다."""
+        past_knowledge_context = ""
+        try:
+            # 사용자의 질문을 벡터로 변환
+            query_vector = self.embed_model.encode([query], convert_to_numpy=True).tolist()
+
+            # 지식 베이스 컬렉션에서 유사한 과거 사례 상위 n개 조회
+            kb_results = self.knowledge_collection.query(
+                query_embeddings=query_vector,
+                n_results=top_k
+            )
+
+            if kb_results and kb_results.get('documents') and kb_results['documents'][0]:
+                kb_docs = kb_results['documents'][0]
+                kb_metas = kb_results['metadatas'][0]
+
+                kb_lines = []
+                for idx, (doc, meta) in enumerate(zip(kb_docs, kb_metas)):
+                    kb_lines.append(
+                        f"[과거 유사 사례 {idx+1}]\n"
+                        f"- 대상 모델: {meta.get('model_name', 'Unknown')}\n"
+                        f"- 심각도: {meta.get('severity', 'Normal')}\n"
+                        f"- 해결 방안 및 엔지니어 코멘트: {doc}"
+                    )
+
+                past_knowledge_context = "=== [💡 참조할 사내 과거 장애 유사 사례] ===\n" + "\n\n".join(kb_lines)
+                print(f"🔍 [RAG_INFO] 과거 사내 지식 베이스에서 {len(kb_lines)}건의 연관 사례를 찾아 컨텍스트에 주입했습니다.")
+        except Exception as e:
+            print(f"[WARN] 사내 지식 베이스 조회 중 에러 발생: {e}")
+
+        return past_knowledge_context
 
     # 💡 [핵심 수정 3] 래퍼 함수 파라미터 분리 동기화
     def _call_llm(self, system_prompt: str, user_query: str, is_bench=False) -> tuple[str, str]:

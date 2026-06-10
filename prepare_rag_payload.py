@@ -102,27 +102,40 @@ class RagPayloadBuilder:
 
         return metadata
 
-    def _inject_global_metadata(self, report_data, rag_payload):
+    def _extract_global_metadata(self, report_data):
         """
-        report_data에 포함된 단말기 전역 정보(Build Info)를
-        생성된 모든 RAG 문서(payload)의 메타데이터에 일괄 주입합니다.
+        report_data에 포함된 단말기 전역 정보(Build Info)를 1회성 메타로 추출합니다.
+
+        주의:
+        - 이 값들은 모든 RAG 문서에 반복 주입하지 않습니다.
+        - kernel/radio/model 같은 공통 정보가 retrieved_meta마다 반복되면
+          정작 이벤트 판단 필드가 밀릴 수 있기 때문입니다.
         """
         if "build_info" not in report_data or not isinstance(report_data["build_info"], dict):
-            return
+            return {}
 
         b_info = report_data["build_info"]
-        global_meta = {
+        return {
             "model_name": b_info.get("model_name", "Unknown"),
             "hardware": b_info.get("hardware", "Unknown"),
             "android_sdk": b_info.get("android_sdk", "Unknown"),
             "radio": b_info.get("radio", "Unknown"),
-            "kernel": b_info.get("kernel", "Unknown")
+            "kernel": b_info.get("kernel", "Unknown"),
         }
 
+    def _strip_repeated_global_metadata(self, rag_payload):
+        """
+        기존 payload/metadata 안에 반복 저장된 공통 단말 메타를 제거합니다.
+        이벤트별 판단에 필요한 metadata만 남겨 retrieved_meta 노이즈를 줄입니다.
+        """
+        repeated_keys = {"model_name", "hardware", "android_sdk", "radio", "kernel"}
+
         for payload in rag_payload:
-            if "metadata" not in payload:
-                payload["metadata"] = {}
-            payload["metadata"].update(global_meta)
+            metadata = payload.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            for key in repeated_keys:
+                metadata.pop(key, None)
 
     def build_payload(self, output_filename=None):
         if not os.path.exists(self.input_file):
@@ -148,7 +161,16 @@ class RagPayloadBuilder:
             )
         )
 
-        self._inject_global_metadata(report_data, rag_payload)
+        global_metadata = self._extract_global_metadata(report_data)
+        self._strip_repeated_global_metadata(rag_payload)
+
+        # 기존 리스트 기반 payload 구조를 유지하면 전역 메타를 "바깥에 1회" 둘 수 없으므로,
+        # 출력 JSON을 wrapper 형태로 저장합니다.
+        # downstream에서는 data.get("payloads", data) 형태로 읽으면 기존 리스트/신규 wrapper 모두 호환됩니다.
+        output_data = {
+            "global_metadata": global_metadata,
+            "payloads": rag_payload,
+        }
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         payload_dir = os.path.join(base_dir, "payloads")
@@ -156,4 +178,5 @@ class RagPayloadBuilder:
         final_output_path = os.path.join(payload_dir, os.path.basename(output_filename))
 
         with open(final_output_path, 'w', encoding='utf-8') as f:
-            json.dump(rag_payload, f, indent=4, ensure_ascii=False)
+            json.dump(output_data, f, indent=4, ensure_ascii=False)
+

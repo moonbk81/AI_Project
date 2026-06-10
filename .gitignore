@@ -236,4 +236,5 @@ benchmark_results/
 default.sqlite
 eval_logs/
 log_for_evaluation/
-debug_prompts/
+csv/rag_golden_eval_details_output.yaml
+*.json

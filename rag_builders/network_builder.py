@@ -69,8 +69,25 @@ def build_data_usage_payloads(report_data, input_file):
 
     return rag_payload
 
+def build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata):
+    rag_payload = []
+    stall_data = report_data.get("internet_stall", {}) or {}
+    stall_windows = stall_data.get("stall_windows", []) or []
+
+    top_windows = sorted(
+        stall_windows,
+        key=lambda w: w.get("severity_score", 0),
+        reverse=True
+    )[:5]
+
+    for window in top_windows:
+        append_callback_payload(rag_payload, window, "Internet_Stall_Analysis", build_markdown_doc, extract_metadata)
+
+    return rag_payload
+
 def build_network_payloads(report_data, input_file, build_markdown_doc, extract_metadata):
     rag_payload = []
     rag_payload.extend(build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_data_usage_payloads(report_data, input_file))
+    rag_payload.extend(build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata))
     return rag_payload
