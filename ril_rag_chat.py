@@ -267,8 +267,8 @@ class RilRagChat:
             return ""
 
         # 1. raw_logs 패턴 원천 차단
-        #text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
-        #text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+        text = re.sub(r'"raw_logs"\s*:\s*\[.*?\]', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
+        text = re.sub(r'"raw_logs"\s*:\s*\{.*?\}', '"raw_logs": "[OMITTED_FOR_LLM_DIET]"', text, flags=re.DOTALL)
 
         # 💡 [어텐션 붕괴 방어벽 1] 가장 심각한 토큰 도둑: Internet Stall의 key_related_events 다이어트
         # 대괄호 안의 무수한 이벤트 나열을 한 줄로 압축합니다.
@@ -306,7 +306,7 @@ class RilRagChat:
             pass
 
         # 3. 중괄호, 큰따옴표 등 2B 모델 토큰 지연 유발하는 구조물 정제
-        # text = text.replace("{", "").replace("}", "").replace('"', "").replace("'", "")
+        text = text.replace("{", "").replace("}", "").replace('"', "").replace("'", "")
 
         # 4. 연속된 줄바꿈 및 의미 없는 공백 압축
         text = re.sub(r'\n\s*\n', '\n', text).strip()

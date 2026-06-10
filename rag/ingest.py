@@ -1,5 +1,4 @@
 
-
 import gc
 import json
 import os
@@ -23,10 +22,27 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
             collection.delete(ids=old["ids"])
 
     with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        loaded = json.load(f)
+
+    if not loaded:
+        print(f"⚠️ 비어있는 payload: {filename}")
+        return
+
+    # Backward/forward compatible payload handling:
+    # - old format: [{"document": ..., "metadata": ...}, ...]
+    # - new format: {"global_metadata": {...}, "payloads": [{...}, ...]}
+    global_metadata = {}
+    if isinstance(loaded, dict):
+        global_metadata = loaded.get("global_metadata", {}) or {}
+        data = loaded.get("payloads", []) or []
+    elif isinstance(loaded, list):
+        data = loaded
+    else:
+        print(f"⚠️ 지원하지 않는 payload 형식: {filename} ({type(loaded).__name__})")
+        return
 
     if not data:
-        print(f"⚠️ 비어있는 payload: {filename}")
+        print(f"⚠️ payload 항목 없음: {filename}")
         return
 
     model_cfg = MODEL_CONFIG.get(model_name, MODEL_CONFIG["default"])
@@ -39,11 +55,31 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
 
     docs, metas, ids = [], [], []
     for i, item in enumerate(data):
+        if not isinstance(item, dict) or "document" not in item:
+            print(f"⚠️ 잘못된 payload 항목 스킵: {filename} index={i}")
+            continue
+
         docs.append(str(item["document"])[:max_doc_chars])
-        meta = item.get("metadata", {}).copy()
+
+        # Keep event-level metadata as the primary metadata.
+        # Do not re-inject long global metadata such as kernel into every document.
+        meta = item.get("metadata", {}) or {}
+        meta = meta.copy()
         meta["source_file"] = filename
+
+        # Store only a compact pointer to global metadata for debugging/filtering,
+        # without bloating every Chroma metadata row.
+        if global_metadata:
+            for key in ("model_name", "hardware", "android_sdk", "radio"):
+                if key not in meta and key in global_metadata:
+                    meta[key] = global_metadata[key]
+
         metas.append(sanitize_chroma_metadata(meta, max_chars=max_meta_chars))
         ids.append(f"{base_id}_{i}")
+
+    if not docs:
+        print(f"⚠️ 유효한 payload 항목 없음: {filename}")
+        return
 
     print(
         f"'{filename}' 배치 임베딩 시작... (총 {len(docs)} docs, embed={EMBED_BATCH_SIZE}, add={ADD_BATCH_SIZE})"
