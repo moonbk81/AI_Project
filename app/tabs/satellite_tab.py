@@ -62,8 +62,8 @@ def render_satellite_tab(engine):
     if not sat_type:
         return
 
-    if st.button(f"{sat_type} 위성망 심층 진단 실행", width="stretch"):
-        with st.spinner(f"Analyzing {sat_type} Satellite Data..."):
+    if st.button(f"{sat_type} 위성망 리포트 생성", width="stretch"):
+        with st.spinner(f"{sat_type} 위성망 데이터를 정리하는 중입니다..."):
             health_kpi_json = get_device_health_kpi(current_base)
             prompt_template = SATELLITE_PROMPTS.get(sat_type, "Prompt template not found.")
             sat_query = prompt_template.format(health_kpi_json=health_kpi_json)
@@ -76,10 +76,10 @@ def render_satellite_tab(engine):
             if isinstance(final_text, str):
                 final_text = final_text.replace("\\n", "\n")
 
-            st.markdown(f"### [AI Analysis: {sat_type} Network Diagnostic]")
+            st.markdown(f"### {sat_type} 위성망 분석 결과")
 
             if sat_thinking:
-                with st.expander("AI Reasoning Trace"):
+                with st.expander("처리 과정", expanded=False):
                     st.markdown(f"```text\n{sat_thinking}\n```")
 
             st.info(final_text)
@@ -87,7 +87,7 @@ def render_satellite_tab(engine):
             if "chat_history" in st.session_state:
                 st.session_state.chat_history.append({
                     "role": "user",
-                    "content": f"{sat_type} Network Diagnostic requested."
+                    "content": f"{sat_type} 위성망 분석 요청"
                 })
                 st.session_state.chat_history.append({
                     "role": "assistant",

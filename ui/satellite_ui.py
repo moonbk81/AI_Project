@@ -7,29 +7,29 @@ import plotly.graph_objects as go
 import streamlit as st
 
 def render_ntn_advanced_fw_analyzer(current_base):
-    st.subheader("NTN Roaming Policy & UI State Analysis (Starlink)")
+    st.subheader("NTN 로밍 정책 및 UI 상태")
 
     if not current_base:
-        st.info("Target file is not selected.")
+        st.info("분석 대상 파일을 선택해 주세요.")
         return
 
     file_path = f"./result/{current_base}_ntn.json"
     if not os.path.exists(file_path):
-        st.info("NTN data file not found.")
+        st.info("NTN 분석 결과 파일이 없습니다.")
         return
 
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     if not data:
-        st.error("No NTN data extracted from the log file.")
+        st.error("로그에서 추출된 NTN 데이터가 없습니다.")
         return
 
     ntn_df = pd.DataFrame(data)
 
     real_ntn_events = ntn_df[ntn_df['event_type'] != 'RADIO_POWER']
     if real_ntn_events.empty:
-        st.info("No NTN specific events found.")
+        st.info("NTN 관련 이벤트가 없습니다.")
         return
 
     expected_cols = ['ntn_plmn', 'data_policy', 'power_state', 'ntn_mode', 'last_ntn_mode', 'last_phone_mode', 'is_hysteresis', 'raw_info']
@@ -69,13 +69,13 @@ def render_ntn_advanced_fw_analyzer(current_base):
             break
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Target Satellite PLMN", latest_plmn)
-    col2.metric("Active Data Policy", latest_policy)
-    col3.metric("Status Bar Icon State", ui_icon_status)
+    col1.metric("대상 위성 PLMN", latest_plmn)
+    col2.metric("적용 데이터 정책", latest_policy)
+    col3.metric("상태바 아이콘", ui_icon_status)
 
     st.divider()
 
-    st.markdown("**NTN Entry Sequence & State Transition Timeline**")
+    st.markdown("**NTN 진입 및 상태 전이 타임라인**")
     chart_df = clean_df[clean_df['event_type'] != 'DATA_POLICY'].copy()
 
     if not chart_df.empty:
@@ -86,8 +86,8 @@ def render_ntn_advanced_fw_analyzer(current_base):
         fig = px.scatter(
             chart_df, x='time_dt', y='event_type', color='event_type',
             hover_data=['ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'power_state'],
-            title="NTN Event Tracker (State Changes)",
-            labels={'time_dt': 'Event Time', 'event_type': 'Event Type'}
+            title="NTN 상태 전이 이벤트",
+            labels={'time_dt': '이벤트 시간', 'event_type': '이벤트 유형'}
         )
         fig.update_traces(marker=dict(size=14, symbol='diamond', line=dict(width=2, color='DarkSlateGrey')))
         fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
@@ -95,15 +95,15 @@ def render_ntn_advanced_fw_analyzer(current_base):
         fig.update_layout(yaxis={'categoryorder': 'array', 'categoryarray': order})
         st.plotly_chart(fig, width="stretch")
     else:
-        st.info("No timeline events to display.")
+        st.info("표시할 타임라인 이벤트가 없습니다.")
 
-    st.markdown("**NTN State Transition Details**")
+    st.markdown("**NTN 상태 전이 상세**")
     display_cols = [col for col in ['time', 'event_type', 'power_state', 'ntn_plmn', 'last_ntn_mode', 'ntn_mode', 'is_hysteresis', 'data_policy'] if col in clean_df.columns]
     final_table_df = clean_df[display_cols].fillna("-")
     st.dataframe(final_table_df, width="stretch")
 
 def render_sat_at_analyzer(current_base=None):
-    st.subheader("Satellite Modem Control Sequence & State (AT Command)")
+    st.subheader("위성 모뎀 제어 상태")
 
     if not current_base: return
     file_path = f"./result/{current_base}_sat_at.json"
@@ -117,29 +117,29 @@ def render_sat_at_analyzer(current_base=None):
     reg_history = data.get("registration_history", [])
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Satellite ARFCN", metrics.get("arfcn", "N/A"))
-    c2.metric("Registration State", metrics.get("current_reg_state", "Unknown"))
+    c1.metric("위성 ARFCN", metrics.get("arfcn", "N/A"))
+    c2.metric("등록 상태", metrics.get("current_reg_state", "Unknown"))
 
     call_total = metrics.get('calls_total', 0)
     call_fail = metrics.get('calls_dropped_or_failed', 0)
-    c3.metric("Voice Call (Total/Fail)", f"{call_total} / {call_fail}",
-              delta=f"{call_fail} Drop" if call_fail > 0 else "Normal", delta_color="inverse")
+    c3.metric("음성 통화(전체/실패)", f"{call_total} / {call_fail}",
+              delta=f"{call_fail}건 실패" if call_fail > 0 else "정상", delta_color="inverse")
 
     sms_rx = metrics.get('sms_rx', 0)
     sms_tx_succ = metrics.get('sms_tx_success', 0)
     sms_tx_fail = metrics.get('sms_tx_fail', 0)
-    c4.metric("SMS (Rx/Tx Succ/Tx Fail)", f"{sms_rx} / {sms_tx_succ} / {sms_tx_fail}",
-              delta=f"{sms_tx_fail} Fail" if sms_tx_fail > 0 else "Normal", delta_color="inverse")
+    c4.metric("SMS(Rx/Tx 성공/Tx 실패)", f"{sms_rx} / {sms_tx_succ} / {sms_tx_fail}",
+              delta=f"{sms_tx_fail}건 실패" if sms_tx_fail > 0 else "정상", delta_color="inverse")
     st.divider()
 
     if reg_history:
-        st.write("#### Satellite Network Registration History")
+        st.write("#### 위성망 등록 이력")
         df_reg = pd.DataFrame(reg_history)
 
         fig_reg = px.line(
             df_reg, x="time", y="status_str", markers=True,
             hover_data=["raw"],
-            labels={"time": "Time", "status_str": "State"}
+            labels={"time": "시간", "status_str": "상태"}
         )
         fig_reg.update_traces(line_shape='hv', line_color='#E64A19', marker=dict(size=8))
         fig_reg.update_yaxes(categoryorder='array', categoryarray=["Deregistered (0)", "Searching", "Registered (1)"])
@@ -148,7 +148,7 @@ def render_sat_at_analyzer(current_base=None):
         st.divider()
 
     if flow:
-        st.write("#### Call Control Full-Stack Sequence (AP ↔ RIL ↔ Modem)")
+        st.write("#### 통화 제어 시퀀스(AP ↔ RIL ↔ Modem)")
         fig = go.Figure()
 
         for idx, msg in enumerate(flow):

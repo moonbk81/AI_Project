@@ -1,4 +1,3 @@
-
 """Sidebar rendering for the Streamlit web app."""
 
 import os
@@ -51,7 +50,7 @@ def _render_engine_settings():
         if (st.session_state['active_model'] != ui_model) or (st.session_state['active_routing_mode'] != ui_mode):
             st.session_state['active_model'] = ui_model
             st.session_state['active_routing_mode'] = ui_mode
-            st.session_state['last_loaded_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state['last_loaded_at'] = f"Loaded @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             st.toast(f"엔진 설정이 업데이트 되었습니다. ({ui_model} / {ui_mode})")
             st.rerun()
         else:
@@ -59,10 +58,15 @@ def _render_engine_settings():
 
     st.divider()
     st.markdown("### 현재 활성 상태")
+
+    loaded_at = st.session_state.get('last_loaded_at', '')
+    if not loaded_at or loaded_at == 'System Initializing...':
+        loaded_at = 'Ready'
+
     st.info(
         f"**Model:** `{st.session_state['active_model']}`  \n"
         f"**Mode:** `{st.session_state['active_routing_mode']}`  \n"
-        f"**Loaded:** `{st.session_state['last_loaded_at']}`"
+        f"**Status:** `{loaded_at}`"
     )
 
 def _render_file_session_manager(engine, reset_analysis_context):
@@ -107,23 +111,11 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         key=f"uploader_{st.session_state.uploader_key}",
     )
 
-    use_slicing = st.checkbox("타임라인 슬라이싱 활성화 (대용량 로그 권장)")
-    start_time, end_time = "", ""
-    if use_slicing:
-        st.info("이슈 발생 시점 기준 전후 5~10분으로 범위를 제한하면 분석 효율이 향상됩니다.")
-        col1, col2 = st.columns(2)
-        with col1:
-            start_time = st.text_input("Start (ex: 04-12 14:00:00)")
-        with col2:
-            end_time = st.text_input("End (ex: 04-12 14:15:00)")
-
     if st.button("분석 및 DB 적재 시작", width="stretch", type="primary"):
         if not uploaded_files:
             st.error("파일을 하나 이상 업로드하십시오.")
-        elif use_slicing and (not start_time or not end_time):
-            st.error("슬라이싱 범위를 명확히 입력하십시오.")
         else:
-            run_analysis_pipeline(uploaded_files, use_slicing, start_time, end_time, engine)
+            run_analysis_pipeline(uploaded_files, False, "", "", engine)
 
 def _reset_analysis_context():
     st.session_state.messages = []

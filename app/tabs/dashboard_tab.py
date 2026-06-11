@@ -1,4 +1,3 @@
-
 """Dashboard tab renderer."""
 
 import json
@@ -13,8 +12,8 @@ from agent_tools import get_device_health_kpi
 from app.helpers import get_collection_metadatas_batched
 
 def render_dashboard_tab(engine):
-    st.header("전사 로그 통계 대시보드")
-    st.markdown("데이터베이스에 축적된 로그 데이터의 통계와 지식 베이스를 확인합니다.")
+    st.header("로그 통계 대시보드")
+    st.markdown("적재된 로그 데이터의 통계와 기존 분석 사례를 확인합니다.")
 
     try:
         all_data = get_collection_metadatas_batched(engine.collection, batch_size=500)
@@ -34,24 +33,24 @@ def render_dashboard_tab(engine):
     df_all = pd.DataFrame(meta_list)
 
     st.divider()
-    view_mode = st.radio("분석 범위 설정", ["현재 활성 세션", "전체 누적 히스토리"], horizontal=True)
+    view_mode = st.radio("조회 범위", ["현재 세션", "전체 이력"], horizontal=True)
 
-    if view_mode == "현재 활성 세션" and st.session_state.current_file:
+    if view_mode == "현재 세션" and st.session_state.current_file:
         df = df_all[df_all['source_file'] == st.session_state.current_file]
-        st.info(f"현재 분석 파일: `{st.session_state.current_file}`")
+        st.info(f"현재 파일: `{st.session_state.current_file}`")
     else:
         df = df_all
-        st.info(f"전체 누적 데이터 분석 (총 {df_all['source_file'].nunique()}개 세션)")
+        st.info(f"전체 이력 기준 조회 (총 {df_all['source_file'].nunique()}개 세션)")
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("총 임베딩 문서 수", f"{len(df)} 건")
+    col1.metric("적재 문서 수", f"{len(df)} 건")
     col2.metric("분석 완료 로그 수", f"{df['source_file'].nunique()} 개" if 'source_file' in df.columns else "0 개")
-    col3.metric("해결된 사례 수", f"{df['known_solution'].notna().sum()} 건" if 'known_solution' in df.columns else "0 건")
+    col3.metric("등록 사례 수", f"{df['known_solution'].notna().sum()} 건" if 'known_solution' in df.columns else "0 건")
     st.divider()
 
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("로그 유형별 분포 (Log Type)")
+        st.subheader("로그 유형별 분포")
         if 'log_type' in df.columns:
             fig1 = px.pie(df, names='log_type', hole=0.4)
             st.plotly_chart(fig1, width="stretch")
@@ -68,7 +67,7 @@ def render_dashboard_tab(engine):
         else:
             st.info("파일 이름 데이터가 존재하지 않습니다.")
 
-    if view_mode != "현재 활성 세션":
+    if view_mode != "현재 세션":
         return
 
     _render_current_session_dashboard(engine, df)
@@ -109,7 +108,7 @@ def _render_kpi_summary(df):
     sig_df = df[df['log_type'] == 'Signal_Level'].copy()
     avg_signal = sig_df['level'].mean() if not sig_df.empty else 0
 
-    st.subheader("단말 상태 요약 지표 (KPI)")
+    st.subheader("단말 상태 요약")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("데이터 사용 상위 앱", f"{top_app_name}", f"{top_app_mb} MB")
     col2.metric("평균 신호 수신 강도", f"Level {avg_signal:.1f}")
@@ -118,7 +117,7 @@ def _render_kpi_summary(df):
 
 def _render_knowledge_base_table(df):
     st.divider()
-    st.subheader("사내 지식 베이스 (이슈 해결 사례)")
+    st.subheader("분석 사례")
     if 'known_solution' not in df.columns:
         st.info("솔루션 데이터 필드가 존재하지 않습니다.")
         return
@@ -150,7 +149,7 @@ def _render_integrated_timeline():
 
 def _render_package_deep_dive(df):
     st.divider()
-    st.subheader("패키지 기반 심층 분석")
+    st.subheader("패키지별 상세")
     data_df = df[df['log_type'] == 'Data_Usage'].copy()
     if data_df.empty:
         st.info("Netstats 로그를 찾을 수 없습니다.")
@@ -163,7 +162,7 @@ def _render_package_deep_dive(df):
 
     top_app = data_df.groupby('app_name')['total_mb'].sum().idxmax()
     default_idx = app_list.index(top_app) if top_app in app_list else 0
-    selected_app = st.selectbox("분석 대상 패키지 선택:", app_list, index=default_idx)
+    selected_app = st.selectbox("패키지 선택", app_list, index=default_idx)
     target_app_df = data_df[data_df['app_name'] == selected_app]
     rat_summary = target_app_df.groupby('rat')['total_mb'].sum().reset_index()
     rat_summary['total_mb'] = rat_summary['total_mb'].apply(lambda x: f"{x:,.2f} MB")
@@ -212,11 +211,11 @@ def _render_detail_sections(df):
     ui.render_data_call_analyzer(current_dc_data)
 
 def _render_ai_integrated_report(engine, df):
-    st.subheader("AI 종합 기술 진단 리포트")
-    if not st.button("전체 세션 통합 분석 리포트 생성", width="stretch"):
+    st.subheader("종합 진단 리포트")
+    if not st.button("현재 세션 리포트 생성", width="stretch"):
         return
 
-    with st.spinner("로그 상관관계를 분석하여 리포트를 생성 중입니다..."):
+    with st.spinner("관련 이벤트와 지표를 정리하는 중입니다..."):
         actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
         current_base = st.session_state.current_file.replace("_payload.json", "")
         health_kpi_json = get_device_health_kpi(current_base)
@@ -244,10 +243,10 @@ def _render_ai_integrated_report(engine, df):
             report_answer = raw_result
             report_thinking = ""
 
-        st.success("심층 진단 분석이 완료되었습니다.")
+        st.success("리포트 생성이 완료되었습니다.")
 
         if report_thinking:
-            with st.expander("AI 리포트 작성 논리 구조 (Reasoning Trace)"):
+            with st.expander("처리 과정", expanded=False):
                 st.markdown(f"```text\n{report_thinking}\n```")
 
         _render_copyable_report(report_answer)
@@ -260,13 +259,13 @@ def _render_ai_integrated_report(engine, df):
         if all_db_data and all_db_data.get('ids'):
             st.session_state.last_ids = all_db_data['ids']
             st.session_state.last_metas = all_db_data['metadatas']
-            st.toast("리포트 결과가 임시 저장되었습니다. 지식 베이스에 추가할 수 있습니다.")
+            st.toast("리포트 결과가 임시 저장되었습니다.")
 
 def _render_copyable_report(report_answer):
     safe_report = report_answer.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("\n", "\\n")
     st.markdown(f"""
 <div style="position: relative; background-color: #f8f9fa; padding: 25px; border-radius: 4px; border-left: 4px solid #0056b3; margin-bottom: 20px;">
-<button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">Copy Report</button>
+<button onclick="copyReport()" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; background-color: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;">복사</button>
 <div id="full-report-text" style="white-space: pre-wrap; font-size: 14px; color: #212529; line-height: 1.6;">
 
 {report_answer}
@@ -277,7 +276,7 @@ def _render_copyable_report(report_answer):
 function copyReport() {{
     const reportText = `{safe_report}`;
     navigator.clipboard.writeText(reportText.replace(/\\n/g, '\n')).then(() => {{
-        alert('리포트가 클립보드에 복사되었습니다.');
+        alert('리포트 내용을 복사했습니다.');
     }}).catch(err => {{
         console.error('Copy failed:', err);
     }});

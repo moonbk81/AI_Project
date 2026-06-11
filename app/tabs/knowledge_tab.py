@@ -20,11 +20,10 @@ def _recommend_knowledge_category(text, categories):
 
 def render_knowledge_tab(engine):
     """사내 지식 베이스 메인 렌더링 함수"""
-    st.title("📚 사내 장애 분석 지식 베이스 (Knowledge Base)")
-    st.markdown("엔지니어들이 등록한 단말 장애 분석 사례와 해결 방안을 조회하고 새로운 지식을 등록합니다.")
+    st.title("분석 사례 관리")
+    st.markdown("등록된 장애 분석 사례와 조치 내용을 조회하고, 현재 분석 결과를 사례로 등록합니다.")
 
-    # 탭을 2개로 나누어 깔끔하게 구성
-    tab_search, tab_register = st.tabs(["🔍 사례 검색 및 조회", "➕ 신규 사례 등록"])
+    tab_search, tab_register = st.tabs(["사례 조회", "사례 등록"])
 
     with tab_search:
         _render_search_ui(engine)
@@ -37,11 +36,11 @@ def _render_search_ui(engine):
     try:
         kb_data = engine.knowledge_collection.get()
     except Exception as e:
-        st.error(f"지식 베이스 DB를 불러오는 중 오류가 발생했습니다: {e}")
+        st.error(f"분석 사례 데이터를 불러오는 중 오류가 발생했습니다: {e}")
         return
 
     if not kb_data or not kb_data.get("ids"):
-        st.info("아직 등록된 지식/사례가 없습니다. '신규 사례 등록' 탭에서 분석 코멘트를 남겨보세요!")
+        st.info("등록된 분석 사례가 없습니다. '사례 등록' 탭에서 현재 분석 결과를 등록할 수 있습니다.")
         return
 
     rows = []
@@ -68,10 +67,10 @@ def _render_search_ui(engine):
     sdks = ["전체"] + sorted(list(df["OS / SDK"].astype(str).unique()))
     severities = ["전체"] + sorted(list(df["Severity"].astype(str).unique()))
 
-    selected_model = col1.selectbox("📱 단말 모델", models)
-    selected_hw = col2.selectbox("⚙️ AP (Hardware)", hws)
-    selected_sdk = col3.selectbox("🤖 Android SDK", sdks)
-    selected_severity = col4.selectbox("🚨 심각도 (Severity)", severities)
+    selected_model = col1.selectbox("단말 모델", models)
+    selected_hw = col2.selectbox("AP(Hardware)", hws)
+    selected_sdk = col3.selectbox("Android SDK", sdks)
+    selected_severity = col4.selectbox("중요도", severities)
 
     filtered_df = df.copy()
     if selected_model != "전체": filtered_df = filtered_df[filtered_df["단말 모델"] == selected_model]
@@ -79,37 +78,36 @@ def _render_search_ui(engine):
     if selected_sdk != "전체": filtered_df = filtered_df[filtered_df["OS / SDK"] == selected_sdk]
     if selected_severity != "전체": filtered_df = filtered_df[filtered_df["Severity"] == selected_severity]
 
-    st.markdown(f"**총 {len(filtered_df)}건의 사례가 검색되었습니다.**")
+    st.markdown(f"**조회 결과: {len(filtered_df)}건**")
     st.dataframe(filtered_df[["단말 모델", "AP (HW)", "OS / SDK", "Severity", "분석 및 해결방안"]], width='stretch', hide_index=True)
 
     st.markdown("---")
-    st.subheader("📖 상세 사례 목록")
+    st.subheader("상세 사례")
 
     if filtered_df.empty:
         st.warning("조건에 맞는 검색 결과가 없습니다.")
     else:
         for idx, row in filtered_df.iterrows():
-            sev = row["Severity"].lower()
-            icon = "🔴" if sev in ["critical", "high"] else ("🟡" if sev == "major" or sev == "medium" else "🟢")
+            severity_label = row["Severity"]
             title_summary = row['분석 및 해결방안'][:60].replace('\n', ' ') + "..."
 
-            with st.expander(f"{icon} [{row['단말 모델']}] {title_summary}"):
-                st.markdown(f"**📝 분석 코멘트 / 가이드:**\n\n{row['분석 및 해결방안']}")
+            with st.expander(f"[{severity_label}] [{row['단말 모델']}] {title_summary}"):
+                st.markdown(f"**분석 코멘트 / 조치 내용**\n\n{row['분석 및 해결방안']}")
                 st.markdown("---")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("단말 모델", row["단말 모델"])
                 c2.metric("AP (HW)", row["AP (HW)"])
                 c3.metric("OS (SDK)", row["OS / SDK"])
-                c4.metric("Severity", row["Severity"])
+                c4.metric("중요도", row["Severity"])
                 st.markdown(f"- **Radio Firmware:** `{row['Radio 펌웨어']}`\n- **Kernel Version:** `{row['Kernel']}`")
-                st.caption(f"참조 로그 Document ID: {row['참조 로그 ID']} | 지식 DB ID: {row['ID']}")
+                st.caption(f"참조 로그 ID: {row['참조 로그 ID']} | 사례 ID: {row['ID']}")
 
 def _render_registration_ui(engine):
     """현재 세션의 분석 로그를 바탕으로 새로운 지식을 등록하는 UI"""
-    st.markdown("### 💡 방금 분석한 로그 이슈를 지식 베이스에 박제합니다.")
+    st.markdown("### 현재 분석 결과 등록")
 
     if not (st.session_state.get("last_ids") and st.session_state.get("last_metas")):
-        st.warning("현재 대화 세션에서 참조된 로그 내역이 없습니다. 메인 탭에서 먼저 로그를 질의/분석해주세요.")
+        st.warning("현재 세션에서 참조된 로그 내역이 없습니다. 로그 분석 후 사례를 등록할 수 있습니다.")
         return
 
     retrieved_types = list(set(m.get('log_type', 'Unknown') for m in st.session_state.last_metas if m))
@@ -119,20 +117,20 @@ def _render_registration_ui(engine):
         st.session_state.feedback_key = 0
 
     feedback = st.text_area(
-        "해결 방안 및 분석 코멘트를 자유롭게 입력하세요:",
+        "분석 내용 및 조치 내용을 입력하세요",
         height=200,
         key=f"fb_{st.session_state.feedback_key}",
-        placeholder="예) RIL에서 Modem Not Responding(MNR) 발생 후 강제 패닉(Force CP CRASH) 유발됨. Radio 펌웨어 업데이트(XX 버전) 필요함."
+        placeholder="예) RIL에서 Modem Not Responding(MNR) 발생 후 Force CP CRASH가 발생함. Radio 펌웨어 업데이트 필요."
     )
 
     recommended = _recommend_knowledge_category(feedback, category_options)
     default_idx = category_options.index(recommended) if recommended in category_options else 0
 
     col1, col2 = st.columns(2)
-    target_type = col1.selectbox("분류 카테고리 (자동 추천)", category_options, index=default_idx)
-    severity = col2.radio("이슈 중요도 (Severity)", ["Critical", "Major", "Minor", "Info"], index=0, horizontal=True)
+    target_type = col1.selectbox("분류", category_options, index=default_idx)
+    severity = col2.radio("중요도", ["Critical", "Major", "Minor", "Info"], index=0, horizontal=True)
 
-    if st.button("🚀 사내 지식 베이스에 공식 사례 등록", type="primary", use_container_width=True):
+    if st.button("사례 등록", type="primary", use_container_width=True):
         if feedback.strip():
             if target_type == "Total_Report":
                 target_ids = st.session_state.last_ids
@@ -167,7 +165,7 @@ def _render_registration_ui(engine):
                     build_info=build_info_dict
                 )
 
-                st.success(f"✅ [{target_type}] 카테고리에 {severity} 등급으로 지식이 성공적으로 등록되었습니다!")
+                st.success(f"[{target_type}] 분류에 {severity} 등급으로 사례를 등록했습니다.")
 
                 # 등록 폼 초기화 트릭
                 st.session_state.feedback_key += 1
@@ -175,5 +173,4 @@ def _render_registration_ui(engine):
                 st.rerun()
 
         else:
-            st.error("분석 코멘트가 비어있습니다. 내용을 입력해주세요.")
-
+            st.error("등록할 내용을 입력해 주세요.")

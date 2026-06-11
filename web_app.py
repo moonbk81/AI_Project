@@ -17,7 +17,24 @@ from ril_rag_chat import RilRagChat
 
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="RIL RAG Dashboard", layout="wide")
+st.set_page_config(page_title="Log Analysis Console", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+    }
+    .block-container {
+        padding-top: 2rem;
+    }
+    h1, h2, h3 {
+        letter-spacing: -0.02em;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 if 'active_model' not in st.session_state:
     is_mac_mps = torch.backends.mps.is_available()
@@ -59,12 +76,12 @@ init_session_states()
 
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
-st.title("Android RIL RAG Analysis Dashboard")
-st.markdown("단말 통신 로그를 업로드하여 AI 분석 파이프라인을 실행합니다.")
+st.title("Android Log Analysis Console")
+st.markdown("단말 로그를 업로드하고 주요 통신 이슈, 장애 이벤트, 관련 근거를 확인합니다.")
 
 tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge = st.tabs([
-    "로그 분석 및 대화", "전사 로그 통계 대시보드", "부팅/Crash/ANR/NITZ",
-    "위성 통신 (NTN)", "인터넷 응답 지연", "모델 벤치마크", "지식 베이스"])
+    "로그 분석", "통계 대시보드", "부팅·Crash·ANR·NITZ",
+    "위성 통신", "인터넷 품질", "평가 결과", "지식 베이스"])
 
 with st.sidebar:
     render_sidebar(engine, run_analysis_pipeline)

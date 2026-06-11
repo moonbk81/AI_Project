@@ -8,7 +8,7 @@ import datetime
 
 def render_call_history_summary(df):
     """전체 통화 세션 (Call History) 차트 및 표 렌더링"""
-    st.subheader("Call Session History Summary")
+    st.subheader("통화 세션 현황")
     if 'log_type' in df.columns:
         call_df = df[df['log_type'] == 'Call_Session']
         if not call_df.empty:
@@ -17,20 +17,20 @@ def render_call_history_summary(df):
 
             col_chart, col_table = st.columns([1, 2])
             with col_chart:
-                st.markdown("**Call Status Distribution**")
+                st.markdown("**통화 상태 분포**")
                 if 'status' in call_df.columns:
-                    fig_call = px.pie(call_df, names='status', hole=0.4, title="Call Success vs Failure Ratio")
+                    fig_call = px.pie(call_df, names='status', hole=0.4, title="통화 성공/실패 비율")
                     st.plotly_chart(fig_call, width="stretch")
                 else:
                     st.info("Status 데이터 필드가 누락되었습니다.")
             with col_table:
-                st.markdown(f"**Call History Log (Total: {len(clean_call_df)})**")
+                st.markdown(f"**통화 이력 상세(총 {len(clean_call_df)}건)**")
                 st.dataframe(clean_call_df, width="stretch", height=400)
         else:
             st.info("현재 분석 세션에 Call_Session 로그가 존재하지 않습니다.")
 
 def render_signal_level_timeline(df):
-    st.subheader("Signal Level & Quality Timeline by RAT")
+    st.subheader("RAT별 신호 세기 추이")
 
     if 'log_type' in df.columns:
         sig_df = df[df['log_type'] == 'Signal_Level'].copy()
@@ -52,7 +52,7 @@ def render_signal_level_timeline(df):
             fig = px.line(
                 sig_df, x='time', y='Level', color='rat', facet_row='slot',
                 line_shape='hv', markers=True,
-                title="Radio Access Technology (RAT) Signal Level Trend",
+                title="RAT별 Signal Level 변화",
                 hover_data={'hover_detail': True, 'raw_info': True}
             )
 
@@ -63,10 +63,10 @@ def render_signal_level_timeline(df):
 
             st.plotly_chart(fig, width="stretch")
         else:
-            st.info("Signal_Level 데이터가 존재하지 않습니다.")
+            st.info("Signal Level 데이터가 없습니다.")
 
 def render_service_state_timeline(df):
-    st.subheader("Network Service State (Registration State) Timeline")
+    st.subheader("망 등록 상태 추이")
 
     if 'log_type' not in df.columns:
         return
@@ -74,7 +74,7 @@ def render_service_state_timeline(df):
     oos_df = df[df['log_type'] == 'OOS_Event'].copy()
 
     if oos_df.empty:
-        st.success("Stable IN_SERVICE condition. No OOS or service state transitions recorded.")
+        st.success("IN_SERVICE 상태가 유지되었으며, OOS 또는 등록 상태 전이가 감지되지 않았습니다.")
         return
 
     records = []
@@ -119,7 +119,7 @@ def render_service_state_timeline(df):
     clean_df = state_df[state_df['keep']].copy()
 
     if clean_df.empty:
-        st.info("No significant state changes to display.")
+        st.info("표시할 주요 상태 변화가 없습니다.")
         return
 
     import datetime
@@ -138,8 +138,8 @@ def render_service_state_timeline(df):
         clean_df, x='time_dt', y='State', color='Type', facet_row='Slot',
         line_shape='hv', markers=True,
         text='Label',
-        title="Voice/Data Registration State Transition Timeline",
-        labels={'time_dt': 'Event Time', 'State': 'State', 'Type': 'Connection Type'},
+        title="Voice/Data 등록 상태 전이",
+        labels={'time_dt': '이벤트 시간', 'State': '상태', 'Type': '연결 유형'},
         hover_data=['Event', 'Cause', 'Raw_Reg', 'Operator', 'Radio_Tech'],
         category_orders={"State": category_order}
     )
@@ -158,10 +158,10 @@ def render_service_state_timeline(df):
     st.plotly_chart(fig, width="stretch")
 
 def render_data_call_analyzer(data):
-    st.subheader("RIL Data Call (SETUP_DATA_CALL) Analysis")
+    st.subheader("Data Call 설정 현황")
 
     if not data or len(data) == 0:
-        st.info("No SETUP_DATA_CALL transaction history found.")
+        st.info("SETUP_DATA_CALL 이력이 없습니다.")
         return
 
     df = pd.DataFrame(data)
@@ -182,14 +182,14 @@ def render_data_call_analyzer(data):
     avg_latency = valid_latency.mean() if not valid_latency.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Connections Attempted", f"{total_calls}")
-    col2.metric("Success Rate", f"{success_rate:.1f} %")
-    col3.metric("Failure Count", f"{fail_calls}")
-    col4.metric("Avg Setup Latency", f"{avg_latency:.0f} ms")
+    col1.metric("연결 시도", f"{total_calls}")
+    col2.metric("성공률", f"{success_rate:.1f} %")
+    col3.metric("실패 건수", f"{fail_calls}")
+    col4.metric("평균 설정 지연", f"{avg_latency:.0f} ms")
 
     st.divider()
 
-    st.markdown("**Data Call Transaction & Lifecycle**")
+    st.markdown("**Data Call 상태 전이**")
 
     chart_df = df[~((df['event_type'] == 'UNSOL_UPDATE') & (df.get('is_changed') == False))].copy()
 
@@ -212,31 +212,31 @@ def render_data_call_analyzer(data):
             symbol='event_type',
             size=[15]*len(chart_df),
             hover_data=['event_type', 'network', 'protocol', 'cause', 'latency_ms', 'cid'],
-            title="APN Data Call State Transition",
-            labels={'req_time_dt': 'Time', 'apn': 'APN'}
+            title="APN별 Data Call 상태 전이",
+            labels={'req_time_dt': '시간', 'apn': 'APN'}
         )
         fig.update_xaxes(tickformat="%m-%d\n%H:%M:%S")
         st.plotly_chart(fig, width="stretch", key="datacall_scatter_chart")
     else:
-        st.info("No events to plot.")
+        st.info("표시할 이벤트가 없습니다.")
 
-    st.markdown("**Data Call Transaction Details**")
+    st.markdown("**Data Call 상세 이력**")
     st.dataframe(df, width="stretch")
 
 def render_ims_sip_flow(current_base=None):
-    st.subheader("VoLTE / IMS SIP Call Flow (Sequence Diagram)")
+    st.subheader("VoLTE / IMS SIP 흐름")
 
     if not current_base: return
     file_path = f"./result/{current_base}_ims_sip.json"
     if not os.path.exists(file_path):
-        st.info("SIP Message Log is not available.")
+        st.info("SIP 메시지 로그가 없습니다.")
         return
 
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     if not data:
-        st.info("No SIP transactions recorded in this log.")
+        st.info("기록된 SIP transaction이 없습니다.")
         return
 
     sip_df = pd.DataFrame(data)
@@ -245,8 +245,8 @@ def render_ims_sip_flow(current_base=None):
     error_msgs = len(sip_df[sip_df['is_error'] == True])
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total SIP Transactions", f"{total_msgs}")
-    col2.metric("SIP Error Responses (4xx~6xx)", f"{error_msgs}", delta="Abnormal" if error_msgs > 0 else "Normal", delta_color="inverse" if error_msgs > 0 else "normal")
+    col1.metric("SIP transaction", f"{total_msgs}")
+    col2.metric("SIP 오류 응답(4xx~6xx)", f"{error_msgs}", delta="이상" if error_msgs > 0 else "정상", delta_color="inverse" if error_msgs > 0 else "normal")
 
     try:
         sip_df['time_dt'] = pd.to_datetime(sip_df['time'], format='%m-%d %H:%M:%S.%f', errors='coerce')
@@ -254,11 +254,11 @@ def render_ims_sip_flow(current_base=None):
         ok_time = sip_df[sip_df['method_code'].str.contains('200 OK', na=False)]['time_dt'].max()
         if pd.notna(invite_time) and pd.notna(ok_time) and ok_time >= invite_time:
             latency_ms = int((ok_time - invite_time).total_seconds() * 1000)
-            col3.metric("Call Setup Latency (Max)", f"{latency_ms} ms")
+            col3.metric("통화 설정 지연(Max)", f"{latency_ms} ms")
         else:
-            col3.metric("Call Setup Latency (Max)", "N/A")
+            col3.metric("통화 설정 지연(Max)", "N/A")
     except:
-        col3.metric("Call Setup Latency (Max)", "N/A")
+        col3.metric("통화 설정 지연(Max)", "N/A")
 
     st.divider()
 
@@ -305,7 +305,7 @@ def render_ims_sip_flow(current_base=None):
     fig.update_layout(
         xaxis=dict(
             tickmode='array', tickvals=[0, 1],
-            ticktext=['UE', 'IMS Network'],
+            ticktext=['UE', 'IMS 망'],
             tickfont=dict(size=15, weight='bold'),
             range=[-0.2, 1.2], side="top", showgrid=False, zeroline=False
         ),
@@ -317,12 +317,12 @@ def render_ims_sip_flow(current_base=None):
 
     st.plotly_chart(fig, width="stretch")
 
-    st.markdown("**SIP Message Transaction Details**")
+    st.markdown("**SIP 메시지 상세**")
     display_cols = ['time', 'direction', 'msg_type', 'method_code', 'tid', 'cseq', 'raw_log']
     st.dataframe(sip_df[display_cols], width="stretch")
 
 def render_rilj_transactions(current_base=None):
-    st.subheader("RILJ (Modem ↔ AP) Transaction Analysis")
+    st.subheader("RILJ transaction 현황")
 
     if not current_base:
         return
@@ -340,7 +340,7 @@ def render_rilj_transactions(current_base=None):
     unsol = rilj_data.get("unsol", [])
 
     if not completed and not timeouts and not unsol:
-        st.info("No RILJ transaction data found in the session.")
+        st.info("RILJ transaction 데이터가 없습니다.")
         return
 
     SLOW_THRESHOLD = 500
@@ -350,14 +350,14 @@ def render_rilj_transactions(current_base=None):
     slows = len([c for c in completed if c.get("latency_ms", 0) > SLOW_THRESHOLD])
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total RIL Requests", f"{total_req}")
-    c2.metric("Timeouts", f"{len(timeouts)}", delta="Critical" if timeouts else "Normal", delta_color="inverse")
-    c3.metric("Error Responses (Fail)", f"{errors}", delta="Error" if errors else "Normal", delta_color="inverse")
-    c4.metric("Unsolicited Events (UNSL)", f"{len(unsol)}", delta="Modem Event" if unsol else "Normal")
+    c1.metric("RIL 요청", f"{total_req}")
+    c2.metric("Timeout", f"{len(timeouts)}", delta="주의" if timeouts else "정상", delta_color="inverse")
+    c3.metric("오류 응답", f"{errors}", delta="오류" if errors else "정상", delta_color="inverse")
+    c4.metric("UNSL 이벤트", f"{len(unsol)}", delta="Modem 이벤트" if unsol else "정상")
 
     st.divider()
 
-    tab_anomaly, tab_unsol = st.tabs(["Abnormal Transactions (Error/Delay/Timeout)", "Unsolicited Events (UNSL)"])
+    tab_anomaly, tab_unsol = st.tabs(["이상 transaction", "UNSL 이벤트"])
 
     with tab_anomaly:
         abnormal_rows = []
@@ -384,24 +384,24 @@ def render_rilj_transactions(current_base=None):
             df_abnormal = pd.DataFrame(abnormal_rows).sort_values(by="Time")
             st.dataframe(df_abnormal, width="stretch", hide_index=True)
         else:
-            st.success("No timeouts, errors, or significant transaction delays (>500ms) detected. Normal state.")
+            st.success("Timeout, 오류 응답, 500ms 초과 지연이 감지되지 않았습니다.")
 
     with tab_unsol:
         if unsol:
-            st.markdown(f"**Modem Real-time Status Update History (Total: {len(unsol)})**")
+            st.markdown(f"**Modem 상태 업데이트 이력(총 {len(unsol)}건)**")
             df_unsol = pd.DataFrame(unsol).sort_values(by="time")
             df_unsol.columns = ["Time", "Command", "Details"]
             st.dataframe(df_unsol, width="stretch", hide_index=True)
         else:
-            st.info("No UNSL event logs collected.")
+            st.info("수집된 UNSL 이벤트 로그가 없습니다.")
 
 def render_integrated_rf_call_timeline(report_data):
-    st.subheader("Integrated Timeline: Call Status & RF Environment (RSRP dBm)")
-    st.markdown("A cross-analysis timeline correlating active call windows, RSRP fluctuations, and SIP transaction errors.")
+    st.subheader("통화 상태 및 RF 환경 통합 타임라인")
+    st.markdown("통화 구간, RSRP 변화, SIP 오류 시점을 함께 표시합니다.")
 
     signal_history = report_data.get("signal_level_history", [])
     if not signal_history:
-        st.info("Insufficient RF signal history for integrated timeline generation.")
+        st.info("통합 타임라인을 구성할 RF 신호 이력이 부족합니다.")
         return
 
     import datetime
@@ -454,7 +454,7 @@ def render_integrated_rf_call_timeline(report_data):
         fig.add_trace(go.Scatter(
             x=sig_times, y=rsrp_values,
             mode='lines+markers',
-            name='RSRP (dBm)',
+            name='RSRP(dBm)',
             line=dict(color='#1f77b4', width=2.5),
             marker=dict(size=6, symbol='circle'),
             text=hover_texts,
@@ -476,7 +476,7 @@ def render_integrated_rf_call_timeline(report_data):
 
             color = "rgba(255, 0, 0, 0.12)" if is_drop else "rgba(0, 255, 0, 0.12)"
             call_type = s.get("type", "CALL")
-            label = f"{call_type} Drop ({s.get('id')})" if is_drop else f"{call_type} Completed"
+            label = f"{call_type} 실패/Drop ({s.get('id')})" if is_drop else f"{call_type} 완료"
 
             fig.add_vrect(
                 x0=start_dt, x1=end_dt,
@@ -504,7 +504,7 @@ def render_integrated_rf_call_timeline(report_data):
                 fig.add_trace(go.Scatter(
                     x=err_times, y=[-135] * len(err_times),
                     mode='markers+text',
-                    name='SIP Error (4xx~6xx)',
+                    name='SIP 오류(4xx~6xx)',
                     marker=dict(symbol='x', color='#d32f2f', size=11, line=dict(width=2)),
                     text=err_texts,
                     textposition="top center",
@@ -512,7 +512,7 @@ def render_integrated_rf_call_timeline(report_data):
                 ))
 
     fig.update_layout(
-        yaxis_title="Received Signal Strength (RSRP dBm)",
+        yaxis_title="수신 신호 세기(RSRP dBm)",
         yaxis=dict(
             range=[-145, -45],
             tickmode='linear',
@@ -539,7 +539,7 @@ def render_nitz_timeline(nitz_data):
         st.info("NITZ 수신 이력이 없습니다.")
         return
 
-    st.markdown("### NITZ 타임존 및 변동 분석")
+    st.markdown("### NITZ 타임존 변동")
     df = pd.DataFrame(nitz_data)
 
     # 1. 시간 파싱
@@ -624,7 +624,7 @@ def render_nitz_timeline(nitz_data):
     col_chart, col_map = st.columns([1, 1])
 
     with col_chart:
-        st.markdown("** 시간대별 오프셋(UTC) 변화 타임라인**")
+        st.markdown("**UTC 오프셋 변화 타임라인**")
         fig_line = px.line(df, x='log_time_dt', y='offset_num', line_shape='hv', markers=True,
                            labels={'log_time_dt': '시간', 'offset_num': 'UTC 오프셋 (+/-)'})
         fig_line.update_traces(line_color='#2ca02c')
@@ -632,7 +632,7 @@ def render_nitz_timeline(nitz_data):
         st.plotly_chart(fig_line, width="stretch")
 
     with col_map:
-        st.markdown("**타임존 기반 예상 체류 지역 (Estimated Region)**")
+        st.markdown("**타임존 기반 예상 지역**")
         if not geo_df.empty:
             fig_map = px.scatter_geo(
                 geo_df,
@@ -657,7 +657,7 @@ def render_nitz_timeline(nitz_data):
 
     # 4. 상세 변화 이력 표 출력
     if not df_changes.empty:
-        with st.expander("🔍 상세 타임존 변경 이력 보기"):
+        with st.expander("상세 타임존 변경 이력"):
             display_df = df_changes[['log_time', 'timezone', 'nitz_raw']].rename(
                 columns={'log_time': '변경 시간', 'timezone': '타임존', 'nitz_raw': '원본 NITZ 데이터'}
             )

@@ -32,12 +32,12 @@ def get_latest_csv_files(output_dir="./benchmark_results"):
     return latest_summary, latest_detail
 
 def render_benchmark_dashboard():
-    st.header("LLM Model Benchmark Dashboard")
+    st.header("모델 평가 결과")
 
     # ==========================================
     # 1. 벤치마크 실행 컨트롤 패널
     # ==========================================
-    st.subheader("벤치마크 실행")
+    st.subheader("평가 실행")
 
     active_payload_file = st.session_state.current_file
     col_file, col_mode, col_model = st.columns([1, 1, 2])
@@ -54,12 +54,12 @@ def render_benchmark_dashboard():
     with col_model:
         available_models = get_installed_ollama_models()
         selected_models = st.multiselect(
-            "벤치마크 수행 모델 선택",
+            "평가 대상 모델",
             options=available_models,
             default=available_models[:1] if available_models else None
         )
 
-    if st.button("선택한 모델로 벤치마크 실행 (Run Benchmark)", type="primary"):
+    if st.button("평가 실행", type="primary"):
         if not selected_models:
             st.error("최소 하나 이상의 모델을 선택해 주십시오.")
         else:
@@ -71,7 +71,7 @@ def render_benchmark_dashboard():
                 "--routing-mode", selected_routing_mode
             ]
 
-            with st.status(f"[{selected_routing_mode} 모드] 벤치마크 수행 중... 터미널 로그를 확인하십시오.", expanded=True) as status:
+            with st.status(f"[{selected_routing_mode} 모드] 평가 수행 중...", expanded=True) as status:
                 log_placeholder = st.empty()
                 logs = []
 
@@ -96,11 +96,11 @@ def render_benchmark_dashboard():
                     return_code = process.wait()
 
                     if return_code == 0:
-                        status.update(label="벤치마크 완료. 대시보드를 갱신합니다.", state="complete", expanded=False)
-                        st.toast("벤치마크 실행 완료")
+                        status.update(label="평가 완료", state="complete", expanded=False)
+                        st.toast("평가 완료")
                         st.rerun()
                     else:
-                        status.update(label="벤치마크 오류 발생", state="error", expanded=True)
+                        status.update(label="평가 오류 발생", state="error", expanded=True)
                         st.error("위 로그 창에서 에러 원인을 확인해 주십시오.")
 
                 except Exception as e:
@@ -118,7 +118,7 @@ def render_benchmark_dashboard():
         st.markdown(f"**최신 결과 파일:** `{os.path.basename(summary_csv_path)}`")
         df_summary = pd.read_csv(summary_csv_path)
 
-        st.subheader("Key Performance Indicators")
+        st.subheader("주요 지표")
         cols = st.columns(len(df_summary))
 
         for i, row in df_summary.iterrows():
@@ -140,7 +140,7 @@ def render_benchmark_dashboard():
             st.subheader("평균 응답 속도 (Latency)")
             fig_latency = px.bar(
                 df_summary, x='model', y='avg_latency_sec', color='model',
-                text_auto='.2f', title="Latency Comparison (Lower is Better)"
+                text_auto='.2f', title="평균 응답 시간 비교"
             )
             fig_latency.update_layout(showlegend=False)
             st.plotly_chart(fig_latency, width="stretch")
@@ -155,7 +155,7 @@ def render_benchmark_dashboard():
 
             fig_recall = px.bar(
                 df_recall_melted, x='model', y='Score', color='Metric', barmode='group',
-                text_auto='.2f', title="Tool vs Log Type Recall"
+                text_auto='.2f', title="라우팅 정확도 비교"
             )
             st.plotly_chart(fig_recall, width="stretch")
 
@@ -171,7 +171,7 @@ def render_benchmark_dashboard():
     # 3. 상세 분석 (Drill-down)
     # ==========================================
     if detail_csv_path:
-        st.subheader("케이스별 상세 분석 (Drill-down)")
+        st.subheader("케이스별 상세 결과")
         df_detail = pd.read_csv(detail_csv_path)
 
         filter_col1, filter_col2 = st.columns(2)
@@ -203,31 +203,31 @@ def render_benchmark_dashboard():
     # 4. 오프라인 RAG 성능 평가 (Golden Dataset)
     # ==========================================
     st.write("---")
-    st.subheader("오프라인 RAG 성능 평가 (Golden Dataset)")
-    st.markdown("`run_golden_eval.py` 스크립트를 파이프라인으로 호출하여 골든 데이터셋 기반 오프라인 평가를 실행합니다.")
+    st.subheader("Golden Dataset 평가")
+    st.markdown("골든 데이터셋 기반 정량 평가를 수행합니다.")
 
     with st.expander("평가 파라미터 설정", expanded=True):
         col_b1, col_b2 = st.columns(2)
         with col_b1:
             eval_dataset_path = st.text_input("골든 데이터셋 경로", value="eval_golden_dataset.json")
             judge_model_name = st.selectbox(
-                "심판 모델 (Judge)",
+                "평가 모델",
                 ["ollama/qwen2.5-coder:7b", "ollama/gemma4:26b", "ollama/gemma3:12b"],
                 index=0
             )
         with col_b2:
             current_rag_model = st.session_state.get('active_model', 'gemma4:12b-mlx')
-            target_rag_model = st.text_input("RAG 모델 (답변 생성용)", value=current_rag_model)
+            target_rag_model = st.text_input("대상 모델", value=current_rag_model)
             ollama_url = st.text_input("Ollama 서버 주소", value="http://localhost:11434")
 
     output_csv = "csv/rag_golden_eval_details.csv"
     summary_csv = "csv/rag_golden_eval_summary.csv"
 
-    if st.button("RAG 자동 채점 시작 (Golden Eval)", type="primary", width="stretch"):
+    if st.button("Golden Dataset 평가 실행", type="primary", width="stretch"):
         if not os.path.exists(eval_dataset_path):
             st.error(f"데이터셋 파일을 찾을 수 없습니다: {eval_dataset_path}")
         else:
-            with st.spinner("심사위원 모델이 답변의 충실성 및 관련성을 채점 중입니다... (터미널 로그를 함께 확인해 주십시오)"):
+            with st.spinner("평가 수행 중입니다..."):
                 try:
                     from run_golden_eval import evaluate_golden_dataset
 
@@ -248,7 +248,7 @@ def render_benchmark_dashboard():
     # 5. 채점 결과 실시간 시각화 대시보드
     # ==========================================
     if os.path.exists(summary_csv) and os.path.exists(output_csv):
-        st.write("#### RAG 평가 결과 레포트")
+        st.write("#### 평가 결과")
 
         try:
             df_sum = pd.read_csv(summary_csv)
@@ -263,7 +263,7 @@ def render_benchmark_dashboard():
         except Exception as e:
             st.warning("요약 데이터를 불러오지 못했습니다.")
 
-        with st.expander("질문별 세부 채점 점수 및 생성 답변 보기", expanded=True):
+        with st.expander("질문별 상세 결과", expanded=True):
             try:
                 df_detail = pd.read_csv(output_csv)
                 score_cols = [c for c in df_detail.columns if 'score' in c or 'coverage' in c or 'risk' in c]

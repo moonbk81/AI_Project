@@ -1,11 +1,12 @@
 import os
 import json
+import ast
 import datetime
 import pandas as pd
 
 def parse_raw_logs(raw_data):
     """
-    JSON, Python List, Text 등 다양한 포맷의 로그 데이터를 파싱하여 리스트로 반환합니다.
+    원본 로그 데이터를 리스트 형태로 정리합니다.
     """
     if isinstance(raw_data, list):
         raw_logs = raw_data

@@ -41,31 +41,31 @@ def _build_reference_text(metas):
     return ref_text
 
 def _render_quick_prompt_guide():
-    st.info("**AI 분석 질의 가이드** (분석 카테고리를 명시하면 정확도가 향상됩니다)")
+    st.info("**질의 가이드**  분석 대상과 증상을 함께 입력하면 관련 근거를 더 정확히 확인할 수 있습니다.")
 
-    with st.expander("질문 예시 확인"):
+    with st.expander("질문 예시"):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(
                 """
-                **Call 및 무선 환경 분석**
-                * "해당 로그에서 발생한 **Call Fail**의 주요 원인을 분석해 주십시오."
-                * "통화 중 기록된 **IMS 에러** 로그를 추출해 주십시오."
-                * "현재 **망 이탈(OOS)**이 발생한 구간 내역을 요약해 주십시오."
+                **통화 및 무선 환경**
+                * "Call Fail 원인과 관련 로그를 확인해 주세요."
+                * "통화 중 IMS 오류가 발생했는지 확인해 주세요."
+                * "OOS 발생 구간과 원인을 요약해 주세요."
                 """
             )
         with col2:
             st.markdown(
                 """
-                **단말 성능 및 네트워크 세션 분석**
-                * "최근 1시간 내 발생한 **배터리 급방전** 원인을 리포트해 주십시오."
-                * "특정 패키지에서 **DNS 차단**이 발생한 이력을 확인해 주십시오."
-                * "네트워크 **지연(Latency)** 관련 통계를 시각화해 주십시오."
+                **단말 상태 및 네트워크**
+                * "배터리 소모와 관련된 이상 로그를 확인해 주세요."
+                * "특정 앱에서 DNS 차단이 있었는지 확인해 주세요."
+                * "인터넷 지연 또는 연결 실패 구간을 요약해 주세요."
                 """
             )
 
 def _render_quick_prompt_buttons():
-    st.caption("질의어를 직접 입력하거나, 하단의 Quick Prompt 버튼을 활용하십시오.")
+    st.caption("직접 입력하거나 아래 빠른 질문을 선택할 수 있습니다.")
 
     quick_prompt = None
 
@@ -74,25 +74,25 @@ def _render_quick_prompt_buttons():
     col_btn7, _, _ = st.columns(3)
 
     with col_btn1:
-        if st.button("통화 끊김(Drop) 분석", width="stretch"):
+        if st.button("통화 끊김 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('call_drop')
     with col_btn2:
-        if st.button("데이터 네트워크 이상 분석", width="stretch"):
+        if st.button("데이터 연결 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('data_network_issue')
     with col_btn3:
-        if st.button("배터리/Crash 통합 분석", width="stretch"):
+        if st.button("배터리·Crash 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('battery_crash')
     with col_btn4:
-        if st.button("망 등록(Reg) 및 OOS 분석", width="stretch"):
+        if st.button("망 등록/OOS 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('network_oos')
     with col_btn5:
-        if st.button("안테나(Signal) 레벨 분석", width="stretch"):
+        if st.button("Signal Level 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('antenna_level_analysis')
     with col_btn6:
-        if st.button("VoLTE/SIP 상세 분석", width="stretch"):
+        if st.button("VoLTE/SIP 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('volte_sip_analysis')
     with col_btn7:
-        if st.button("인터넷 응답 지연 종합 분석", width="stretch"):
+        if st.button("인터넷 지연 확인", width="stretch"):
             quick_prompt = QUICK_PROMPTS.get('internet_stall_analysis')
 
     return quick_prompt
@@ -116,7 +116,7 @@ def _render_chat_answer(engine, prompt):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("로그 데이터 및 과거 해결 사례를 분석 중입니다..."):
+        with st.spinner("관련 로그와 분석 기록을 확인하는 중입니다..."):
             current_target = st.session_state.get("current_file", None)
             health_kpi_json = _get_current_health_kpi()
 
@@ -130,7 +130,7 @@ def _render_chat_answer(engine, prompt):
             ref_text = _build_reference_text(metas)
 
             if thinking:
-                with st.expander("AI Reasoning Trace"):
+                with st.expander("처리 과정", expanded=False):
                     st.markdown(f"```text\n{thinking}\n```")
 
             st.markdown(answer)
@@ -153,7 +153,7 @@ def render_chat_tab(engine):
     st.divider()
     render_chat_interface(engine, key_suffix="main", show_input=False)
 
-    user_input = st.chat_input("에러 증상 또는 분석 요청 사항을 입력하십시오")
+    user_input = st.chat_input("증상 또는 확인할 내용을 입력하세요")
     prompt = quick_prompt if quick_prompt else user_input
 
     if prompt:

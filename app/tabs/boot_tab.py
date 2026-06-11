@@ -8,7 +8,7 @@ import streamlit as st
 import ui
 
 def render_boot_tab():
-    st.subheader("Android Boot Sequence Analysis")
+    st.subheader("부팅 시퀀스 분석")
 
     current_target = st.session_state.get("current_file", None)
     if not current_target:
@@ -19,7 +19,7 @@ def render_boot_tab():
     report_path = f"./result/{base_name}_report.json"
 
     if not os.path.exists(report_path):
-        st.error(f"Report file ({base_name}_report.json) not found.")
+        st.error(f"분석 결과 파일을 찾을 수 없습니다. ({base_name}_report.json)")
         return
 
     with open(report_path, 'r', encoding='utf-8') as f:
@@ -31,7 +31,7 @@ def render_boot_tab():
     if events:
         df_boot = pd.DataFrame(events)
 
-        st.markdown("#### Boot Milestone Summary")
+        st.markdown("#### 부팅 주요 구간 요약")
 
         c1, c2, c3 = st.columns(3)
 
@@ -50,20 +50,20 @@ def render_boot_tab():
         data_ready = data_events['Time_ms'].max() if not data_events.empty else "N/A"
 
         c1.metric(
-            "Final Boot Time",
+            "부팅 완료",
             f"{boot_complete:,} ms" if boot_complete else "N/A"
         )
         c2.metric(
-            "Voice(RIL) Ready",
+            "Voice(RIL) 준비",
             f"{voice_ready:,} ms" if isinstance(voice_ready, (int, float)) else voice_ready
         )
         c3.metric(
-            "Data(NW) Ready",
+            "Data(NW) 준비",
             f"{data_ready:,} ms" if isinstance(data_ready, (int, float)) else data_ready
         )
 
         st.divider()
-        st.write("#### Top 10 Boot Bottlenecks")
+        st.write("#### 부팅 지연 구간 Top 10")
 
         if 'Delta_ms' in df_boot.columns:
             df_slow = (
@@ -81,10 +81,10 @@ def render_boot_tab():
                     color='Delta_ms',
                     color_continuous_scale='Reds',
                     text='Delta_ms',
-                    title="Boot Delay Events (ms)",
+                    title="부팅 지연 이벤트(ms)",
                     labels={
-                        'Delta_ms': 'Delay(ms)',
-                        'Event': 'Event Name'
+                        'Delta_ms': '지연(ms)',
+                        'Event': '이벤트'
                     }
                 )
 
@@ -97,7 +97,7 @@ def render_boot_tab():
         else:
             st.info("Delta_ms 데이터가 존재하지 않아 병목 차트를 렌더링할 수 없습니다.")
 
-        with st.expander("Full Boot Sequence Timeline"):
+        with st.expander("부팅 시퀀스 상세 타임라인"):
             df_full = (
                 df_boot.sort_values("Time_ms")
                 if 'Time_ms' in df_boot.columns
@@ -105,7 +105,7 @@ def render_boot_tab():
             )
             st.dataframe(df_full, width="stretch")
     else:
-        st.warning("Boot event 데이터가 누락되었습니다.")
+        st.warning("부팅 이벤트 데이터가 없습니다.")
 
     st.divider()
     ui.render_crash_analyzer(report_data)
