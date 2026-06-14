@@ -24,6 +24,13 @@ SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 
 # core/config.py 파일 맨 아래에 추가
 
+# 디바이스별 기본 모델 매핑
+DEFAULT_MODEL_BY_DEVICE = {
+    "cpu": "gemma4:12b",
+    "mps": "gemma4:12b",
+    "cuda": "gemma3:4b",  # 회사 8GB VRAM 환경
+}
+
 MODEL_CONFIG = {
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용

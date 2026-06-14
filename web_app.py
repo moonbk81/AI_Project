@@ -14,6 +14,7 @@ from app.tabs import (
     render_knowledge_tab,
 )
 from ril_rag_chat import RilRagChat
+from core.config import DEFAULT_MODEL_BY_DEVICE
 
 warnings.filterwarnings("ignore")
 
@@ -37,8 +38,18 @@ st.markdown(
 )
 
 if 'active_model' not in st.session_state:
-    is_mac_mps = torch.backends.mps.is_available()
-    default_model = "gemma3:4b" if torch.cuda.is_available() else "gemma4:12b" if is_mac_mps else "gemma3:12b"
+    if torch.cuda.is_available():
+        device_type = "cuda"
+    elif torch.backends.mps.is_available():
+        device_type = "mps"
+    else:
+        device_type = "cpu"
+
+    default_model = DEFAULT_MODEL_BY_DEVICE.get(
+        device_type,
+        "gemma4:12b"
+    )
+
     st.session_state['active_model'] = default_model
 
 if 'active_routing_mode' not in st.session_state:

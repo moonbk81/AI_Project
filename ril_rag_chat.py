@@ -35,7 +35,7 @@ from agent_toolkit import (
 )
 
 from sentence_transformers import SentenceTransformer
-from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG
+from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG, DEFAULT_MODEL_BY_DEVICE
 from rca import StructuredEventRenderer
 from rag.chroma_utils import (
     sanitize_chroma_metadata,
@@ -72,13 +72,12 @@ class RilRagChat:
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 
-        # 3. LLM 로드 (Gemma4:12b 적용)
-        self.llm_model_name = 'gemma4:12b'  # ✅ 외부에서 접근할 수 있도록 인스턴스 변수로 선언
-        if device == "cuda":
-            self.llm_model_name = 'gemma3:4b'
-
-        if model_name is not None:
-            self.llm_model_name = model_name
+        # 3. LLM 모델 설정 (디바이스별 기본 모델)
+        default_model_name = DEFAULT_MODEL_BY_DEVICE.get(
+            device,
+            "gemma4:12b"
+        )
+        self.llm_model_name = model_name or default_model_name
         self.routing_mode = routing_mode
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
