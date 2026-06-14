@@ -51,23 +51,72 @@ def get_dns_latency_analytics(base_name: str, result_dir: str = "./result") -> s
     """중증(Critical) DNS 지연 현상과 앱 차단 이력을 추출합니다."""
     report_data = _load_report_json(base_name, result_dir)
     net_ts = report_data.get("network_timeseries", {})
+    dns_queries = report_data.get("dns_queries", []) or []
 
     timeline = net_ts.get("sorted_timeline", {})
     critical_latencies = []
+    slow_dns_queries = []
+    max_dns_latency_ms = 0
+    max_dns_avg_ms = 0
+    max_dns_max_ms = 0
+    max_dns_delayed_cnt = 0
+    max_dns_blocked_cnt = 0
 
     for ts, details in timeline.items():
         for stat in details.get("net_stats", []):
             dns_avg = stat.get("dns_avg", 0)
+            max_dns_avg_ms = max(max_dns_avg_ms, dns_avg)
+            max_dns_max_ms = max(max_dns_max_ms, stat.get("dns_max", 0) or 0)
+            max_dns_delayed_cnt = max(max_dns_delayed_cnt, stat.get("dns_delayed_cnt", 0) or 0)
+            max_dns_blocked_cnt = max(max_dns_blocked_cnt, stat.get("dns_blocked_cnt", 0) or 0)
             if isinstance(dns_avg, (int, float)) and dns_avg > 2000:
                 critical_latencies.append({
                     "time": ts,
                     "netId": stat.get("netId"),
-                    "dns_avg_ms": dns_avg
+                    "dns_avg_ms": dns_avg,
+                    "dns_max_ms": stat.get("dns_max"),
+                    "dns_delayed_cnt": stat.get("dns_delayed_cnt"),
+                    "dns_blocked_cnt": stat.get("dns_blocked_cnt"),
+                    "dns_err_rate": stat.get("dns_err_rate")
                 })
+
+    for dns in dns_queries:
+        if not isinstance(dns, dict):
+            continue
+
+        latency_ms = dns.get("latency_ms")
+        if not isinstance(latency_ms, (int, float)):
+            continue
+
+        max_dns_latency_ms = max(max_dns_latency_ms, latency_ms)
+
+        if latency_ms >= 1000:
+            slow_dns_queries.append({
+                "time": dns.get("time"),
+                "net_id": dns.get("net_id"),
+                "uid": dns.get("uid"),
+                "app_name": dns.get("app_name"),
+                "return_code": dns.get("return_code"),
+                "latency_ms": latency_ms
+            })
+
+    slow_dns_queries = sorted(
+        slow_dns_queries,
+        key=lambda x: x.get("latency_ms", 0),
+        reverse=True
+    )[:20]
 
     return json.dumps({
         "dns_blocked_apps_count": len(net_ts.get("dns_issues", [])),
-        "critical_dns_latency_spikes": critical_latencies
+        "critical_dns_latency_spikes": critical_latencies,
+        "dns_query_count": len(dns_queries),
+        "max_dns_latency_ms": max_dns_latency_ms,
+        "max_dns_avg_ms": max_dns_avg_ms,
+        "max_dns_max_ms": max_dns_max_ms,
+        "max_dns_delayed_cnt": max_dns_delayed_cnt,
+        "max_dns_blocked_cnt": max_dns_blocked_cnt,
+        "slow_dns_query_count": len(slow_dns_queries),
+        "slow_dns_queries": slow_dns_queries
     }, ensure_ascii=False)
 
 def get_data_stall_and_recovery_analytics(base_name: str, result_dir: str = "./result") -> str:
@@ -221,6 +270,15 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
             "root_cause_candidates": w.get("root_cause_candidates", []),
             "radio_power_context": radio_power_context,
             "user_action_hint": radio_power_context.get("is_user_radio_power_related", False),
+            "dns_latency_events": [
+                {
+                    "time": e.get("time"),
+                    "latency_ms": e.get("latency_ms"),
+                    "reason": e.get("reason")
+                }
+                for e in related
+                if e.get("layer") == "DNS" and e.get("latency_ms")
+            ][:10],
             "key_related_events": [
                 {
                     "time": e.get("time"),

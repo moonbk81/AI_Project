@@ -39,7 +39,7 @@ DIAG_PATTERNS = {
     'SIGNAL_LEVEL': re.compile(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?\[(\d+)\] EVENT_SIGNAL_LEVEL_INFO_CHANGED - SignalBarInfo\{\s*(.*?)\s*\}'),
     'NETSTAT_IDENT': re.compile(r'ident=\[\{.*?metered=true.*?transports=\{0\}\}\].*?uid=(-\d+|\d+)'),
     'NETSTAT_BYTES': re.compile(r'rb=(\d+)\s+rp=\d+\s+tb=(\d+)'),
-    'DNS_FULL': re.compile(r'(?P<time>\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?DNS Requested by\s+\d+,\s*(?P<uid>\d+)\((?P<app_name>[^)]+)\)(?P<rest>.*)'),
+    'DNS_FULL': re.compile(r'(?P<time>\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?DNS Requested by\s+(?P<net_id>\d+),\s*(?P<uid>\d+)\((?P<app_name>[^)]+)\),\s*(?P<rest>.*)', re.I),
 
     # Radio Power
     'RADIO_REQ': re.compile(r'(?P<timestamp>\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+radio\s+(?P<pid>\d+)\s+(?P<tid>\d+)\s+(?P<level>[VDIWEFS])\s+RILJ\s*:\s*\[(?P<seq>\d+)\]\s*>\s*RADIO_POWER\s+on\s*=\s*(?P<on>\w+)\s+forEmergencyCall\s*=\s*(?P<for_emergency>\w+)\s+preferredForEmergencyCall\s*=\s*(?P<preferred_emergency>\w+)\s+\[(?P<phone>PHONE\d+)\]'),

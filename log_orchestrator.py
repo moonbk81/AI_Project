@@ -139,11 +139,20 @@ class LogOrchestrator:
             datacall_lines = buckets.get('datacall') or lines
             internet_stall_lines = buckets.get('internet_stall') or lines
             result['datacall_data'] = self.datacall_parser.analyze(datacall_lines)
+
+            # DNS Query를 먼저 생성하여 Internet Stall 분석 시 활용
+            if dns_res := self.dns_parser.analyze(
+                buckets['dns'],
+                global_uid_map=global_uid_map
+            ):
+                result['dns_queries'] = dns_res
+
             result['ims_sip_data'] = self.ims_sip_parser.analyze(buckets['ims_sip'])
             result['sat_at_data'] = self.sat_at_parser.analyze(buckets['sat_at'])
             result['internet_stall'] = self.internet_stall_parser.analyze(
                 internet_stall_lines,
                 data_call_events=result.get('datacall_data', []),
+                dns_events=result.get('dns_queries', []),
                 report_data=result)
 
             # 지표성 데이터 추가
@@ -153,7 +162,6 @@ class LogOrchestrator:
             if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
             if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
             if net_usage := self.data_usage_parser.analyze(buckets['usage'], global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage
-            if dns_res := self.dns_parser.analyze(buckets['dns'], global_uid_map=global_uid_map): result['dns_queries'] = dns_res
             if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
                 result["battery_thermal_stats"] = battery_thermal_res
             if binder_res := self.binder_parser.analyze(buckets['binder']):

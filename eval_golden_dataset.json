@@ -374,5 +374,20 @@
     "must_not_claim": ["일반 애플리케이션 크래시", "Java Exception", "단순 기지국/망 장애", "원인 불명", "메모리 부족(OOM)"],
     "trap_type": "root_cause_disambiguation",
     "severity": "critical"
+  },
+  {
+    "test_id": "TC-026",
+    "category": "DNS_Latency_Spike",
+    "target_log_file": "log_for_evaluation/data_stall.log",
+    "query": "08:14경 netId=122(Cellular)에서 인터넷이 안 되는 것처럼 보일 수 있는 DNS 지연 징후가 있는지 분석해줘. DNS 평균/최대 응답시간, delayed response, blocked response 근거를 포함하고, 특정 앱 DNS_Query 지연으로 단정 가능한지도 구분해줘.",
+    "ground_truth": "08:14:00경 netId=122(Cellular) 네트워크 통계에서 DNS 평균 응답시간이 11244ms, 최대 응답시간이 21095ms로 급증했습니다. 전체 DNS 요청 7건 중 delayed response가 6건이며, error rate는 28.6%, blocked response는 0건으로 확인됩니다. 따라서 해당 구간은 Cellular 망에서 DNS 응답 지연이 매우 크게 발생하여 사용자가 인터넷 연결 지연 또는 미연결처럼 체감했을 가능성이 높습니다. 다만 같은 로그의 DNS_Query 개별 요청들은 대부분 수십 ms 수준으로 확인되므로, 특정 앱의 개별 DNS_Query가 11초 이상 지연되었다고 단정하면 안 됩니다. 핵심 근거는 DNS_Query가 아니라 Network_Timeline_Stat의 dns_avg/dns_max/dns_delayed_cnt 지표입니다.",
+    "eval_keywords": ["netId=122", "Cellular", "11244ms", "21095ms", "delayed response", "DNS 응답 지연"],
+    "expected_decision": "08:14경 Cellular netId=122에서 DNS 평균/최대 응답시간이 비정상적으로 증가했고, delayed response가 다수 발생하여 인터넷 지연처럼 체감되었을 가능성이 높습니다.",
+    "root_cause": "Network_Timeline_Stat 기준으로 netId=122(Cellular)에서 DNS avg 11244ms, max 21095ms, delayed response 6건이 확인되는 DNS latency spike입니다.",
+    "must_have": ["netId=122", "Cellular", "DNS 평균 응답시간 11244ms", "DNS 최대 응답시간 21095ms", "delayed response 6건", "DNS 응답 지연", "Network_Timeline_Stat"],
+    "evidence_should_include": ["dns_avg", "dns_max", "dns_delayed_cnt", "dns_err_rate", "dns_blocked_cnt"],
+    "must_not_claim": ["특정 앱 DNS_Query가 11초 이상 지연됨", "com.ktcs.whowho DNS Query가 11초 지연됨", "도메인 확인됨", "DNS 서버 장애로 확정", "기지국 장애로 확정", "망 전체 장애로 확정", "blocked response가 원인으로 확정"],
+    "trap_type": "dns_latency_correlation_without_app_overclaim",
+    "severity": "high"
   }
 ]

@@ -187,8 +187,9 @@ class InternetStallParser(BaseParser):
         re.IGNORECASE
     )
 
-    def analyze(self, lines, data_call_events=None, report_data=None):
+    def analyze(self, lines, data_call_events=None, dns_events=None, report_data=None):
         data_call_events = data_call_events or []
+        dns_events = dns_events or []
         report_data = report_data or {}
 
         timeline = []
@@ -215,6 +216,9 @@ class InternetStallParser(BaseParser):
         # 기존 DataCallProcessor 결과를 timeline에 합침
         timeline.extend(self._convert_data_call_events(data_call_events))
 
+        # DNS_Query 결과를 timeline에 합침
+        timeline.extend(self._convert_dns_query_events(dns_events))
+
         # report_data의 RF/OOS/signal을 timeline에 일부 합침
         timeline.extend(self._convert_rf_events(report_data))
 
@@ -236,6 +240,43 @@ class InternetStallParser(BaseParser):
             "timeline_total_count": len(timeline),
             "stall_window_total_count": len(stall_windows),
         }
+    def _convert_dns_query_events(self, dns_events):
+        converted = []
+
+        for e in dns_events:
+            if not isinstance(e, dict):
+                continue
+
+            time_value = e.get("time")
+            if not time_value:
+                continue
+
+            latency_ms = e.get("latency_ms")
+            severity = "info"
+            event_type = "DNS_QUERY"
+            reason = f"DNS query by {e.get('app_name', 'unknown')}"
+
+            if isinstance(latency_ms, (int, float)):
+                if latency_ms >= 5000:
+                    severity = "critical"
+                    event_type = "DNS_SLOW_RESPONSE"
+                elif latency_ms >= 1000:
+                    severity = "warning"
+                    event_type = "DNS_SLOW_RESPONSE"
+
+            converted.append({
+                "time": time_value,
+                "layer": "DNS",
+                "event_type": event_type,
+                "severity": severity,
+                "reason": reason,
+                "net_id": e.get("net_id"),
+                "package": e.get("app_name"),
+                "latency_ms": latency_ms,
+                "raw": json.dumps(e, ensure_ascii=False)
+            })
+
+        return converted
 
     def save_ui_report(self, output_dir="./result", base_name="", analysis=None):
         os.makedirs(output_dir, exist_ok=True)
@@ -431,6 +472,7 @@ class InternetStallParser(BaseParser):
             "DATA_STALL_RECOVERY",
             "VALIDATION_FAIL",
             "DNS_ISSUE",
+            "DNS_SLOW_RESPONSE",
             "PRIVATE_DNS_FAIL",
             "TCP_TLS_TIMEOUT"
         }
@@ -458,6 +500,14 @@ class InternetStallParser(BaseParser):
             for r in related:
                 layer_counts[r.get("layer", "UNKNOWN")] += 1
                 severity_score += {"info": 1, "warning": 3, "critical": 5}.get(r.get("severity"), 1)
+                latency_ms = r.get("latency_ms")
+                if isinstance(latency_ms, (int, float)):
+                    if latency_ms >= 10000:
+                        severity_score += 10
+                    elif latency_ms >= 5000:
+                        severity_score += 5
+                    elif latency_ms >= 1000:
+                        severity_score += 2
 
             root_candidates = self._infer_window_causes(related)
 
@@ -491,6 +541,18 @@ class InternetStallParser(BaseParser):
             types[e.get("event_type", "UNKNOWN")] += 1
 
         candidates = []
+
+        max_dns_latency = max(
+            [e.get("latency_ms", 0) for e in related if isinstance(e.get("latency_ms"), (int, float))],
+            default=0
+        )
+
+        if max_dns_latency >= 5000:
+            candidates.append({
+                "category": "DNS_LATENCY_SPIKE",
+                "confidence": "high",
+                "reason": f"DNS latency spike detected (max={max_dns_latency}ms)"
+            })
 
         if layers["RF"] > 0 and (layers["DATA_CALL"] > 0 or layers["DATA_STALL"] > 0 or layers["VALIDATION"] > 0):
             candidates.append({

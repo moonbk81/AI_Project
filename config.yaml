@@ -89,6 +89,7 @@ routing_map:
       - get_data_stall_and_recovery_analytics
     log_types:
       - Network_DNS_Issue
+      - DNS_Query
       - Network_Timeline_Stat
       - Data_Stall_Recovery
   Data_Call_Setup:
@@ -108,6 +109,7 @@ routing_map:
     log_types:
       - Internet_Stall_Analysis
       - Network_DNS_Issue
+      - DNS_Query
       - Network_Timeline_Stat
       - Data_Stall_Recovery
       - SetupDataCall_Failed
@@ -306,6 +308,16 @@ log_guidelines:
     Network_DNS_Issue: |
       - 🚨 [정책 차단 최우선 판별]: 특정 앱의 접속 실패 원인을 물을 때, `effective_policy`에 `BATTERY_SAVER`, `REJECT`, `APP_STANDBY`, `APP_BACKGROUND` 등이 하나라도 포함되어 있다면, 절대 망(네트워크) 장애나 DNS 서버 에러로 분석하지 마라.
       - 이는 "단말 내부의 절전 모드나 백그라운드 데이터 제한 정책에 의한 정상적인 DNS 강제 차단 동작"으로 100% 확정하여 답변하라.
+
+    DNS_Query: |
+      - NetdEventListenerService의 DNS 요청 단위 로그를 구조화한 데이터이다.
+      - 주요 필드는 time, net_id, uid, app_name, return_code, latency_ms 이다.
+      - latency_ms 값이 큰 DNS_Query가 특정 시간대에 집중되면 DNS 응답 지연 가능성을 우선 검토하라.
+      - app_name이 존재하면 "특정 앱의 DNS 요청에서 지연 확인" 수준까지는 설명 가능하다.
+      - hostname/domain 정보가 없는 경우 어떤 도메인을 조회했는지는 추론하거나 단정하지 마라.
+      - Network_Timeline_Stat의 dns_avg 급증과 동일 시간대 DNS_Query의 latency_ms 증가가 함께 확인되면 DNS 계층 지연 가능성을 언급하라.
+      - DNS_Query 단독으로 망 전체 장애를 단정하지 말고, Internet_Stall_Analysis, OOS_Event, SetupDataCall_Failed와의 시간 상관관계를 함께 확인하라.
+      - 예시: "08:14경 netId=122(Cellular)에서 DNS 응답 지연이 증가했으며, 동일 시간대 특정 앱의 DNS 요청에서도 높은 latency_ms가 확인됩니다. 인터넷 접속 지연처럼 체감되었을 가능성이 있습니다."
 
     Internet_Stall_Analysis: |
       - stall_windows, root_cause_summary, highest_risk_windows 중심 분석.

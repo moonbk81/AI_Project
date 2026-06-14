@@ -15,10 +15,26 @@ def build_network_timeseries_payloads(report_data, build_markdown_doc, extract_m
                 "netId": stat.get("netId"),
                 "transport": stat.get("transport"),
                 "dns_avg": stat.get("dns_avg"),
+                "dns_max": stat.get("dns_max"),
                 "dns_err_rate": stat.get("dns_err_rate"),
+                "dns_tot": stat.get("dns_tot"),
+                "dns_delayed_cnt": stat.get("dns_delayed_cnt"),
+                "dns_blocked_cnt": stat.get("dns_blocked_cnt"),
+                "connect_avg": stat.get("connect_avg"),
+                "connect_max": stat.get("connect_max"),
+                "connect_err_rate": stat.get("connect_err_rate"),
+                "connect_tot": stat.get("connect_tot"),
                 "tcp_avg_loss": stat.get("tcp_avg_loss"),
             }
-            doc = f"Network Stat at {ts}: netId={stat.get('netId')}, DNS Avg={stat.get('dns_avg')}ms"
+            doc = (
+                f"Network Stat at {ts}: netId={stat.get('netId')} ({stat.get('transport')}), "
+                f"DNS Avg={stat.get('dns_avg')}ms, DNS Max={stat.get('dns_max')}ms, "
+                f"DNS ErrRate={stat.get('dns_err_rate')}%, DNS Total={stat.get('dns_tot')}, "
+                f"DelayedRsp={stat.get('dns_delayed_cnt')}, BlockedRsp={stat.get('dns_blocked_cnt')}, "
+                f"Connect Avg={stat.get('connect_avg')}ms, Connect Max={stat.get('connect_max')}ms, "
+                f"Connect ErrRate={stat.get('connect_err_rate')}%, Connect Total={stat.get('connect_tot')}, "
+                f"TCP AvgLoss={stat.get('tcp_avg_loss')}%"
+            )
             append_payload(rag_payload, doc, stat_item)
 
     for dns_issue in net_data.get("dns_issues", []):
@@ -39,6 +55,48 @@ def build_network_timeseries_payloads(report_data, build_markdown_doc, extract_m
             build_markdown_doc,
             extract_metadata,
         )
+
+    return rag_payload
+
+
+# --- NEW FUNCTION: build_dns_query_payloads ---
+def build_dns_query_payloads(report_data, input_file):
+    rag_payload = []
+    source_file = source_file_name(input_file)
+
+    for dns in report_data.get("dns_queries", []) or []:
+        if not isinstance(dns, dict):
+            continue
+
+        time = dns.get("time") or dns.get("timestamp") or "시간 미상"
+        net_id = dns.get("net_id") or dns.get("netId") or "Unknown"
+        uid = dns.get("uid") or "Unknown"
+        app_name = dns.get("app_name") or dns.get("package") or "Unknown"
+        return_code = dns.get("return_code") or dns.get("result") or "Unknown"
+        latency_ms = dns.get("latency_ms")
+        raw_info = dns.get("raw_info") or dns.get("raw") or ""
+
+        meta = dict(dns)
+        meta.update({
+            "source_file": source_file,
+            "log_type": "DNS_Query",
+            "time": time,
+            "net_id": net_id,
+            "uid": uid,
+            "app_name": app_name,
+            "return_code": return_code,
+            "latency_ms": latency_ms,
+        })
+
+        latency_text = f"{latency_ms}ms" if latency_ms is not None else "Unknown"
+        text_content = (
+            f"[{time}] DNS Query: app={app_name}, uid={uid}, netId={net_id}, "
+            f"result={return_code}, latency={latency_text}"
+        )
+        if raw_info:
+            text_content += f"\n원본 정보: {raw_info}"
+
+        append_payload(rag_payload, text_content, meta)
 
     return rag_payload
 
@@ -141,6 +199,7 @@ def build_internet_stall_payloads(report_data, build_markdown_doc, extract_metad
 def build_network_payloads(report_data, input_file, build_markdown_doc, extract_metadata):
     rag_payload = []
     rag_payload.extend(build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata))
+    rag_payload.extend(build_dns_query_payloads(report_data, input_file))
     rag_payload.extend(build_data_usage_payloads(report_data, input_file))
     rag_payload.extend(build_datacall_payloads(report_data, input_file))
     rag_payload.extend(build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata))

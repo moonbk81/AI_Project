@@ -132,7 +132,12 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                         "dns_max": int(groups[4]),
                         "dns_err_rate": float(groups[5]),
                         "dns_tot": int(groups[6]),
+                        "dns_delayed_cnt": int(groups[7]),
                         "dns_blocked_cnt": int(groups[8]) if groups[8] is not None else 0,
+                        "connect_avg": int(groups[9]),
+                        "connect_max": int(groups[10]),
+                        "connect_err_rate": float(groups[11]),
+                        "connect_tot": int(groups[12]),
                         "tcp_avg_loss": float(groups[13])
                     })
             if self.stats_end.search(clean_line):
@@ -141,4 +146,5 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         return {
             "sorted_timeline": dict(sorted(timeline.items())),
             "dns_issues": dns_issues,
+            "private_dns_status": private_dns_status,
         }

@@ -226,10 +226,14 @@ class DnsParser(BaseParser):
             if "DNS Requested by" in line:
                 m = DIAG_PATTERNS['DNS_FULL'].search(line)
                 if m:
-                    time_str, uid, orig_app_name, rest = m.group('time'), m.group('uid'), m.group('app_name'), m.group('rest')
+                    time_str, net_id, uid, orig_app_name, rest = m.group('time'), m.group('net_id'), m.group('uid'), m.group('app_name'), m.group('rest')
 
                     # 🚨 [핵심 수정] global_uid_map에 완벽한 이름이 있으면 그걸 쓰고, 없으면 기존 로그에서 뽑은 이름 유지
                     app_name = global_uid_map.get(uid, orig_app_name)
+                    latency_ms = None
+                    latency_match = re.search(r',\s*(\d+)\s*ms\b', rest, re.IGNORECASE)
+                    if latency_match:
+                        latency_ms = self.safe_to_int(latency_match.group(1))
 
                     if "SUCCESS" in rest.upper(): return_code = "SUCCESS"
                     else:
@@ -242,9 +246,11 @@ class DnsParser(BaseParser):
 
                     dns_events.append({
                         "time": time_str,
+                        "net_id": net_id,
                         "uid": uid,
-                        "app_name": app_name, # <-- 이제 깔끔한 패키지명이 들어갑니다.
+                        "app_name": app_name,
                         "return_code": return_code,
+                        "latency_ms": latency_ms,
                         "raw_info": rest.strip()
                     })
         return dns_events

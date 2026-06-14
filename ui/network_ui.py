@@ -78,6 +78,15 @@ def render_network_timeseries_and_dns(df):
             ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
             ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
 
+            if 'dns_max' in ts_df.columns:
+                ts_df['dns_max'] = pd.to_numeric(ts_df['dns_max'], errors='coerce')
+
+            if 'dns_delayed_cnt' in ts_df.columns:
+                ts_df['dns_delayed_cnt'] = pd.to_numeric(ts_df['dns_delayed_cnt'], errors='coerce')
+
+            if 'dns_blocked_cnt' in ts_df.columns:
+                ts_df['dns_blocked_cnt'] = pd.to_numeric(ts_df['dns_blocked_cnt'], errors='coerce')
+
             def safe_parse_time(t):
                 t_str = str(t).strip()
                 if len(t_str) > 5 and t_str[2] == '-' and t_str.count('-') == 1:
@@ -104,6 +113,37 @@ def render_network_timeseries_and_dns(df):
             fig_ts.update_xaxes(tickformat="%m-%d\n%H:%M:%S", title="Time")
             fig_ts.update_layout(yaxis_title="Value")
             st.plotly_chart(fig_ts, width="stretch")
+
+            st.markdown("**DNS Spike 구간 (고지연 DNS 탐지)**")
+
+            spike_df = ts_df[
+                (ts_df['dns_avg'] >= 1000) |
+                (pd.to_numeric(ts_df.get('dns_delayed_cnt', 0), errors='coerce').fillna(0) > 0)
+            ].copy()
+
+            if not spike_df.empty:
+                display_cols = [
+                    c for c in [
+                        'time',
+                        'netId',
+                        'transport',
+                        'dns_avg',
+                        'dns_max',
+                        'dns_err_rate',
+                        'dns_delayed_cnt',
+                        'dns_blocked_cnt'
+                    ]
+                    if c in spike_df.columns
+                ]
+
+                st.dataframe(
+                    spike_df[display_cols]
+                    .sort_values('dns_avg', ascending=False),
+                    width="stretch",
+                    hide_index=True
+                )
+            else:
+                st.success("고지연 DNS Spike 구간이 없습니다.")
         else:
             st.info("Network Timeline Stat 데이터가 존재하지 않습니다.")
 

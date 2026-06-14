@@ -166,6 +166,66 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     net_ts = report_data.get("network_timeseries", {})
     dns_issues = net_ts.get("dns_issues", [])
     private_dns = net_ts.get("private_dns_status", {})
+    dns_queries = report_data.get("dns_queries", [])
+
+    high_latency_queries = [
+        d for d in dns_queries
+        if isinstance(d, dict)
+        and isinstance(d.get("latency_ms"), (int, float))
+        and d.get("latency_ms", 0) >= 1000
+    ]
+
+    max_dns_latency = max(
+        [d.get("latency_ms", 0) for d in dns_queries if isinstance(d, dict)],
+        default=0
+    )
+
+    slow_dns_apps = sorted(list(set([
+        d.get("app_name")
+        for d in high_latency_queries
+        if d.get("app_name")
+    ])))
+
+    max_dns_avg_ms = 0
+    max_dns_max_ms = 0
+    max_dns_delayed_cnt = 0
+    max_dns_blocked_cnt = 0
+    critical_dns_timeline_spikes = []
+
+    timeline = net_ts.get("sorted_timeline", {})
+    for ts, details in timeline.items():
+        for stat in details.get("net_stats", []):
+            if not isinstance(stat, dict):
+                continue
+
+            dns_avg = stat.get("dns_avg", 0) or 0
+            dns_max = stat.get("dns_max", 0) or 0
+            dns_delayed_cnt = stat.get("dns_delayed_cnt", 0) or 0
+            dns_blocked_cnt = stat.get("dns_blocked_cnt", 0) or 0
+
+            max_dns_avg_ms = max(max_dns_avg_ms, dns_avg)
+            max_dns_max_ms = max(max_dns_max_ms, dns_max)
+            max_dns_delayed_cnt = max(max_dns_delayed_cnt, dns_delayed_cnt)
+            max_dns_blocked_cnt = max(max_dns_blocked_cnt, dns_blocked_cnt)
+
+            if isinstance(dns_avg, (int, float)) and dns_avg >= 1000:
+                critical_dns_timeline_spikes.append({
+                    "time": ts,
+                    "netId": stat.get("netId"),
+                    "transport": stat.get("transport"),
+                    "dns_avg_ms": dns_avg,
+                    "dns_max_ms": dns_max,
+                    "dns_err_rate": stat.get("dns_err_rate"),
+                    "dns_tot": stat.get("dns_tot"),
+                    "dns_delayed_cnt": dns_delayed_cnt,
+                    "dns_blocked_cnt": dns_blocked_cnt,
+                })
+
+    critical_dns_timeline_spikes = sorted(
+        critical_dns_timeline_spikes,
+        key=lambda x: x.get("dns_avg_ms", 0),
+        reverse=True
+    )[:10]
 
     blocked_packages = list(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
 
@@ -177,7 +237,16 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     kpi_report["7_dns_network_issues"] = {
         "dns_issue_count": len(dns_issues),
         "blocked_packages": blocked_packages if blocked_packages else "없음",
-        "private_dns_failures": dot_failures if dot_failures else "DoT 세션 모두 정상 (또는 OFF 상태)"
+        "private_dns_failures": dot_failures if dot_failures else "DoT 세션 모두 정상 (또는 OFF 상태)",
+        "dns_query_count": len(dns_queries),
+        "slow_dns_query_count": len(high_latency_queries),
+        "max_dns_latency_ms": max_dns_latency,
+        "slow_dns_apps": slow_dns_apps if slow_dns_apps else "없음",
+        "max_dns_avg_ms": max_dns_avg_ms,
+        "max_dns_max_ms": max_dns_max_ms,
+        "max_dns_delayed_cnt": max_dns_delayed_cnt,
+        "max_dns_blocked_cnt": max_dns_blocked_cnt,
+        "critical_dns_timeline_spikes": critical_dns_timeline_spikes if critical_dns_timeline_spikes else "없음"
     }
 
     # ==========================================
