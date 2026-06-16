@@ -115,6 +115,8 @@ def render_network_timeseries_and_dns(df):
             st.plotly_chart(fig_ts, width="stretch")
 
             st.markdown("**DNS Spike 구간 (고지연 DNS 탐지)**")
+            if 'dns_delayed_cnt' not in ts_df.columns:
+                ts_df['dns_delayed_cnt'] = 0
 
             spike_df = ts_df[
                 (ts_df['dns_avg'] >= 1000) |
