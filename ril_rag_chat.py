@@ -51,6 +51,7 @@ from rag.ingest import (
 from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
 from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
+from core.golden_matcher import DynamicGoldenMatcher
 
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
@@ -82,6 +83,8 @@ class RilRagChat:
         print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
+
+        self.golden_matcher = DynamicGoldenMatcher(self.embed_model, json_path="./eval_golden_dataset.json")
 
         self.tool_registry = {
             "get_cs_call_analytics": get_cs_call_analytics,
@@ -330,6 +333,9 @@ class RilRagChat:
         if len(user_query) < 15 and chat_history:
             last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
+
+        search_query = self.golden_matcher.align_query(search_query)
+        print(f"[DEBUG] Aligned Search Query {search_query}")
 
         if self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
         elif self.routing_mode == "hybrid": routing_result = self._get_hybrid_routing(search_query)

@@ -28,7 +28,7 @@ SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 DEFAULT_MODEL_BY_DEVICE = {
     "cpu": "gemma4:12b",
     "mps": "gemma4:12b",
-    "cuda": "batiai/gemma4-e2b:q4",  # 회사 8GB VRAM 환경
+    "cuda": "gemma3:4b",  # 회사 8GB VRAM 환경
 }
 
 MODEL_CONFIG = {
