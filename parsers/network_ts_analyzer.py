@@ -14,12 +14,10 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         # 1. 상세 DNS 차단 로그 패턴 (isBlocked)
         self.re_time = re.compile(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}')
         self.re_tag = re.compile(r'[VDIWE]\s+([a-zA-Z0-9_\-]+)\s*(?=:)', re.I)
-        self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+(\d+)\((.*?)\),\s+(\d+)\((.*?)\),\s+isBlocked=(\w+)', re.I)
+        self.re_dns_event = re.compile(r'DNS\s+requested\s+by\s+(\d+),\s+(\d+)(?:\(([^)]*)\))?,\s+(\d+)\(([^)]*)\),\s+isBlocked=(\w+)', re.I)
 
         self.re_uid_state = re.compile(
-            r'UID=(?P<uid>\d+).*?blocked_state=\{.*?effective=(?P<effective>[^}]+)\}',
-            re.I
-        )
+            r'UID=(?P<uid>\d+).*?blocked_state=\{blocked=(?P<blocked>[^,]+).*?effective=(?P<effective>[^}]+)\}', re.I)
 
         # 2. NetId별 성능 통계 패턴 (NetStats)
         self.re_net_perf = re.compile(
@@ -40,6 +38,7 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
 
         # 시계열 분석을 위해 시간(Time)을 키로 사용하는 딕셔너리
         timeline = defaultdict(lambda: {"net_stats": []})
+        last_perf_ts = ''  # 💡 동일 라인 내 후속 netId 블록을 위한 timestamp 상속용
 
         current_netid = None
         private_dns_status = {}
@@ -51,7 +50,16 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
             # (A) 차단 정책 수집
             uid_m = self.re_uid_state.search(clean_line)
             if uid_m:
-                uid_block_map[uid_m.group('uid')] = uid_m.group('effective')
+                uid_val = uid_m.group('uid')
+                blocked_val = uid_m.group('blocked')
+                effective_val = uid_m.group('effective')
+
+                # 💡 핵심: effective가 NONE이더라도, blocked에 명확한 사유(예: APP_BACKGROUND)가
+                # 있다면 그 값을 진짜 차단 원인으로 기록해 둡니다.
+                if effective_val == 'NONE' and blocked_val != 'NONE':
+                    uid_block_map[uid_val] = f"{blocked_val} (Delayed Unlock)"
+                else:
+                    uid_block_map[uid_val] = effective_val
 
             # 🚨 (B) 신규: pkg 리스트에서 실제 패키지 이름 긁어오기
             if clean_line.startswith("pkg,"):
@@ -95,14 +103,17 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                 dns_m = self.re_dns_event.search(clean_line)
                 if dns_m:
                     net_id, uid, pkg, res_code, res_str, blocked = dns_m.groups()
+                    pkg = pkg or ''  # 💡 (app_name) 생략 시 None → 빈 문자열
 
                     if "FAIL" in res_str or "NODATA" in res_str or blocked.lower() == 'true':
                         effective_policy = uid_block_map.get(uid, "SYSTEM_POLICY")
+                        if blocked.lower() == 'true' and effective_policy == 'NONE':
+                            effective_policy = "TRANSITION_DELAY"
 
                         # 🚨 신규: 1단계에서 수집한 실제 앱 이름으로 치환
                         # 로그 원본의 pkg 값이 없거나 단순 숫자일 경우 uid_map에서 찾아옵니다.
-                        real_pkg = uid_map.get(uid, pkg)
-                        if real_pkg.isdigit(): # 매핑 실패 시 식별을 위해 App_UID 붙여줌
+                        real_pkg = uid_map.get(uid, pkg) or f"App_UID_{uid}"
+                        if real_pkg.isdigit():
                             real_pkg = f"App_UID_{real_pkg}"
 
                         dns_issues.append({
@@ -121,10 +132,16 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                 continue
 
             if in_stats:
-                perf_m = self.re_net_perf.search(clean_line)
-                if perf_m:
+                # 💡 동일 라인에 여러 netId 블록이 있을 때 시간이 첫 블록에만 나오므로
+                #    이전 timestamp를 기억해두고 후속 블록에 재사용합니다.
+                for perf_m in self.re_net_perf.finditer(clean_line):
                     groups = perf_m.groups()
-                    ts, net_id = groups[0], groups[1]
+                    ts = groups[0]
+                    if ts:
+                        last_perf_ts = ts
+                    else:
+                        ts = last_perf_ts
+                    net_id = groups[1]
                     timeline[ts]["net_stats"].append({
                         "netId": net_id,
                         "transport": "Wi-Fi" if groups[2] == "1" else "Cellular",

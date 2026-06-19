@@ -59,6 +59,7 @@ class AnalysisBucketBuilder:
         "NOT_SPECIFIED", "E-PDN", "EPDN", "E_PDN",
     ]
     IMS_SIP_KEYWORDS = [
+        "reSIProcate",  # reSIProcate 스택 로그 (SipReq/SipResp: CANCEL, ACK, PRACK, UPDATE 등 모두 포함)
         "SIP/2.0", "REGISTER sip:", "INVITE sip:", "BYE sip:", "CANCEL sip:",
         "P-CSCF", "ImsReasonInfo", "ImsPhoneConnection", "ImsCallSession",
         "createCallProfile", "onCallStarted", "onCallStartFailed",
