@@ -2,12 +2,305 @@ import re
 from collections import deque, defaultdict
 from core.constants import RE_TIME, RE_TAG, TEL_PATTERNS, VALID_TAGS, COMMON_EXCLUDES, PS_EXCLUDE_TAGS, SST_FIELDS, NETWORK_EXCLUDE_TAGS
 from core.telephony_constants import CALL_FAIL_REASON_MAP, VENDER_FAIL_REASON_MAP
+
 from parsers.base import BaseParser
 
+# ==========================================
+# IMS/PS(VoLTE) Call Parser (objId-based session parsing)
+# ==========================================
+class ImsCallParser:
+    """IMS/PS(VoLTE) Call 로그를 objId 기준 세션으로 파싱한다."""
+
+    def __init__(self, timestamp_extractor):
+        self._extract_timestamp = timestamp_extractor
+
+    def is_ims_call_line(self, line: str) -> bool:
+        return "[IPCT" in line or "[IPCN" in line
+
+    def detect_event(self, line: str) -> str | None:
+        event_keywords = [
+            'onIncomingCall', 'takeCall', 'accept', 'reject',
+            'onCallTerminated', 'onCallStartFailed'
+        ]
+        for keyword in event_keywords:
+            if keyword in line:
+                return keyword
+        return None
+
+    def build_event_log(self, line: str) -> str:
+        timestamp = self._extract_timestamp(line)
+        payload = line.split(' - ', 1)[-1].strip()
+        return f"[{timestamp}] {payload}"
+
+    def extract_fail_reason(self, line: str, ims_bracket_re, ims_standard_re) -> str:
+        bracket_match = ims_bracket_re.search(line)
+        if bracket_match:
+            extracted_code = f"{bracket_match.group(1)}_{bracket_match.group(2)}"
+            sip_code = bracket_match.group(3)
+            sip_desc = bracket_match.group(4)
+            if sip_code and sip_code != "0":
+                extracted_code += f" (SIP_{sip_code}_{sip_desc.strip()})"
+            return extracted_code
+
+        standard_match = ims_standard_re.search(line)
+        if standard_match:
+            return f"IMS_REASON_{standard_match.group(1)}"
+
+        return ""
+
+    def should_update_fail_reason(self, existing_code: str, extracted_code: str) -> bool:
+        if not extracted_code:
+            return False
+        if not existing_code:
+            return True
+        return "510" not in extracted_code and "TERMINATED" not in extracted_code
+
+    def append_unique_event(self, events: list, event: str) -> None:
+        if not events or events[-1] != event:
+            events.append(event)
+
+    def resolve_final_reason(self, events, status, fail_reason, ims_bracket_re, ims_standard_re):
+        if fail_reason:
+            return fail_reason
+        if status != "FAIL":
+            return "0"
+
+        last_line = events[-1]
+        reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', last_line)
+        if reason_match:
+            return reason_match.group(1).strip()
+
+        fallback_match = ims_bracket_re.search(last_line)
+        if fallback_match:
+            return f"{fallback_match.group(1)}_{fallback_match.group(2)}"
+
+        fallback_std = ims_standard_re.search(last_line)
+        return f"IMS_FAIL_{fallback_std.group(1)}" if fallback_std else "IMS_CALL_START_FAILED"
+
+    def build_session(self, obj_id, events, tc_id, fail_reason, ims_bracket_re, ims_standard_re):
+        start_time = events[0].split("]")[0].replace("[", "") if events else "Unknown"
+        end_time = events[-1].split("]")[0].replace("[", "") if events else "Unknown"
+        is_user_reject = any("USER_DECLINE" in e for e in events)
+
+        status = "SUCCESS"
+        has_failed_event = any(any(k in e for k in ['Terminated', 'reject', 'Failed']) for e in events)
+        if has_failed_event:
+            status = "FAIL" if "CODE_USER" not in events[-1] and "USER_DECLINE" not in events[-1] else "NORMAL_RELEASE"
+
+        display_id = f"{tc_id} (objId:{obj_id})" if tc_id else f"objId:{obj_id}"
+        final_reason = self.resolve_final_reason(events, status, fail_reason, ims_bracket_re, ims_standard_re)
+
+        return {
+            "type": "PS(VoLTE)",
+            "id": display_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "status": status,
+            "is_user_reject": is_user_reject,
+            "fail_reason": final_reason,
+            "logs": events
+        }
+
+    def parse(self, lines):
+        calls = defaultdict(list)
+        obj_to_tc = {}
+        pending_events = []
+        obj_fail_reasons = defaultdict(str)
+
+        obj_re = re.compile(r'objId:(\d+)')
+        tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)')
+        ims_bracket_re = re.compile(r'ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)(?:,\s*(\d+)\s*,\s*([^,}]+))?', re.IGNORECASE)
+        ims_standard_re = re.compile(r'ImsReasonInfo\s*(?:[:\s\(\=]+code\=)?[:\s\(\=]*(\d+)', re.IGNORECASE)
+
+        for line in lines:
+            if not self.is_ims_call_line(line):
+                continue
+
+            if not self.detect_event(line):
+                continue
+
+            event_str = self.build_event_log(line)
+            obj_match = obj_re.search(line)
+            extracted_code = self.extract_fail_reason(line, ims_bracket_re, ims_standard_re)
+
+            if not obj_match:
+                pending_events.append(event_str)
+                continue
+
+            obj_id = obj_match.group(1)
+
+            existing_code = obj_fail_reasons.get(obj_id, "")
+            if self.should_update_fail_reason(existing_code, extracted_code):
+                obj_fail_reasons[obj_id] = extracted_code
+
+            tc_match = tc_id_re.search(line)
+            if tc_match:
+                obj_to_tc[obj_id] = tc_match.group(1)
+
+            if pending_events:
+                for p_event in pending_events:
+                    self.append_unique_event(calls[obj_id], p_event)
+                pending_events = []
+
+            self.append_unique_event(calls[obj_id], event_str)
+
+        multi_calls_list = []
+        for obj_id, events in calls.items():
+            multi_calls_list.append(
+                self.build_session(
+                    obj_id=obj_id,
+                    events=events,
+                    tc_id=obj_to_tc.get(obj_id),
+                    fail_reason=obj_fail_reasons[obj_id],
+                    ims_bracket_re=ims_bracket_re,
+                    ims_standard_re=ims_standard_re
+                )
+            )
+
+        return multi_calls_list
+
+class CsCallStateMachine:
+    """CS Call 로그를 통화 세션 상태로 누적/완료 처리한다."""
+
+    def is_ps_call_payload(self, payload: str) -> bool:
+        """IMS/PS(VoLTE) call 로그인지 판단한다."""
+        return "[IPCT" in payload or "[IPCN" in payload
+
+    def process(self, ts, payload, completed_list, active_list, slot_id, tc_id_re):
+        """CS Call 상태 머신 처리."""
+        # IMS/PS(VoLTE) 관련 로그는 CS 로직에서 처리하지 않는다.
+        if self.is_ps_call_payload(payload):
+            return
+
+        is_cs = TEL_PATTERNS['CS_START'].search(payload)
+        tc_match = tc_id_re.search(payload)
+        id_m = TEL_PATTERNS['CONN_ID'].search(payload)
+
+        current_id = None
+        if tc_match:
+            current_id = tc_match.group(1)
+        elif id_m:
+            current_id = f"conn_id:{id_m.group(1)}"
+
+        # 1. 새로운 CS Call 발생 시 active_list에 추가
+        if is_cs:
+            new_call = {
+                "type": "CS",
+                "slot": slot_id,
+                "start_time": ts,
+                "end_time": None,
+                "id": current_id if current_id else f"Unknown_{len(active_list)}_{ts[-6:].replace('.','')}",
+                "status": "DIALING",
+                "is_user_reject": False,
+                "fail_reason": "0",
+                "logs": [f"[{ts}] START: {payload}"]
+            }
+            active_list.append(new_call)
+            return
+
+        # 2. 이 로그가 어느 통화의 것인지(Target Call) 식별
+        target_call = None
+        if current_id:
+            for call in active_list:
+                if call["id"] == current_id:
+                    target_call = call
+                    break
+
+            if not target_call:
+                for call in active_list:
+                    if call["id"].startswith("Unknown"):
+                        call["id"] = current_id
+                        target_call = call
+                        break
+        else:
+            if active_list:
+                target_call = active_list[-1]
+
+        is_just_completed = False
+        if not target_call and "LAST_CALL_FAIL_CAUSE" in payload and completed_list:
+            target_call = completed_list[-1]
+            is_just_completed = True
+
+        if not target_call:
+            return
+
+        if target_call["slot"] == "Unknown" and slot_id != "Unknown":
+            target_call["slot"] = slot_id
+
+        target_call["logs"].append(f"[{ts}] {payload}")
+        if ",ACTIVE," in payload:
+            target_call["status"] = "SUCCESS"
+
+        # 조기 종료된 콜에 뒤늦게 들어온 Cause Code 명시적 덮어쓰기
+        if "LAST_CALL_FAIL_CAUSE" in payload and "causeCode" in payload:
+            c_match = re.search(r'causeCode:\s*(\d+)', payload)
+            v_match = re.search(r'vendorCause:\s*(\d+)', payload)
+            if c_match:
+                cause_str = f"callFailCause: {c_match.group(1)}"
+                if v_match:
+                    cause_str += f", vendorCause: {v_match.group(1)}"
+                target_call["fail_reason"] = cause_str
+                target_call["status"] = "CALL DROP"
+
+        # 이미 완료 처리된 콜에 로그만 덧붙인 경우, 아래의 종료 로직을 중복으로 타지 않고 반환
+        if is_just_completed:
+            return
+
+        cs_m = TEL_PATTERNS['CS_REASON'].search(payload)
+        if cs_m:
+            is_drop = cs_m.group(1) in ['34', '41', '42', '44', '49', '58', '65535']
+            if not is_drop and target_call["status"] == "DIALING" and cs_m.group(1) == "16":
+                target_call["status"] = "CANCELED"
+            else:
+                target_call["status"] = "CALL DROP" if is_drop else "SUCCESS"
+
+            reason_desc = CALL_FAIL_REASON_MAP.get(cs_m.group(1), f"Code:{cs_m.group(1)}")
+            target_call["fail_reason"] = reason_desc
+
+        # 기존 END_EV 패턴에 더해, 명시적으로 빈 객체 {} 도 통화 종료로 처리한다.
+        is_end = TEL_PATTERNS['END_EV'].search(payload) or re.search(r'\<\s*(?:GET_CURRENT_CALLS\s*)?\{\}', payload, re.I)
+
+        if is_end:
+            target_call["end_time"] = ts
+            if target_call["status"] == "DIALING":
+                reason = target_call.get("fail_reason", "0")
+                if any(code in reason for code in ["16(", "Normal"]):
+                    target_call["status"] = "CANCELED"
+                elif reason != "0":
+                    target_call["status"] = "FAIL"
+                else:
+                    target_call["status"] = "CALL DROP"
+            completed_list.append(target_call)
+            active_list.remove(target_call)
+
 class TelephonyParser(BaseParser):
+
+    def _normalize_payload_from_dump_line(self, clean_line: str) -> str:
+        """Telephony dump 라인에서 실제 payload만 분리한다."""
+        parts = clean_line.split(" - ", 1)
+        return parts[1] if len(parts) > 1 else clean_line
+
+    def _normalize_payload_from_radio_line(self, clean_line: str) -> str:
+        """Radio log 라인에서 실제 payload만 분리한다."""
+        parts = clean_line.split(":", 1)
+        return parts[1].strip() if len(parts) > 1 else clean_line
+
+    def _time_to_sec(self, t_str: str) -> int:
+        """MM-DD HH:MM:SS.mmm 형태의 timestamp를 초 단위로 변환한다."""
+        try:
+            if " " in t_str:
+                t_str = t_str.split(" ")[1]
+            p = t_str.split(".")[0].split(":")
+            return int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2])
+        except Exception:
+            return 0
+
+
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
         self.pre_context = deque(maxlen=50)
+        self.ims_call_parser = ImsCallParser(self._extract_timestamp)
+        self.cs_call_parser = CsCallStateMachine()
 
     def _extract_timestamp(self, line: str) -> str:
         # 1) 2025-05-03T07:04:35.388 / 2025-05-03 07:04:35.388
@@ -36,132 +329,60 @@ class TelephonyParser(BaseParser):
 
         return "UnknownTime"
 
-    # 💡 IMS/PS Call 전담 파서 (objId 기반 멀티콜 지원)
-    def _parse_ims_multi_calls(self, lines):
-        calls = defaultdict(list)
-        obj_to_tc = {}
-        pending_events = []
-        obj_fail_reasons = defaultdict(str)
 
-        obj_re = re.compile(r'objId:(\d+)')
-        tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)')
+    def _extract_connection_history_entry(self, clean_line: str, tc_id_re):
+        """Connection History 라인에서 TC ID와 시작 시간을 추출한다."""
+        tc_m = tc_id_re.search(clean_line)
+        if not tc_m:
+            return None
 
-        event_keywords = [
-            'onIncomingCall', 'takeCall', 'accept', 'reject',
-            'onCallTerminated', 'onCallStartFailed'
-        ]
+        time_m = re.findall(r'\((\d{2}:\d{2}:\d{2})\)', clean_line)
+        date_m = re.search(r'\((\d{2}-\d{2})\)', clean_line)
+        if not time_m or not date_m:
+            return None
 
-        # 🚨 [정밀 교정 정규식]
-        # 패턴 1: {369 : CODE_SIP_...} 중괄호 매칭 (숫자와 에러 단어 그룹을 각각 분리 추출)
-        ims_bracket_re = re.compile(r'ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)(?:,\s*(\d+)\s*,\s*([^,}]+))?', re.IGNORECASE)
-        # 패턴 2: 기존 표준형 (code=361 또는 (361, 0, ...)) 방어용 백업
-        ims_standard_re = re.compile(r'ImsReasonInfo\s*(?:[:\s\(\=]+code\=)?[:\s\(\=]*(\d+)', re.IGNORECASE)
+        start_ts = f"{date_m.group(1)} {time_m[0]}.000"
+        return {
+            "tc_id": tc_m.group(1),
+            "start_sec": self._time_to_sec(start_ts),
+            "raw_log": clean_line
+        }
 
-        for line in lines:
-            if "[IPCT" not in line and "[IPCN" not in line:
+    def _finalize_active_sessions(self, dump_sessions, radio_sessions, active_dump_calls, active_radio_calls):
+        """종료 이벤트를 만나지 못한 active call을 최종 세션 목록에 합친다."""
+        dump_sessions.extend(active_dump_calls)
+        radio_sessions.extend(active_radio_calls)
+
+    def _merge_cs_sessions(self, dump_sessions, radio_sessions):
+        """dump 기반 CS 세션을 우선 사용하고 없을 때 radio 기반 세션을 사용한다."""
+        return dump_sessions if dump_sessions else radio_sessions
+
+    def _bind_connection_history(self, sessions, conn_histories):
+        """TC ID가 없는 세션을 Connection History 기준으로 보강한다."""
+        for session in sessions:
+            if "TC@" in session["id"]:
                 continue
 
-            detected_event = None
-            for keyword in event_keywords:
-                if keyword in line:
-                    detected_event = keyword
-                    break
+            s_sec = self._time_to_sec(session["start_time"])
+            for ch in conn_histories:
+                if abs(s_sec - ch["start_sec"]) > 5:
+                    continue
 
-            if not detected_event:
-                continue
-
-            timestamp = self._extract_timestamp(line)
-            event_str = f"[{timestamp}] {line.split(' - ', 1)[-1].strip()}"
-
-            obj_match = obj_re.search(line)
-
-            # 🚨 [에러 추출 계층 고도화]
-            extracted_code = ""
-            bracket_match = ims_bracket_re.search(line)
-            if bracket_match:
-                # 기본 안드로이드 코드 (예: 504_CODE_USER_DECLINE)
-                extracted_code = f"{bracket_match.group(1)}_{bracket_match.group(2)}"
-
-                # SIP 코드가 파싱되었다면 추가! (예: 480)
-                sip_code = bracket_match.group(3)
-                sip_desc = bracket_match.group(4)
-                if sip_code and sip_code != "0":
-                    extracted_code += f" (SIP_{sip_code}_{sip_desc.strip()})"
-            else:
-                standard_match = ims_standard_re.search(line)
-                if standard_match:
-                    extracted_code = f"IMS_REASON_{standard_match.group(1)}"
-
-            if not obj_match:
-                pending_events.append(event_str)
-                continue
-
-            obj_id = obj_match.group(1)
-
-            # 🚨 [덮어쓰기 방어] 510 같은 포괄적 종료 코드가 진짜 원인(504, 480)을 덮어쓰지 못하게 락(Lock)
-            if extracted_code:
-                existing_code = obj_fail_reasons.get(obj_id, "")
-                if not existing_code or ("510" not in extracted_code and "TERMINATED" not in extracted_code):
-                    obj_fail_reasons[obj_id] = extracted_code
-
-            tc_match = tc_id_re.search(line)
-            if tc_match:
-                obj_to_tc[obj_id] = tc_match.group(1)
-
-            if pending_events:
-                for p_event in pending_events:
-                    if not calls[obj_id] or calls[obj_id][-1] != p_event:
-                        calls[obj_id].append(p_event)
-                pending_events = []
-
-            if not calls[obj_id] or calls[obj_id][-1] != event_str:
-                calls[obj_id].append(event_str)
-
-        multi_calls_list = []
-        for obj_id, events in calls.items():
-            start_time = events[0].split("]")[0].replace("[", "") if events else "Unknown"
-            end_time = events[-1].split("]")[0].replace("[", "") if events else "Unknown"
-            is_user_reject = any("USER_DECLINE" in e for e in events)
-
-            status = "SUCCESS"
-            has_failed_event = any(any(k in e for k in ['Terminated', 'reject', 'Failed']) for e in events)
-
-            if has_failed_event:
-                 status = "FAIL" if "CODE_USER" not in events[-1] and "USER_DECLINE" not in events[-1] else "NORMAL_RELEASE"
-
-            tc_id = obj_to_tc.get(obj_id)
-            display_id = f"{tc_id} (objId:{obj_id})" if tc_id else f"objId:{obj_id}"
-
-            # 🚨 [최종 조립] 정제된 에러 단어를 fail_reason 필드에 매핑
-            final_reason = "0"
-            if obj_fail_reasons[obj_id]:
-                final_reason = obj_fail_reasons[obj_id]
-            elif status == "FAIL":
-                # 백업용 분석기 가동
-                last_line = events[-1]
-                reason_match = re.search(r'(CODE_[A-Z_]+|USER_DECLINE|\d{3}\s:\s[^,]+)', last_line)
-                if reason_match:
-                    final_reason = reason_match.group(1).strip()
+                # PS 콜은 기존 objId를 남겨두고 앞에 TC@를 붙여 가독성을 높인다.
+                if "objId:" in session["id"]:
+                    session["id"] = f"{ch['tc_id']} ({session['id']})"
                 else:
-                    fallback_match = ims_bracket_re.search(last_line)
-                    if fallback_match:
-                        final_reason = f"{fallback_match.group(1)}_{fallback_match.group(2)}"
-                    else:
-                        fallback_std = ims_standard_re.search(last_line)
-                        final_reason = f"IMS_FAIL_{fallback_std.group(1)}" if fallback_std else "IMS_CALL_START_FAILED"
+                    session["id"] = ch["tc_id"]
 
-            multi_calls_list.append({
-                "type": "PS(VoLTE)",
-                "id": display_id,
-                "start_time": start_time,
-                "end_time": end_time,
-                "status": status,
-                "is_user_reject": is_user_reject,
-                "fail_reason": final_reason,
-                "logs": events
-            })
+                session["logs"].append(f"==> [BOUND from Connection History]: {ch['raw_log']}")
+                break
 
-        return multi_calls_list
+    def _dedupe_and_sort_sessions(self, sessions):
+        """세션 로그 중복 제거 후 시작 시간 기준으로 정렬한다."""
+        for session in sessions:
+            session["logs"] = sorted(list(set(session["logs"])))
+        sessions.sort(key=lambda x: x["start_time"])
+        return sessions
 
     def analyze(self, lines):
         dump_sessions = []
@@ -180,120 +401,6 @@ class TelephonyParser(BaseParser):
         radio_time_re = re.compile(r'(\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2}\.\d{3})')
         tc_id_re = re.compile(r'(TC@[a-zA-Z0-9_]+)')
 
-        def time_to_sec(t_str):
-            try:
-                if " " in t_str: t_str = t_str.split(" ")[1]
-                p = t_str.split(".")[0].split(":")
-                return int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2])
-            except: return 0
-
-        # 💡 process_cs_multi_payload는 이제 순수하게 CS Call(또는 예외적인 Call)만 처리합니다.
-        def process_cs_multi_payload(ts, payload, completed_list, active_list, slot_id="Unknown"):
-
-            # 🚨 [추가된 방어 로직 1] IMS/PS(VoLTE) 관련 로그는 CS 로직에서 아예 무시하도록 차단합니다.
-            if "[IPCT" in payload or "[IPCN" in payload:
-                return
-
-            is_cs = TEL_PATTERNS['CS_START'].search(payload)
-            tc_match = tc_id_re.search(payload)
-            id_m = TEL_PATTERNS['CONN_ID'].search(payload)
-
-            current_id = None
-            if tc_match:
-                current_id = tc_match.group(1)
-            elif id_m:
-                current_id = f"conn_id:{id_m.group(1)}"
-
-            # 1. 새로운 CS Call 발생 시 active_list에 추가
-            if is_cs:
-                new_call = {
-                    "type": "CS",
-                    "slot": slot_id,
-                    "start_time": ts,
-                    "end_time": None,
-                    "id": current_id if current_id else f"Unknown_{len(active_list)}_{ts[-6:].replace('.','')}",
-                    "status": "DIALING",
-                    "is_user_reject": False,
-                    "fail_reason": "0",
-                    "logs": [f"[{ts}] START: {payload}"]
-                }
-                active_list.append(new_call)
-                return
-
-            # 2. 이 로그가 어느 통화의 것인지(Target Call) 식별
-            target_call = None
-            if current_id:
-                for call in active_list:
-                    if call["id"] == current_id:
-                        target_call = call
-                        break
-
-                if not target_call:
-                    for call in active_list:
-                        if call["id"].startswith("Unknown"):
-                            call["id"] = current_id
-                            target_call = call
-                            break
-            else:
-                if active_list:
-                    target_call = active_list[-1]
-
-            is_just_completed = False
-            if not target_call and "LAST_CALL_FAIL_CAUSE" in payload and completed_list:
-                target_call = completed_list[-1] # 방금 막 종료된 타겟 호출
-                is_just_completed = True
-
-            if not target_call:
-                return
-
-            if target_call["slot"] == "Unknown" and slot_id != "Unknown":
-                target_call["slot"] = slot_id
-
-            target_call["logs"].append(f"[{ts}] {payload}")
-            if ",ACTIVE," in payload:
-                target_call["status"] = "SUCCESS"
-
-            # 🚨 [수정 2] 조기 종료된 콜에 뒤늦게 들어온 Cause Code 명시적 덮어쓰기
-            if "LAST_CALL_FAIL_CAUSE" in payload and "causeCode" in payload:
-                c_match = re.search(r'causeCode:\s*(\d+)', payload)
-                v_match = re.search(r'vendorCause:\s*(\d+)', payload)
-                if c_match:
-                    cause_str = f"callFailCause: {c_match.group(1)}"
-                    if v_match:
-                        cause_str += f", vendorCause: {v_match.group(1)}"
-                    target_call["fail_reason"] = cause_str
-                    target_call["status"] = "CALL DROP" # 명시적 에러 수신 시 강제 실패 처리
-
-            # 이미 완료 처리된 콜에 로그만 덧붙인 경우, 아래의 종료 로직(is_end)을 중복으로 타지 않고 반환
-            if is_just_completed:
-                return
-
-            cs_m = TEL_PATTERNS['CS_REASON'].search(payload)
-            if cs_m:
-                is_drop = cs_m.group(1) in ['34', '41', '42', '44', '49', '58', '65535']
-                if not is_drop and target_call["status"] == "DIALING" and cs_m.group(1) == "16":
-                    target_call["status"] = "CANCELED"
-                else:
-                    target_call["status"] = "CALL DROP" if is_drop else "SUCCESS"
-
-                reason_desc = CALL_FAIL_REASON_MAP.get(cs_m.group(1), f"Code:{cs_m.group(1)}")
-                target_call["fail_reason"] = reason_desc
-
-            # 🚨 [추가된 방어 로직 2] 기존 END_EV 패턴에 더해, 명시적으로 빈 객체 {} 도 통화 종료로 처리합니다.
-            is_end = TEL_PATTERNS['END_EV'].search(payload) or re.search(r'\<\s*(?:GET_CURRENT_CALLS\s*)?\{\}', payload, re.I)
-
-            if is_end:
-                target_call["end_time"] = ts
-                if target_call["status"] == "DIALING":
-                    reason = target_call.get("fail_reason", "0")
-                    if any(code in reason for code in ["16(", "Normal"]):
-                        target_call["status"] = "CANCELED"
-                    elif reason != "0":
-                        target_call["status"] = "FAIL"
-                    else:
-                        target_call["status"] = "CALL DROP"
-                completed_list.append(target_call)
-                active_list.remove(target_call)
 
         # --- 로그 라인 순회 ---
         for line in lines:
@@ -311,16 +418,9 @@ class TelephonyParser(BaseParser):
                 if clean_line.startswith("---------") or "DUMP OF" in clean_line or clean_line.startswith("Call Log"):
                     in_conn_history = False
                 else:
-                    tc_m = tc_id_re.search(clean_line)
-                    if tc_m:
-                        tc_id = tc_m.group(1)
-                        time_m = re.findall(r'\((\d{2}:\d{2}:\d{2})\)', clean_line)
-                        date_m = re.search(r'\((\d{2}-\d{2})\)', clean_line)
-                        if time_m and date_m:
-                            start_ts = f"{date_m.group(1)} {time_m[0]}.000"
-                            conn_histories.append({
-                                "tc_id": tc_id, "start_sec": time_to_sec(start_ts), "raw_log": clean_line
-                            })
+                    conn_entry = self._extract_connection_history_entry(clean_line, tc_id_re)
+                    if conn_entry:
+                        conn_histories.append(conn_entry)
                     continue
 
             if clean_line.startswith("Call Log") or "DUMP OF SERVICE telecom" in clean_line:
@@ -340,56 +440,34 @@ class TelephonyParser(BaseParser):
                     if '.' not in time_part:
                         time_part += ".000"
                     ts = f"{m.group(1)} {time_part}"
-                    parts = clean_line.split(" - ", 1)
-                    payload = parts[1] if len(parts) > 1 else clean_line
-                    process_cs_multi_payload(ts, payload, dump_sessions, active_dump_calls, slot_id=current_dump_slot)
+                    payload = self._normalize_payload_from_dump_line(clean_line)
+                    self.cs_call_parser.process(
+                        ts, payload, dump_sessions, active_dump_calls,
+                        slot_id=current_dump_slot, tc_id_re=tc_id_re
+                    )
 
             elif in_radio:
                 m = radio_time_re.search(clean_line)
                 if m:
                     ts = f"{m.group(1)} {m.group(2)}"
-                    parts = clean_line.split(":", 1)
-                    payload = parts[1].strip() if len(parts) > 1 else clean_line
+                    payload = self._normalize_payload_from_radio_line(clean_line)
                     radio_slot_m = re.search(r'PHONE(\d)', clean_line, re.I)
                     radio_slot = radio_slot_m.group(1) if radio_slot_m else "Unknown"
-                    process_cs_multi_payload(ts, payload, radio_sessions, active_radio_calls, slot_id=radio_slot)
+                    self.cs_call_parser.process(
+                        ts, payload, radio_sessions, active_radio_calls,
+                        slot_id=radio_slot, tc_id_re=tc_id_re
+                    )
 
-        # 4. 루프 종료 후, 아직 END_EV를 못 만나서 끝나지 않은(Active) 통화들을 완료 목록에 합쳐줌
-        dump_sessions.extend(active_dump_calls)
-        radio_sessions.extend(active_radio_calls)
+        self._finalize_active_sessions(
+            dump_sessions, radio_sessions,
+            active_dump_calls, active_radio_calls
+        )
 
-        merged_sessions = dump_sessions if dump_sessions else radio_sessions
+        merged_sessions = self._merge_cs_sessions(dump_sessions, radio_sessions)
+        merged_sessions.extend(self.ims_call_parser.parse(lines))
 
-        dump_sessions.extend(active_dump_calls)
-        radio_sessions.extend(active_radio_calls)
-
-        merged_sessions = dump_sessions if dump_sessions else radio_sessions
-
-        # 💡 [순서 변경 1] PS 콜을 가장 먼저 파싱해서 전체 세션 목록에 합칩니다.
-        ps_sessions = self._parse_ims_multi_calls(lines)
-        merged_sessions.extend(ps_sessions)
-
-        # 💡 [순서 변경 2] 합쳐진 전체 세션(CS+PS)을 돌면서 시간 차이(5초 이내)를 이용해 TC ID를 찾아 묶어줍니다.
-        for session in merged_sessions:
-            if "TC@" not in session["id"]:
-                s_sec = time_to_sec(session["start_time"])
-                for ch in conn_histories:
-                    if abs(s_sec - ch["start_sec"]) <= 5:
-                        # PS 콜은 기존 objId를 남겨두고 앞에 TC@를 붙여 가독성을 높입니다.
-                        if "objId:" in session["id"]:
-                            session["id"] = f"{ch['tc_id']} ({session['id']})"
-                        else:
-                            session["id"] = ch["tc_id"]
-
-                        session["logs"].append(f"==> [BOUND from Connection History]: {ch['raw_log']}")
-                        break
-
-        # 마지막으로 로그 중복 제거 및 시간순 정렬
-        for session in merged_sessions:
-            session["logs"] = sorted(list(set(session["logs"])))
-        merged_sessions.sort(key=lambda x: x["start_time"])
-
-        return merged_sessions
+        self._bind_connection_history(merged_sessions, conn_histories)
+        return self._dedupe_and_sort_sessions(merged_sessions)
 
 # ==========================================
 # 2. Radio Log 전담 망 이탈(OOS) 파서
