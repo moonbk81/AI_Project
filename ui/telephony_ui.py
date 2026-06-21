@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import datetime
+import numpy as np
 
 def render_call_history_summary(df):
     """전체 통화 세션 (Call History) 차트 및 표 렌더링"""
@@ -364,7 +365,7 @@ def render_rilj_transactions(current_base=None):
         for t in timeouts:
             abnormal_rows.append({
                 "Status": "TIMEOUT", "Time": t["time"], "Command": t["command"],
-                "Latency(ms)": "N/A", "Error Code": "NO_RESPONSE", "Details": t["details"]
+                "Latency(ms)": None, "Error Code": "NO_RESPONSE", "Details": t["details"]
             })
 
         for c in completed:
