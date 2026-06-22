@@ -202,6 +202,12 @@ class DataUsageParser(BaseParser):
         for (uid, rat, bucket_time), data in usage_by_key.items():
             total_bytes = data["rx_bytes"] + data["tx_bytes"]
             if total_bytes > 0:
+                total_mb = round(total_bytes / (1024 * 1024), 2)
+                rx_mb = round(data["rx_bytes"] / (1024 * 1024), 2)
+                tx_mb = round(data["tx_bytes"] / (1024 * 1024), 2)
+
+                if total_mb < 5.0:
+                    continue
                 # 🚨 [핵심] 이제 uid_map에는 [PACKAGE INFO]에서 가져온 완벽한 앱 이름이 들어있습니다.
                 app_name = {"-5": "모바일 핫스팟 (Tethering)", "-4": "삭제된 앱 (Removed)", "1000": "Android System (OS)", "0": "OS Kernel (Root)"}.get(uid, uid_map.get(uid, f"App_UID_{uid}"))
                 report_data.append({

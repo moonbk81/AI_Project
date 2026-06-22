@@ -101,7 +101,7 @@ class AnalysisBucketBuilder:
         "binder_alloc", "am_kill", "am_wtf",
     ]
 
-    BASIC_USAGE_KEYWORDS = ["transports={0}", "metered=true", "DNS Requested", "pkg,"]
+    BASIC_USAGE_KEYWORDS = ["transports={0}", "metered=true", "DNS Requested", "pkg,", "st=", "App ID:", "Package:"]
     NET_TS_KEYWORDS = ["NetId", "DnsEvent", "TcpStats", "NetworkMonitor", "ConnectivityService"]
     RILJ_TAG_REGEX = re.compile(r'\b[VDIWEF](?:/|\s+)(?:RILJ|SEM_RILJ)\b', re.IGNORECASE)
 
