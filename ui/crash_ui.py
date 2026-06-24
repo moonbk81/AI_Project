@@ -84,18 +84,30 @@ def _render_binder_events(report_data, binder_warnings):
     if not binder_warnings:
         return
 
+    # 💡 신규: BINDER_ONEWAY_SPAM만 따로 빼서 강력하게 경고 (UI 최상단 노출)
+    spam_events = [b for b in binder_warnings if isinstance(b, dict) and b.get("type") == "BINDER_ONEWAY_SPAM"]
+    if spam_events:
+        st.error(f"🚨 **Binder Oneway Spamming (버퍼 고갈 원인 프로세스 감지) {len(spam_events)}건 감지!**")
+        for spam in spam_events:
+            st.warning(spam.get("desc", ""))
+            with st.expander(f"[{spam.get('time', 'Unknown')}] 커널 로그 원문 확인"):
+                st.code(spam.get("raw", ""), language='log')
+        st.markdown("---") # 시각적 분리선
+
+    # 기존 일반 바인더 이벤트 표 출력 로직
     binder_event_types = {
         "THREAD_EXHAUSTION", "TRANSACTION_DELAY", "BINDER_DELAY",
-        "BINDER_TRANSACTION_FAILURE", "BINDER_BUFFER_ERROR", "REPEATED_BINDER_DELAY"
+        "BINDER_TRANSACTION_FAILURE", "BINDER_BUFFER_ERROR", "REPEATED_BINDER_DELAY",
+        "BINDER_ONEWAY_SPAM" # 표(DataFrame) 안에도 전체 이력을 남기기 위해 추가
     }
+
     binder_event_rows = [
         b for b in binder_warnings
         if isinstance(b, dict) and b.get("type") in binder_event_types
     ]
 
-    st.warning(
-        f"Binder 지연/실패/스레드 부족 이벤트 {len(binder_event_rows)}건 감지"
-    )
+    st.warning(f"Binder 지연/실패/스레드 부족 이벤트 {len(binder_event_rows)}건 감지")
+
     with st.expander("Binder 이벤트 상세"):
         if binder_event_rows:
             binder_df = pd.DataFrame(binder_event_rows)[['time', 'type', 'desc']]

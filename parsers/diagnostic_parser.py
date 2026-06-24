@@ -834,6 +834,7 @@ class BinderWarningParser(BaseParser):
         "REPEATED_BINDER_DELAY",
         "SYSTEM_KILL",
         "SYSTEM_WTF",
+        "BINDER_ONEWAY_SPAM", # 💡 신규 이벤트 타입 추가
     }
 
     def _extract_time(self, line_str):
@@ -866,7 +867,6 @@ class BinderWarningParser(BaseParser):
             event_time = self._extract_time(line_str)
 
             if "am_kill" in line_str:
-                # 예: am_kill : [0,1234,com.android.phone,0,Too many Binders sent to SYSTEM]
                 match = re.search(r'am_kill\s*:\s*\[\d+,\d+,([^,]+),-?\d+,\s*([^\]]+)\]', line_str)
                 if match:
                     process = match.group(1)
@@ -907,33 +907,23 @@ class BinderWarningParser(BaseParser):
 
             if in_proxy_histogram:
                 histogram_line_count += 1
-
-                # 💡 2. 종료점 감지 (명시적 종료 메시지 OR 너무 많은 라인이 지났을 때 강제 종료)
                 if "critical dump took" in lower or histogram_line_count > 100:
                     in_proxy_histogram = False
-
                     if current_histogram:
-                        # 내림차순 정렬
                         current_histogram.sort(key=lambda x: x[1], reverse=True)
-
-                        # 💡 필터링 제거: 수집된 모든 Top N 데이터를 그대로 보존
-                        max_count = current_histogram[0][1] # 가장 큰 값 저장
-
+                        max_count = current_histogram[0][1]
                         details = ", ".join([f"{name} ({cnt}개)" for name, cnt in current_histogram])
                         raw_logs = "\n".join([f"  {name} x{cnt}" for name, cnt in current_histogram])
 
                         warnings.append({
                             "time": histogram_time,
-                            "type": "BINDER_PROXY_HISTOGRAM", # 💡 중립적인 이름으로 변경
-                            "max_count": max_count,           # 💡 UI/LLM이 판단할 수 있도록 기준값 제공
+                            "type": "BINDER_PROXY_HISTOGRAM",
+                            "max_count": max_count,
                             "desc": f"Binder Proxy 객체 상태 덤프: {details}",
                             "raw": raw_logs
                         })
                     continue
 
-                # 💡 3. 실제 데이터 파싱 (정규식 강화)
-                # 앞부분의 Logcat 태그(I Binder :)를 무시하고,
-                # 반드시 영문자로 시작하는 클래스명([a-zA-Z_][a-zA-Z0-9\.\$]*)만 매칭하여 오탐지 차단
                 match = re.search(r'(?:#\d+:\s*)?([a-zA-Z_][a-zA-Z0-9\.\$]+)\s*x\s*(\d+)', line_str)
                 if match:
                     descriptor = match.group(1).strip()
@@ -941,21 +931,14 @@ class BinderWarningParser(BaseParser):
                     current_histogram.append((descriptor, count))
                 continue
 
-            # 1. Thread Exhaustion / Starved: 강한 장애 신호
+            # 1. Thread Exhaustion / Starved
             if "binder thread pool" in lower and ("is full" in lower or "starved for" in lower):
                 starved_match = re.search(r'starved for (\d+)\s*ms', line_str, re.IGNORECASE)
                 if starved_match:
                     delay_ms = int(starved_match.group(1))
-                    desc = (
-                        f"Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 "
-                        f"{delay_ms}ms(약 {round(delay_ms / 1000, 1)}초) 대기했습니다. "
-                        "ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."
-                    )
+                    desc = f"Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 {delay_ms}ms(약 {round(delay_ms / 1000, 1)}초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."
                 else:
-                    desc = (
-                        "Binder thread pool 포화 감지. IPC 처리 자원 부족을 의미하는 강한 이상 신호이며, "
-                        "동시간대 ANR/Watchdog/느린 Binder transaction 여부를 함께 확인해야 합니다."
-                    )
+                    desc = "Binder thread pool 포화 감지. IPC 처리 자원 부족을 의미하는 강한 이상 신호이며, 동시간대 ANR/Watchdog/느린 Binder transaction 여부를 함께 확인해야 합니다."
 
                 warnings.append({
                     "time": event_time,
@@ -965,7 +948,7 @@ class BinderWarningParser(BaseParser):
                 })
                 continue
 
-            # 2. Binder transaction delay: 원인 후보/증상으로 표현
+            # 2. Binder transaction delay
             if "binder transaction to" in line_str and "took" in line_str:
                 try:
                     target_part = line_str.split("Binder transaction to ", 1)[1]
@@ -976,11 +959,7 @@ class BinderWarningParser(BaseParser):
 
                     if duration_ms > 1000:
                         level = self._severity_label(duration_ms)
-                        desc = (
-                            f"[{target}] 대상 Binder transaction이 {duration_ms}ms"
-                            f"(약 {round(duration_ms / 1000, 1)}초) 지연되었습니다. 심각도: {level}. "
-                            "단독으로 Root Cause를 확정하지 말고, ANR/Watchdog/thread starvation/대상 서비스 재시작 여부와 교차 확인해야 합니다."
-                        )
+                        desc = f"[{target}] 대상 Binder transaction이 {duration_ms}ms(약 {round(duration_ms / 1000, 1)}초) 지연되었습니다. 심각도: {level}. 단독으로 Root Cause를 확정하지 말고, ANR/Watchdog/thread starvation/대상 서비스 재시작 여부와 교차 확인해야 합니다."
                         event = {
                             "time": event_time,
                             "type": "TRANSACTION_DELAY",
@@ -999,7 +978,7 @@ class BinderWarningParser(BaseParser):
                     })
                 continue
 
-            # 3. binder_sample: 느린 IPC 샘플링 지표
+            # 3. binder_sample
             if "binder_sample" in line_str:
                 sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,\]]+)')
                 m = sample_pattern.search(line_str)
@@ -1010,19 +989,13 @@ class BinderWarningParser(BaseParser):
                         warnings.append({
                             "time": event_time,
                             "type": "BINDER_DELAY",
-                            "desc": (
-                                f"[{pkg}] 패키지의 {interface} Binder call이 {duration_ms}ms 지연되었습니다. "
-                                f"심각도: {level}. 반복 발생 또는 ANR 시점 인접 여부 확인이 필요합니다."
-                            ),
+                            "desc": f"[{pkg}] 패키지의 {interface} Binder call이 {duration_ms}ms 지연되었습니다. 심각도: {level}. 반복 발생 또는 ANR 시점 인접 여부 확인이 필요합니다.",
                             "raw": line_str
                         })
                 continue
 
-            # 4. Binder transaction failure 계열: 단순 지연보다 장애성이 강함
-            if any(k in lower for k in [
-                "deadobjectexception", "failed_transaction", "binder transaction failed",
-                "transaction failed", "remoteexception"
-            ]):
+            # 4. Binder transaction failure 계열
+            if any(k in lower for k in ["deadobjectexception", "failed_transaction", "binder transaction failed", "transaction failed", "remoteexception"]):
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_TRANSACTION_FAILURE",
@@ -1031,11 +1004,31 @@ class BinderWarningParser(BaseParser):
                 })
                 continue
 
-            # 5. Binder buffer / allocation 계열
-            if any(k in lower for k in [
-                "transactiontoolargeexception", "binder_alloc", "binder buffer",
-                "no space left", "buffer allocation", "parcel size"
-            ]):
+            # 5. Binder buffer / allocation 계열 (No space left on device 포함)
+            if any(k in lower for k in ["transactiontoolargeexception", "binder_alloc", "binder buffer", "no space left", "buffer allocation", "parcel size"]):
+                # 💡 6. 신규 추가: 커널 레벨의 Binder Oneway Spamming 감지
+                if "spamming" in lower and "way" in lower:
+                    # 커널 타임스탬프 (KTime) 추출 시도
+                    ktime_match = re.search(r'\[\s*(\d+\.\d+)\s*\]', line_str)
+                    spam_time = f"KTime: {ktime_match.group(1)}" if ktime_match else event_time
+
+                    spam_match = re.search(r'binder_alloc:\s*(\d+):\s*pid\s*(\d+)\s*spamming\s+one\s*way\?', line_str)
+                    if spam_match:
+                        target_pid = spam_match.group(1)
+                        sender_pid = spam_match.group(2)
+
+                        size_match = re.search(r'total size of (\d+)', line_str)
+                        total_size = size_match.group(1) if size_match else "Unknown"
+
+                        warnings.append({
+                            "time": spam_time,
+                            "type": "BINDER_ONEWAY_SPAM",
+                            "desc": f"[Caller PID: {sender_pid}] 프로세스가 [Callee PID: {target_pid}] 방향으로 비동기(Oneway) 트랜잭션을 과도하게 전송하고 있습니다(Spamming 감지). (버퍼 점유: {total_size} bytes). 이로 인해 대상 프로세스에 No space left on device (-28) 에러가 유발됩니다.",
+                            "raw": line_str
+                        })
+                    continue
+
+                # 일반 버퍼 에러 처리 (Spamming이 아닌 경우)
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_BUFFER_ERROR",
@@ -1044,7 +1037,7 @@ class BinderWarningParser(BaseParser):
                 })
                 continue
 
-        # 동일 target의 반복 지연은 별도 요약 이벤트 1건만 추가합니다.
+        # 동일 target의 반복 지연 처리
         for target, cnt in delay_count_by_target.items():
             if cnt >= 3:
                 last = last_delay_event_by_target.get(target, {})
@@ -1058,7 +1051,7 @@ class BinderWarningParser(BaseParser):
         return warnings
 
     def build_context_summary(self, context_lines, max_examples=12):
-        """Binder RCA 보조용 문맥 요약입니다. 반환값은 UI 테이블이 아닌 LLM/KPI 보조 팩트에만 사용합니다."""
+        # ... (기존 코드와 동일하게 유지)
         if not context_lines:
             return {}
 
@@ -1084,18 +1077,12 @@ class BinderWarningParser(BaseParser):
 
         if summary["signals"]:
             checklist = []
-            if summary["signals"].get("anr_or_input_timeout"):
-                checklist.append("ANR/Input timeout 시점과 Binder 지연 시점의 시간 상관관계 확인")
-            if summary["signals"].get("watchdog_or_system_server"):
-                checklist.append("system_server Watchdog/slow dispatch 동반 여부 확인")
-            if summary["signals"].get("lock_contention"):
-                checklist.append("Lock/monitor contention이 Binder 응답 지연의 선행 원인인지 확인")
-            if summary["signals"].get("service_or_ipc_failure"):
-                checklist.append("대상 서비스 사망/재시작/RemoteException 여부 확인")
-            if summary["signals"].get("resource_pressure"):
-                checklist.append("CPU/iowait/memory pressure로 인한 전역 지연 가능성 확인")
-            if summary["signals"].get("telephony_nearby"):
-                checklist.append("RILJ/Telephony/IMS/DataCall/OOS 이벤트와 장애 시점 비교")
+            if summary["signals"].get("anr_or_input_timeout"): checklist.append("ANR/Input timeout 시점과 Binder 지연 시점의 시간 상관관계 확인")
+            if summary["signals"].get("watchdog_or_system_server"): checklist.append("system_server Watchdog/slow dispatch 동반 여부 확인")
+            if summary["signals"].get("lock_contention"): checklist.append("Lock/monitor contention이 Binder 응답 지연의 선행 원인인지 확인")
+            if summary["signals"].get("service_or_ipc_failure"): checklist.append("대상 서비스 사망/재시작/RemoteException 여부 확인")
+            if summary["signals"].get("resource_pressure"): checklist.append("CPU/iowait/memory pressure로 인한 전역 지연 가능성 확인")
+            if summary["signals"].get("telephony_nearby"): checklist.append("RILJ/Telephony/IMS/DataCall/OOS 이벤트와 장애 시점 비교")
             summary["checklist"] = checklist
 
         return summary if summary["signals"] else {}

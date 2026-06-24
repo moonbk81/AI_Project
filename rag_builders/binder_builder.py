@@ -9,6 +9,13 @@ BINDER_LEAK_TYPES = (
     "BINDER_PROXY_LEAK_SUMMARY",
 )
 
+# 💡 신규 추가: Payload 누락 방지를 위한 핵심 바인더 에러 타입 정의
+CRITICAL_BINDER_TYPES = (
+    "BINDER_ONEWAY_SPAM",
+    "BINDER_BUFFER_ERROR",
+    "THREAD_EXHAUSTION",
+)
+
 def safe_int(value, default=0):
     try:
         if value is None:
@@ -142,6 +149,7 @@ def build_binder_payloads(report_data, input_file):
     rag_payload = []
     binder_warnings = report_data.get("binder_warnings", []) or []
 
+    # 1. 누수(Leak) 계열 처리
     leak_warnings = [
         bw for bw in binder_warnings
         if isinstance(bw, dict) and bw.get("type") in BINDER_LEAK_TYPES
@@ -169,19 +177,31 @@ def build_binder_payloads(report_data, input_file):
         )
         append_payload(rag_payload, text_content, meta)
 
-    normal_warnings = [
+    # 누수가 아닌 나머지 경고들 분리 작업
+    remaining_warnings = [
         bw for bw in binder_warnings
         if isinstance(bw, dict) and bw.get("type") not in BINDER_LEAK_TYPES
     ]
 
+    # 2. 시스템 강제 종료 계열 (Kill / WTF)
     system_kill_wtf_events = [
-        bw for bw in normal_warnings
+        bw for bw in remaining_warnings
         if bw.get("type") in ("SYSTEM_KILL", "SYSTEM_WTF")
     ]
-    normal_warnings = [
-        bw for bw in normal_warnings
-        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF")
+
+    # 3. 💡 핵심 단서 우선 처리 (Oneway Spam, Buffer Error 등)
+    critical_events = [
+        bw for bw in remaining_warnings
+        if bw.get("type") in CRITICAL_BINDER_TYPES
     ]
+
+    # 4. 짜잘한 일반 지연 이벤트들 (최종 10개 제한용)
+    normal_warnings = [
+        bw for bw in remaining_warnings
+        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF") and bw.get("type") not in CRITICAL_BINDER_TYPES
+    ]
+
+    # --- Payload 조립 시작 ---
 
     for bw in system_kill_wtf_events[::-1][:20]:
         meta = {
@@ -193,10 +213,25 @@ def build_binder_payloads(report_data, input_file):
             "desc": bw.get("desc", ""),
             "raw_info": bw.get("raw", bw.get("raw_info", "")),
         }
-
         text_content = (
             f"[시스템 Kill/WTF 이벤트] 시간: {meta['time']}, "
             f"프로세스: {meta['process']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+        )
+        append_payload(rag_payload, text_content, meta)
+
+    # 💡 신규: 핵심 이벤트들을 일반 이벤트보다 먼저, 그리고 더 넉넉하게(최대 30개) Payload에 추가합니다.
+    for bw in critical_events[::-1][:30]:
+        meta = {
+            "source_file": source_file_name(input_file),
+            "log_type": "Binder_Warning_Critical",
+            "time": bw.get("time", ""),
+            "type": bw.get("type", ""),
+            "desc": bw.get("desc", ""),
+            "raw_info": bw.get("raw", bw.get("raw_info", "")),
+        }
+        text_content = (
+            f"[바인더 핵심 이상 신호] 시간: {meta['time']}, "
+            f"유형: {meta['type']}, 상세: {meta['desc']}"
         )
         append_payload(rag_payload, text_content, meta)
 
@@ -209,9 +244,8 @@ def build_binder_payloads(report_data, input_file):
             "desc": bw.get("desc", ""),
             "raw_info": bw.get("raw", bw.get("raw_info", "")),
         }
-
         text_content = (
-            f"[바인더 통신 이벤트] 시간: {meta['time']}, "
+            f"[바인더 통신 지연/일반 이벤트] 시간: {meta['time']}, "
             f"유형: {meta['type']}, 상세: {meta['desc']}"
         )
         append_payload(rag_payload, text_content, meta)
