@@ -15,12 +15,13 @@ from rag.query_classifiers import (
     is_negative_binder_leak_check_query,
     is_nitz_query,
     is_time_context_inference_query,
+    extract_metadata_filters,
 )
 
 from rag.domain_boosts import apply_domain_boosts
 from rag.rerank_injections import apply_rerank_injections
 
-def build_where_filter(current_file=None, target_log_types=None):
+def build_where_filter(current_file=None, target_log_types=None, filters_dict=None):
     conditions = []
     if current_file:
         conditions.append({"source_file": current_file})
@@ -29,6 +30,10 @@ def build_where_filter(current_file=None, target_log_types=None):
             conditions.append({"log_type": target_log_types[0]})
         else:
             conditions.append({"log_type": {"$in": target_log_types}})
+
+    # Regex로 추출한 수치 조건이 있다면 ChromaDB '$gte' 연산자 추가
+    if filters_dict and 'min_dns_avg' in filters_dict:
+        conditions.append({"dns_avg": {"$gte": filters_dict['min_dns_avg']}})
 
     if len(conditions) == 1:
         return conditions[0]
@@ -105,6 +110,9 @@ def retrieve_and_rerank(
 ) -> dict:
     query_lower = search_query.lower()
 
+    # 1. 정규표현식으로 필터 조건 가볍게 추출
+    extracted_filters = extract_metadata_filters(query_lower)
+
     effective_target_log_types = target_log_types
 
     if is_crash_absence_check(query_lower):
@@ -129,6 +137,7 @@ def retrieve_and_rerank(
     where_filter = build_where_filter(
         current_file=current_file,
         target_log_types=effective_target_log_types,
+        filters_dict=extracted_filters
     )
 
     query_embedding = embed_model.encode(search_query).tolist()

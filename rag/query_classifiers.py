@@ -1,3 +1,4 @@
+import re
 
 """Query classifier helpers for retrieval and routing.
 
@@ -139,3 +140,35 @@ def is_negative_binder_leak_check_query(query_lower: str) -> bool:
         "확인되지", "근거 없음", "없다고 명확히", "없다고 답"
     ])
     return has_binder_leak_scope and has_absence_scope
+
+def extract_metadata_filters(query_lower: str) -> dict:
+    """
+    정규표현식을 사용하여 쿼리에서 시간, 수치 기반의 하드 필터 조건을 추출합니다.
+    """
+    filters = {}
+
+    # 1. 지연 시간 조건 추출 (예: "30초 이상", "5000ms 넘는")
+    # 매칭 그룹: 1=숫자, 2=단위(초|ms), 3=방향(이상|넘)
+    latency_pattern = r'(\d+)\s*(초|ms)\s*(이상|넘)'
+    latency_match = re.search(latency_pattern, query_lower)
+
+    if latency_match:
+        value = int(latency_match.group(1))
+        unit = latency_match.group(2)
+
+        # 단위 통일 (ms로 변환)
+        if unit == '초':
+            value *= 1000
+
+        # 하드 필터 적용 (최소값)
+        filters['min_dns_avg'] = value
+
+    # 2. 특정 시간 키워드 추출 (예: "18:15")
+    time_pattern = r'\b([0-1]?[0-9]|2[0-3]):([0-5][0-9])\b'
+    time_match = re.search(time_pattern, query_lower)
+
+    if time_match:
+        # DB 필터링 대신 리랭커에서 가중치를 주기 위해 텍스트로 보존
+        filters['time_keyword'] = time_match.group(0)
+
+    return filters
