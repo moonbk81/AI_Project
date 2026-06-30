@@ -109,6 +109,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     if "is_running" not in st.session_state:
         st.session_state.is_running = False
 
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0
+
     uploaded_files = st.file_uploader(
         "원시 로그 파일 업로드 (다중 선택 가능)",
         accept_multiple_files=True,
@@ -125,9 +128,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
             if not uploaded_files:
                 st.error("파일을 하나 이상 업로드하십시오.")
             else:
-                # 💡 여기에 스피너를 추가하면 시각적으로 더 좋습니다
-                with st.spinner("파이프라인 분석 및 DB 적재 중입니다. 잠시만 기다려주세요..."):
-                    run_analysis_pipeline(uploaded_files, False, "", "", engine)
+                st.session_state.uploader_key += 1
+                run_analysis_pipeline(uploaded_files, False, "", "", engine)
+
         finally:
             # 4. 분석이 끝나거나 에러가 나더라도 무조건 상태를 해제하고 새로고침
             st.session_state.is_running = False
