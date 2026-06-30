@@ -227,14 +227,27 @@ class DnsParser(BaseParser):
         if global_uid_map is None:
             global_uid_map = {}
 
-        dns_events = []
+        result = {
+            "queries": [],
+            "health_warnings": []
+        }
+
+        current_net_id = "Unknown"
+
         for line in lines:
+            # NetId 추적 (어떤 네트워크에서 발생한 불량인지 알기 위함)
+            if line.startswith("NetId:"):
+                m_netid = re.search(r'NetId:\s*(\d+)', line)
+                if m_netid:
+                    current_net_id = m_netid.group(1)
+                continue
+
+            # 1. 일반 DNS 쿼리 수집 (기존 로직)
             if "DNS Requested by" in line:
                 m = DIAG_PATTERNS['DNS_FULL'].search(line)
                 if m:
                     time_str, net_id, uid, orig_app_name, rest = m.group('time'), m.group('net_id'), m.group('uid'), m.group('app_name') or '', m.group('rest')
 
-                    # 🚨 [핵심 수정] global_uid_map에 완벽한 이름이 있으면 그걸 쓰고, 없으면 기존 로그에서 뽑은 이름 유지
                     app_name = global_uid_map.get(uid, orig_app_name) or f"UID_{uid}"
                     latency_ms = None
                     latency_match = re.search(r',\s*(\d+)\s*ms\b', rest, re.IGNORECASE)
@@ -250,7 +263,7 @@ class DnsParser(BaseParser):
                             if "isBlocked=true" in rest: return_code = f"BLOCKED (Code:{raw_code})"
                         else: return_code = "UNKNOWN"
 
-                    dns_events.append({
+                    result["queries"].append({
                         "time": time_str,
                         "net_id": net_id,
                         "uid": uid,
@@ -259,7 +272,39 @@ class DnsParser(BaseParser):
                         "latency_ms": latency_ms,
                         "raw_info": rest.strip()
                     })
-        return dns_events
+
+            # 2. DNS 서버 건강 상태(Health) 분석
+            elif "score{" in line or "score {" in line:
+                m_ip = re.search(r'^\s*([\[\]a-fA-F0-9\.:]+):\d+', line)
+                m_score = re.search(r'score\s*\{\s*([0-9.]+)\s*\}', line)
+                m_timeout = re.search(r'TIMEOUT:(\d+)', line)
+                m_latency = re.search(r'(\d+)ms', line)
+
+                if m_ip and m_score:
+                    ip = m_ip.group(1)
+                    score = float(m_score.group(1))
+                    timeout_cnt = int(m_timeout.group(1)) if m_timeout else 0
+                    latency = self.safe_to_int(m_latency.group(1)) if m_latency else 0
+
+                    # 임계치: 점수가 10점 이하이거나, 타임아웃이 10회 이상 발생한 경우
+                    if score <= 10.0 or timeout_cnt >= 10:
+                        desc = (
+                            f"NetId {current_net_id}에 할당된 DNS 서버({ip})의 응답 불량이 감지되었습니다. "
+                            f"(상태 점수: {score}점, 타임아웃: {timeout_cnt}회, 평균지연: {latency}ms). "
+                            f"해당 서버로의 DNS 라우팅 실패가 초기 앱 인터넷 접속 지연(Internet Stall)의 근본 원인일 확률이 매우 높습니다."
+                        )
+
+                        result["health_warnings"].append({
+                            "net_id": current_net_id,
+                            "server_ip": ip,
+                            "score": score,
+                            "timeout_count": timeout_cnt,
+                            "avg_latency_ms": latency,
+                            "description": desc,
+                            "raw_log": line.strip()
+                        })
+
+        return result
 
 class CrashParser(BaseParser):
     def analyze(self, lines):

@@ -105,17 +105,33 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.header("자동 분석 파이프라인")
 
+    # 1. 실행 상태를 관리할 세션 변수 초기화
+    if "is_running" not in st.session_state:
+        st.session_state.is_running = False
+
     uploaded_files = st.file_uploader(
         "원시 로그 파일 업로드 (다중 선택 가능)",
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}",
     )
 
-    if st.button("분석 및 DB 적재 시작", width="stretch", type="primary"):
-        if not uploaded_files:
-            st.error("파일을 하나 이상 업로드하십시오.")
-        else:
-            run_analysis_pipeline(uploaded_files, False, "", "", engine)
+    # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
+    def set_running():
+        st.session_state.is_running = True
+
+    # 3. 버튼에 disabled 속성과 on_click 콜백 적용
+    if st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running):
+        try:
+            if not uploaded_files:
+                st.error("파일을 하나 이상 업로드하십시오.")
+            else:
+                # 💡 여기에 스피너를 추가하면 시각적으로 더 좋습니다
+                with st.spinner("파이프라인 분석 및 DB 적재 중입니다. 잠시만 기다려주세요..."):
+                    run_analysis_pipeline(uploaded_files, False, "", "", engine)
+        finally:
+            # 4. 분석이 끝나거나 에러가 나더라도 무조건 상태를 해제하고 새로고침
+            st.session_state.is_running = False
+            st.rerun()
 
 def _reset_analysis_context():
     st.session_state.messages = []

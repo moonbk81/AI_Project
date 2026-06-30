@@ -192,6 +192,9 @@ class AnalysisBucketBuilder:
         elif self._contains_any(line, self.INTERNET_STALL_LINE_KEYWORDS):
             buckets['internet_stall'].append(line)
 
+        if "score{" in line or "PrivateDns=" in line:
+            self._add_context_window(buckets, 'dns', lines, idx, window=30)
+
     def _collect_native_crash_bucket(self, buckets, lines, idx, line):
         if self._contains_any(line, self.NATIVE_CRASH_KEYWORDS):
             self._add_context_window(buckets, 'native_crash', lines, idx, window=60)

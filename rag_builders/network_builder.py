@@ -100,7 +100,6 @@ def build_dns_query_payloads(report_data, input_file):
 
     return rag_payload
 
-
 def build_data_usage_payloads(report_data, input_file):
     rag_payload = []
     source_file = source_file_name(input_file)
@@ -196,10 +195,38 @@ def build_internet_stall_payloads(report_data, build_markdown_doc, extract_metad
 
     return rag_payload
 
+def build_dns_health_warnings_payloads(report_data, input_file):
+    rag_payload = []
+    source_file = source_file_name(input_file)
+
+    for warning in report_data.get("dns_health_warnings", []) or []:
+        if not isinstance(warning, dict):
+            continue
+
+        meta = dict(warning)
+        meta.update({
+            "source_file": source_file,
+            "log_type": "DNS_Health_Warning",
+            "time": "DNS_DUMP" # 타임스탬프가 없으므로 식별자로 대체
+        })
+
+        # LLM이 읽고 즉각적으로 장애 원인으로 파악할 수 있도록 텍스트 구성
+        text_content = (
+            f"[DNS_DUMP] DNS 라우팅 장애 경고: NetId={warning.get('net_id')} 망의 "
+            f"DNS 서버({warning.get('server_ip')})가 응답 불량 상태입니다. "
+            f"(점수={warning.get('score')}점, 타임아웃={warning.get('timeout_count')}회). "
+            f"상세 원인: {warning.get('description')}"
+        )
+
+        append_payload(rag_payload, text_content, meta)
+
+    return rag_payload
+
 def build_network_payloads(report_data, input_file, build_markdown_doc, extract_metadata):
     rag_payload = []
     rag_payload.extend(build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_dns_query_payloads(report_data, input_file))
+    rag_payload.extend(build_dns_health_warnings_payloads(report_data, input_file))
     rag_payload.extend(build_data_usage_payloads(report_data, input_file))
     rag_payload.extend(build_datacall_payloads(report_data, input_file))
     rag_payload.extend(build_internet_stall_payloads(report_data, build_markdown_doc, extract_metadata))

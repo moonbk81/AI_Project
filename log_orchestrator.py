@@ -145,7 +145,9 @@ class LogOrchestrator:
                 buckets['dns'],
                 global_uid_map=global_uid_map
             ):
-                result['dns_queries'] = dns_res
+                result['dns_queries'] = dns_res.get('queries', [])
+                if health_warnings := dns_res.get('health_warnings', []):
+                    result['dns_health_warnings'] = health_warnings
 
             result['ims_sip_data'] = self.ims_sip_parser.analyze(buckets['ims_sip'])
             result['sat_at_data'] = self.sat_at_parser.analyze(buckets['sat_at'])

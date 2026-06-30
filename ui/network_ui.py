@@ -40,6 +40,24 @@ def render_network_timeseries_and_dns(df):
     st.subheader("DNS 및 네트워크 추이")
 
     if 'log_type' in df.columns:
+        warning_df = df[df['log_type'] == 'DNS_Health_Warning'].copy()
+        if not warning_df.empty:
+            for _, row in warning_df.iterrows():
+                net_id = row.get('net_id', 'Unknown')
+                server_ip = row.get('server_ip', 'Unknown')
+                score = row.get('score', 0)
+                timeouts = row.get('timeout_count', 0)
+                desc = row.get('description', '')
+
+                st.error(
+                    f"🚨 **[Critical] DNS 서버 라우팅 장애 감지**\n\n"
+                    f"**NetId {net_id}**의 DNS 서버(`{server_ip}`)가 응답하지 않습니다.\n"
+                    f"- 상태 점수: **{score}점**\n"
+                    f"- 타임아웃 발생: **{timeouts}회**\n\n"
+                    f"💡 {desc}"
+                )
+            st.divider() # 경고 박스 아래에 구분선 추가
+
         dns_df = df[df['log_type'] == 'Network_DNS_Issue'].copy()
         if not dns_df.empty:
             col_dns1, col_dns2 = st.columns(2)
