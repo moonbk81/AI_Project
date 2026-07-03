@@ -39,7 +39,8 @@ def is_dns_policy_query(query_lower: str) -> bool:
 def is_datacall_failure_query(query_lower: str) -> bool:
     has_datacall_scope = any(k in query_lower for k in [
         "setupdatacall", "setup data call", "data call", "datacall",
-        "e-pdn", "epdn", "apn", "pdp", "데이터 연결", "데이터콜", "데이터 콜"
+        "setup", "e-pdn", "epdn", "apn", "pdp", "데이터 연결", "데이터콜", "데이터 콜",
+        "data_setup_fail", "setup_fail"
     ])
     has_failure_scope = any(k in query_lower for k in [
         "fail", "failed", "failure", "reject", "rejected", "거절", "실패",

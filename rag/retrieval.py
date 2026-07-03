@@ -131,8 +131,12 @@ def retrieve_and_rerank(
             "Device_Property_State",
         ]
     if is_datacall_failure_query(query_lower):
+        if effective_target_log_types is None:
+            effective_target_log_types = []
         if "Data_Call_Setup_Event" not in effective_target_log_types:
             effective_target_log_types.append("Data_Call_Setup_Event")
+        if "Internet_Stall_Analysis" not in effective_target_log_types:
+            effective_target_log_types.append("Internet_Stall_Analysis")
 
     where_filter = build_where_filter(
         current_file=current_file,
