@@ -8,6 +8,17 @@ from core.telephony_constants import RIL_DATA_FAIL_CAUSE_MAP
 class DataCallProcessor(BaseParser):
     """RIL SETUP_DATA_CALL Request/Response 매칭 및 데이터 스톨(Stall) 분석기"""
 
+    IRRELEVANT_LOG_KEYWORDS = [
+        "LocationAccessPolicy", "VolteServiceModule", "SatelliteController",
+        "checkLocationPermission", "onServiceStateChanged", "getSatellitePerPlmnConfiguration"
+    ]
+
+    DATA_CALL_CONTEXT_KEYWORDS = [
+        "setupdatacall", "setup data call", "data call", "datacall",
+        "deactivate", "pdp", "epdn", "apn", "dnn", "e-pdn",
+        "data setup", "data connection", "데이터 연결", "데이터콜", "pdp 활성화"
+    ]
+
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
         self.parsed_data = []
@@ -158,6 +169,14 @@ class DataCallProcessor(BaseParser):
                 continue
 
             # SETUP_DATA_CALL 응답이 아닌 framework 상태 로그에도 실패 원인이 남는 경우 보강 처리
+            # 단, 데이터 콜 설정과 무관한 로그는 제외
+            if any(kw in clean_line for kw in self.IRRELEVANT_LOG_KEYWORDS):
+                continue
+
+            is_data_call_context = any(k in clean_line.lower() for k in self.DATA_CALL_CONTEXT_KEYWORDS)
+            if not is_data_call_context:
+                continue
+
             # 먼저 fail cause를 추출
             cause_match = re.search(
                 r'(?:fail cause|cause)\s*[:=]\s*([^,\n]+?)(?:\s*,|$)',
@@ -183,7 +202,8 @@ class DataCallProcessor(BaseParser):
                 time_str = time_match.group(1)
                 apn = apn_match.group(1).strip() if apn_match else "UNKNOWN"
                 fail_upper = fail_cause.upper()
-                if fail_upper not in ["NONE", "NONE(0X0)", "0"]:
+                # NONE, NONE(0x0), 0 등은 성공을 의미하므로 DATA_SETUP_FAIL로 처리하지 않음
+                if fail_upper not in ["NONE", "NONE(0X0)", "0"] and not fail_upper.startswith("NONE"):
                     # 실패 관련 키워드를 포함한 로그만 필터링하여 raw_context에 포함
                     # (정상 상태 알림 등 무관한 로그 제외)
                     failure_keywords = [
