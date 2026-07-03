@@ -208,7 +208,7 @@ quick_prompts:
     시스템 크래시, ANR 또는 배터리/발열 이상 발생 원인을 찾아줘.
 
   data_network_issue: |
-    데이터 연결 실패나 SetupDataCall 거절 에러 원인을 확인해 줘.
+    데이터 호(SetupDataCall) 연결 실패의 명시적인 거절 사유를 알려줘.
 
   internet_stall_analysis: |
     인터넷 멈춤(Data Stall) 현상의 근본 원인을 분석해 줘.
