@@ -184,9 +184,22 @@ class DataCallProcessor(BaseParser):
                 apn = apn_match.group(1).strip() if apn_match else "UNKNOWN"
                 fail_upper = fail_cause.upper()
                 if fail_upper not in ["NONE", "NONE(0X0)", "0"]:
+                    # 실패 관련 키워드를 포함한 로그만 필터링하여 raw_context에 포함
+                    # (정상 상태 알림 등 무관한 로그 제외)
+                    failure_keywords = [
+                        "fail", "error", "disconnected", "disallowed", "reject",
+                        "unsupported", "invalid", "forbidden", "denied", "failed",
+                        "cannot", "unable", "not allowed", "not found"
+                    ]
                     context_start = max(0, idx - 20)
                     context_end = min(len(lines), idx + 21)
-                    nearby_context = "\n".join(self.clean_line(ctx_line) for ctx_line in lines[context_start:context_end])
+                    relevant_lines = []
+                    for ctx_line in lines[context_start:context_end]:
+                        clean = self.clean_line(ctx_line)
+                        # 실패 관련 키워드가 있거나, 현재 라인(idx)인 경우만 포함
+                        if any(kw.lower() in clean.lower() for kw in failure_keywords) or ctx_line == lines[idx]:
+                            relevant_lines.append(clean)
+                    nearby_context = "\n".join(relevant_lines) if relevant_lines else "\n".join(self.clean_line(ctx_line) for ctx_line in lines[context_start:context_end])
                     vendor_err = []
                     if re.search(r'NO\s+CARRIER', nearby_context, re.I):
                         vendor_err.append("NO CARRIER")
