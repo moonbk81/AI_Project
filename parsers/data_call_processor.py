@@ -158,15 +158,30 @@ class DataCallProcessor(BaseParser):
                 continue
 
             # SETUP_DATA_CALL 응답이 아닌 framework 상태 로그에도 실패 원인이 남는 경우 보강 처리
-            fw_fail_match = re.search(
-                r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?(?:fail cause|cause)[:=]\s*([^,}\s]+).*?(?:APN Setting|mDnn|dnn|apn)[:=]?\s*([^,}\s]+)?',
+            # 먼저 fail cause를 추출
+            cause_match = re.search(
+                r'(?:fail cause|cause)\s*[:=]\s*([^,\n]+?)(?:\s*,|$)',
                 clean_line,
                 re.I,
             )
-            if fw_fail_match:
-                time_str = fw_fail_match.group(1)
-                fail_cause = fw_fail_match.group(2).strip()
-                apn = fw_fail_match.group(3).strip() if fw_fail_match.group(3) else "UNKNOWN"
+            if cause_match:
+                fail_cause = cause_match.group(1).strip()
+            else:
+                fail_cause = None
+
+            # APN Setting을 추출
+            apn_match = re.search(
+                r'(?:APN Setting|mDnn|dnn|apn)[:=]?\s*([^,}\s()]+)',
+                clean_line,
+                re.I,
+            )
+
+            # 타임스탐프 추출
+            time_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})', clean_line)
+
+            if time_match and cause_match and fail_cause:
+                time_str = time_match.group(1)
+                apn = apn_match.group(1).strip() if apn_match else "UNKNOWN"
                 fail_upper = fail_cause.upper()
                 if fail_upper not in ["NONE", "NONE(0X0)", "0"]:
                     context_start = max(0, idx - 20)
