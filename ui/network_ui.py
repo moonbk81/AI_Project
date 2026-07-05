@@ -96,6 +96,9 @@ def render_network_timeseries_and_dns(df):
             ts_df['dns_avg'] = pd.to_numeric(ts_df['dns_avg'], errors='coerce')
             ts_df['dns_err_rate'] = pd.to_numeric(ts_df['dns_err_rate'], errors='coerce')
 
+            if 'tcp_avg_loss' in ts_df.columns:
+                ts_df['tcp_avg_loss'] = pd.to_numeric(ts_df['tcp_avg_loss'], errors='coerce')
+
             if 'dns_max' in ts_df.columns:
                 ts_df['dns_max'] = pd.to_numeric(ts_df['dns_max'], errors='coerce')
 
@@ -121,15 +124,22 @@ def render_network_timeseries_and_dns(df):
 
             ts_df['netId'] = ts_df['netId'].astype(str)
 
-            metric_choice = st.selectbox("지표 선택", ["DNS 평균 응답 시간(ms)", "DNS 오류율(%)"])
-            target_col = 'dns_avg' if "응답 시간" in metric_choice else 'dns_err_rate'
+            metric_options = {
+                "DNS 평균 응답 시간(ms)": ("dns_avg", "ms"),
+                "DNS 오류율(%)": ("dns_err_rate", "%"),
+            }
+            if 'tcp_avg_loss' in ts_df.columns and ts_df['tcp_avg_loss'].notna().any():
+                metric_options["TCP 평균 손실률(%)"] = ("tcp_avg_loss", "%")
+
+            metric_choice = st.selectbox("지표 선택", list(metric_options.keys()))
+            target_col, yaxis_unit = metric_options[metric_choice]
 
             fig_ts = px.line(
                 ts_df, x='time_dt', y=target_col, color='netId', hover_data=['transport'],
                 markers=True, title=f"{metric_choice} 추이"
             )
             fig_ts.update_xaxes(tickformat="%m-%d\n%H:%M:%S", title="Time")
-            fig_ts.update_layout(yaxis_title="Value")
+            fig_ts.update_layout(yaxis_title=yaxis_unit)
             st.plotly_chart(fig_ts, width="stretch")
 
             st.markdown("**DNS Spike 구간 (고지연 DNS 탐지)**")
