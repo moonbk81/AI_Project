@@ -989,7 +989,9 @@ class BinderWarningParser(BaseParser):
                     "time": event_time,
                     "type": "THREAD_EXHAUSTION",
                     "desc": desc,
-                    "raw": line_str
+                    "raw": line_str,
+                    "evidence_role": "rca_candidate",
+                    "rca_candidate": True
                 })
                 continue
 
@@ -1009,7 +1011,9 @@ class BinderWarningParser(BaseParser):
                             "time": event_time,
                             "type": "TRANSACTION_DELAY",
                             "desc": desc,
-                            "raw": line_str
+                            "raw": line_str,
+                            "evidence_role": "secondary_signal",
+                            "rca_candidate": False
                         }
                         warnings.append(event)
                         delay_count_by_target[target] = delay_count_by_target.get(target, 0) + 1
@@ -1019,7 +1023,9 @@ class BinderWarningParser(BaseParser):
                         "time": event_time,
                         "type": "TRANSACTION_DELAY",
                         "desc": "Binder transaction 지연 로그가 감지되었으나 target/duration 상세 추출에 실패했습니다. 원문 확인이 필요합니다.",
-                        "raw": line_str
+                        "raw": line_str,
+                        "evidence_role": "secondary_signal",
+                        "rca_candidate": False
                     })
                 continue
 
@@ -1035,17 +1041,25 @@ class BinderWarningParser(BaseParser):
                             "time": event_time,
                             "type": "BINDER_DELAY",
                             "desc": f"[{pkg}] 패키지의 {interface} Binder call이 {duration_ms}ms 지연되었습니다. 심각도: {level}. 반복 발생 또는 ANR 시점 인접 여부 확인이 필요합니다.",
-                            "raw": line_str
+                            "raw": line_str,
+                            "evidence_role": "secondary_signal",
+                            "rca_candidate": False
                         })
                 continue
 
             # 4. Binder transaction failure 계열
-            if any(k in lower for k in ["deadobjectexception", "failed_transaction", "binder transaction failed", "transaction failed", "remoteexception"]):
+            if any(k in lower for k in [
+                "deadobjectexception", "failed_transaction", "binder transaction failed",
+                "binder transaction failure", "transaction failed", "transaction failure",
+                "remoteexception"
+            ]):
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_TRANSACTION_FAILURE",
-                    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 대상 프로세스 종료, 서비스 재시작, IPC 실패 가능성이 있어 전후 Crash/ANR 로그 확인이 필요합니다.",
-                    "raw": line_str
+                    "desc": "Binder transaction failure/RemoteException 계열 로그 감지. 이는 상대 프로세스 종료, 서비스 재시작, endpoint 소멸 이후 나타나는 보조 증상일 수 있으므로 단독으로 Binder 병목/리소스 고갈/Root Cause로 판단하지 않습니다. 전후 Crash/ANR/am_kill/thread starvation 근거가 있을 때만 연관성을 검토합니다.",
+                    "raw": line_str,
+                    "evidence_role": "secondary_symptom",
+                    "rca_candidate": False
                 })
                 continue
 
@@ -1069,7 +1083,9 @@ class BinderWarningParser(BaseParser):
                             "time": spam_time,
                             "type": "BINDER_ONEWAY_SPAM",
                             "desc": f"[Caller PID: {sender_pid}] 프로세스가 [Callee PID: {target_pid}] 방향으로 비동기(Oneway) 트랜잭션을 과도하게 전송하고 있습니다(Spamming 감지). (버퍼 점유: {total_size} bytes). 이로 인해 대상 프로세스에 No space left on device (-28) 에러가 유발됩니다.",
-                            "raw": line_str
+                            "raw": line_str,
+                            "evidence_role": "rca_candidate",
+                            "rca_candidate": True
                         })
                     continue
 
@@ -1078,7 +1094,9 @@ class BinderWarningParser(BaseParser):
                     "time": event_time,
                     "type": "BINDER_BUFFER_ERROR",
                     "desc": "Binder buffer/parcel 크기 관련 오류 감지. 대용량 parcel, buffer 부족 또는 TransactionTooLargeException 가능성이 있습니다.",
-                    "raw": line_str
+                    "raw": line_str,
+                    "evidence_role": "rca_candidate",
+                    "rca_candidate": True
                 })
                 continue
 

@@ -84,6 +84,7 @@ class AnalysisBucketBuilder:
     BINDER_KEYWORDS = [
         "binder thread pool", "binder_sample", "Binder transaction to",
         "DeadObjectException", "FAILED_TRANSACTION", "binder transaction failed",
+        "Binder transaction failure",
         "TransactionTooLargeException", "binder_alloc", "binder buffer",
         "am_kill", "am_wtf",
     ]
@@ -97,7 +98,8 @@ class AnalysisBucketBuilder:
     ]
     BINDER_CONTEXT_ANCHOR_KEYWORDS = [
         "binder thread pool", "binder_sample", "Binder transaction to",
-        "DeadObjectException", "FAILED_TRANSACTION", "TransactionTooLargeException",
+        "DeadObjectException", "FAILED_TRANSACTION", "Binder transaction failure",
+        "TransactionTooLargeException",
         "binder_alloc", "am_kill", "am_wtf",
     ]
 

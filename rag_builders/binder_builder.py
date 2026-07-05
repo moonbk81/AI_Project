@@ -204,6 +204,11 @@ def build_binder_payloads(report_data, input_file):
     # --- Payload 조립 시작 ---
 
     for bw in system_kill_wtf_events[::-1][:20]:
+        raw_info = bw.get("raw", bw.get("raw_info", ""))
+        is_too_many_binders_kill = (
+            bw.get("type") == "SYSTEM_KILL"
+            and "Too many Binders sent to SYSTEM" in f"{bw.get('desc', '')} {raw_info}"
+        )
         meta = {
             "source_file": source_file_name(input_file),
             "log_type": "System_Kill_Wtf_Event",
@@ -211,7 +216,11 @@ def build_binder_payloads(report_data, input_file):
             "type": bw.get("type", ""),
             "process": bw.get("process", "Unknown"),
             "desc": bw.get("desc", ""),
-            "raw_info": bw.get("raw", bw.get("raw_info", "")),
+            "raw_info": raw_info,
+            "evidence_role": bw.get("evidence_role") or (
+                "rca_candidate" if is_too_many_binders_kill else "event"
+            ),
+            "rca_candidate": bool(bw.get("rca_candidate", is_too_many_binders_kill)),
         }
         text_content = (
             f"[시스템 Kill/WTF 이벤트] 시간: {meta['time']}, "
@@ -236,18 +245,32 @@ def build_binder_payloads(report_data, input_file):
         append_payload(rag_payload, text_content, meta)
 
     for bw in normal_warnings[::-1][:10]:
+        warning_type = bw.get("type", "")
+        is_transaction_failure = warning_type == "BINDER_TRANSACTION_FAILURE"
+        evidence_role = bw.get("evidence_role") or (
+            "secondary_symptom" if is_transaction_failure else "secondary_signal"
+        )
         meta = {
             "source_file": source_file_name(input_file),
             "log_type": "Binder_Warning",
             "time": bw.get("time", ""),
-            "type": bw.get("type", ""),
+            "type": warning_type,
             "desc": bw.get("desc", ""),
             "raw_info": bw.get("raw", bw.get("raw_info", "")),
+            "evidence_role": evidence_role,
+            "rca_candidate": bool(bw.get("rca_candidate", False)),
         }
-        text_content = (
-            f"[바인더 통신 지연/일반 이벤트] 시간: {meta['time']}, "
-            f"유형: {meta['type']}, 상세: {meta['desc']}"
-        )
+        if is_transaction_failure:
+            text_content = (
+                f"[바인더 보조 증상] 시간: {meta['time']}, 유형: {meta['type']}, "
+                f"상세: {meta['desc']} "
+                "이 이벤트 단독으로 Binder 병목, 리소스 고갈, proxy leak 또는 Root Cause를 확정하지 마십시오."
+            )
+        else:
+            text_content = (
+                f"[바인더 통신 지연/일반 이벤트] 시간: {meta['time']}, "
+                f"유형: {meta['type']}, 상세: {meta['desc']}"
+            )
         append_payload(rag_payload, text_content, meta)
 
     rag_payload.extend(build_binder_leak_rca_docs(report_data, input_file))

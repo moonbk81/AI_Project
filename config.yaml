@@ -246,6 +246,7 @@ prompts:
   root_cause_synthesis: |
     - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 관련 ERROR/FAILURE/EXHAUSTION이 감지되면 해당 이벤트를 참고하되, 질문 대상과 시간/프로세스/원인 연결성이 명확한 경우에만 Root Cause로 판단한다. Crash/ANR 존재 여부 확인 질문에서는 System_Kill_Wtf_Event, Binder_Warning, RCA_Event를 Crash/ANR의 대체 근거로 사용하지 않는다.
     - [로그 간 결합]: RILJ 트랜잭션 에러와 Binder 에러가 동시간대에 발생하더라도 자동으로 하나의 치명적 장애로 묶지 않는다. 동일 프로세스, 동일 시간대, RCA_Event, 또는 명확한 후속 장애 근거가 있을 때만 인과관계로 연결한다.
+    - [Binder transaction failure 보수 해석]: BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 단독 Root Cause가 아니라 후속/보조 증상으로 취급한다. thread starvation, buffer 부족, oneway spam, proxy histogram/leak, Too many Binders kill 근거가 없으면 Binder 병목 또는 리소스 고갈로 확정하지 않는다.
 
 log_guidelines:
     Call_Session: |
@@ -342,6 +343,8 @@ log_guidelines:
       - THREAD_EXHAUSTION: Binder thread pool 포화(Starvation). ANR/Freezing 원인으로 지목하되 선행 transaction 확인.
       - THREAD_EXHAUSTION이 검색 결과에 있으면 절대 단답으로 답하지 말고, Binder_Warning, THREAD_EXHAUSTION, Binder thread pool 고갈, Starvation 대기 시간(ms), 발생 시간대를 반드시 포함하라. 여러 THREAD_EXHAUSTION 이벤트가 있으면 가장 큰 ms 값을 핵심 수치로 사용하라.
       - IPC/Bottleneck/병목 질문에서 THREAD_EXHAUSTION이 확인되면 이는 망 문제가 아니라 단말 내부 IPC 처리 스레드 부족에 의한 시스템 성능 저하로 결론 내라.
+      - BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 상대 프로세스 종료/서비스 재시작/endpoint 소멸 이후 나타나는 보조 증상일 수 있다. 이 이벤트 단독으로 Binder 병목, 시스템 리소스 고갈, Binder proxy leak, Root Cause를 확정하지 마라.
+      - Binder Root Cause 후보로 승격할 수 있는 근거는 THREAD_EXHAUSTION, BINDER_BUFFER_ERROR, BINDER_ONEWAY_SPAM, BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA, 또는 `Too many Binders sent to SYSTEM` am_kill처럼 명시적인 리소스 고갈/누수/스레드 포화 신호가 있을 때로 제한한다.
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
       - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 Binder_Warning/Binder_Context를 답변에 언급하지 마라.
       - 🚨 [BINDER_PROXY_HISTOGRAM / LEAK 감지 시 최우선 규칙]: 바인더 프록시 객체가 수천 개 단위로 누수된 히스토그램이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver 등)를 확인하고 "해당 인터페이스의 등록(Register) 후 해제(Unregister) 누락에 의한 메모리 릭"을 시스템 마비 및 am_kill의 근본 원인(Root Cause)으로 지목하라.
@@ -413,4 +416,3 @@ satellite_prompts:
     5. [상관관계 금지]: 통화 실패 원인을 무리하게 SpaceX 상태와 엮어서 분석하지 마십시오.
 
     [✍️ 톤앤매너] 기계적인 속성 나열을 금지하고, 수석 엔지니어가 경영진이나 동료에게 브리핑하듯 논리적인 서술형 문장으로 작성해.
-

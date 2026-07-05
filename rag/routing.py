@@ -183,7 +183,8 @@ def get_semantic_routing(query, routing_map, embed_model):
     elif any(keyword in query_lower for keyword in [
         "anr", "crash/anr", "crash", "크래시", "앱 죽음", "앱 강제종료", "앱 강제 종료", "죽었",
         "응답 없음", "응답없음", "application not responding", "fatal exception", "watchdog",
-        "native crash", "네이티브 크래시", "tombstone", "fatal signal", "sigsegv", "sigabrt"
+        "native crash", "네이티브 크래시", "tombstone", "fatal signal", "sigsegv", "sigabrt",
+        "리부팅", "재부팅", "reboot"
     ]):
         selected_intents = {"Crash_ANR"}
         if "Crash_ANR" in routing_map:
@@ -312,6 +313,19 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_tools.update(["get_radio_power_analytics", "get_ps_ims_call_analytics", "get_network_oos_analytics"])
             selected_log_types.update(["Device_Property_State", "Call_Session", "Radio_Power_Event", "OOS_Event"])
         selected_log_types.discard("IMS_SIP_Message")
+
+    if any(keyword in query_lower for keyword in ["비행기 모드", "airplane mode", "flight mode"]):
+        if "Radio_Power" in routing_map:
+            selected_intents.add("Radio_Power")
+            selected_tools.update(routing_map["Radio_Power"].get("tools", []))
+            selected_log_types.update(routing_map["Radio_Power"].get("log_types", []))
+        if any(keyword in query_lower for keyword in [
+            "네트워크", "망", "복구", "안됨", "안 되고", "안되고", "되지 않", "실패"
+        ]):
+            selected_intents.add("Network_OOS")
+            if "Network_OOS" in routing_map:
+                selected_tools.update(routing_map["Network_OOS"].get("tools", []))
+                selected_log_types.update(routing_map["Network_OOS"].get("log_types", []))
 
     if any(keyword in query_lower for keyword in ["ril", "rilj", "모뎀", "명령어", "타임아웃", "딜레이", "지연", "응답"]):
         selected_log_types.add("RILJ_Transaction")

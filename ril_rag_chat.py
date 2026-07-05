@@ -65,11 +65,14 @@ class RilRagChat:
         # Mac(MPS) 또는 Ubuntu(CUDA) 환경에 맞게 디바이스 자동 설정
         device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         # 2. 임베딩 모델 로드 (오프라인 경로 또는 허깅페이스 repo)
-        if device == "cuda" or device == "cpu":
-            current_path = os.path.dirname(os.path.abspath(__file__))
-            embed_model_path = os.path.join(current_path, "bge-m3-offline")
-        else:
-            embed_model_path = "BAAI/bge-m3"
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        offline_embed_model_path = os.path.join(current_path, "bge-m3-offline")
+        embed_model_path = os.environ.get("RIL_RAG_EMBED_MODEL")
+        if not embed_model_path:
+            if device in ("cuda", "cpu") and os.path.exists(offline_embed_model_path):
+                embed_model_path = offline_embed_model_path
+            else:
+                embed_model_path = "BAAI/bge-m3"
         print(f"📦 임베딩 모델 로드 중... ({embed_model_path})")
         self.embed_model = SentenceTransformer(embed_model_path, device=device)
 

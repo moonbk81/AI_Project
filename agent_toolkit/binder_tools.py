@@ -21,6 +21,13 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
     type_counter = Counter()
     max_wait_ms = None
     proxy_leaks = [] # 💡 BINDER_PROXY_HISTOGRAM 수집용
+    rca_candidate_types = {
+        "THREAD_EXHAUSTION",
+        "BINDER_BUFFER_ERROR",
+        "BINDER_ONEWAY_SPAM",
+        "BINDER_PROXY_HISTOGRAM",
+        "BINDER_PROXY_LEAK",
+    }
 
     # 💡 [핵심 추가] SYSTEM_WTF 압축을 위한 딕셔너리
     wtf_groups = {}
@@ -49,6 +56,7 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
             continue
 
         if warning_type == "SYSTEM_KILL":
+            is_too_many_binders_kill = "Too many Binders sent to SYSTEM" in f"{desc} {raw}"
             warning_facts.append({
                 "time": warning.get("time") or warning.get("timestamp"),
                 "type": warning_type,
@@ -57,6 +65,10 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
                 "reason": desc,
                 "raw": raw,
                 "wait_ms": None,
+                "evidence_role": warning.get("evidence_role") or (
+                    "rca_candidate" if is_too_many_binders_kill else "event"
+                ),
+                "rca_candidate": bool(warning.get("rca_candidate", is_too_many_binders_kill)),
             })
             continue
 
@@ -97,6 +109,10 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
                 "desc": desc,
                 "wait_ms": wait_ms,
                 "raw": raw,
+                "evidence_role": warning.get("evidence_role") or (
+                    "rca_candidate" if warning_type in rca_candidate_types else "secondary_signal"
+                ),
+                "rca_candidate": bool(warning.get("rca_candidate", warning_type in rca_candidate_types)),
             })
 
     # 💡 [핵심 추가] 루프가 끝난 뒤 압축된 SYSTEM_WTF를 warning_facts에 한 줄씩만 삽입
@@ -117,6 +133,8 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
             "summary": compressed_desc,
             "raw": f"OMITTED_RAW_FOR_COMPRESSION (Count: {count})",
             "wait_ms": None,
+            "evidence_role": "event",
+            "rca_candidate": False,
         })
 
     signals = binder_context_summary.get("signals", {}) if isinstance(binder_context_summary, dict) else {}
@@ -135,6 +153,11 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         if "BINDER_TRANSACTION_FAILURE" in str(item.get("type", ""))
         or "BINDER_TRANSACTION_FAILURE" in str(item.get("desc", ""))
         or "BINDER_TRANSACTION_FAILURE" in str(item.get("raw", ""))
+    ]
+
+    rca_candidate_events = [
+        item for item in warning_facts
+        if item.get("rca_candidate") is True
     ]
 
     system_kills = [
@@ -175,7 +198,15 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         "max_wait_ms": max_wait_ms,
         "has_thread_exhaustion": len(thread_exhaustion_events) > 0,
         "has_binder_transaction_failure": len(transaction_failures) > 0,
+        "has_binder_rca_signal": bool(rca_candidate_events or proxy_leaks),
+        "transaction_failure_interpretation": (
+            "BINDER_TRANSACTION_FAILURE/DeadObjectException/RemoteException은 보조 증상입니다. "
+            "THREAD_EXHAUSTION, BINDER_BUFFER_ERROR, BINDER_ONEWAY_SPAM, "
+            "BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK 또는 Too many Binders sent to SYSTEM 근거 없이 "
+            "Binder 병목, 리소스 고갈, proxy leak의 Root Cause로 단정하지 마십시오."
+        ),
         "binder_warnings": warning_facts[:50],
+        "rca_candidate_events": rca_candidate_events[:20],
         "thread_exhaustion_events": thread_exhaustion_events[:20],
         "transaction_failure_events": transaction_failures[:20],
         "binder_context_summary": {
