@@ -40,6 +40,29 @@ class DynamicGoldenMatcher:
 
         return entities
 
+    def _has_explicit_cs_scope(self, text: str) -> bool:
+        text_lower = text.lower()
+        return any(k in text_lower for k in [
+            "cs call", "cs콜", "cs 콜", "cs 통화", "cscall"
+        ])
+
+    def _has_explicit_ps_scope(self, text: str) -> bool:
+        text_lower = text.lower()
+        return any(k in text_lower for k in [
+            "ps call", "ps콜", "ps 콜", "ps 통화", "volte", "ims", "sip"
+        ])
+
+    def _is_scope_narrowing_match(self, user_query: str, template: str) -> bool:
+        """골든셋 템플릿이 사용자의 일반 질의를 특정 통화 도메인으로 좁히는지 확인."""
+        template_lower = template.lower()
+        requires_cs = any(k in template_lower for k in ["cs call", "cs 통화"])
+        requires_ps = any(k in template_lower for k in ["ps(", "ps call", "volte", "ims"])
+
+        return (
+            (requires_cs and not self._has_explicit_cs_scope(user_query))
+            or (requires_ps and not self._has_explicit_ps_scope(user_query))
+        )
+
     def _generalize_golden_query(self, golden_query):
         """골든셋 쿼리 내의 구체적 데이터를 변수({time}, {package} 등)로 템플릿화합니다."""
         gen_q = golden_query
@@ -104,6 +127,12 @@ class DynamicGoldenMatcher:
         if score_val >= threshold:
             matched = self.golden_data[best_idx]
             template = matched["query_template"]
+
+            if self._is_scope_narrowing_match(user_query, template):
+                print(f"\n🎯 [Golden Match 후보 제외] 유사도: {score_val:.2f} (기반 TC: {matched['tc_id']})")
+                print(f"   -> 원본 질문: {user_query}")
+                print(f"   -> 제외 사유: 사용자 질문에 없는 통화 도메인(CS/PS)을 확장 지시가 강제함\n")
+                return user_query
 
             # 사용자 질문에서 추출
             user_entities = self._extract_entities(user_query)
