@@ -5,6 +5,8 @@ streamlit>=1.32.0
 pandas>=2.1.0
 numpy>=1.24.0
 plotly>=5.18.0
+PyYAML>=6.0.0
+tqdm>=4.66.0
 
 # AI, Vector DB & Embedding Models
 chromadb>=0.4.24

@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Testing
+pytest>=8.0.0
+
+# Golden evaluation / LLM-as-a-judge
+litellm>=1.0.0

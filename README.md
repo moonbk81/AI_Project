@@ -241,7 +241,7 @@ pip install -r requirements.txt
 평가/테스트 스크립트까지 실행하려면 현재 코드에서 추가로 다음 패키지가 필요할 수 있습니다.
 
 ```bash
-pip install pyyaml pytest tqdm litellm
+pip install -r requirements-dev.txt
 ```
 
 임베딩 모델은 실행 환경에 따라 다르게 로드됩니다.
