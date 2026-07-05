@@ -22,8 +22,6 @@ QUICK_PROMPTS = CONFIG.get('quick_prompts', {})
 PROMPTS = CONFIG.get('prompts', {})
 SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 
-# core/config.py 파일 맨 아래에 추가
-
 # 디바이스별 기본 모델 매핑
 DEFAULT_MODEL_BY_DEVICE = {
     "cpu": "gemma4:12b",
@@ -31,6 +29,8 @@ DEFAULT_MODEL_BY_DEVICE = {
     "cuda": "gemma3:4b",  # 회사 8GB VRAM 환경
 }
 
+# 모델별 추론/임베딩 배치 설정입니다.
+# 키는 Ollama에서 사용하는 모델명을 그대로 맞춥니다.
 MODEL_CONFIG = {
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
@@ -45,18 +45,6 @@ MODEL_CONFIG = {
         "top_k": 4,
     },
     "gemma4:12b": {
-        "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
-        "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 32,
-        "add_batch_size": 256,
-        "temperature": 0.1,
-        # "repeat_penalty": 1.15,
-        # "stop": ["<unused", "<|im_end|>", "<eos>"],
-        "max_doc_chars": 1200,
-        "max_meta_chars": 2000,
-        "top_k": 4,
-    },
-    "gemma3:12b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
         "embed_batch_size": 32,

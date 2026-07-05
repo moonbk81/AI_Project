@@ -16,7 +16,7 @@ def get_installed_ollama_models():
         return models
     except Exception as e:
         st.warning("Ollama 모델 목록을 불러오지 못했습니다. Ollama가 실행 중인지 확인해 주십시오.")
-        return ["gemma2:9b", "gemma3:12b", "qwen2.5-coder:7b"]
+        return ["gemma4:12b", "gemma3:12b", "gemma3:4b", "qwen2.5-coder:7b"]
 
 def get_latest_csv_files(output_dir="./benchmark_results"):
     """benchmark_result 폴더 내에서 가장 최신의 요약 및 상세 CSV 파일을 찾습니다."""
@@ -216,7 +216,7 @@ def render_benchmark_dashboard():
                 index=0
             )
         with col_b2:
-            current_rag_model = st.session_state.get('active_model', 'gemma4:12b-mlx')
+            current_rag_model = st.session_state.get('active_model', 'gemma4:12b')
             target_rag_model = st.text_input("대상 모델", value=current_rag_model)
             ollama_url = st.text_input("Ollama 서버 주소", value="http://localhost:11434")
 
