@@ -13,15 +13,50 @@ class DataCallProcessor(BaseParser):
         "checkLocationPermission", "onServiceStateChanged", "getSatellitePerPlmnConfiguration"
     ]
 
+    SERVICE_STATE_CONTEXT_KEYWORDS = [
+        "Poll ServiceState done", "ServiceState", "mDataRegState", "mVoiceRegState",
+        "emergencyEnabled", "availableServices", "cellIdentity", "voiceSpecificInfo",
+        "dataSpecificInfo", "nrState", "rRplmn", "isUsingCarrierAggregation",
+        "isNonTerrestrialNetwork"
+    ]
+
     DATA_CALL_CONTEXT_KEYWORDS = [
         "setupdatacall", "setup data call", "data call", "datacall",
         "deactivate", "pdp", "epdn", "apn", "dnn", "e-pdn",
         "data setup", "data connection", "데이터 연결", "데이터콜", "pdp 활성화"
     ]
 
+    FAILURE_CONTEXT_KEYWORDS = [
+        "fail", "failed", "failure", "error", "reject", "rejected", "disconnected",
+        "disallowed", "unsupported", "invalid", "forbidden", "denied", "cannot",
+        "unable", "not allowed", "not found", "no carrier", "authentication failed"
+    ]
+
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
         self.parsed_data = []
+
+    def _is_success_cause(self, cause: str) -> bool:
+        cause_upper = (cause or "").strip().upper()
+        return (
+            cause_upper.startswith("NONE")
+            or "(0X0)" in cause_upper
+            or cause_upper == "0"
+            or bool(re.match(r'^0(?:\s|$)', cause_upper))
+        )
+
+    def _extract_framework_fail_cause(self, clean_line: str):
+        next_field = (
+            r'(?=\s+(?:APN Setting|mDnn|dnn|apn|emergencyEnabled|availableServices|'
+            r'cellIdentity|voiceSpecificInfo|dataSpecificInfo|nrState|rRplmn|'
+            r'isUsingCarrierAggregation|isNonTerrestrialNetwork)\b|[,}]|$)'
+        )
+        match = re.search(
+            r'(?:fail[_\s-]*cause|(?<![A-Za-z])cause)\s*[:=]\s*(.+?)' + next_field,
+            clean_line,
+            re.I,
+        )
+        return match.group(1).strip() if match else None
 
     def analyze(self, lines):
         """run_parser()를 대체하는 단일 분석 인터페이스 (메모리 리스트 기반)"""
@@ -97,14 +132,10 @@ class DataCallProcessor(BaseParser):
                 cid = cid_m.group(1) if cid_m else "-1"
 
                 # 💡 [핵심 수정] 가짜 SUCCESS / 가짜 FAIL 판별 로직 고도화
-                cause_upper = cause.upper()
-                # 1. NONE, 0, NONE(0x0) 등은 모두 정상(OK)으로 간주
-                cause_is_ok = cause_upper.startswith("NONE") or "(0X0)" in cause_upper or cause_upper == "0"
-
                 is_success = True
 
                 # [조건 1] cause가 에러 코드를 가리키면 무조건 실패
-                if not cause_is_ok:
+                if not self._is_success_cause(cause):
                     is_success = False
 
                 # [조건 2] status 문자열이 명시적 실패(NOT_SPECIFIED, FAIL, ERROR)인 경우 실패
@@ -170,23 +201,23 @@ class DataCallProcessor(BaseParser):
 
             # SETUP_DATA_CALL 응답이 아닌 framework 상태 로그에도 실패 원인이 남는 경우 보강 처리
             # 단, 데이터 콜 설정과 무관한 로그는 제외
-            if any(kw in clean_line for kw in self.IRRELEVANT_LOG_KEYWORDS):
+            clean_line_lower = clean_line.lower()
+            if any(kw.lower() in clean_line_lower for kw in self.IRRELEVANT_LOG_KEYWORDS):
                 continue
 
-            is_data_call_context = any(k in clean_line.lower() for k in self.DATA_CALL_CONTEXT_KEYWORDS)
+            if any(kw.lower() in clean_line_lower for kw in self.SERVICE_STATE_CONTEXT_KEYWORDS):
+                continue
+
+            is_data_call_context = any(k in clean_line_lower for k in self.DATA_CALL_CONTEXT_KEYWORDS)
             if not is_data_call_context:
                 continue
 
+            has_failure_context = any(k in clean_line_lower for k in self.FAILURE_CONTEXT_KEYWORDS)
+            if not has_failure_context:
+                continue
+
             # 먼저 fail cause를 추출
-            cause_match = re.search(
-                r'(?:fail cause|cause)\s*[:=]\s*([^,\n]+?)(?:\s*,|$)',
-                clean_line,
-                re.I,
-            )
-            if cause_match:
-                fail_cause = cause_match.group(1).strip()
-            else:
-                fail_cause = None
+            fail_cause = self._extract_framework_fail_cause(clean_line)
 
             # APN Setting을 추출
             apn_match = re.search(
@@ -198,12 +229,11 @@ class DataCallProcessor(BaseParser):
             # 타임스탐프 추출
             time_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})', clean_line)
 
-            if time_match and cause_match and fail_cause:
+            if time_match and fail_cause:
                 time_str = time_match.group(1)
                 apn = apn_match.group(1).strip() if apn_match else "UNKNOWN"
-                fail_upper = fail_cause.upper()
                 # NONE, NONE(0x0), 0 등은 성공을 의미하므로 DATA_SETUP_FAIL로 처리하지 않음
-                if fail_upper not in ["NONE", "NONE(0X0)", "0"] and not fail_upper.startswith("NONE"):
+                if not self._is_success_cause(fail_cause):
                     # 실패 관련 키워드를 포함한 로그만 필터링하여 raw_context에 포함
                     # (정상 상태 알림 등 무관한 로그 제외)
                     failure_keywords = [
