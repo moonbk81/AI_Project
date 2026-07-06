@@ -385,7 +385,7 @@ class DataCallProcessor(BaseParser):
             # 4. DATA STALL & RECOVERY (스톨 감지 및 복구 액션)
             # ==========================================
             # 🚨 타임스탬프 포맷(MM-DD HH... 또는 YYYY-MM-DDTHH...)과 벤더 특화 스톨 키워드 모두 호환되도록 확장
-            stall_match = re.search(r'([\d-]{5,10}[T\s]\d{2}:\d{2}:\d{2}\.\d+).*?(data stall: start|data stall: end|onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
+            stall_match = re.search(r'([\d-]{5,19}[T\s]\d{2}:\d{2}:\d{2}[.,]\d+).*?(data stall: start|data stall: end|onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
 
             if stall_match:
                 time_str, keyword, payload = stall_match.groups()
@@ -425,7 +425,18 @@ class DataCallProcessor(BaseParser):
                     elif action_level == "3": action_desc = "RADIO_RESTART (모뎀 리셋)"
                     elif action_level == "4": action_desc = "MODEM_RESET (하드웨어 리셋)"
 
-                self.parsed_data.append({
+                # lastaction, isRecovered, reason, TimeDuration 필드 추출
+                last_action_m = re.search(r'lastaction=([A-Za-z0-9_]+)', payload)
+                is_recovered_m = re.search(r'isRecovered=(\w+)', payload)
+                reason_m = re.search(r'reason=([A-Za-z0-9_]+)', payload)
+                time_duration_m = re.search(r'TimeDuration=(\d+)', payload)
+
+                last_action = last_action_m.group(1) if last_action_m else None
+                is_recovered = is_recovered_m.group(1) if is_recovered_m else None
+                recovered_reason = reason_m.group(1) if reason_m else None
+                time_duration = int(time_duration_m.group(1)) if time_duration_m else None
+
+                event_dict = {
                     'event_type': 'DATA_STALL_RECOVERY',
                     'req_time': time_str,
                     'res_time': time_str,
@@ -438,7 +449,19 @@ class DataCallProcessor(BaseParser):
                     'cause': action_desc,
                     'latency_ms': 0,
                     'raw_payload': payload.strip()
-                })
+                }
+
+                # 추가 필드들 (있으면 포함)
+                if last_action:
+                    event_dict['last_action'] = last_action
+                if is_recovered:
+                    event_dict['is_recovered'] = is_recovered
+                if recovered_reason:
+                    event_dict['recovered_reason'] = recovered_reason
+                if time_duration:
+                    event_dict['duration_ms'] = time_duration
+
+                self.parsed_data.append(event_dict)
                 continue
 
         return self.parsed_data

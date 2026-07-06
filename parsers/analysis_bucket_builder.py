@@ -68,6 +68,10 @@ class AnalysisBucketBuilder:
         "AT+", "AT^", "AT$", "> AT", "< AT",
         "+CEREG", "+CREG", "+CGREG", "+COPS", "+CSQ",
     ]
+    DATA_STALL_RECOVERY_KEYWORDS = [
+        "data stall:", "data stall: start", "data stall: end", "data stall: in process",
+        "lastaction=", "isRecovered=", "RECOVERY_ACTION_",
+    ]
     INTERNET_STALL_CONTEXT_KEYWORDS = [
         "Data Stall", "data stall", "validation failed",
         "PARTIAL_CONNECTIVITY", "NO_INTERNET", "EVENT_NETWORK_TESTED",
@@ -182,6 +186,11 @@ class AnalysisBucketBuilder:
             # can appear several lines away from SETUP_DATA_CALL, so keep a wider context.
             self._add_context_window(buckets, 'datacall', lines, idx, window=20)
             self._add_context_window(buckets, 'internet_stall', lines, idx, window=20)
+
+        if self._contains_any(line, self.DATA_STALL_RECOVERY_KEYWORDS):
+            # Data Stall: start/end/in process 로그는 datacall과 internet_stall 모두에 포함
+            self._add_context_window(buckets, 'datacall', lines, idx, window=5)
+            self._add_context_window(buckets, 'internet_stall', lines, idx, window=5)
 
         if self._contains_any(line, self.IMS_SIP_KEYWORDS):
             self._add_context_window(buckets, 'ims_sip', lines, idx, window=5)
