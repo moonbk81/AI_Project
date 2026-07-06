@@ -199,81 +199,6 @@ class DataCallProcessor(BaseParser):
                 })
                 continue
 
-            # SETUP_DATA_CALL 응답이 아닌 framework 상태 로그에도 실패 원인이 남는 경우 보강 처리
-            # 단, 데이터 콜 설정과 무관한 로그는 제외
-            clean_line_lower = clean_line.lower()
-            if any(kw.lower() in clean_line_lower for kw in self.IRRELEVANT_LOG_KEYWORDS):
-                continue
-
-            if any(kw.lower() in clean_line_lower for kw in self.SERVICE_STATE_CONTEXT_KEYWORDS):
-                continue
-
-            is_data_call_context = any(k in clean_line_lower for k in self.DATA_CALL_CONTEXT_KEYWORDS)
-            if not is_data_call_context:
-                continue
-
-            has_failure_context = any(k in clean_line_lower for k in self.FAILURE_CONTEXT_KEYWORDS)
-            if not has_failure_context:
-                continue
-
-            # 먼저 fail cause를 추출
-            fail_cause = self._extract_framework_fail_cause(clean_line)
-
-            # APN Setting을 추출
-            apn_match = re.search(
-                r'(?:APN Setting|mDnn|dnn|apn)[:=]?\s*([^,}\s()]+)',
-                clean_line,
-                re.I,
-            )
-
-            # 타임스탐프 추출
-            time_match = re.search(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})', clean_line)
-
-            if time_match and fail_cause:
-                time_str = time_match.group(1)
-                apn = apn_match.group(1).strip() if apn_match else "UNKNOWN"
-                # NONE, NONE(0x0), 0 등은 성공을 의미하므로 DATA_SETUP_FAIL로 처리하지 않음
-                if not self._is_success_cause(fail_cause):
-                    # 실패 관련 키워드를 포함한 로그만 필터링하여 raw_context에 포함
-                    # (정상 상태 알림 등 무관한 로그 제외)
-                    failure_keywords = [
-                        "fail", "error", "disconnected", "disallowed", "reject",
-                        "unsupported", "invalid", "forbidden", "denied", "failed",
-                        "cannot", "unable", "not allowed", "not found"
-                    ]
-                    context_start = max(0, idx - 20)
-                    context_end = min(len(lines), idx + 21)
-                    relevant_lines = []
-                    for ctx_line in lines[context_start:context_end]:
-                        clean = self.clean_line(ctx_line)
-                        # 실패 관련 키워드가 있거나, 현재 라인(idx)인 경우만 포함
-                        if any(kw.lower() in clean.lower() for kw in failure_keywords) or ctx_line == lines[idx]:
-                            relevant_lines.append(clean)
-                    nearby_context = "\n".join(relevant_lines) if relevant_lines else "\n".join(self.clean_line(ctx_line) for ctx_line in lines[context_start:context_end])
-                    vendor_err = []
-                    if re.search(r'NO\s+CARRIER', nearby_context, re.I):
-                        vendor_err.append("NO CARRIER")
-                    if re.search(r'(?:User\s+)?authentication\s+failed', nearby_context, re.I):
-                        vendor_err.append("User authentication failed")
-                    detailed_cause = f"status=UNKNOWN, cause={fail_cause}"
-                    if vendor_err:
-                        detailed_cause += f" ({' / '.join(dict.fromkeys(vendor_err))})"
-                    self.parsed_data.append({
-                        'event_type': 'DATA_SETUP_FAIL',
-                        'req_time': time_str,
-                        'res_time': time_str,
-                        'token': 'FW',
-                        'cid': '-1',
-                        'apn': apn,
-                        'network': 'UNKNOWN',
-                        'protocol': 'UNKNOWN',
-                        'status': 'FAIL',
-                        'cause': detailed_cause,
-                        'latency_ms': 0,
-                        'raw_context': nearby_context,
-                    })
-                continue
-
             # ==========================================
             # 2. DEACTIVATE_DATA_CALL (해제)
             # ==========================================
@@ -394,10 +319,13 @@ class DataCallProcessor(BaseParser):
                 action_desc = "스톨(병목) 현상 감지됨"
                 action_level = "DETECTED"
 
-                # 🚨 새로 발견된 로그 포맷 처리 (start / end)
+                # 🚨 새로 발견된 로그 포맷 처리 (start / in process / end)
                 if "data stall: start" in keyword_lower:
                     action_level = "START"
                     action_desc = "Data Stall 감지되어 Recovery 로직 진입"
+                elif "data stall: in process" in keyword_lower:
+                    action_level = "IN_PROCESS"
+                    action_desc = "Recovery 진행 중"
                 elif "data stall: end" in keyword_lower:
                     action_level = "END"
                     action_desc = "Recovery 동작 종료"
@@ -415,8 +343,8 @@ class DataCallProcessor(BaseParser):
                         action_desc += f" [복구 소요시간: {duration_sec}초]"
 
                 else:
-                    # 기존 AOSP 표준 복구 시퀀스 매핑
-                    action_m = re.search(r'(?:action|step|recoveryAction)\s*[=:]?\s*(\d+)', payload, re.IGNORECASE)
+                    # 기존 AOSP 표준 복구 시퀀스 매핑 (action/step 키워드가 명시적으로 있을 때만)
+                    action_m = re.search(r'(?:action|step|recoveryAction)\s*[:=]\s*(\d+)', payload, re.IGNORECASE)
                     action_level = action_m.group(1) if action_m else "DETECTED"
 
                     if action_level == "0": action_desc = "GET_DATA_CALL_LIST (상태 확인)"
@@ -424,6 +352,8 @@ class DataCallProcessor(BaseParser):
                     elif action_level == "2": action_desc = "REREGISTER (망 재등록)"
                     elif action_level == "3": action_desc = "RADIO_RESTART (모뎀 리셋)"
                     elif action_level == "4": action_desc = "MODEM_RESET (하드웨어 리셋)"
+                    else:
+                        action_desc = f"Recovery Action {action_level}"
 
                 # lastaction, isRecovered, reason, TimeDuration 필드 추출
                 last_action_m = re.search(r'lastaction=([A-Za-z0-9_]+)', payload)
