@@ -137,6 +137,38 @@ def build_datacall_payloads(report_data, input_file):
         if not isinstance(event, dict):
             continue
 
+        event_type = event.get("event_type", "")
+
+        # DATA_STALL_RECOVERY 이벤트는 별도 처리
+        if event_type == "DATA_STALL_RECOVERY":
+            time = event.get("req_time") or event.get("time") or "시간 미상"
+            status = event.get("status") or "Unknown"
+            cause = event.get("cause") or "Unknown"
+            last_action = event.get("last_action") or "Unknown"
+            is_recovered = event.get("is_recovered") or "Unknown"
+
+            meta = dict(event)
+            meta.update({
+                "source_file": source_file,
+                "log_type": "Data_Stall_Recovery",
+                "time": time,
+                "status": status,
+                "cause": cause,
+                "last_action": last_action,
+                "is_recovered": is_recovered,
+            })
+
+            text_content = (
+                f"[{time}] Data Stall Recovery: status={status}, "
+                f"last_action={last_action}, is_recovered={is_recovered}"
+            )
+            if cause and cause != "Unknown":
+                text_content += f", detail={cause}"
+
+            append_payload(rag_payload, text_content, meta)
+            continue
+
+        # 기존 DataCall 이벤트 처리
         status = event.get("status") or event.get("result") or event.get("fail_cause") or "Unknown"
         cause = event.get("cause") or event.get("fail_reason") or event.get("reason") or event.get("detailed_cause") or "Unknown"
         vendor_reason = event.get("vendor_reason") or event.get("vendor_error") or event.get("vendor_cause") or event.get("ril_fail_cause") or ""
