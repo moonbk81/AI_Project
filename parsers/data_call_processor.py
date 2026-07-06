@@ -384,8 +384,8 @@ class DataCallProcessor(BaseParser):
             # ==========================================
             # 4. DATA STALL & RECOVERY (스톨 감지 및 복구 액션)
             # ==========================================
-            # 🚨 타임스탬프 포맷(MM-DD HH... 또는 YYYY-MM-DDTHH...)과 벤더 특화 스톨 키워드 모두 호환되도록 확장
-            stall_match = re.search(r'([\d-]{5,19}[T\s]\d{2}:\d{2}:\d{2}[.,]\d+).*?(data stall: start|data stall: end|onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
+            # 🚨 타임스탬프 포맷: MM-DD HH:MM:SS.fff (RILJ) 또는 YYYY-MM-DDTHH:MM:SS.ffffff (JSON)
+            stall_match = re.search(r'(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+|[\d-]{5,19}[T\s]\d{2}:\d{2}:\d{2}[.,]\d+).*?(data stall: start|data stall: end|data stall: in process|onDataStallAlarm|DataStallRecovery|trigger data stall|Data stall detected)(.*)', clean_line, re.IGNORECASE)
 
             if stall_match:
                 time_str, keyword, payload = stall_match.groups()
