@@ -143,7 +143,13 @@ def render_plm_search():
             # Show details for cached results
             for i, defect in enumerate(st.session_state.plm_search_results):
                 with st.expander(f"📋 Details: {defect.get('defectCode')}"):
-                    _render_defect_details(defect, st.session_state.plm_search_division)
+                    try:
+                        _render_defect_details(defect, st.session_state.plm_search_division)
+                    except Exception as e:
+                        logger.error(f"Error rendering cached defect details: {e}", exc_info=True)
+                        st.error(f"Error displaying defect details: {str(e)}")
+                        with st.expander("Debug Info"):
+                            st.json({"defect_keys": list(defect.keys()), "error": str(e)})
 
             st.divider()
             st.markdown("**New Search**")
@@ -222,7 +228,13 @@ def render_plm_search():
                         # Show details for each defect
                         for i, defect in enumerate(defects):
                             with st.expander(f"📋 Details: {defect.get('defectCode')}"):
-                                _render_defect_details(defect, division_code)
+                                try:
+                                    _render_defect_details(defect, division_code)
+                                except Exception as e:
+                                    logger.error(f"Error rendering defect details: {e}", exc_info=True)
+                                    st.error(f"Error displaying defect details: {str(e)}")
+                                    with st.expander("Debug Info"):
+                                        st.json({"defect_keys": list(defect.keys()), "error": str(e)})
                     else:
                         st.info("No defects found")
 
@@ -266,7 +278,12 @@ def _render_defects_table(defects: List[Dict[str, Any]]):
 
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
     """Render detailed view of a defect"""
-    col1, col2, col3, col4 = st.columns(4)
+    try:
+        col1, col2, col3, col4 = st.columns(4)
+    except Exception as e:
+        logger.error(f"Error creating columns(4): {e}")
+        st.error(f"Display error: {e}")
+        return
 
     with col1:
         st.metric("Status", defect.get('plmStatus', 'N/A'))
@@ -286,10 +303,17 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
     # Problem description
     problem_content = defect.get('content', 'N/A')
     with st.expander("📌 Problem"):
-        st.write(problem_content)
+        if problem_content and problem_content != 'N/A':
+            st.write(problem_content)
+        else:
+            st.info("No problem content available")
 
         # Button to send to Chat analysis
-        col1, col2 = st.columns([3, 1])
+        try:
+            col1, col2 = st.columns([3, 1])
+        except Exception as e:
+            st.error(f"Layout error: {e}")
+            col1, col2 = st.columns(2)
         with col2:
             # Check if we just saved this problem to avoid duplicate processing
             current_defect_code = defect.get('defectCode')
