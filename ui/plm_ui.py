@@ -142,14 +142,13 @@ def render_plm_search():
 
             # Show details for cached results
             for i, defect in enumerate(st.session_state.plm_search_results):
-                with st.expander(f"📋 Details: {defect.get('defectCode')}"):
-                    try:
+                try:
+                    defect_code = defect.get('defectCode') if isinstance(defect, dict) else 'Unknown'
+                    with st.expander(f"📋 Details: {defect_code}"):
                         _render_defect_details(defect, st.session_state.plm_search_division)
-                    except Exception as e:
-                        logger.error(f"Error rendering cached defect details: {e}", exc_info=True)
-                        st.error(f"Error displaying defect details: {str(e)}")
-                        with st.expander("Debug Info"):
-                            st.json({"defect_keys": list(defect.keys()), "error": str(e)})
+                except Exception as e:
+                    logger.error(f"Error rendering cached defect details: {e}", exc_info=True)
+                    st.error(f"Error displaying defect details: {str(e)}")
 
             st.divider()
             st.markdown("**New Search**")
@@ -227,14 +226,13 @@ def render_plm_search():
 
                         # Show details for each defect
                         for i, defect in enumerate(defects):
-                            with st.expander(f"📋 Details: {defect.get('defectCode')}"):
-                                try:
+                            try:
+                                defect_code = defect.get('defectCode') if isinstance(defect, dict) else 'Unknown'
+                                with st.expander(f"📋 Details: {defect_code}"):
                                     _render_defect_details(defect, division_code)
-                                except Exception as e:
-                                    logger.error(f"Error rendering defect details: {e}", exc_info=True)
-                                    st.error(f"Error displaying defect details: {str(e)}")
-                                    with st.expander("Debug Info"):
-                                        st.json({"defect_keys": list(defect.keys()), "error": str(e)})
+                            except Exception as e:
+                                logger.error(f"Error rendering defect details: {e}", exc_info=True)
+                                st.error(f"Error displaying defect details: {str(e)}")
                     else:
                         st.info("No defects found")
 
@@ -278,6 +276,11 @@ def _render_defects_table(defects: List[Dict[str, Any]]):
 
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
     """Render detailed view of a defect"""
+    # Validate input is a dictionary
+    if not isinstance(defect, dict):
+        st.error(f"Invalid defect data: expected dict, got {type(defect)}")
+        return
+
     # Key metrics
     status = defect.get('plmStatus', 'N/A')
     priority = defect.get('plmPriority', 'N/A')
