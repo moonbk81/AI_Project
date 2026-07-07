@@ -241,13 +241,23 @@ def _render_defects_table(defects: List[Dict[str, Any]]):
     df_data = []
 
     for defect in defects:
+        # Safe handling of Title (truncate if too long)
+        title = defect.get('plmTitle', '')
+        if isinstance(title, str) and len(title) > 50:
+            title = title[:50] + "..."
+
+        # Safe handling of Created date (get first 10 chars)
+        created = defect.get('createDate', '')
+        if isinstance(created, str) and created:
+            created = created[:10]
+
         df_data.append({
             'Code': defect.get('defectCode'),
-            'Title': defect.get('plmTitle', '')[:50] + "..." if len(defect.get('plmTitle', '')) > 50 else defect.get('plmTitle', ''),
+            'Title': title,
             'Status': defect.get('plmStatus', 'N/A'),
             'Priority': defect.get('plmPriority', 'N/A'),
             'Owner': defect.get('mainOwnerName', 'N/A'),
-            'Created': defect.get('createDate', '')[:10] if defect.get('createDate') else ''
+            'Created': created
         })
 
     df = pd.DataFrame(df_data)
@@ -264,9 +274,14 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         st.metric("Priority", defect.get('plmPriority', 'N/A'))
     with col3:
         owner = defect.get('mainOwnerName', 'N/A')
-        st.metric("Owner", owner[:20] if owner else 'N/A')
+        if isinstance(owner, str) and owner != 'N/A':
+            owner = owner[:20]
+        st.metric("Owner", owner)
     with col4:
-        st.metric("Created", defect.get('createDate', 'N/A')[:10] if defect.get('createDate') else 'N/A')
+        created = defect.get('createDate', 'N/A')
+        if isinstance(created, str) and created != 'N/A':
+            created = created[:10]
+        st.metric("Created", created)
 
     # Problem description
     problem_content = defect.get('content', 'N/A')
