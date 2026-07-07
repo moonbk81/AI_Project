@@ -321,13 +321,19 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         with col2:
             # Check if we just saved this problem to avoid duplicate processing
             current_defect_code = defect.get('defectCode')
-            last_analyzed = st.session_state.get('plm_last_analyzed_code')
 
-            is_already_sent = (
-                st.session_state.get('plm_problem_query') and
-                st.session_state.plm_problem_query.get('defect_code') == current_defect_code and
-                not st.session_state.get('plm_problem_analyzed', True)  # Not yet analyzed
-            )
+            # Explicitly check conditions and convert to bool
+            plm_query = st.session_state.get('plm_problem_query')
+            if plm_query and isinstance(plm_query, dict):
+                is_already_sent = (
+                    plm_query.get('defect_code') == current_defect_code and
+                    not st.session_state.get('plm_problem_analyzed', False)
+                )
+            else:
+                is_already_sent = False
+
+            # Ensure it's a boolean for Streamlit
+            is_already_sent = bool(is_already_sent)
 
             # Create safe button key
             defect_code_str = str(current_defect_code) if current_defect_code else "unknown"
