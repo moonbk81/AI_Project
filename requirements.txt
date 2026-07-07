@@ -8,8 +8,14 @@ plotly>=5.18.0
 PyYAML>=6.0.0
 tqdm>=4.66.0
 
+# HTTP & API
+requests>=2.31.0
+
 # AI, Vector DB & Embedding Models
 chromadb>=0.4.24
 sentence-transformers>=2.5.0
 ollama>=0.1.7
 torch>=2.1.0
+
+# PLM Integration
+# (requests is already included above for PLM API calls)

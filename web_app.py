@@ -12,6 +12,7 @@ from app.tabs import (
     render_internet_tab,
     render_satellite_tab,
     render_knowledge_tab,
+    render_plm_section_tab,
 )
 from ril_rag_chat import RilRagChat
 from core.config import DEFAULT_MODEL_BY_DEVICE
@@ -90,9 +91,10 @@ if "chat_history" not in st.session_state: st.session_state.chat_history = []
 st.title("Android Log Analysis Console")
 st.markdown("단말 로그를 업로드하고 주요 통신 이슈, 장애 이벤트, 관련 근거를 확인합니다.")
 
-tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge = st.tabs([
+tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge, tab_plm = st.tabs([
     "로그 분석", "통계 대시보드", "부팅·Crash·ANR·NITZ",
-    "위성 통신", "인터넷 품질", "평가 결과", "지식 베이스"])
+    "위성 통신", "인터넷 품질", "평가 결과", "지식 베이스",
+    "PLM"])
 
 with st.sidebar:
     render_sidebar(engine, run_analysis_pipeline)
@@ -117,3 +119,6 @@ with tab_benchmark:
 
 with tab_knowledge:
     render_knowledge_tab(engine)
+
+with tab_plm:
+    render_plm_section_tab()

@@ -1,0 +1,113 @@
+# ==========================================
+# PLM (Product Lifecycle Management) API Configuration
+# ==========================================
+
+# PLM Server Settings
+plm:
+  # API Endpoint
+  base_url: "http://10.195.55.11:8080/plmapi/broker.do"  # Test server (staging)
+  production_url: "http://splm.sec.samsung.net"  # Update with production URL
+
+  # Authentication
+  # Option 1: Set directly in YAML (for development/local testing)
+  knox_id: "bongki.moon"
+  app_id: "cpsol_telephony_rag_ai"
+
+  # Option 2: Use environment variables (for production/CI)
+  # knox_id: "${PLM_KNOX_ID}"                    # Falls back to env var if not set above
+  # app_id: "${PLM_APP_ID}"                      # Falls back to env var if not set above
+
+  user_lang: "en"
+
+  # Connection settings
+  timeout: 30                                  # Request timeout in seconds
+  disable_proxy: true                          # Disable proxy (workplace has proxy)
+  max_retries: 3                              # Retry attempts on failure
+  retry_delay: 2                              # Delay between retries (seconds)
+
+# Division codes for different departments
+divisions:
+  mobile: "25"                                # Mobile division
+  network: "26"                               # Network division
+  vd: "11"                                   # VD division
+  liv: "14"                                  # LIV division
+
+# System codes for external systems
+system_codes:
+  ai_project: "AI_ANALYSIS"                  # AI analysis system
+  tank: "TANK"                               # TANK system
+  iap: "IAP"                                # IAP system
+  stts: "STTS"                              # STTS system
+  gpg: "GPG"                                # GPG system
+  btsp: "BTSP"                              # BTSP system
+
+# Default values for defect registration
+defect_defaults:
+  change_type: "DRAFT"                       # Default to DRAFT (not OPEN)
+  language: "en"
+  disable_proxy: true
+
+# RAG Integration Settings
+rag:
+  enabled: true
+  # Data types to collect from PLM
+  data_types:
+    - defect_info                            # Defect information
+    - resolutions                            # Resolution/solutions
+    - comments                               # Comments and discussions
+    - history                                # Change history
+
+  # Store PLM data in vector database
+  vector_db:
+    enabled: true
+    chunk_size: 500                          # Characters per chunk
+    overlap: 50                              # Overlap between chunks
+
+  # Update frequency
+  schedule:
+    enabled: false                           # Set to true for scheduled updates
+    interval_hours: 24                       # Update every 24 hours
+    batch_size: 50                           # Process 50 defects per batch
+
+# Dashboard Settings
+dashboard:
+  enabled: true
+  # Show in UI
+  plm_section: true
+  # Refresh rate
+  refresh_interval: 60                       # Seconds
+
+  # Display options
+  max_recent_defects: 10
+  show_summary_stats: true
+  show_resolution_tracking: true
+
+# Logging
+logging:
+  level: "INFO"                              # DEBUG, INFO, WARNING, ERROR
+  file: "logs/plm_api.log"
+  max_file_size: 10485760                    # 10MB
+  backup_count: 5
+
+# Error handling
+error_handling:
+  # Retry configuration
+  auto_retry: true
+  retry_on: ["timeout", "500", "502", "503", "504"]
+
+  # Fallback behavior
+  cache_responses: true                      # Cache API responses
+  cache_ttl_hours: 24                        # Cache valid for 24 hours
+
+# Field mappings for RAG ingestion
+field_mappings:
+  # Map PLM field names to RAG document fields
+  defect_code: "id"
+  plm_title: "title"
+  content: "problem_description"
+  reason: "root_cause"
+  countermeasure: "solution"
+  mainOwnerName: "owner"
+  plmStatus: "status"
+  createDate: "created_at"
+  updateDate: "updated_at"

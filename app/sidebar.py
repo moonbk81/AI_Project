@@ -8,6 +8,7 @@ from datetime import datetime
 import streamlit as st
 
 from benchmark_ui import get_installed_ollama_models
+from ui.plm_ui import render_plm_sidebar_stats
 
 def _render_sidebar_style():
     st.markdown(
@@ -68,6 +69,8 @@ def _render_engine_settings():
         f"**Mode:** `{st.session_state['active_routing_mode']}`  \n"
         f"**Status:** `{loaded_at}`"
     )
+    st.divider()
+    render_plm_sidebar_stats()
 
 def _render_file_session_manager(engine, reset_analysis_context):
     st.divider()
