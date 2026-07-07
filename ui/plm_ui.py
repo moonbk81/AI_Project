@@ -285,20 +285,26 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         st.error(f"Display error: {e}")
         return
 
-    with col1:
-        st.metric("Status", defect.get('plmStatus', 'N/A'))
-    with col2:
-        st.metric("Priority", defect.get('plmPriority', 'N/A'))
-    with col3:
-        owner = defect.get('mainOwnerName', 'N/A')
-        if isinstance(owner, str) and owner != 'N/A':
-            owner = owner[:20]
-        st.metric("Owner", owner)
-    with col4:
-        created = defect.get('createDate', 'N/A')
-        if isinstance(created, str) and created != 'N/A':
-            created = created[:10]
-        st.metric("Created", created)
+    try:
+        with col1:
+            status = defect.get('plmStatus', 'N/A')
+            st.metric("Status", str(status) if status is not None else 'N/A')
+        with col2:
+            priority = defect.get('plmPriority', 'N/A')
+            st.metric("Priority", str(priority) if priority is not None else 'N/A')
+        with col3:
+            owner = defect.get('mainOwnerName', 'N/A')
+            if isinstance(owner, str) and owner != 'N/A':
+                owner = owner[:20]
+            st.metric("Owner", str(owner) if owner is not None else 'N/A')
+        with col4:
+            created = defect.get('createDate', 'N/A')
+            if isinstance(created, str) and created != 'N/A':
+                created = created[:10]
+            st.metric("Created", str(created) if created is not None else 'N/A')
+    except Exception as e:
+        logger.error(f"Error rendering metrics: {e}", exc_info=True)
+        st.error(f"Metric display error: {e}")
 
     # Problem description
     problem_content = defect.get('content', 'N/A')
@@ -325,9 +331,13 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
                 not st.session_state.get('plm_problem_analyzed', True)  # Not yet analyzed
             )
 
+            # Create safe button key
+            defect_code_str = str(current_defect_code) if current_defect_code else "unknown"
+            button_key = f"analyze_problem_{defect_code_str}"
+
             if st.button(
                 "🚀 분석하기",
-                key=f"analyze_problem_{defect.get('defectCode')}",
+                key=button_key,
                 help="Send this problem to Chat tab for analysis",
                 disabled=is_already_sent
             ):
