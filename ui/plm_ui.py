@@ -278,33 +278,32 @@ def _render_defects_table(defects: List[Dict[str, Any]]):
 
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
     """Render detailed view of a defect"""
-    try:
-        col1, col2, col3, col4 = st.columns(4)
-    except Exception as e:
-        logger.error(f"Error creating columns(4): {e}")
-        st.error(f"Display error: {e}")
-        return
+    # Key metrics
+    status = defect.get('plmStatus', 'N/A')
+    priority = defect.get('plmPriority', 'N/A')
+    owner = defect.get('mainOwnerName', 'N/A')
+    created = defect.get('createDate', 'N/A')
 
-    try:
-        with col1:
-            status = defect.get('plmStatus', 'N/A')
-            st.metric("Status", str(status) if status is not None else 'N/A')
-        with col2:
-            priority = defect.get('plmPriority', 'N/A')
-            st.metric("Priority", str(priority) if priority is not None else 'N/A')
-        with col3:
-            owner = defect.get('mainOwnerName', 'N/A')
-            if isinstance(owner, str) and owner != 'N/A':
-                owner = owner[:20]
-            st.metric("Owner", str(owner) if owner is not None else 'N/A')
-        with col4:
-            created = defect.get('createDate', 'N/A')
-            if isinstance(created, str) and created != 'N/A':
-                created = created[:10]
-            st.metric("Created", str(created) if created is not None else 'N/A')
-    except Exception as e:
-        logger.error(f"Error rendering metrics: {e}", exc_info=True)
-        st.error(f"Metric display error: {e}")
+    # Format owner (truncate if too long)
+    if isinstance(owner, str) and owner != 'N/A' and len(owner) > 20:
+        owner = owner[:20]
+
+    # Format created date (get first 10 chars)
+    if isinstance(created, str) and created != 'N/A' and len(created) > 10:
+        created = created[:10]
+
+    # Display in 2x2 grid
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Status", str(status) if status is not None else 'N/A')
+    with col2:
+        st.metric("Priority", str(priority) if priority is not None else 'N/A')
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Owner", str(owner) if owner is not None else 'N/A')
+    with col2:
+        st.metric("Created", str(created) if created is not None else 'N/A')
 
     # Problem description
     problem_content = defect.get('content', 'N/A')
