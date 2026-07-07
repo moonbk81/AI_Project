@@ -315,11 +315,7 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
             st.info("No problem content available")
 
         # Button to send to Chat analysis
-        try:
-            col1, col2 = st.columns([3, 1])
-        except Exception as e:
-            st.error(f"Layout error: {e}")
-            col1, col2 = st.columns(2)
+        col1, col2 = st.columns([3, 1])
         with col2:
             # Check if we just saved this problem to avoid duplicate processing
             current_defect_code = defect.get('defectCode')
@@ -356,7 +352,7 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
 
             # Show status if already sent
             if is_already_sent:
-                st.caption("⏳ Pending analysis", unsafe_allow_html=True)
+                st.caption("⏳ Pending analysis")
 
     # Root cause
     with st.expander("🔍 Root Cause"):
