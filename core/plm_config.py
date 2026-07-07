@@ -6,7 +6,8 @@ class PlmConfig:
     # ------------------------------------------------------------------
     # Connection
     # ------------------------------------------------------------------
-    BASE_URL = "http://10.195.55.11:8080/plmapi"
+    PRODUCTION_URL = "http://splm.sec.samsung.net/plmapi/broker.do"
+    BASE_URL = "http://10.195.55.11:8080/plmapi/broker.do"
     APP_ID = "cpsol_telephony_rag_ai"
     USER_LANG = "EN"
     TIMEOUT = 30

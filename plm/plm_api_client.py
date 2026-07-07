@@ -9,6 +9,8 @@ API Guide: PLM Defect Rest API Guide_20260424.xlsx
 
 import requests
 import json
+import re
+import sys
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -336,7 +338,26 @@ class PLMDefectAPIClient:
                 )
 
             response.raise_for_status()
-            result = response.json()
+
+            # Clean response text first to remove control characters
+            text = response.text
+
+            # Remove all control characters including newlines inside JSON strings
+            # Replace common problematic characters with spaces
+            text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+            # Remove other control characters
+            text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]', '', text)
+            # Clean up multiple spaces
+            text = re.sub(r' +', ' ', text)
+
+            # Parse JSON from cleaned text
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError as e:
+                print(f"[DEBUG] Raw response: {response.text[:500]}", file=sys.stderr)
+                print(f"[DEBUG] Cleaned response: {text[:500]}", file=sys.stderr)
+                raise e
+
             return APIResponse.from_json(result)
 
         except requests.exceptions.RequestException as e:
@@ -710,21 +731,26 @@ class PLMDefectAPIClient:
     def get_file_list(
         self,
         division_code: str,
-        defect_code: str
+        defect_code: str,
+        attach_type: str = 'OP_DEFECT_ATTACH'
     ) -> APIResponse:
         """
         Get file list from defect
 
         Args:
-            division_code: Division code
-            defect_code: Defect case code
+            division_code: Division code (25=Mobile, 26=Network)
+            defect_code: Defect case code (e.g., P170517-00003)
+            attach_type: Attachment type - 'OP_DEFECT_ATTACH' (defect files),
+                        'OP_DEFECT_COMMENT' (comment files),
+                        'OP_DEFECT_RESOLVE' (solution files)
 
         Returns:
             APIResponse with file list
         """
         param = {
             'divisionCode': division_code,
-            'defectCode': defect_code
+            'moduleCode': attach_type,
+            'code': defect_code
         }
 
         return self._make_request(
@@ -734,59 +760,147 @@ class PLMDefectAPIClient:
 
     def download_file(
         self,
-        file_id: str,
-        division_code: str
-    ) -> APIResponse:
+        division_code: str,
+        doc_id: str,
+        title: str,
+        file_id: str
+    ) -> Dict[str, Any]:
         """
         Download file from defect
 
         Args:
-            file_id: File ID
-            division_code: Division code
+            division_code: Division code (25=Mobile, 26=Network)
+            doc_id: Document ID (from file list response)
+            title: File title (from file list response)
+            file_id: File ID (from file list response)
 
         Returns:
-            APIResponse with file download information
+            Dictionary with 'success' and 'data' keys. 'data' contains the file binary content.
         """
+        # File download uses a different endpoint: /fileapi/getFile.do
+        download_url = self.base_url.replace('/plmapi/broker.do', '/fileapi/getFile.do')
+
         param = {
-            'fileId': file_id,
-            'divisionCode': division_code
+            'divisionCode': division_code,
+            'docId': doc_id,
+            'title': title,
+            'fileId': file_id
         }
 
-        return self._make_request(
-            'GET_FILE',
-            param
-        )
+        data = {
+            'singleId': self.knox_id,
+            'appId': self.app_id,
+            'userLang': self.user_lang,
+            'serviceCode': 'GET_FILE',
+            'param': json.dumps(param)
+        }
+
+        try:
+            # File download returns binary stream, not JSON
+            response = self.session.get(
+                download_url,
+                params=data,
+                proxies=self.proxies,
+                stream=True
+            )
+
+            response.raise_for_status()
+
+            # Check if response is JSON (error) or binary (file)
+            content_type = response.headers.get('content-type', '').lower()
+
+            if 'application/json' in content_type:
+                # Error response - parse JSON
+                try:
+                    result = response.json()
+                    status = result.get('status', {})
+                    return {
+                        'success': False,
+                        'message': status.get('message', 'Download failed'),
+                        'data': None
+                    }
+                except:
+                    return {
+                        'success': False,
+                        'message': f'Invalid response: {response.text[:100]}',
+                        'data': None
+                    }
+            else:
+                # Binary file response
+                file_content = response.content
+                if file_content and len(file_content) > 0:
+                    return {
+                        'success': True,
+                        'data': file_content,
+                        'size': len(file_content)
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'message': 'Empty file content received',
+                        'data': None
+                    }
+
+        except requests.exceptions.RequestException as e:
+            return {
+                'success': False,
+                'message': f'API request failed: {str(e)}',
+                'data': None
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'message': f'Error: {str(e)}',
+                'data': None
+            }
 
     def upload_file(
         self,
         division_code: str,
-        defect_code: str,
-        file_path: str
+        defect_id: str,
+        file_path: str,
+        module_code: str = 'OP_DEFECT_ATTACH'
     ) -> APIResponse:
         """
         Upload file to defect (up to 2GB)
 
         Args:
-            division_code: Division code
-            defect_code: Defect case code
+            division_code: Division code (25=Mobile, 26=Network)
+            defect_id: Defect object ID (returned from defect registration API)
             file_path: Path to file to upload
+            module_code: Module code - 'OP_DEFECT_ATTACH' (defect files),
+                        'OP_DEFECT_COMMENT' (comment files),
+                        'OP_DEFECT_RESOLVE' (solution files)
 
         Returns:
             APIResponse with file upload status
         """
-        # File upload typically requires multipart form data
+        # File upload requires multipart form data
         param = {
             'divisionCode': division_code,
-            'defectCode': defect_code
+            'moduleCode': module_code,
+            'requestedId': defect_id
         }
 
-        data = self._build_request_data('CREATE_FILE', param)
+        # File upload uses a different endpoint
+        upload_url = self.base_url.replace('/plmapi/broker.do', '/fileapi/createPLMDocument.do')
+
+        data = {
+            'singleId': self.knox_id,
+            'appId': self.app_id,
+            'userLang': self.user_lang,
+            'serviceCode': 'CREATE_FILE',
+            'divisionCode': division_code,
+            'param': json.dumps(param)
+        }
 
         try:
             with open(file_path, 'rb') as f:
-                files = {'file': f}
+                files = {'uploadFile': f}
                 response = self.session.post(
-                    self.base_url,
+                    upload_url,
                     data=data,
                     files=files,
                     proxies=self.proxies

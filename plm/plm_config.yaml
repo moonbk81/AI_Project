@@ -6,7 +6,7 @@
 plm:
   # API Endpoint
   base_url: "http://10.195.55.11:8080/plmapi/broker.do"  # Test server (staging)
-  production_url: "http://splm.sec.samsung.net"  # Update with production URL
+  production_url: "http://splm.sec.samsung.net/plmapi/broker.do"  # Production server
 
   # Authentication
   # Option 1: Set directly in YAML (for development/local testing)

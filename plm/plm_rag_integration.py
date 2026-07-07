@@ -113,7 +113,9 @@ class PLMConfigManager:
 
     def get_plm_client(self) -> PLMDefectAPIClient:
         """Create PLM API client from configuration"""
-        base_url = self.resolve_env_vars(self.get('plm.base_url'))
+        base_url = self.resolve_env_vars(self.get('plm.production_url'))
+        if not base_url:
+            base_url = self.resolve_env_vars(self.get('plm.base_url'))
         knox_id = self.resolve_env_vars(self.get('plm.knox_id'))
         app_id = self.resolve_env_vars(self.get('plm.app_id'))
         user_lang = self.get('plm.user_lang', 'en')
@@ -121,7 +123,7 @@ class PLMConfigManager:
 
         # Provide helpful error messages
         if not base_url:
-            raise ValueError("PLM base_url not configured in plm_config.yaml")
+            raise ValueError("PLM base_url or production_url not configured in plm_config.yaml")
         if not knox_id or knox_id.startswith("${"):
             raise ValueError(
                 "PLM knox_id not configured. \n"

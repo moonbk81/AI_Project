@@ -26,6 +26,14 @@ from .telephony_ui import (
     render_service_state_timeline,
     render_signal_level_timeline,
 )
+from .plm_ui import (
+    render_plm_section,
+    render_plm_search,
+    render_plm_analyze,
+    render_plm_register,
+    render_plm_comment,
+    render_plm_sidebar_stats,
+)
 
 __all__ = [
     "render_battery_thermal_chart",
@@ -46,4 +54,10 @@ __all__ = [
     "render_sat_at_analyzer",
     "render_service_state_timeline",
     "render_signal_level_timeline",
+    "render_plm_section",
+    "render_plm_search",
+    "render_plm_analyze",
+    "render_plm_register",
+    "render_plm_comment",
+    "render_plm_sidebar_stats",
 ]

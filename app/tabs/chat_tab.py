@@ -144,17 +144,71 @@ def _render_chat_answer(engine, prompt):
         "metas": metas,
         "thinking": thinking,
     })
-    st.rerun()
+    # Do NOT call st.rerun() here - it causes infinite loops
 
 def render_chat_tab(engine):
     _render_quick_prompt_guide()
     quick_prompt = _render_quick_prompt_buttons()
 
     st.divider()
+
+    # Check for PLM problem query - only auto-analyze if it's newly added
+    plm_problem = st.session_state.get('plm_problem_query')
+    plm_problem_analyzed = st.session_state.get('plm_problem_analyzed', False)
+
+    if plm_problem and not plm_problem_analyzed:
+        # First time seeing this PLM problem - auto-analyze it
+        st.info(
+            f"📋 **PLM 결함에서 문제 내용을 가져왔습니다**  \n"
+            f"결함 코드: `{plm_problem.get('defect_code')}`  \n"
+            f"제목: {plm_problem.get('defect_title')}"
+        )
+
+        st.divider()
+
+        # Auto-analyze the PLM problem
+        problem_content = plm_problem.get('content', '')
+        auto_prompt = f"PLM 결함 분석:\n결함 코드: {plm_problem.get('defect_code')}\n\n**문제 내용:**\n{problem_content}\n\n위 문제에 대해 분석해 주세요."
+
+        render_chat_interface(engine, key_suffix="main", show_input=False)
+        _render_chat_answer(engine, auto_prompt)
+
+        # Mark as analyzed so we don't loop
+        st.session_state.plm_problem_analyzed = True
+        return  # Exit early to prevent further processing
+
+    elif plm_problem and plm_problem_analyzed:
+        # Already analyzed, show info and clear button
+        st.info(
+            f"📋 **PLM 결함 분석 중**  \n"
+            f"결함 코드: `{plm_problem.get('defect_code')}`"
+        )
+
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("❌ 삭제 및 초기화", key="clear_plm_query"):
+                st.session_state.plm_problem_query = None
+                st.session_state.plm_problem_analyzed = False
+                st.rerun()
+
+        st.divider()
+
     render_chat_interface(engine, key_suffix="main", show_input=False)
 
-    user_input = st.chat_input("증상 또는 확인할 내용을 입력하세요")
-    prompt = quick_prompt if quick_prompt else user_input
+    # Placeholder text changes based on PLM query availability
+    placeholder_text = "증상 또는 확인할 내용을 입력하세요"
+    if plm_problem and plm_problem_analyzed:
+        placeholder_text = "추가 질문을 입력하세요"
+
+    user_input = st.chat_input(placeholder_text)
+
+    # Determine prompt source priority: quick_prompt > user_input
+    prompt = None
+
+    if quick_prompt:
+        prompt = quick_prompt
+    elif user_input:
+        prompt = user_input
 
     if prompt:
         _render_chat_answer(engine, prompt)

@@ -12,6 +12,8 @@ from datetime import datetime
 import logging
 import sys
 import os
+import zipfile
+import io
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -33,6 +35,16 @@ def _initialize_plm_session():
             st.session_state.plm_integration = create_plm_integration()
             st.session_state.plm_available = True
             st.session_state.plm_cache = {}
+            st.session_state.plm_search_results = None
+            st.session_state.plm_search_division = None
+            st.session_state.plm_analysis_results = None
+            st.session_state.plm_selected_defect_code = None
+            st.session_state.plm_selected_division = None
+            st.session_state.plm_files_list = None
+            st.session_state.plm_download_data = {}  # {file_id: (file_data, file_name)}
+            st.session_state.plm_zip_file_data = None  # Binary data of ZIP file (for lazy extraction)
+            st.session_state.plm_zip_file_list = {}  # {filename: file_size} - metadata only
+            st.session_state.plm_selected_from_zip = None  # Selected file from ZIP
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
@@ -46,6 +58,65 @@ def _get_plm_client():
     return st.session_state.plm_integration.client
 
 
+def _list_zip_contents(file_data: bytes) -> Dict[str, int]:
+    """
+    List ZIP file contents without extracting (memory efficient)
+    Only includes files in root directory (ignores subdirectories)
+
+    Args:
+        file_data: Binary data of ZIP file
+
+    Returns:
+        Dictionary with {filename: file_size_in_bytes}
+    """
+    try:
+        files_dict = {}
+        zip_buffer = io.BytesIO(file_data)
+
+        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+            for file_info in zip_ref.infolist():
+                # Skip directories and files in subdirectories
+                if file_info.is_dir():
+                    continue
+
+                filename = file_info.filename
+                # Only include root-level files (no "/" in name)
+                if '/' not in filename:
+                    files_dict[filename] = file_info.file_size
+
+        return files_dict
+
+    except zipfile.BadZipFile:
+        return {}
+    except Exception as e:
+        logger.error(f"Error listing ZIP: {e}")
+        return {}
+
+
+def _extract_file_from_zip(file_data: bytes, target_filename: str) -> Optional[bytes]:
+    """
+    Extract a single file from ZIP (called only when user selects a file)
+
+    Args:
+        file_data: Binary data of ZIP file
+        target_filename: Name of file to extract
+
+    Returns:
+        File content as bytes, or None if failed
+    """
+    try:
+        zip_buffer = io.BytesIO(file_data)
+
+        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+            if target_filename in zip_ref.namelist():
+                return zip_ref.read(target_filename)
+        return None
+
+    except Exception as e:
+        logger.error(f"Error extracting file from ZIP: {e}")
+        return None
+
+
 def render_plm_search():
     """
     Render PLM defect search interface
@@ -53,6 +124,29 @@ def render_plm_search():
     Allows users to search defects by code or ID and view details
     """
     st.subheader("🔍 Search Defects")
+
+    # Display cached results if available
+    if st.session_state.get('plm_search_results'):
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info(f"📌 Cached results: {len(st.session_state.plm_search_results)} defect(s)")
+            with col2:
+                if st.button("Clear Cache", key="btn_clear_search"):
+                    st.session_state.plm_search_results = None
+                    st.session_state.plm_search_division = None
+                    st.rerun()
+
+            st.divider()
+            _render_defects_table(st.session_state.plm_search_results)
+
+            # Show details for cached results
+            for i, defect in enumerate(st.session_state.plm_search_results):
+                with st.expander(f"📋 Details: {defect.get('defectCode')}"):
+                    _render_defect_details(defect, st.session_state.plm_search_division)
+
+            st.divider()
+            st.markdown("**New Search**")
 
     col1, col2 = st.columns(2)
 
@@ -116,6 +210,12 @@ def render_plm_search():
                     defects = response.result.get('defectList', [])
 
                     if defects:
+                        st.session_state.plm_search_results = defects
+                        st.session_state.plm_search_division = division_code
+                        # Store first defect code for use in other tabs
+                        if len(search_values) == 1:
+                            st.session_state.plm_selected_defect_code = search_values[0]
+                            st.session_state.plm_selected_division = division_code
                         st.success(f"Found {len(defects)} defect(s)")
                         _render_defects_table(defects)
 
@@ -169,8 +269,48 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         st.metric("Created", defect.get('createDate', 'N/A')[:10] if defect.get('createDate') else 'N/A')
 
     # Problem description
+    problem_content = defect.get('content', 'N/A')
     with st.expander("📌 Problem"):
-        st.write(defect.get('content', 'N/A'))
+        st.write(problem_content)
+
+        # Button to send to Chat analysis
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button(
+                "🚀 분석하기",
+                key=f"analyze_problem_{defect.get('defectCode')}",
+                help="Send this problem to Chat tab for analysis"
+            ):
+                # Store problem content in session for Chat tab
+                st.session_state.plm_problem_query = {
+                    'content': problem_content,
+                    'defect_code': defect.get('defectCode'),
+                    'defect_title': defect.get('plmTitle', 'Unknown'),
+                    'timestamp': datetime.now().isoformat()
+                }
+                st.session_state.plm_problem_analyzed = False  # Reset analyzed flag
+                st.success("✅ Problem content saved!")
+
+                # Create a clickable link to navigate to chat tab
+                st.markdown(
+                    """
+                    <div style="text-align: center; margin-top: 10px;">
+                        <a href="#로그-분석" style="
+                            display: inline-block;
+                            background-color: #FF6B6B;
+                            color: white;
+                            padding: 10px 20px;
+                            border-radius: 5px;
+                            text-decoration: none;
+                            font-weight: bold;
+                            cursor: pointer;
+                        ">
+                            🚀 로그 분석 탭으로 이동
+                        </a>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
     # Root cause
     with st.expander("🔍 Root Cause"):
@@ -206,19 +346,35 @@ def render_plm_analyze():
     """
     st.subheader("📊 Defect Analysis")
 
+    # Use selected defect code from Search tab if available
+    default_code = st.session_state.get('plm_selected_defect_code', '')
+    default_division = st.session_state.get('plm_selected_division')
+
+    if default_code:
+        st.info(f"📌 Using Defect Code from Search: **{default_code}**")
+
     col1, col2 = st.columns(2)
 
     with col1:
         defect_code = st.text_input(
-            "Defect Code",
+            "Defect Code (or enter new one)",
             placeholder="P190404-00007",
             key="analyze_code"
         )
+        # Use default if no input
+        if not defect_code and default_code:
+            defect_code = default_code
 
     with col2:
+        division_options = ["Mobile", "Network"]
+        default_index = 0
+        if default_division == "26":
+            default_index = 1
+
         division = st.selectbox(
             "Division",
-            options=["Mobile", "Network"],
+            options=division_options,
+            index=default_index,
             key="analyze_division"
         )
 
@@ -398,6 +554,282 @@ def render_plm_register():
                 st.error(f"Error: {e}")
 
 
+def render_plm_files():
+    """
+    Render PLM file management interface
+
+    Allows listing and downloading files attached to defects
+    """
+    st.subheader("📁 File Management")
+
+    # Use selected defect code from Search tab if available
+    default_code = st.session_state.get('plm_selected_defect_code', '')
+    default_division = st.session_state.get('plm_selected_division')
+
+    if default_code:
+        st.info(f"📌 Using Defect Code from Search: **{default_code}**")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        division_options = ["Mobile", "Network"]
+        default_index = 0
+        if default_division == "26":
+            default_index = 1
+
+        division = st.selectbox(
+            "Division",
+            options=division_options,
+            index=default_index,
+            format_func=lambda x: f"{x} ({'25' if x == 'Mobile' else '26'})",
+            key="file_division"
+        )
+
+    with col2:
+        defect_code_input = st.text_input(
+            "Defect Code",
+            placeholder="e.g., P190404-00007",
+            key="file_code"
+        )
+        defect_code = defect_code_input if defect_code_input else default_code
+
+    # Display cached files if available
+    if st.session_state.get('plm_files_list'):
+        cached_files = st.session_state.plm_files_list
+        cached_division = st.session_state.get('plm_files_division')
+
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info(f"📌 Cached files: {len(cached_files)} file(s)")
+            with col2:
+                if st.button("Clear Cache", key="btn_clear_files"):
+                    st.session_state.plm_files_list = None
+                    st.session_state.plm_files_division = None
+                    st.session_state.plm_download_data = {}
+                    st.rerun()
+
+            st.divider()
+
+            # Show cached file list
+            table_data = []
+            for file in cached_files:
+                table_data.append({
+                    'File': file.get('title', 'N/A'),
+                    'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
+                    'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
+                    'ID': file.get('fileId')
+                })
+
+            df = pd.DataFrame(table_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Download section
+            st.subheader("Download Files")
+
+            for file in cached_files:
+                doc_id = file.get('docId')
+                file_id = file.get('fileId')
+                title = file.get('title', f'file_{file_id}')
+
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.text(f"📄 {title}")
+                with col2:
+                    if st.button(
+                        "⬇️ Download",
+                        key=f"btn_download_{file_id}"
+                    ):
+                        with st.spinner(f"Downloading {title}..."):
+                            try:
+                                client = _get_plm_client()
+                                division_code = cached_division or "25"
+
+                                download_result = client.download_file(
+                                    division_code=division_code,
+                                    doc_id=doc_id,
+                                    title=title,
+                                    file_id=file_id
+                                )
+
+                                if download_result.get('success'):
+                                    file_content = download_result.get('data')
+                                    file_size = download_result.get('size', 0)
+
+                                    if file_content and file_size > 0:
+                                        st.session_state.plm_download_data[file_id] = (file_content, title)
+                                        logger.info(f"File downloaded: {title} ({file_size} bytes)")
+                                        st.success(f"✅ Downloaded {file_size:,} bytes - Scroll down to save file")
+                                    else:
+                                        st.warning(f"File content not available (size: {file_size} bytes)")
+                                else:
+                                    error_msg = download_result.get('message', 'Unknown error')
+                                    st.error(f"Download failed: {error_msg}")
+                                    if "권한" in error_msg or "권" in error_msg:
+                                        st.info("💡 권한 문제: 파일에 접근할 권한이 없습니다. 관리자에게 문의하세요.")
+
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+
+            # Show download buttons for cached files
+            if st.session_state.plm_download_data:
+                st.divider()
+                st.subheader("💾 Save Downloaded Files")
+                st.info(
+                    f"📥 **{len(st.session_state.plm_download_data)} file(s) ready**\n\n"
+                    f"**How to download:**\n"
+                    f"1. Click the 💾 button below\n"
+                    f"2. Browser will automatically save to: **Downloads folder** (`~/Downloads` or `C:\\Users\\{{username}}\\Downloads`)\n"
+                    f"3. Check your Downloads folder for the file"
+                )
+
+                for file_id, (file_content, file_name) in st.session_state.plm_download_data.items():
+                    if file_content:
+                        file_size_kb = len(file_content) / 1024
+                        is_zip = file_name.lower().endswith('.zip')
+
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        with col1:
+                            st.download_button(
+                                label=f"💾 {file_name} ({file_size_kb:.1f} KB)",
+                                data=file_content,
+                                file_name=file_name,
+                                key=f"save_{file_id}",
+                                use_container_width=True
+                            )
+                        with col2:
+                            st.caption(f"{len(file_content)} bytes")
+
+                        # If ZIP file, add button to open and view contents
+                        with col3:
+                            if is_zip:
+                                if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents (memory efficient)"):
+                                    zip_file_list = _list_zip_contents(file_content)
+                                    if zip_file_list:
+                                        st.session_state.plm_zip_file_data = file_content  # Store ZIP binary
+                                        st.session_state.plm_zip_file_list = zip_file_list  # Store metadata only
+                                        st.success(f"✅ Listed {len(zip_file_list)} file(s)")
+                                    else:
+                                        st.error("Failed to list ZIP or ZIP is empty")
+                    else:
+                        st.warning(f"⚠️ {file_name} - Invalid data")
+
+                # Display ZIP contents (metadata only, no extraction)
+                if st.session_state.plm_zip_file_list:
+                    st.divider()
+                    st.subheader("📂 ZIP Contents (미압축 상태)")
+                    st.info(
+                        f"📋 {len(st.session_state.plm_zip_file_list)} file(s) in archive  \n"
+                        f"💾 Files are loaded on-demand when selected (memory efficient)"
+                    )
+
+                    # Create table of files
+                    zip_files = []
+                    for fname, fsize in st.session_state.plm_zip_file_list.items():
+                        zip_files.append({
+                            'File': fname,
+                            'Size': f"{fsize / 1024:.1f} KB"
+                        })
+
+                    df_zip = pd.DataFrame(zip_files)
+                    st.dataframe(df_zip, use_container_width=True, hide_index=True)
+
+                    # File selection for analysis
+                    st.subheader("🔍 Select File for Analysis")
+                    selected_file = st.selectbox(
+                        "Choose a file to analyze",
+                        options=list(st.session_state.plm_zip_file_list.keys()),
+                        key="select_zip_file"
+                    )
+
+                    if selected_file:
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            file_size_kb = st.session_state.plm_zip_file_list[selected_file] / 1024
+                            st.text(f"Selected: **{selected_file}** ({file_size_kb:.1f} KB)")
+                        with col2:
+                            if st.button("➕ Add to Analysis", key=f"add_to_analysis_{selected_file}"):
+                                with st.spinner(f"Extracting {selected_file}..."):
+                                    # Extract only the selected file (lazy extraction)
+                                    file_content = _extract_file_from_zip(
+                                        st.session_state.plm_zip_file_data,
+                                        selected_file
+                                    )
+
+                                    if file_content:
+                                        st.session_state.plm_selected_from_zip = {
+                                            'filename': selected_file,
+                                            'content': file_content,
+                                            'size': len(file_content),
+                                            'type': selected_file.split('.')[-1].lower()
+                                        }
+                                        st.success(f"✅ Extracted and added {selected_file} to analysis pipeline")
+                                        st.info(f"🔍 Go to sidebar to start analysis")
+                                    else:
+                                        st.error(f"Failed to extract {selected_file}")
+
+            st.divider()
+            st.markdown("**New Search**")
+
+    if st.button("📂 List Files", key="btn_list_files"):
+        if not defect_code:
+            st.error("Please enter a defect code")
+            return
+
+        with st.spinner("Loading files..."):
+            try:
+                client = _get_plm_client()
+                if not client:
+                    st.error("PLM API not configured")
+                    return
+
+                division_code = "25" if division == "Mobile" else "26"
+
+                # Note: The get_file_list API requires specific parameters that may differ
+                # from the defect code. The API expects moduleCode and code parameters.
+                response = client.get_file_list(
+                    division_code=division_code,
+                    defect_code=defect_code
+                )
+
+                if response.is_success():
+                    # Response format: result is a list with objects containing 'data' array
+                    result = response.result if response.result else []
+                    files = []
+
+                    # Extract files from the response structure
+                    if isinstance(result, list) and len(result) > 0:
+                        data = result[0].get('data', []) if isinstance(result[0], dict) else []
+                        # Filter out non-file entries (messages)
+                        files = [f for f in data if f.get('title') and f.get('fileId')]
+                    elif isinstance(result, dict):
+                        data = result.get('data', [])
+                        files = [f for f in data if f.get('title') and f.get('fileId')]
+
+                    if files:
+                        # Cache files and division
+                        st.session_state.plm_files_list = files
+                        st.session_state.plm_files_division = division_code
+                        st.success(f"Found {len(files)} file(s)")
+                        st.rerun()  # Rerun to display cached files
+
+                    else:
+                        st.info("No files attached to this defect")
+
+                else:
+                    st.error(f"Failed to list files: {response.get_error_message()}")
+
+            except PLMAPIException as e:
+                st.error(f"API Error: {e}")
+                with st.expander("📋 Debug Info"):
+                    st.code(str(e), language="text")
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}", exc_info=True)
+                st.error(f"Error: {e}")
+                with st.expander("📋 Debug Info"):
+                    st.code(str(e), language="text")
+
+
 def render_plm_comment():
     """
     Render PLM comment management interface
@@ -406,23 +838,43 @@ def render_plm_comment():
     """
     st.subheader("💬 Add Comment")
 
+    # Use selected defect code from Search tab if available
+    default_code = st.session_state.get('plm_selected_defect_code', '')
+    default_division = st.session_state.get('plm_selected_division')
+
+    if default_code:
+        st.info(f"📌 Using Defect Code from Search: **{default_code}**")
+
+    # Setup form with pre-filled values before form creation
+    col1, col2 = st.columns(2)
+
+    with col1:
+        division_options = ["Mobile", "Network"]
+        default_index = 0
+        if default_division == "26":
+            default_index = 1
+
+        division = st.selectbox(
+            "Division",
+            options=division_options,
+            index=default_index,
+            key="comment_division"
+        )
+
+    with col2:
+        defect_code_input = st.text_input(
+            "Defect Code",
+            placeholder="P190404-00007",
+            key="comment_code"
+        )
+        defect_code = defect_code_input if defect_code_input else default_code
+
     with st.form("add_comment"):
         col1, col2 = st.columns(2)
 
         with col1:
-            division = st.selectbox(
-                "Division",
-                options=["Mobile", "Network"],
-                key="comment_division"
-            )
-            defect_code = st.text_input(
-                "Defect Code",
-                placeholder="P190404-00007",
-                key="comment_code"
-            )
-
-        with col2:
             system_code = st.text_input("System Code", value="AI_ANALYSIS", key="comment_system")
+        with col2:
             create_user = st.text_input("Your Knox ID", key="comment_user")
 
         comment = st.text_area(
@@ -499,14 +951,23 @@ def render_plm_section():
 
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Search",
-        "📊 Analysis",
-        "➕ Register",
-        "💬 Comment"
+        "🔍 검색 및 파일",
+        "📊 분석",
+        "➕ 등록",
+        "💬 댓글"
     ])
 
     with tab1:
-        render_plm_search()
+        # Combined Search and Files tab
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.subheader("🔍 결함 검색")
+            render_plm_search()
+
+        with col2:
+            st.subheader("📁 파일 관리")
+            render_plm_files()
 
     with tab2:
         render_plm_analyze()
@@ -553,6 +1014,7 @@ __all__ = [
     'render_plm_analyze',
     'render_plm_register',
     'render_plm_comment',
+    'render_plm_files',
     'render_plm_sidebar_stats',
     '_initialize_plm_session',
 ]

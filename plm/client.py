@@ -11,11 +11,13 @@ class PlmClient:
     def __init__(
         self,
         single_id: str,
-        base_url: str = PlmConfig.BASE_URL,
+        base_url: str = None,
         app_id: str = PlmConfig.APP_ID,
         user_lang: str = PlmConfig.USER_LANG,
         timeout: int = PlmConfig.TIMEOUT,
     ):
+        if base_url is None:
+            base_url = PlmConfig.PRODUCTION_URL or PlmConfig.BASE_URL
         self.base_url = base_url.rstrip("/")
         self.single_id = single_id
         self.app_id = app_id
