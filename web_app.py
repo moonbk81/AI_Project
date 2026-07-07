@@ -91,6 +91,11 @@ if "chat_history" not in st.session_state: st.session_state.chat_history = []
 st.title("Android Log Analysis Console")
 st.markdown("단말 로그를 업로드하고 주요 통신 이슈, 장애 이벤트, 관련 근거를 확인합니다.")
 
+# Show notification if coming from PLM analysis
+if st.session_state.get('navigate_to_chat', False):
+    st.info("🚀 PLM 결함 분석 정보가 준비되었습니다. **'로그 분석' 탭**을 클릭하면 바로 분석이 시작됩니다!", icon="ℹ️")
+    st.session_state.navigate_to_chat = False
+
 tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge, tab_plm = st.tabs([
     "로그 분석", "통계 대시보드", "부팅·Crash·ANR·NITZ",
     "위성 통신", "인터넷 품질", "평가 결과", "지식 베이스",

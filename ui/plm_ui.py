@@ -276,10 +276,21 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         # Button to send to Chat analysis
         col1, col2 = st.columns([3, 1])
         with col2:
+            # Check if we just saved this problem to avoid duplicate processing
+            current_defect_code = defect.get('defectCode')
+            last_analyzed = st.session_state.get('plm_last_analyzed_code')
+
+            is_already_sent = (
+                st.session_state.get('plm_problem_query') and
+                st.session_state.plm_problem_query.get('defect_code') == current_defect_code and
+                not st.session_state.get('plm_problem_analyzed', True)  # Not yet analyzed
+            )
+
             if st.button(
                 "🚀 분석하기",
                 key=f"analyze_problem_{defect.get('defectCode')}",
-                help="Send this problem to Chat tab for analysis"
+                help="Send this problem to Chat tab for analysis",
+                disabled=is_already_sent
             ):
                 # Store problem content in session for Chat tab
                 st.session_state.plm_problem_query = {
@@ -289,28 +300,14 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
                     'timestamp': datetime.now().isoformat()
                 }
                 st.session_state.plm_problem_analyzed = False  # Reset analyzed flag
-                st.success("✅ Problem content saved!")
+                st.session_state.plm_last_analyzed_code = current_defect_code
+                st.session_state.navigate_to_chat = True  # Flag to navigate to chat tab
+                st.success("✅ Problem content saved! Navigating to Log Analysis tab...")
+                st.rerun()  # Rerun to apply navigation
 
-                # Create a clickable link to navigate to chat tab
-                st.markdown(
-                    """
-                    <div style="text-align: center; margin-top: 10px;">
-                        <a href="#로그-분석" style="
-                            display: inline-block;
-                            background-color: #FF6B6B;
-                            color: white;
-                            padding: 10px 20px;
-                            border-radius: 5px;
-                            text-decoration: none;
-                            font-weight: bold;
-                            cursor: pointer;
-                        ">
-                            🚀 로그 분석 탭으로 이동
-                        </a>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+            # Show status if already sent
+            if is_already_sent:
+                st.caption("⏳ Pending analysis", unsafe_allow_html=True)
 
     # Root cause
     with st.expander("🔍 Root Cause"):
