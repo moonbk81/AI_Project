@@ -994,13 +994,19 @@ def render_plm_comment():
 @st.fragment
 def _show_cached_results_in_fragment():
     """Show cached results with radio button selection"""
+    # Safety check
+    if not st.session_state.get('plm_quick_search_results'):
+        st.info("No cached results")
+        return
+
     st.subheader("🔍 Quick Search Results")
 
     col1, col2 = st.columns([3, 1])
     with col1:
         search_label = st.session_state.get('plm_quick_search_label', 'Unknown')
         status_cached = st.session_state.get('plm_quick_search_status', 'Unknown')
-        st.info(f"📌 Cached [{status_cached}] results for {search_label}: {len(st.session_state.plm_quick_search_results)} defect(s)")
+        results_count = len(st.session_state.plm_quick_search_results) if st.session_state.plm_quick_search_results else 0
+        st.info(f"📌 Cached [{status_cached}] results for {search_label}: {results_count} defect(s)")
     with col2:
         if st.button("Clear Cache", key="btn_clear_quick_search"):
             st.session_state.plm_quick_search_results = None
