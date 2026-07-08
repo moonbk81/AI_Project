@@ -1138,7 +1138,15 @@ def _show_cached_results_in_fragment():
             st.info("Select a defect to view files")
 
     st.divider()
-    st.markdown("**New Search**")
+    st.markdown("---")
+    st.subheader("🔄 New Search")
+
+    if st.button("🔄 Clear and Search Again", key="btn_new_search"):
+        st.session_state.plm_quick_search_results = None
+        st.session_state.plm_quick_search_division = None
+        st.session_state.plm_quick_search_label = None
+        st.session_state.plm_quick_search_status = None
+        st.rerun(scope="fragment")
 
 
 @st.fragment
