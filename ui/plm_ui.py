@@ -991,7 +991,6 @@ def render_plm_comment():
 
 
 
-@st.fragment
 def _show_cached_results_in_fragment():
     """Show cached results with radio button selection"""
     # Safety check
@@ -1149,36 +1148,21 @@ def _show_cached_results_in_fragment():
         st.rerun(scope="fragment")
 
 
-@st.fragment
-def _show_search_form():
-    """Display search form or cached results"""
-    # If cached results exist, show them
-    if st.session_state.get('plm_quick_search_results'):
-        _show_cached_results_in_fragment()
-        return
-
-    # Otherwise show search form
+def _show_search_input_form_fragment():
+    """Display search input form using radio buttons"""
     st.subheader("🔍 Quick Search")
 
-    col1, col2 = st.columns(2)
+    # Division fixed to Mobile
+    division = "Mobile"
+    division_code = "25"
 
-    with col1:
-        division = st.selectbox(
-            "Division",
-            options=["Mobile", "Network"],
-            format_func=lambda x: f"{x} ({'25' if x == 'Mobile' else '26'})",
-            key="quick_search_division"
-        )
-
-    with col2:
-        search_method = st.selectbox(
-            "Search By",
-            options=["Group", "User ID"],
-            index=0,
-            key="quick_search_method"
-        )
-
-    division_code = "25" if division == "Mobile" else "26"
+    search_method = st.radio(
+        "Search By",
+        options=["Group", "User ID"],
+        horizontal=True,
+        key="quick_search_method_radio",
+        index=0
+    )
 
     if search_method == "Group":
         config_manager = PLMConfigManager()
@@ -1188,11 +1172,11 @@ def _show_search_form():
             st.warning(f"No groups defined for {division}")
             return
 
-        selected_group_key = st.selectbox(
+        selected_group_key = st.radio(
             "Select Group",
             options=list(groups.keys()),
             format_func=lambda k: groups[k],
-            key="quick_search_group"
+            key="quick_search_group_radio"
         )
         owner_id = None
         group_key = selected_group_key
@@ -1207,10 +1191,11 @@ def _show_search_form():
 
     col1, col2 = st.columns(2)
     with col1:
-        status = st.selectbox(
+        status = st.radio(
             "Status",
             options=["Open", "Resolve", "Close"],
-            key="quick_search_status"
+            horizontal=True,
+            key="quick_search_status_radio"
         )
 
     if st.button("🔍 Search", key="btn_quick_search"):
@@ -1284,7 +1269,9 @@ def _show_search_form():
                         st.session_state.plm_quick_search_status = status
                         st.session_state.quick_search_select = 0
                         st.success(f"Loaded {len(defects)} {status} defect(s)")
-                        st.rerun(scope="fragment")
+                        st.divider()
+                        # Show results immediately after loading
+                        _show_cached_results_in_fragment()
                         return
                     else:
                         st.info(f"No defect details available")
@@ -1323,7 +1310,11 @@ def render_plm_section():
 
     with tab0:
         try:
-            _show_search_form()
+            # Check for cached results directly
+            if st.session_state.get('plm_quick_search_results'):
+                _show_cached_results_in_fragment()
+            else:
+                _show_search_input_form_fragment()
         except Exception as e:
             logger.error(f"Error in Quick Search: {e}", exc_info=True)
             st.error(f"Error: {e}")
