@@ -241,3 +241,4 @@ csv/rag_golden_eval_details_output.yaml
 *.json
 !/eval_golden_dataset.json
 !/tests/*.json
+*.xlsx

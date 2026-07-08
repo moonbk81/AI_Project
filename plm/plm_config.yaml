@@ -32,6 +32,22 @@ divisions:
   vd: "11"                                   # VD division
   liv: "14"                                  # LIV division
 
+# User groups for Quick Search
+user_groups:
+  # Mobile division teams
+  mobile_security:
+    name: "RIL2"
+    division: "25"
+    users:
+      - "j1jang"
+      - "bongki.moon"
+      - "sj.jin.jung"
+      - "sora1021.han"
+      - "shin_th"
+      - "hongs78.kim"
+      - "sh_tiger.kim"
+      - "hangyu.lee"
+
 # System codes for external systems
 system_codes:
   ai_project: "AI_ANALYSIS"                  # AI analysis system

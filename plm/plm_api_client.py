@@ -642,21 +642,36 @@ class PLMDefectAPIClient:
     def get_defect_list(
         self,
         division_code: str,
-        main_owner_id: str
+        main_owner_id: str,
+        status: str = "open",
+        reg_date: str = None,
+        search_type: str = "main"
     ) -> APIResponse:
         """
         Get defect list by main owner
 
         Args:
-            division_code: Division code
-            main_owner_id: Main owner's Knox ID
+            division_code: Division code (e.g., "25" for Mobile)
+            main_owner_id: Main owner's Knox ID (comma-separated for multiple)
+            status: Status filter (Draft, Open, resolve, close) - default "open"
+            reg_date: From register date of defect (format: YYYYMMDD) - if None, uses current year
+            search_type: Search criteria (REG: register, MAIN: main owner, SUB: sub owner) - default "main"
 
         Returns:
             APIResponse with defect list
         """
+        from datetime import datetime
+
+        # If regDate not provided, use Jan 1 of current year
+        if reg_date is None:
+            reg_date = datetime.now().strftime("%Y0101")
+
         param = {
             'divisionCode': division_code,
-            'mainOwnerId': main_owner_id
+            'mainOwnerId': main_owner_id,
+            'status': status,
+            'regDate': reg_date,
+            'searchType': search_type
         }
 
         return self._make_request(

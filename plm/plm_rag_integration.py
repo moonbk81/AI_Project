@@ -146,6 +146,45 @@ class PLMConfigManager:
             disable_proxy=disable_proxy
         )
 
+    def get_user_groups(self) -> Dict[str, Dict[str, Any]]:
+        """Get all user groups defined in configuration"""
+        return self.get('user_groups', {})
+
+    def get_group_users(self, group_key: str) -> List[str]:
+        """Get list of users in a specific group"""
+        group = self.get(f'user_groups.{group_key}')
+        if group and isinstance(group, dict):
+            return group.get('users', [])
+        return []
+
+    def get_group_name(self, group_key: str) -> str:
+        """Get display name of a group"""
+        group = self.get(f'user_groups.{group_key}')
+        if group and isinstance(group, dict):
+            return group.get('name', group_key)
+        return group_key
+
+    def get_group_division(self, group_key: str) -> str:
+        """Get division code for a group"""
+        group = self.get(f'user_groups.{group_key}')
+        if group and isinstance(group, dict):
+            return group.get('division', '25')
+        return '25'
+
+    def get_groups_by_division(self, division_code: str) -> Dict[str, str]:
+        """Get all groups for a specific division (key: group_key, value: group_name)"""
+        groups = self.get('user_groups', {})
+        result = {}
+        for group_key, group_info in groups.items():
+            if isinstance(group_info, dict) and group_info.get('division') == division_code:
+                result[group_key] = group_info.get('name', group_key)
+        return result
+
+    def get_users_for_search(self, group_key: str) -> List[str]:
+        """Get comma-separated user list for API search"""
+        users = self.get_group_users(group_key)
+        return users
+
 
 class PLMRAGIntegration:
     """Integrate PLM defect data with RAG system"""

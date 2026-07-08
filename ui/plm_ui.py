@@ -37,6 +37,10 @@ def _initialize_plm_session():
             st.session_state.plm_cache = {}
             st.session_state.plm_search_results = None
             st.session_state.plm_search_division = None
+            st.session_state.plm_quick_search_results = None
+            st.session_state.plm_quick_search_division = None
+            st.session_state.plm_quick_search_label = None
+            st.session_state.plm_quick_search_status = None
             st.session_state.plm_analysis_results = None
             st.session_state.plm_selected_defect_code = None
             st.session_state.plm_selected_division = None
@@ -985,6 +989,302 @@ def render_plm_comment():
                 st.error(f"Error: {e}")
 
 
+
+
+@st.fragment
+def _show_cached_results_in_fragment():
+    """Show cached results with radio button selection"""
+    st.subheader("🔍 Quick Search Results")
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_label = st.session_state.get('plm_quick_search_label', 'Unknown')
+        status_cached = st.session_state.get('plm_quick_search_status', 'Unknown')
+        st.info(f"📌 Cached [{status_cached}] results for {search_label}: {len(st.session_state.plm_quick_search_results)} defect(s)")
+    with col2:
+        if st.button("Clear Cache", key="btn_clear_quick_search"):
+            st.session_state.plm_quick_search_results = None
+            st.session_state.plm_quick_search_division = None
+            st.session_state.plm_quick_search_label = None
+            st.session_state.plm_quick_search_status = None
+            st.rerun(scope="fragment")
+            return
+
+    st.divider()
+
+    results = st.session_state.plm_quick_search_results
+    division_code = st.session_state.plm_quick_search_division
+
+    _render_defects_table(results)
+
+    st.divider()
+
+    defect_options = []
+    for defect in results:
+        code = defect.get('defectCode', 'Unknown')
+        title = defect.get('plmTitle', 'No title')[:40]
+        status = defect.get('plmStatus', '')
+        defect_options.append(f"{code} - {title} [{status}]")
+
+    # Use radio button instead of selectbox to avoid rerun issues
+    selected_display = st.radio(
+        "Select a defect to view details",
+        options=defect_options,
+        key="quick_search_select"
+    )
+
+    if selected_display:
+        selected_index = defect_options.index(selected_display)
+        selected_defect = results[selected_index]
+        st.divider()
+        st.subheader(f"📋 Details: {selected_defect.get('defectCode')}")
+        _render_defect_details(selected_defect, division_code)
+
+        # Show files section
+        st.divider()
+        st.subheader("📁 Attached Files")
+
+        defect_code = selected_defect.get('defectCode')
+        if defect_code:
+            if st.button(f"📂 Load Files for {defect_code}", key=f"load_files_{defect_code}"):
+                with st.spinner(f"Loading files for {defect_code}..."):
+                    try:
+                        client = _get_plm_client()
+                        if not client:
+                            st.error("PLM API not configured")
+                        else:
+                            response = client.get_file_list(
+                                division_code=division_code,
+                                defect_code=defect_code
+                            )
+
+                            if response.is_success():
+                                result = response.result if response.result else []
+                                files = []
+
+                                if isinstance(result, list) and len(result) > 0:
+                                    data = result[0].get('data', []) if isinstance(result[0], dict) else []
+                                    files = [f for f in data if f.get('title') and f.get('fileId')]
+                                elif isinstance(result, dict):
+                                    data = result.get('data', [])
+                                    files = [f for f in data if f.get('title') and f.get('fileId')]
+
+                                if files:
+                                    st.success(f"Found {len(files)} file(s)")
+
+                                    table_data = []
+                                    for file in files:
+                                        table_data.append({
+                                            'File': file.get('title', 'N/A'),
+                                            'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
+                                            'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
+                                        })
+
+                                    df = pd.DataFrame(table_data)
+                                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                                    # Download files
+                                    for file in files:
+                                        doc_id = file.get('docId')
+                                        file_id = file.get('fileId')
+                                        title = file.get('title', f'file_{file_id}')
+
+                                        col1, col2 = st.columns([3, 1])
+                                        with col1:
+                                            st.text(f"📄 {title}")
+                                        with col2:
+                                            if st.button("⬇️ Download", key=f"download_{file_id}"):
+                                                with st.spinner(f"Downloading {title}..."):
+                                                    download_result = client.download_file(
+                                                        division_code=division_code,
+                                                        doc_id=doc_id,
+                                                        title=title,
+                                                        file_id=file_id
+                                                    )
+
+                                                    if download_result.get('success'):
+                                                        file_content = download_result.get('data')
+                                                        file_size = download_result.get('size', 0)
+
+                                                        if file_content and file_size > 0:
+                                                            st.download_button(
+                                                                label=f"💾 {title}",
+                                                                data=file_content,
+                                                                file_name=title,
+                                                                key=f"save_{file_id}",
+                                                                use_container_width=True
+                                                            )
+                                                            st.success(f"✅ {file_size:,} bytes ready to download")
+                                                        else:
+                                                            st.warning(f"File content not available")
+                                                    else:
+                                                        error_msg = download_result.get('message', 'Unknown error')
+                                                        st.error(f"Download failed: {error_msg}")
+                                else:
+                                    st.info("No files attached to this defect")
+                            else:
+                                st.error(f"Failed to list files: {response.get_error_message()}")
+
+                    except Exception as e:
+                        logger.error(f"Error loading files: {e}", exc_info=True)
+                        st.error(f"Error: {e}")
+        else:
+            st.info("Select a defect to view files")
+
+    st.divider()
+    st.markdown("**New Search**")
+
+
+@st.fragment
+def _show_search_form():
+    """Display search form or cached results"""
+    # If cached results exist, show them
+    if st.session_state.get('plm_quick_search_results'):
+        _show_cached_results_in_fragment()
+        return
+
+    # Otherwise show search form
+    st.subheader("🔍 Quick Search")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        division = st.selectbox(
+            "Division",
+            options=["Mobile", "Network"],
+            format_func=lambda x: f"{x} ({'25' if x == 'Mobile' else '26'})",
+            key="quick_search_division"
+        )
+
+    with col2:
+        search_method = st.selectbox(
+            "Search By",
+            options=["Group", "User ID"],
+            index=0,
+            key="quick_search_method"
+        )
+
+    division_code = "25" if division == "Mobile" else "26"
+
+    if search_method == "Group":
+        config_manager = PLMConfigManager()
+        groups = config_manager.get_groups_by_division(division_code)
+
+        if not groups:
+            st.warning(f"No groups defined for {division}")
+            return
+
+        selected_group_key = st.selectbox(
+            "Select Group",
+            options=list(groups.keys()),
+            format_func=lambda k: groups[k],
+            key="quick_search_group"
+        )
+        owner_id = None
+        group_key = selected_group_key
+    else:
+        owner_id = st.text_input(
+            "User ID (Knox ID)",
+            placeholder="e.g., bongki.moon",
+            help="Enter your Knox ID to search your defects",
+            key="quick_search_user_id"
+        )
+        group_key = None
+
+    col1, col2 = st.columns(2)
+    with col1:
+        status = st.selectbox(
+            "Status",
+            options=["Open", "Resolve", "Close"],
+            key="quick_search_status"
+        )
+
+    if st.button("🔍 Search", key="btn_quick_search"):
+        if search_method == "Group":
+            if not group_key:
+                st.error("Please select a group")
+                return
+            config_manager = PLMConfigManager()
+            users = config_manager.get_users_for_search(group_key)
+            if not users:
+                st.error(f"No users found in selected group")
+                return
+            search_id = ",".join(users)
+            search_label = f"Group ({len(users)} users)"
+        else:
+            if not owner_id or not owner_id.strip():
+                st.error("Please enter a user ID")
+                return
+            search_id = owner_id.strip()
+            search_label = f"User: {owner_id.strip()}"
+
+        with st.spinner(f"Searching {status} defects for {search_label}..."):
+            try:
+                client = _get_plm_client()
+                if not client:
+                    st.error("PLM API not configured")
+                    return
+
+                response = client.get_defect_list(
+                    division_code=division_code,
+                    main_owner_id=search_id,
+                    status=status.lower(),
+                    search_type="main"
+                )
+
+                if not response.is_success():
+                    error_msg = response.get_error_message()
+                    st.error(f"Search failed: {error_msg}")
+                    return
+
+                result_data = response.result.get('resultData', [])
+                if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
+                    st.info(f"No defects found")
+                    return
+
+                defect_codes = result_data[0].get('defectCode', [])
+                if not defect_codes:
+                    st.info(f"No {status} defects found")
+                    return
+
+                codes_to_fetch = defect_codes[:50]
+                st.info(f"Found {len(defect_codes)} {status} defect code(s). Loading details...")
+                if len(defect_codes) > 50:
+                    st.warning(f"⚠️ Showing first 50 out of {len(defect_codes)} defects")
+
+                response_details = client.get_defect_info(
+                    division_code=division_code,
+                    defect_codes=codes_to_fetch
+                )
+
+                logger.info(f"API call: codes_to_fetch={len(codes_to_fetch)}, response codes={len(response_details.result.get('defectList', []))}")
+
+                if response_details.is_success():
+                    defects = response_details.result.get('defectList', [])
+                    logger.info(f"Loaded {len(defects)} defect details")
+
+                    if defects:
+                        st.session_state.plm_quick_search_results = defects
+                        st.session_state.plm_quick_search_division = division_code
+                        st.session_state.plm_quick_search_label = search_label
+                        st.session_state.plm_quick_search_status = status
+                        st.session_state.quick_search_select = 0
+                        st.success(f"Loaded {len(defects)} {status} defect(s)")
+                        st.rerun(scope="fragment")
+                        return
+                    else:
+                        st.info(f"No defect details available")
+                else:
+                    error_msg = response_details.get_error_message()
+                    st.error(f"Failed to load details: {error_msg}")
+
+            except PLMAPIException as e:
+                st.error(f"API Error: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}", exc_info=True)
+                st.error(f"Error: {e}")
+
+
 def render_plm_section():
     """
     Main PLM section renderer
@@ -1000,33 +1300,46 @@ def render_plm_section():
         return
 
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab1, tab2, tab3 = st.tabs([
+        "🔍 Quick Search",
         "🔍 검색 및 파일",
         "📊 분석",
-        "➕ 등록",
         "💬 댓글"
     ])
 
+    with tab0:
+        try:
+            _show_search_form()
+        except Exception as e:
+            logger.error(f"Error in Quick Search: {e}", exc_info=True)
+            st.error(f"Error: {e}")
+
     with tab1:
-        # Combined Search and Files tab
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.subheader("🔍 결함 검색")
-            render_plm_search()
-
-        with col2:
-            st.subheader("📁 파일 관리")
-            render_plm_files()
+        try:
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.subheader("🔍 결함 검색")
+                render_plm_search()
+            with col2:
+                st.subheader("📁 파일 관리")
+                render_plm_files()
+        except Exception as e:
+            logger.error(f"Error in Search & Files: {e}", exc_info=True)
+            st.error(f"Error: {e}")
 
     with tab2:
-        render_plm_analyze()
+        try:
+            render_plm_analyze()
+        except Exception as e:
+            logger.error(f"Error in Analysis: {e}", exc_info=True)
+            st.error(f"Error: {e}")
 
     with tab3:
-        render_plm_register()
-
-    with tab4:
-        render_plm_comment()
+        try:
+            render_plm_comment()
+        except Exception as e:
+            logger.error(f"Error in Comments: {e}", exc_info=True)
+            st.error(f"Error: {e}")
 
 
 def render_plm_sidebar_stats():
