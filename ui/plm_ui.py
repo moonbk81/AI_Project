@@ -1077,6 +1077,7 @@ def _show_cached_results_in_fragment():
             st.session_state.plm_quick_search_division = None
             st.session_state.plm_quick_search_label = None
             st.session_state.plm_quick_search_status = None
+            st.session_state.plm_quick_search_downloads = {}
             st.rerun()
             return
 
@@ -1153,7 +1154,10 @@ def _show_cached_results_in_fragment():
                                     df = pd.DataFrame(table_data)
                                     st.dataframe(df, use_container_width=True, hide_index=True)
 
-                                    # Download files
+                                    # Download files - use session state to avoid UI conflicts
+                                    if 'plm_quick_search_downloads' not in st.session_state:
+                                        st.session_state.plm_quick_search_downloads = {}
+
                                     for file in files:
                                         doc_id = file.get('docId')
                                         file_id = file.get('fileId')
@@ -1177,19 +1181,31 @@ def _show_cached_results_in_fragment():
                                                         file_size = download_result.get('size', 0)
 
                                                         if file_content and file_size > 0:
-                                                            st.download_button(
-                                                                label=f"💾 {title}",
-                                                                data=file_content,
-                                                                file_name=title,
-                                                                key=f"save_{file_id}",
-                                                                use_container_width=True
-                                                            )
-                                                            st.success(f"✅ {file_size:,} bytes ready to download")
+                                                            # Store in session state for display
+                                                            st.session_state.plm_quick_search_downloads[file_id] = {
+                                                                'content': file_content,
+                                                                'filename': title,
+                                                                'size': file_size
+                                                            }
+                                                            st.success(f"✅ {file_size:,} bytes - ready to save below")
                                                         else:
                                                             st.warning(f"File content not available")
                                                     else:
                                                         error_msg = download_result.get('message', 'Unknown error')
                                                         st.error(f"Download failed: {error_msg}")
+
+                                    # Show download buttons for downloaded files
+                                    if st.session_state.plm_quick_search_downloads:
+                                        st.divider()
+                                        st.subheader("💾 Save Downloaded Files")
+                                        for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
+                                            st.download_button(
+                                                label=f"💾 Save {file_info['filename']}",
+                                                data=file_info['content'],
+                                                file_name=file_info['filename'],
+                                                key=f"save_{file_id}",
+                                                use_container_width=True
+                                            )
                                 else:
                                     st.info("No files attached to this defect")
                             else:
@@ -1210,6 +1226,7 @@ def _show_cached_results_in_fragment():
         st.session_state.plm_quick_search_division = None
         st.session_state.plm_quick_search_label = None
         st.session_state.plm_quick_search_status = None
+        st.session_state.plm_quick_search_downloads = {}
         st.rerun()
 
 
