@@ -14,7 +14,6 @@ import sys
 import os
 import zipfile
 import io
-import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -1239,16 +1238,7 @@ def _show_search_input_form_fragment():
                     st.error(f"Search failed: {error_msg}")
                     return
 
-                # Debug: Show response structure
-                with st.expander("🔧 API Response Debug Info"):
-                    st.write(f"**Search params:** search_id={search_id}, status={status}")
-                    st.write(f"**Response result keys:** {response.result.keys() if response.result else 'None'}")
-                    st.write(f"**Full response result:** {json.dumps(response.result, indent=2, default=str)[:1000]}")
-
                 result_data = response.result.get('resultData', [])
-
-                with st.expander("🔧 ResultData Debug Info"):
-                    st.write(f"**resultData:** {json.dumps(result_data, indent=2, default=str)[:1000]}")
 
                 if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
                     st.info(f"No defects found")
@@ -1266,12 +1256,6 @@ def _show_search_input_form_fragment():
                         elif isinstance(codes, str):
                             # defectCode is a comma-separated string
                             defect_codes.extend([code.strip() for code in codes.split(',') if code.strip()])
-
-                with st.expander("🔧 Defect Code Extraction Debug"):
-                    st.write(f"**Result count:** {len(result_data)} owners")
-                    for i, result in enumerate(result_data):
-                        st.write(f"  Owner {i+1} ({result.get('ownerId')}): {result.get('defectCode')}")
-                    st.write(f"**Final defect_codes:** {defect_codes} (total: {len(defect_codes)})")
 
                 if not defect_codes:
                     st.info(f"No {status} defects found")
