@@ -1239,13 +1239,16 @@ def _show_search_input_form_fragment():
                     st.error(f"Search failed: {error_msg}")
                     return
 
-                # Debug: Log the actual response structure
-                logger.info(f"Search params - search_id: {search_id}, status: {status}, search_type: main")
-                logger.info(f"Full response result: {response.result}")
-                logger.info(f"Response keys: {response.result.keys() if response.result else 'None'}")
+                # Debug: Show response structure
+                with st.expander("🔧 API Response Debug Info"):
+                    st.write(f"**Search params:** search_id={search_id}, status={status}")
+                    st.write(f"**Response result keys:** {response.result.keys() if response.result else 'None'}")
+                    st.write(f"**Full response result:** {json.dumps(response.result, indent=2, default=str)[:1000]}")
 
                 result_data = response.result.get('resultData', [])
-                logger.info(f"resultData: {result_data}")
+
+                with st.expander("🔧 ResultData Debug Info"):
+                    st.write(f"**resultData:** {json.dumps(result_data, indent=2, default=str)[:1000]}")
 
                 if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
                     st.info(f"No defects found")
@@ -1253,12 +1256,13 @@ def _show_search_input_form_fragment():
 
                 # Extract defect codes from resultData
                 first_result = result_data[0] if result_data else {}
-                logger.info(f"first_result: {first_result}")
-                logger.info(f"first_result keys: {first_result.keys() if isinstance(first_result, dict) else 'not a dict'}")
 
                 # Try to get defectCode - it could be a list or string
                 defect_codes = first_result.get('defectCode', [])
-                logger.info(f"defectCode raw value: {defect_codes} (type: {type(defect_codes).__name__})")
+
+                with st.expander("🔧 Defect Code Extraction Debug"):
+                    st.write(f"**first_result:** {json.dumps(first_result, indent=2, default=str)[:1000]}")
+                    st.write(f"**defectCode raw value:** {defect_codes} (type: {type(defect_codes).__name__})")
 
                 if isinstance(defect_codes, str):
                     # If it's a comma-separated string, split it
@@ -1266,7 +1270,8 @@ def _show_search_input_form_fragment():
                 elif not isinstance(defect_codes, list):
                     defect_codes = []
 
-                logger.info(f"Final defect_codes: {defect_codes}")
+                with st.expander("🔧 Final Debug Info"):
+                    st.write(f"**Final defect_codes:** {defect_codes}")
 
                 if not defect_codes:
                     st.info(f"No {status} defects found")
