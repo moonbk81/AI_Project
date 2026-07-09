@@ -35,7 +35,7 @@ divisions:
 # User groups for Quick Search
 user_groups:
   # Mobile division teams
-  mobile_security:
+  cp_solution:
     name: "RIL2"
     division: "25"
     users:

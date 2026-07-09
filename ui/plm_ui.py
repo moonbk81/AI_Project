@@ -28,6 +28,63 @@ from plm.plm_api_client import DivisionCode, PLMAPIException
 logger = logging.getLogger(__name__)
 
 
+def _refine_problem_description(problem_content: str, use_llm: bool = True) -> str:
+    """
+    Refine problem description by extracting key points
+
+    Args:
+        problem_content: Original problem description
+        use_llm: Whether to use LLM for refinement (True) or simple extraction (False)
+
+    Returns:
+        Refined, concise problem description
+    """
+    if not problem_content or len(problem_content.strip()) == 0:
+        return problem_content
+
+    # If content is already short, return as is
+    if len(problem_content) < 200:
+        return problem_content
+
+    if use_llm:
+        try:
+            import ollama
+
+            system_prompt = """You are an expert at summarizing technical problem descriptions.
+Your task is to extract and refine the essential information from a problem description.
+
+Rules:
+1. Keep only the core problem statement
+2. Remove redundant details and unnecessary explanations
+3. Extract key technical details (error codes, symptoms, affected components)
+4. Make it concise but complete (aim for 2-3 sentences max)
+5. Use bullet points for multiple issues
+6. Return ONLY the refined description, no additional text"""
+
+            response = ollama.chat(
+                model="llama2",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Please refine this problem description:\n\n{problem_content}"}
+                ],
+                stream=False
+            )
+
+            refined = response['message']['content'].strip()
+            return refined if refined else problem_content
+
+        except Exception as e:
+            logger.warning(f"Failed to refine with LLM: {e}. Using fallback method.")
+            return _refine_problem_description(problem_content, use_llm=False)
+    else:
+        # Fallback: simple extraction method
+        lines = problem_content.split('\n')
+        # Filter empty lines and very short lines
+        meaningful_lines = [line.strip() for line in lines if len(line.strip()) > 10]
+        # Take first 3 meaningful lines
+        return '\n'.join(meaningful_lines[:3]) if meaningful_lines else problem_content
+
+
 def _initialize_plm_session():
     """Initialize Streamlit session state for PLM"""
     if 'plm_integration' not in st.session_state:
@@ -349,9 +406,14 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
                 help="Send this problem to Chat tab for analysis",
                 disabled=is_already_sent
             ):
-                # Store problem content in session for Chat tab
+                # Refine problem description before sending to Chat
+                with st.spinner("💡 Refining problem description..."):
+                    refined_content = _refine_problem_description(problem_content)
+
+                # Store refined problem content in session for Chat tab
                 st.session_state.plm_problem_query = {
-                    'content': problem_content,
+                    'content': refined_content,
+                    'original_content': problem_content,
                     'defect_code': defect.get('defectCode'),
                     'defect_title': defect.get('plmTitle', 'Unknown'),
                     'timestamp': datetime.now().isoformat()
@@ -359,7 +421,7 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
                 st.session_state.plm_problem_analyzed = False  # Reset analyzed flag
                 st.session_state.plm_last_analyzed_code = current_defect_code
                 st.session_state.navigate_to_chat = True  # Flag to navigate to chat tab
-                st.success("✅ Problem content saved! Navigating to Log Analysis tab...")
+                st.success("✅ Problem refined! Navigating to Log Analysis tab...")
                 st.rerun()  # Rerun to apply navigation
 
             # Show status if already sent

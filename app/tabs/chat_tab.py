@@ -166,8 +166,23 @@ def render_chat_tab(engine):
 
         st.divider()
 
-        # Auto-analyze the PLM problem
+        # Show refined vs original content comparison
         problem_content = plm_problem.get('content', '')
+        original_content = plm_problem.get('original_content', problem_content)
+
+        if original_content != problem_content:
+            with st.expander("📝 문제 내용 (정제된 내용 / 원본)", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**✅ 정제된 내용**")
+                    st.text(problem_content)
+                with col2:
+                    st.markdown("**📋 원본 내용**")
+                    st.text(original_content)
+                st.caption("💡 정제된 내용이 분석에 사용됩니다.")
+            st.divider()
+
+        # Auto-analyze the PLM problem
         auto_prompt = f"PLM 결함 분석:\n결함 코드: {plm_problem.get('defect_code')}\n\n**문제 내용:**\n{problem_content}\n\n위 문제에 대해 분석해 주세요."
 
         render_chat_interface(engine, key_suffix="main", show_input=False)
