@@ -14,6 +14,7 @@ import sys
 import os
 import zipfile
 import io
+import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -1236,12 +1237,25 @@ def _show_search_input_form_fragment():
                     st.error(f"Search failed: {error_msg}")
                     return
 
+                # Debug: Log the actual response structure
+                logger.info(f"get_defect_list response: {json.dumps(response.result, indent=2, default=str)[:500]}")
+
                 result_data = response.result.get('resultData', [])
                 if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
                     st.info(f"No defects found")
                     return
 
-                defect_codes = result_data[0].get('defectCode', [])
+                # Extract defect codes from resultData
+                first_result = result_data[0] if result_data else {}
+
+                # Try to get defectCode - it could be a list or string
+                defect_codes = first_result.get('defectCode', [])
+                if isinstance(defect_codes, str):
+                    # If it's a comma-separated string, split it
+                    defect_codes = [code.strip() for code in defect_codes.split(',') if code.strip()]
+                elif not isinstance(defect_codes, list):
+                    defect_codes = []
+
                 if not defect_codes:
                     st.info(f"No {status} defects found")
                     return
