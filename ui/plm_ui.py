@@ -50,6 +50,9 @@ def _refine_problem_description(problem_content: str, use_llm: bool = True) -> s
         try:
             import ollama
 
+            # Get the active model from session state
+            model_name = st.session_state.get('active_model', 'gemma4:12b')
+
             system_prompt = """You are an expert at summarizing technical problem descriptions.
 Your task is to extract and refine the essential information from a problem description.
 
@@ -62,7 +65,7 @@ Rules:
 6. Return ONLY the refined description, no additional text"""
 
             response = ollama.chat(
-                model="llama2",
+                model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Please refine this problem description:\n\n{problem_content}"}
