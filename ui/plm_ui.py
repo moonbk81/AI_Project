@@ -1254,24 +1254,24 @@ def _show_search_input_form_fragment():
                     st.info(f"No defects found")
                     return
 
-                # Extract defect codes from resultData
-                first_result = result_data[0] if result_data else {}
-
-                # Try to get defectCode - it could be a list or string
-                defect_codes = first_result.get('defectCode', [])
+                # Extract defect codes from ALL items in resultData
+                # API returns an array where each item contains defectCode(s) for one owner
+                defect_codes = []
+                for result in result_data:
+                    if isinstance(result, dict) and 'defectCode' in result:
+                        codes = result['defectCode']
+                        if isinstance(codes, list):
+                            # defectCode is already a list
+                            defect_codes.extend(codes)
+                        elif isinstance(codes, str):
+                            # defectCode is a comma-separated string
+                            defect_codes.extend([code.strip() for code in codes.split(',') if code.strip()])
 
                 with st.expander("🔧 Defect Code Extraction Debug"):
-                    st.write(f"**first_result:** {json.dumps(first_result, indent=2, default=str)[:1000]}")
-                    st.write(f"**defectCode raw value:** {defect_codes} (type: {type(defect_codes).__name__})")
-
-                if isinstance(defect_codes, str):
-                    # If it's a comma-separated string, split it
-                    defect_codes = [code.strip() for code in defect_codes.split(',') if code.strip()]
-                elif not isinstance(defect_codes, list):
-                    defect_codes = []
-
-                with st.expander("🔧 Final Debug Info"):
-                    st.write(f"**Final defect_codes:** {defect_codes}")
+                    st.write(f"**Result count:** {len(result_data)} owners")
+                    for i, result in enumerate(result_data):
+                        st.write(f"  Owner {i+1} ({result.get('ownerId')}): {result.get('defectCode')}")
+                    st.write(f"**Final defect_codes:** {defect_codes} (total: {len(defect_codes)})")
 
                 if not defect_codes:
                     st.info(f"No {status} defects found")
