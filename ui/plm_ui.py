@@ -1012,7 +1012,7 @@ def _show_cached_results_in_fragment():
             st.session_state.plm_quick_search_division = None
             st.session_state.plm_quick_search_label = None
             st.session_state.plm_quick_search_status = None
-            st.rerun(scope="fragment")
+            st.rerun()
             return
 
     st.divider()
@@ -1145,7 +1145,7 @@ def _show_cached_results_in_fragment():
         st.session_state.plm_quick_search_division = None
         st.session_state.plm_quick_search_label = None
         st.session_state.plm_quick_search_status = None
-        st.rerun(scope="fragment")
+        st.rerun()
 
 
 def _show_search_input_form_fragment():
