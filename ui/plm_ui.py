@@ -1158,6 +1158,7 @@ def _show_cached_results_in_fragment():
                                     if 'plm_quick_search_downloads' not in st.session_state:
                                         st.session_state.plm_quick_search_downloads = {}
 
+                                    st.subheader("📥 Download Files")
                                     for file in files:
                                         doc_id = file.get('docId')
                                         file_id = file.get('fileId')
@@ -1167,34 +1168,41 @@ def _show_cached_results_in_fragment():
                                         with col1:
                                             st.text(f"📄 {title}")
                                         with col2:
-                                            if st.button("⬇️ Download", key=f"download_{file_id}"):
-                                                with st.spinner(f"Downloading {title}..."):
-                                                    download_result = client.download_file(
-                                                        division_code=division_code,
-                                                        doc_id=doc_id,
-                                                        title=title,
-                                                        file_id=file_id
-                                                    )
+                                            # Check if already downloaded
+                                            is_downloaded = file_id in st.session_state.plm_quick_search_downloads
 
-                                                    if download_result.get('success'):
-                                                        file_content = download_result.get('data')
-                                                        file_size = download_result.get('size', 0)
+                                            if st.button("⬇️ Download", key=f"download_{file_id}", disabled=is_downloaded):
+                                                # Download and store in session state
+                                                download_result = client.download_file(
+                                                    division_code=division_code,
+                                                    doc_id=doc_id,
+                                                    title=title,
+                                                    file_id=file_id
+                                                )
 
-                                                        if file_content and file_size > 0:
-                                                            # Store in session state for display
-                                                            st.session_state.plm_quick_search_downloads[file_id] = {
-                                                                'content': file_content,
-                                                                'filename': title,
-                                                                'size': file_size
-                                                            }
-                                                            st.success(f"✅ {file_size:,} bytes - ready to save below")
-                                                        else:
-                                                            st.warning(f"File content not available")
+                                                if download_result.get('success'):
+                                                    file_content = download_result.get('data')
+                                                    file_size = download_result.get('size', 0)
+
+                                                    if file_content and file_size > 0:
+                                                        # Store in session state for display
+                                                        st.session_state.plm_quick_search_downloads[file_id] = {
+                                                            'content': file_content,
+                                                            'filename': title,
+                                                            'size': file_size
+                                                        }
+                                                        st.rerun()  # Rerun to show success message and download button
                                                     else:
-                                                        error_msg = download_result.get('message', 'Unknown error')
-                                                        st.error(f"Download failed: {error_msg}")
+                                                        st.warning(f"File content not available")
+                                                else:
+                                                    error_msg = download_result.get('message', 'Unknown error')
+                                                    st.error(f"Download failed: {error_msg}")
 
-                                    # Show download buttons for downloaded files
+                                            # Show download status
+                                            if is_downloaded:
+                                                st.caption("✅ Downloaded")
+
+                                    # Show download buttons for downloaded files (OUTSIDE the file loop)
                                     if st.session_state.plm_quick_search_downloads:
                                         st.divider()
                                         st.subheader("💾 Save Downloaded Files")
