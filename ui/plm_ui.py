@@ -1116,112 +1116,136 @@ def _show_cached_results_in_fragment():
         st.subheader("📁 Attached Files")
 
         defect_code = selected_defect.get('defectCode')
+
+        # Initialize file storage in session state
+        if 'plm_quick_search_files' not in st.session_state:
+            st.session_state.plm_quick_search_files = {}
+        if 'plm_quick_search_downloads' not in st.session_state:
+            st.session_state.plm_quick_search_downloads = {}
+
         if defect_code:
-            if st.button(f"📂 Load Files for {defect_code}", key=f"load_files_{defect_code}"):
-                with st.spinner(f"Loading files for {defect_code}..."):
+            # Check if we need to load files for this defect
+            should_load = defect_code not in st.session_state.plm_quick_search_files
+
+            if should_load:
+                if st.button(f"📂 Load Files for {defect_code}", key=f"load_files_{defect_code}"):
                     try:
                         client = _get_plm_client()
                         if not client:
                             st.error("PLM API not configured")
                         else:
-                            response = client.get_file_list(
-                                division_code=division_code,
-                                defect_code=defect_code
-                            )
+                            with st.spinner(f"Loading files for {defect_code}..."):
+                                response = client.get_file_list(
+                                    division_code=division_code,
+                                    defect_code=defect_code
+                                )
 
-                            if response.is_success():
-                                result = response.result if response.result else []
-                                files = []
+                                if response.is_success():
+                                    result = response.result if response.result else []
+                                    files = []
 
-                                if isinstance(result, list) and len(result) > 0:
-                                    data = result[0].get('data', []) if isinstance(result[0], dict) else []
-                                    files = [f for f in data if f.get('title') and f.get('fileId')]
-                                elif isinstance(result, dict):
-                                    data = result.get('data', [])
-                                    files = [f for f in data if f.get('title') and f.get('fileId')]
+                                    if isinstance(result, list) and len(result) > 0:
+                                        data = result[0].get('data', []) if isinstance(result[0], dict) else []
+                                        files = [f for f in data if f.get('title') and f.get('fileId')]
+                                    elif isinstance(result, dict):
+                                        data = result.get('data', [])
+                                        files = [f for f in data if f.get('title') and f.get('fileId')]
 
-                                if files:
-                                    st.success(f"Found {len(files)} file(s)")
-
-                                    table_data = []
-                                    for file in files:
-                                        table_data.append({
-                                            'File': file.get('title', 'N/A'),
-                                            'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
-                                            'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
-                                        })
-
-                                    df = pd.DataFrame(table_data)
-                                    st.dataframe(df, use_container_width=True, hide_index=True)
-
-                                    # Download files - use session state to avoid UI conflicts
-                                    if 'plm_quick_search_downloads' not in st.session_state:
-                                        st.session_state.plm_quick_search_downloads = {}
-
-                                    st.subheader("📥 Download Files")
-                                    for file in files:
-                                        doc_id = file.get('docId')
-                                        file_id = file.get('fileId')
-                                        title = file.get('title', f'file_{file_id}')
-
-                                        col1, col2 = st.columns([3, 1])
-                                        with col1:
-                                            st.text(f"📄 {title}")
-                                        with col2:
-                                            # Check if already downloaded
-                                            is_downloaded = file_id in st.session_state.plm_quick_search_downloads
-
-                                            if st.button("⬇️ Download", key=f"download_{file_id}", disabled=is_downloaded):
-                                                # Download and store in session state
-                                                download_result = client.download_file(
-                                                    division_code=division_code,
-                                                    doc_id=doc_id,
-                                                    title=title,
-                                                    file_id=file_id
-                                                )
-
-                                                if download_result.get('success'):
-                                                    file_content = download_result.get('data')
-                                                    file_size = download_result.get('size', 0)
-
-                                                    if file_content and file_size > 0:
-                                                        # Store in session state for display
-                                                        st.session_state.plm_quick_search_downloads[file_id] = {
-                                                            'content': file_content,
-                                                            'filename': title,
-                                                            'size': file_size
-                                                        }
-                                                        st.rerun()  # Rerun to show success message and download button
-                                                    else:
-                                                        st.warning(f"File content not available")
-                                                else:
-                                                    error_msg = download_result.get('message', 'Unknown error')
-                                                    st.error(f"Download failed: {error_msg}")
-
-                                            # Show download status
-                                            if is_downloaded:
-                                                st.caption("✅ Downloaded")
-
-                                    # Show download buttons for downloaded files (OUTSIDE the file loop)
-                                    if st.session_state.plm_quick_search_downloads:
-                                        st.divider()
-                                        st.subheader("💾 Save Downloaded Files")
-                                        for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
-                                            st.download_button(
-                                                label=f"💾 Save {file_info['filename']}",
-                                                data=file_info['content'],
-                                                file_name=file_info['filename'],
-                                                key=f"save_{file_id}",
-                                                use_container_width=True
-                                            )
+                                    # Store files in session state
+                                    st.session_state.plm_quick_search_files[defect_code] = {
+                                        'files': files,
+                                        'division_code': division_code,
+                                        'defect_code': defect_code
+                                    }
+                                    st.rerun()
                                 else:
-                                    st.info("No files attached to this defect")
-                            else:
-                                st.error(f"Failed to list files: {response.get_error_message()}")
+                                    st.error(f"Failed to list files: {response.get_error_message()}")
 
                     except Exception as e:
                         logger.error(f"Error loading files: {e}", exc_info=True)
                         st.error(f"Error: {e}")
+
+            # Display files if loaded
+            if defect_code in st.session_state.plm_quick_search_files:
+                file_data = st.session_state.plm_quick_search_files[defect_code]
+                files = file_data.get('files', [])
+
+                if files:
+                    st.success(f"Found {len(files)} file(s)")
+
+                    table_data = []
+                    for file in files:
+                        table_data.append({
+                            'File': file.get('title', 'N/A'),
+                            'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
+                            'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
+                        })
+
+                    df = pd.DataFrame(table_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    st.subheader("📥 Download Files")
+                    for file in files:
+                        doc_id = file.get('docId')
+                        file_id = file.get('fileId')
+                        title = file.get('title', f'file_{file_id}')
+
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.text(f"📄 {title}")
+                        with col2:
+                            # Check if already downloaded
+                            is_downloaded = file_id in st.session_state.plm_quick_search_downloads
+
+                            if st.button("⬇️ Download", key=f"download_{file_id}", disabled=is_downloaded):
+                                # Download and store in session state
+                                client = _get_plm_client()
+                                download_result = client.download_file(
+                                    division_code=division_code,
+                                    doc_id=doc_id,
+                                    title=title,
+                                    file_id=file_id
+                                )
+
+                                if download_result.get('success'):
+                                    file_content = download_result.get('data')
+                                    file_size = download_result.get('size', 0)
+
+                                    if file_content and file_size > 0:
+                                        # Store in session state for display
+                                        st.session_state.plm_quick_search_downloads[file_id] = {
+                                            'content': file_content,
+                                            'filename': title,
+                                            'size': file_size
+                                        }
+                                        st.rerun()
+                                    else:
+                                        st.warning(f"File content not available")
+                                else:
+                                    error_msg = download_result.get('message', 'Unknown error')
+                                    st.error(f"Download failed: {error_msg}")
+
+                            # Show download status
+                            if is_downloaded:
+                                st.caption("✅ Downloaded")
+
+                    # Show download buttons for downloaded files
+                    if st.session_state.plm_quick_search_downloads:
+                        st.divider()
+                        st.subheader("💾 Save Downloaded Files")
+                        for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
+                            st.download_button(
+                                label=f"💾 Save {file_info['filename']}",
+                                data=file_info['content'],
+                                file_name=file_info['filename'],
+                                key=f"save_{file_id}",
+                                use_container_width=True
+                            )
+
+                    # Clear button
+                    if st.button("🔄 Reload Files", key=f"reload_files_{defect_code}"):
+                        st.session_state.plm_quick_search_files[defect_code] = None
+                        st.rerun()
         else:
             st.info("Select a defect to view files")
 
