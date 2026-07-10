@@ -240,6 +240,7 @@ class CommentRegistrationRequest:
     externalDefectId: Optional[str] = None
     defectCommentId: Optional[str] = None
     isCommentEditorYn: Optional[str] = None
+    docAttachedYn: str = "N"  # Document attached: "N" for no attachment
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, excluding None values"""

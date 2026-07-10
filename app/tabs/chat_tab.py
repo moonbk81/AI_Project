@@ -137,21 +137,6 @@ def _render_chat_answer(engine, prompt):
             st.session_state.last_ids = ids
             st.session_state.last_metas = metas
 
-            # Show PLM Comment button directly after answer
-            active_defect = st.session_state.get('plm_active_defect_code')
-            if active_defect:
-                st.divider()
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.caption(f"📌 활성 결함: `{active_defect}`")
-                with col2:
-                    if st.button("📝 Comment로 등록", key="plm_comment_button"):
-                        st.session_state.plm_current_analysis_result = {
-                            'answer': answer,
-                            'from_chat': True
-                        }
-                        st.info("💬 PLM 결함 관리 > 댓글 탭에서 등록할 수 있습니다")
-
     st.session_state.messages.append({
         "role": "assistant",
         "content": answer,
@@ -243,3 +228,64 @@ def render_chat_tab(engine):
 
     if prompt:
         _render_chat_answer(engine, prompt)
+
+    # PLM Comment registration form (outside chat_message)
+    if st.session_state.messages and st.session_state.messages[-1].get("role") == "assistant":
+        last_answer = st.session_state.messages[-1].get("content", "")
+        active_defect = st.session_state.get('plm_active_defect_code')
+
+        if active_defect and last_answer:
+            st.divider()
+            st.caption(f"📌 활성 결함: `{active_defect}`")
+
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                knox_id = st.text_input("Knox ID", key="plm_knox_id", label_visibility="collapsed")
+            with col2:
+                system_code = st.text_input("System Code", value="AI_ANALYSIS", key="plm_system_code", label_visibility="collapsed")
+            with col3:
+                if st.button("📝 등록", use_container_width=True, key="plm_register_btn"):
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info("=== PLM Comment 등록 시작 ===")
+                    logger.info(f"Button clicked - Knox ID: {knox_id}")
+
+                    if not knox_id:
+                        st.error("Knox ID는 필수입니다")
+                    else:
+                        try:
+                            from plm.plm_api_client import CommentRegistrationRequest
+                            from ui.plm_ui import _format_analysis_as_comment
+
+                            comment_text = _format_analysis_as_comment({
+                                'answer': last_answer,
+                                'from_chat': True
+                            })
+
+                            division_code = st.session_state.get('plm_active_division')
+                            logger.info(f"Defect: {active_defect}, Division: {division_code}")
+
+                            request = CommentRegistrationRequest(
+                                divisionCode=division_code,
+                                systemCode=system_code,
+                                defectCode=active_defect,
+                                defectComment=comment_text,
+                                createUser=knox_id,
+                                changeType="S",
+                                docAttachedYn="N"
+                            )
+
+                            with st.spinner("PLM에 등록 중..."):
+                                logger.info("Calling API...")
+                                response = st.session_state.plm_integration.client.register_comment(request)
+
+                                logger.info(f"Response: {response.is_success()}")
+
+                                if response.is_success():
+                                    st.success("✅ PLM Comment 등록 완료!")
+                                else:
+                                    error_msg = response.get_error_message()
+                                    st.error(f"❌ 실패: {error_msg}")
+                        except Exception as e:
+                            logger.exception(f"Exception: {e}")
+                            st.error(f"❌ 오류: {str(e)}")

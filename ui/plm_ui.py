@@ -118,6 +118,15 @@ def _initialize_plm_session():
             st.session_state.plm_active_defect_code = None  # Currently active PLM defect
             st.session_state.plm_active_division = None  # Currently active division
             st.session_state.plm_current_analysis_result = None  # Current analysis result to be posted
+
+            # Pre-load groups for Quick Search (Mobile division - 25)
+            try:
+                config_manager = PLMConfigManager()
+                st.session_state.plm_groups_cache = config_manager.get_groups_by_division("25")
+                logger.info(f"Groups pre-loaded: {len(st.session_state.plm_groups_cache)} groups")
+            except Exception as e:
+                logger.warning(f"Failed to pre-load groups: {e}")
+                st.session_state.plm_groups_cache = {}
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
@@ -1170,6 +1179,8 @@ def render_plm_comment():
         st.info(f"📌 현재 결함: **{default_code}**")
         if analysis_result:
             st.success("✅ 분석 결과가 준비되어 있습니다")
+        else:
+            st.caption("분석 결과 없음 (직접 입력해주세요)")
 
     # Setup form with pre-filled values before form creation
     col1, col2 = st.columns(2)
@@ -1195,6 +1206,12 @@ def render_plm_comment():
         )
         defect_code = defect_code_input if defect_code_input else default_code
 
+    # Pre-fill comment if analysis result is available (outside form)
+    default_comment = ""
+    if analysis_result:
+        default_comment = _format_analysis_as_comment(analysis_result)
+        st.info(f"✅ Chat 분석 결과가 로드되었습니다")
+
     with st.form("add_comment"):
         col1, col2 = st.columns(2)
 
@@ -1202,11 +1219,6 @@ def render_plm_comment():
             system_code = st.text_input("System Code", value="AI_ANALYSIS", key="comment_system")
         with col2:
             create_user = st.text_input("Your Knox ID", key="comment_user")
-
-        # Pre-fill comment if analysis result is available
-        default_comment = ""
-        if analysis_result:
-            default_comment = _format_analysis_as_comment(analysis_result)
 
         comment = st.text_area(
             "Comment",
@@ -1574,39 +1586,7 @@ def _show_search_input_form_fragment():
     division = "Mobile"
     division_code = "25"
 
-    search_method = st.radio(
-        "Search By",
-        options=["Group", "User ID"],
-        horizontal=True,
-        key="quick_search_method_radio",
-        index=0
-    )
-
-    if search_method == "Group":
-        config_manager = PLMConfigManager()
-        groups = config_manager.get_groups_by_division(division_code)
-
-        if not groups:
-            st.warning(f"No groups defined for {division}")
-            return
-
-        selected_group_key = st.radio(
-            "Select Group",
-            options=list(groups.keys()),
-            format_func=lambda k: groups[k],
-            key="quick_search_group_radio"
-        )
-        owner_id = None
-        group_key = selected_group_key
-    else:
-        owner_id = st.text_input(
-            "User ID (Knox ID)",
-            placeholder="e.g., bongki.moon",
-            help="Enter your Knox ID to search your defects",
-            key="quick_search_user_id"
-        )
-        group_key = None
-
+    # Status first (no dependencies, faster)
     col1, col2 = st.columns(2)
     with col1:
         status = st.radio(
@@ -1615,6 +1595,49 @@ def _show_search_input_form_fragment():
             horizontal=True,
             key="quick_search_status_radio"
         )
+
+    # Search method (with dependency: Group needs API cache)
+    # Initialize session state if not present
+    if 'quick_search_method' not in st.session_state:
+        st.session_state.quick_search_method = "Group"
+
+    search_method = st.radio(
+        "Search By",
+        options=["Group", "User ID"],
+        horizontal=True,
+        key="quick_search_method_select",
+        index=0 if st.session_state.quick_search_method == "Group" else 1,
+        on_change=lambda: st.session_state.update({'quick_search_method': st.session_state.quick_search_method_select})
+    )
+
+    # Update session state with current selection
+    st.session_state.quick_search_method = search_method
+
+    with st.container():
+        if search_method == "Group":
+            # Use pre-loaded groups cache (loaded during initialization)
+            groups = st.session_state.get('plm_groups_cache', {})
+
+            if not groups:
+                st.warning(f"No groups defined for {division}")
+                return
+
+            selected_group_key = st.radio(
+                "Select Group",
+                options=list(groups.keys()),
+                format_func=lambda k: groups[k],
+                key="quick_search_group_radio"
+            )
+            owner_id = None
+            group_key = selected_group_key
+        else:
+            owner_id = st.text_input(
+                "User ID (Knox ID)",
+                placeholder="e.g., bongki.moon",
+                help="Enter your Knox ID to search your defects",
+                key="quick_search_user_id"
+            )
+            group_key = None
 
     if st.button("🔍 Search", key="btn_quick_search"):
         if search_method == "Group":
@@ -1944,4 +1967,6 @@ __all__ = [
     'render_analysis_queue',
     'render_plm_sidebar_stats',
     '_initialize_plm_session',
+    '_get_plm_client',
+    '_format_analysis_as_comment',
 ]
