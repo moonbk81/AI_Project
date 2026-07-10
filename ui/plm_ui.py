@@ -24,6 +24,12 @@ from plm.plm_rag_integration import (
     PLMConfigManager
 )
 from plm.plm_api_client import DivisionCode, PLMAPIException
+from ui.plm_auto_download import (
+    LogFileExtractor,
+    LogAnalysisPipeline,
+    AutoDownloadManager,
+    PLMAutoDownloadFlow
+)
 
 logger = logging.getLogger(__name__)
 
@@ -790,16 +796,16 @@ def render_plm_files():
                             except Exception as e:
                                 st.error(f"Error: {e}")
 
-            # Show download buttons for cached files
+            # Auto-process downloaded files
             if st.session_state.plm_download_data:
                 st.divider()
-                st.subheader("💾 Save Downloaded Files")
+                st.subheader("💾 Downloaded Files - Auto Processing")
                 st.info(
                     f"📥 **{len(st.session_state.plm_download_data)} file(s) ready**\n\n"
-                    f"**How to download:**\n"
-                    f"1. Click the 💾 button below\n"
-                    f"2. Browser will automatically save to: **Downloads folder** (`~/Downloads` or `C:\\Users\\{{username}}\\Downloads`)\n"
-                    f"3. Check your Downloads folder for the file"
+                    f"**Auto-processing enabled:**\n"
+                    f"• Non-ZIP files → Auto-saved to Downloads folder\n"
+                    f"• ZIP files → Auto-extract log files\n"
+                    f"• Log files → Auto-added to analysis pipeline"
                 )
 
                 for file_id, (file_content, file_name) in st.session_state.plm_download_data.items():
@@ -809,24 +815,48 @@ def render_plm_files():
 
                         col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
-                            st.download_button(
-                                label=f"💾 {file_name} ({file_size_kb:.1f} KB)",
-                                data=file_content,
-                                file_name=file_name,
-                                key=f"save_{file_id}",
-                                use_container_width=True
-                            )
+                            st.text(f"📄 {file_name} ({file_size_kb:.1f} KB)")
+
+                        # Auto-download button
                         with col2:
-                            st.caption(f"{len(file_content)} bytes")
+                            if st.button(
+                                "⬇️ Auto-Download",
+                                key=f"auto_download_{file_id}",
+                                help="Auto-save to Downloads folder and process"
+                            ):
+                                with st.spinner(f"Processing {file_name}..."):
+                                    result = PLMAutoDownloadFlow.process_downloaded_file(
+                                        filename=file_name,
+                                        file_content=file_content,
+                                        source_defect=st.session_state.get('plm_selected_defect_code'),
+                                        auto_save=True,
+                                        auto_extract_logs=True
+                                    )
+
+                                    # Show processing results
+                                    if result['success']:
+                                        st.success(f"✅ Processing completed")
+                                        for msg in result['messages']:
+                                            st.info(msg)
+
+                                        # Show extracted logs if any
+                                        if result['extracted_logs']:
+                                            st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
+                                            for log_name in result['extracted_logs']:
+                                                st.caption(f"  • {log_name}")
+                                    else:
+                                        st.warning(f"⚠️ Processing had issues")
+                                        for msg in result['messages']:
+                                            st.warning(msg)
 
                         # If ZIP file, add button to open and view contents
                         with col3:
                             if is_zip:
-                                if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents (memory efficient)"):
+                                if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents"):
                                     zip_file_list = _list_zip_contents(file_content)
                                     if zip_file_list:
-                                        st.session_state.plm_zip_file_data = file_content  # Store ZIP binary
-                                        st.session_state.plm_zip_file_list = zip_file_list  # Store metadata only
+                                        st.session_state.plm_zip_file_data = file_content
+                                        st.session_state.plm_zip_file_list = zip_file_list
                                         st.success(f"✅ Listed {len(zip_file_list)} file(s)")
                                     else:
                                         st.error("Failed to list ZIP or ZIP is empty")
@@ -947,6 +977,112 @@ def render_plm_files():
                 st.error(f"Error: {e}")
                 with st.expander("📋 Debug Info"):
                     st.code(str(e), language="text")
+
+
+def render_analysis_queue():
+    """
+    Render the log analysis queue dashboard
+
+    Shows extracted log files waiting for analysis and their status
+    """
+    st.subheader("📋 Analysis Queue Status")
+
+    # Get queue status
+    queue_status = LogAnalysisPipeline.get_queue_status()
+    queue = queue_status.get('queue', [])
+
+    # Display metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Total", queue_status['total'])
+    with col2:
+        st.metric("Pending", queue_status['pending'], delta="⏳")
+    with col3:
+        st.metric("Processing", queue_status['processing'], delta="🔄")
+    with col4:
+        st.metric("Completed", queue_status['completed'], delta="✅")
+    with col5:
+        st.metric("Failed", queue_status['failed'], delta="❌")
+
+    st.divider()
+
+    if queue:
+        st.subheader("📁 Queued Log Files")
+
+        # Create table view
+        table_data = []
+        for idx, item in enumerate(queue, 1):
+            status_icon = {
+                'pending': '⏳',
+                'processing': '🔄',
+                'completed': '✅',
+                'failed': '❌'
+            }.get(item.get('status'), '?')
+
+            table_data.append({
+                '#': idx,
+                'Status': f"{status_icon} {item.get('status', 'unknown')}",
+                'Filename': item.get('filename', 'Unknown'),
+                'Size (KB)': f"{item.get('size', 0) / 1024:.1f}",
+                'Source': item.get('source_defect', '-'),
+                'Added': item.get('added_at', '')[-19:-9]  # YYYY-MM-DD
+            })
+
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # Detail view
+        if queue:
+            st.subheader("📄 Log File Details")
+            selected_idx = st.selectbox(
+                "Select a log file to view details",
+                options=range(len(queue)),
+                format_func=lambda i: f"{queue[i].get('filename', f'File {i}')} ({queue[i].get('status', 'unknown')})"
+            )
+
+            if selected_idx is not None and selected_idx < len(queue):
+                item = queue[selected_idx]
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Filename:**", item.get('filename'))
+                    st.write("**Size:**", f"{item.get('size', 0) / 1024:.1f} KB")
+                    st.write("**Status:**", item.get('status', 'unknown'))
+                with col2:
+                    st.write("**Added at:**", item.get('added_at', 'Unknown'))
+                    st.write("**Source Defect:**", item.get('source_defect', '-'))
+
+                # Show file content preview
+                with st.expander("📋 Content Preview (first 2000 chars)"):
+                    content = item.get('content', b'')
+                    if isinstance(content, bytes):
+                        try:
+                            preview = content[:2000].decode('utf-8', errors='ignore')
+                        except:
+                            preview = "[Binary content - cannot display]"
+                    else:
+                        preview = str(content)[:2000]
+
+                    st.text(preview)
+
+        # Queue management
+        st.divider()
+        st.subheader("⚙️ Queue Management")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ Clear Queue", key="btn_clear_queue"):
+                LogAnalysisPipeline.clear_queue()
+                st.success("Queue cleared")
+                st.rerun()
+
+        with col2:
+            st.caption("Clear all pending files from the queue")
+
+    else:
+        st.info("📭 No log files in the queue. Files will appear here after extraction from ZIP archives.")
 
 
 def render_plm_comment():
@@ -1229,18 +1365,74 @@ def _show_cached_results_in_fragment():
                             if is_downloaded:
                                 st.caption("✅ Downloaded")
 
-                    # Show download buttons for downloaded files
+                    # Auto-process downloaded files
                     if st.session_state.plm_quick_search_downloads:
                         st.divider()
-                        st.subheader("💾 Save Downloaded Files")
+                        st.subheader("💾 Downloaded Files - Auto Processing")
+
+                        # Show auto-save status and analysis queue info
+                        st.info(
+                            "📥 **Auto-processing enabled:**\n"
+                            "• Non-ZIP files → Auto-saved to Downloads folder\n"
+                            "• ZIP files → Auto-extract log files\n"
+                            "• Log files → Auto-added to analysis pipeline\n"
+                        )
+
                         for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
-                            st.download_button(
-                                label=f"💾 Save {file_info['filename']}",
-                                data=file_info['content'],
-                                file_name=file_info['filename'],
-                                key=f"save_{file_id}",
-                                use_container_width=True
-                            )
+                            filename = file_info['filename']
+                            content = file_info['content']
+                            file_size_kb = len(content) / 1024
+
+                            col1, col2, col3 = st.columns([2, 1, 1])
+                            with col1:
+                                st.text(f"📄 {filename} ({file_size_kb:.1f} KB)")
+
+                            with col2:
+                                # Auto-download button
+                                if st.button(
+                                    "⬇️ Auto-Download",
+                                    key=f"auto_download_{file_id}",
+                                    help="Auto-save to Downloads folder and process"
+                                ):
+                                    with st.spinner(f"Processing {filename}..."):
+                                        result = PLMAutoDownloadFlow.process_downloaded_file(
+                                            filename=filename,
+                                            file_content=content,
+                                            source_defect=defect_code,
+                                            auto_save=True,
+                                            auto_extract_logs=True
+                                        )
+
+                                        # Show processing results
+                                        if result['success']:
+                                            st.success(f"✅ Processing completed")
+                                            for msg in result['messages']:
+                                                st.info(msg)
+
+                                            # Show extracted logs if any
+                                            if result['extracted_logs']:
+                                                st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
+                                                for log_name in result['extracted_logs']:
+                                                    st.caption(f"  • {log_name}")
+                                        else:
+                                            st.warning(f"⚠️ Processing had issues")
+                                            for msg in result['messages']:
+                                                st.warning(msg)
+
+                            with col3:
+                                # Direct save button (for users who prefer manual control)
+                                if st.button(
+                                    "💾 Save",
+                                    key=f"manual_save_{file_id}",
+                                    help="Manually save to Downloads"
+                                ):
+                                    success, path_or_error = AutoDownloadManager.save_to_downloads(
+                                        filename, content
+                                    )
+                                    if success:
+                                        st.success(f"✅ Saved to: {path_or_error}")
+                                    else:
+                                        st.error(f"❌ Failed: {path_or_error}")
 
                     # Clear button
                     if st.button("🔄 Reload Files", key=f"reload_files_{defect_code}"):
@@ -1429,12 +1621,17 @@ def render_plm_section():
         st.warning("⚠️ PLM API is not configured. Check credentials and network.")
         return
 
+    # Initialize analysis queue in session state
+    if 'plm_analysis_queue' not in st.session_state:
+        st.session_state.plm_analysis_queue = []
+
     # Create tabs
-    tab0, tab1, tab2, tab3 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4 = st.tabs([
         "🔍 Quick Search",
         "🔍 검색 및 파일",
         "📊 분석",
-        "💬 댓글"
+        "💬 댓글",
+        "⚙️ Analysis Queue"
     ])
 
     with tab0:
@@ -1475,6 +1672,13 @@ def render_plm_section():
             logger.error(f"Error in Comments: {e}", exc_info=True)
             st.error(f"Error: {e}")
 
+    with tab4:
+        try:
+            render_analysis_queue()
+        except Exception as e:
+            logger.error(f"Error in Analysis Queue: {e}", exc_info=True)
+            st.error(f"Error: {e}")
+
 
 def render_plm_sidebar_stats():
     """
@@ -1512,6 +1716,7 @@ __all__ = [
     'render_plm_register',
     'render_plm_comment',
     'render_plm_files',
+    'render_analysis_queue',
     'render_plm_sidebar_stats',
     '_initialize_plm_session',
 ]

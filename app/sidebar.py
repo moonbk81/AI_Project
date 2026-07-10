@@ -9,6 +9,7 @@ import streamlit as st
 
 from benchmark_ui import get_installed_ollama_models
 from ui.plm_ui import render_plm_sidebar_stats
+from ui.plm_auto_download import LogAnalysisPipeline
 
 def _render_sidebar_style():
     st.markdown(
@@ -108,6 +109,19 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.header("자동 분석 파이프라인")
 
+    # Show analysis queue status
+    queue_status = LogAnalysisPipeline.get_queue_status()
+    total_in_queue = queue_status['total']
+
+    if total_in_queue > 0:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.info(f"📋 분석 큐: {total_in_queue}개 파일\n⏳ {queue_status['pending']} • 🔄 {queue_status['processing']} • ✅ {queue_status['completed']}")
+        with col2:
+            if st.button("🗑️ 큐 초기화", key="btn_clear_queue_sidebar"):
+                LogAnalysisPipeline.clear_queue()
+                st.rerun()
+
     # 1. 실행 상태를 관리할 세션 변수 초기화
     if "is_running" not in st.session_state:
         st.session_state.is_running = False
@@ -125,6 +139,10 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     plm_selected_file = st.session_state.get('plm_selected_from_zip')
     if plm_selected_file:
         st.success(f"✅ PLM 파일 준비됨: `{plm_selected_file['filename']}`")
+
+    # Check for PLM analysis queue items
+    if total_in_queue > 0:
+        st.info(f"📋 분석 대기 로그: {total_in_queue}개\n\n'⚙️ Analysis Queue' 탭에서 관리하세요")
 
     # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
     def set_running():

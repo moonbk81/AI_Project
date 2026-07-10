@@ -7,6 +7,7 @@ import streamlit as st
 
 from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
+from ui.plm_auto_download import LogAnalysisPipeline
 
 def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
     pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
@@ -57,7 +58,29 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             os.makedirs("./temp_logs", exist_ok=True)
             saved_paths = []
 
-            for file in uploaded_files:
+            # Add files from analysis queue (PLM extracted logs)
+            queue_status = LogAnalysisPipeline.get_queue_status()
+            queue = queue_status.get('queue', [])
+
+            # Prepare queue files
+            files_to_process = list(uploaded_files) if uploaded_files else []
+
+            if queue:
+                st.write(f"📋 분석 큐에서 {len(queue)}개의 로그 파일 로드 중...")
+                for queue_item in queue:
+                    if queue_item.get('status') == 'pending':
+                        # Create a file-like object from queue item
+                        from types import SimpleNamespace
+                        import io
+
+                        plm_file = SimpleNamespace()
+                        plm_file.name = queue_item.get('filename', f"queue_{len(files_to_process)}.log")
+                        plm_file.getbuffer = lambda content=queue_item.get('content'): content
+                        files_to_process.append(plm_file)
+                        st.caption(f"✓ {plm_file.name}")
+
+            # Process all files
+            for file in files_to_process:
                 original_name = file.name
                 name, ext = os.path.splitext(original_name)
                 counter = 1
@@ -112,6 +135,12 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             status.update(label="분석 완료. 대시보드에서 결과를 확인하십시오.", state="complete", expanded=False)
             st.session_state.current_file = f"{base_name}_payload.json"
             st.session_state.messages = []
+
+            # Clear analysis queue after successful analysis
+            if queue:
+                LogAnalysisPipeline.clear_queue()
+                st.write("✅ 분석 큐 초기화됨")
+
             st.rerun()
         except Exception as e:
             status.update(label="파이프라인 실행 오류", state="error")
