@@ -1477,7 +1477,7 @@ def _show_cached_results_in_fragment():
         st.session_state.plm_quick_search_downloads = {}
         st.session_state.plm_quick_search_selected_index = 0
         st.session_state.plm_quick_search_files = {}
-        st.success("Search cleared. Scroll up to search again.")
+        st.rerun()
 
 
 def _show_search_input_form_fragment():
