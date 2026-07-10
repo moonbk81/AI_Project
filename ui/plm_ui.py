@@ -844,6 +844,9 @@ def render_plm_files():
                                             st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
                                             for log_name in result['extracted_logs']:
                                                 st.caption(f"  • {log_name}")
+
+                                            # Trigger auto-analysis if logs were extracted
+                                            st.rerun()
                                     else:
                                         st.warning(f"⚠️ Processing had issues")
                                         for msg in result['messages']:
@@ -1414,6 +1417,10 @@ def _show_cached_results_in_fragment():
                                                 st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
                                                 for log_name in result['extracted_logs']:
                                                     st.caption(f"  • {log_name}")
+
+                                            # Trigger auto-analysis if logs were extracted
+                                            if result['extracted_logs']:
+                                                st.rerun()
                                         else:
                                             st.warning(f"⚠️ Processing had issues")
                                             for msg in result['messages']:
@@ -1624,6 +1631,10 @@ def render_plm_section():
     # Initialize analysis queue in session state
     if 'plm_analysis_queue' not in st.session_state:
         st.session_state.plm_analysis_queue = []
+
+    # Check if auto-analysis should be triggered
+    if st.session_state.get('trigger_auto_analysis', False):
+        st.info("🚀 자동 분석 파이프라인이 시작되었습니다.")
 
     # Create tabs
     tab0, tab1, tab2, tab3, tab4 = st.tabs([

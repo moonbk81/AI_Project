@@ -109,9 +109,20 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.header("자동 분석 파이프라인")
 
+    # Check if auto-analysis should be triggered
+    if st.session_state.get('trigger_auto_analysis', False):
+        st.session_state.trigger_auto_analysis = False
+        st.info("🚀 자동 분석 파이프라인 시작 중...")
+
     # Show analysis queue status
     queue_status = LogAnalysisPipeline.get_queue_status()
     total_in_queue = queue_status['total']
+
+    # Debug: Show queue status
+    with st.expander("🐛 Debug - Queue & Auto-Analysis", expanded=False):
+        st.write(f"trigger_auto_analysis: {st.session_state.get('trigger_auto_analysis', False)}")
+        st.write(f"total_in_queue: {total_in_queue}")
+        st.write(f"is_running: {st.session_state.get('is_running', False)}")
 
     if total_in_queue > 0:
         col1, col2 = st.columns([2, 1])
@@ -148,8 +159,23 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     def set_running():
         st.session_state.is_running = True
 
+    # Auto-trigger analysis if:
+    # 1. trigger_auto_analysis flag is set OR
+    # 2. Queue has pending files and is_running is False
+    pending_files = queue_status.get('pending', 0)
+    should_auto_trigger = (st.session_state.get('trigger_auto_analysis', False) or pending_files > 0) and not st.session_state.is_running
+
     # 3. 버튼에 disabled 속성과 on_click 콜백 적용
-    if st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running):
+    if should_auto_trigger:
+        # Auto-trigger: run analysis immediately
+        st.session_state.trigger_auto_analysis = False
+        st.session_state.is_running = True
+        button_click = True
+        st.warning("🚀 자동으로 분석을 시작합니다...")
+    else:
+        button_click = st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running)
+
+    if button_click or should_auto_trigger:
         try:
             # Combine uploaded files and PLM selected file
             files_to_analyze = list(uploaded_files) if uploaded_files else []
@@ -164,7 +190,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
                 plm_file.getbuffer = lambda: plm_selected_file['content']
                 files_to_analyze.append(plm_file)
 
-            if not files_to_analyze:
+            # If no uploaded files and no PLM files, but queue has files, that's OK
+            # Pipeline will handle queue files automatically
+            if not files_to_analyze and total_in_queue == 0:
                 st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
             else:
                 st.session_state.uploader_key += 1

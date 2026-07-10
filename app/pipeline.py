@@ -67,17 +67,23 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
 
             if queue:
                 st.write(f"📋 분석 큐에서 {len(queue)}개의 로그 파일 로드 중...")
+                queue_filenames = []  # Track which files we're processing
                 for queue_item in queue:
                     if queue_item.get('status') == 'pending':
+                        # Update status to processing immediately
+                        filename = queue_item.get('filename')
+                        LogAnalysisPipeline.update_item_status(filename, 'processing')
+                        queue_filenames.append(filename)
+
                         # Create a file-like object from queue item
                         from types import SimpleNamespace
                         import io
 
                         plm_file = SimpleNamespace()
-                        plm_file.name = queue_item.get('filename', f"queue_{len(files_to_process)}.log")
+                        plm_file.name = filename
                         plm_file.getbuffer = lambda content=queue_item.get('content'): content
                         files_to_process.append(plm_file)
-                        st.caption(f"✓ {plm_file.name}")
+                        st.caption(f"✓ {plm_file.name} (🔄 분석 중...)")
 
             # Process all files
             for file in files_to_process:
@@ -136,12 +142,29 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             st.session_state.current_file = f"{base_name}_payload.json"
             st.session_state.messages = []
 
-            # Clear analysis queue after successful analysis
+            # Update queue items to completed
             if queue:
-                LogAnalysisPipeline.clear_queue()
-                st.write("✅ 분석 큐 초기화됨")
+                st.write("📊 큐 상태 업데이트 중...")
+                for queue_item in queue:
+                    filename = queue_item.get('filename')
+                    # Update all items that were processing
+                    if queue_item.get('status') in ['processing', 'pending']:
+                        success = LogAnalysisPipeline.update_item_status(filename, 'completed')
+                        if success:
+                            st.write(f"  ✅ {filename}")
+                        else:
+                            st.write(f"  ⚠️ {filename} (상태 업데이트 실패)")
 
             st.rerun()
         except Exception as e:
             status.update(label="파이프라인 실행 오류", state="error")
             st.error(f"System Error: {e}")
+
+            # Update failed items
+            if queue:
+                st.write("❌ 큐 항목 상태를 실패로 업데이트 중...")
+                for queue_item in queue:
+                    filename = queue_item.get('filename')
+                    if queue_item.get('status') == 'processing':
+                        LogAnalysisPipeline.update_item_status(filename, 'failed')
+                        st.write(f"  ❌ {filename}")
