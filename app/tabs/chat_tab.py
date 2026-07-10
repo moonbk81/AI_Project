@@ -137,6 +137,21 @@ def _render_chat_answer(engine, prompt):
             st.session_state.last_ids = ids
             st.session_state.last_metas = metas
 
+            # Show PLM Comment button directly after answer
+            active_defect = st.session_state.get('plm_active_defect_code')
+            if active_defect:
+                st.divider()
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.caption(f"📌 활성 결함: `{active_defect}`")
+                with col2:
+                    if st.button("📝 Comment로 등록", key="plm_comment_button"):
+                        st.session_state.plm_current_analysis_result = {
+                            'answer': answer,
+                            'from_chat': True
+                        }
+                        st.info("💬 PLM 결함 관리 > 댓글 탭에서 등록할 수 있습니다")
+
     st.session_state.messages.append({
         "role": "assistant",
         "content": answer,
@@ -208,32 +223,6 @@ def render_chat_tab(engine):
         st.divider()
 
     render_chat_interface(engine, key_suffix="main", show_input=False)
-
-    # Show PLM Comment button if there are messages
-    if st.session_state.messages and len(st.session_state.messages) > 0:
-        last_msg = st.session_state.messages[-1]
-        if last_msg.get("role") == "assistant":
-            st.divider()
-            st.subheader("💬 PLM 연동")
-
-            active_defect = st.session_state.get('plm_active_defect_code')
-            if active_defect:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.caption(f"📌 활성 결함: `{active_defect}`")
-                with col2:
-                    # Use index as part of key to ensure uniqueness
-                    msg_key = f"post_to_plm_{len(st.session_state.messages)}"
-                    if st.button("📝 Comment로 등록", key=msg_key):
-                        # Store the answer to be posted as comment
-                        st.session_state.plm_current_analysis_result = {
-                            'answer': last_msg['content'],
-                            'from_chat': True
-                        }
-                        st.session_state.plm_active_defect_code = active_defect
-                        st.info("💬 PLM 결함 관리 > 댓글 탭에서 등록할 수 있습니다")
-            else:
-                st.warning("⚠️ 활성된 PLM 결함이 없습니다. PLM Quick Search에서 결함을 선택해주세요.")
 
     st.divider()
 
