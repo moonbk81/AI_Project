@@ -115,6 +115,9 @@ def _initialize_plm_session():
             st.session_state.plm_zip_file_data = None  # Binary data of ZIP file (for lazy extraction)
             st.session_state.plm_zip_file_list = {}  # {filename: file_size} - metadata only
             st.session_state.plm_selected_from_zip = None  # Selected file from ZIP
+            st.session_state.plm_active_defect_code = None  # Currently active PLM defect
+            st.session_state.plm_active_division = None  # Currently active division
+            st.session_state.plm_current_analysis_result = None  # Current analysis result to be posted
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
@@ -531,6 +534,11 @@ def render_plm_analyze():
                 if context:
                     st.success("Analysis Complete")
 
+                    # Save analysis result to session state for comment posting
+                    st.session_state.plm_current_analysis_result = context
+                    st.session_state.plm_active_defect_code = defect_code
+                    st.session_state.plm_active_division = division_code
+
                     # Key metrics
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -569,6 +577,18 @@ def render_plm_analyze():
                         st.write("**Created:**", context.get('created_date', 'N/A'))
                     with col2:
                         st.write("**Updated:**", context.get('updated_date', 'N/A'))
+
+                    # Button to post analysis result as PLM comment
+                    st.divider()
+                    st.subheader("📤 Post to PLM")
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.caption("분석 결과를 PLM comment로 등록합니다")
+                    with col2:
+                        if st.button("📝 Comment 등록", key="btn_post_analysis_comment"):
+                            st.session_state.navigate_to_comment_tab = True
+                            st.success("💬 댓글 탭으로 이동합니다")
+                            st.rerun()
 
                 else:
                     st.error("Defect not found")
@@ -1099,6 +1119,37 @@ def render_analysis_queue():
         st.info("📭 No log files in the queue. Files will appear here after extraction from ZIP archives.")
 
 
+def _format_analysis_as_comment(context: Dict[str, Any]) -> str:
+    """
+    Format analysis context as a PLM comment
+
+    Args:
+        context: Analysis context from PLMDefectContextBuilder or Chat answer
+
+    Returns:
+        Formatted comment text
+    """
+    # Check if it's from Chat (has 'answer' and 'from_chat' flag)
+    if context.get('from_chat'):
+        return f"💬 **AI Chat 분석 결과**\n\n{context.get('answer', 'N/A')}"
+
+    # Otherwise it's from PLM analysis tab
+    comment_lines = [
+        "🤖 AI 분석 결과",
+        "",
+        f"**문제점:**",
+        context.get('problem', 'N/A'),
+        "",
+        f"**근본 원인:**",
+        context.get('root_cause', 'N/A'),
+        "",
+        f"**해결 방안:**",
+        context.get('solution', 'N/A'),
+    ]
+
+    return "\n".join(comment_lines)
+
+
 def render_plm_comment():
     """
     Render PLM comment management interface
@@ -1107,12 +1158,18 @@ def render_plm_comment():
     """
     st.subheader("💬 Add Comment")
 
-    # Use selected defect code from Search tab if available
-    default_code = st.session_state.get('plm_selected_defect_code', '')
-    default_division = st.session_state.get('plm_selected_division')
+    # Check if navigating from analysis tab
+    navigate_to_comment = st.session_state.get('navigate_to_comment_tab', False)
+    analysis_result = st.session_state.get('plm_current_analysis_result')
+
+    # Use active defect from analysis or search tab
+    default_code = st.session_state.get('plm_active_defect_code') or st.session_state.get('plm_selected_defect_code', '')
+    default_division = st.session_state.get('plm_active_division') or st.session_state.get('plm_selected_division')
 
     if default_code:
-        st.info(f"📌 Using Defect Code from Search: **{default_code}**")
+        st.info(f"📌 현재 결함: **{default_code}**")
+        if analysis_result:
+            st.success("✅ 분석 결과가 준비되어 있습니다")
 
     # Setup form with pre-filled values before form creation
     col1, col2 = st.columns(2)
@@ -1146,9 +1203,15 @@ def render_plm_comment():
         with col2:
             create_user = st.text_input("Your Knox ID", key="comment_user")
 
+        # Pre-fill comment if analysis result is available
+        default_comment = ""
+        if analysis_result:
+            default_comment = _format_analysis_as_comment(analysis_result)
+
         comment = st.text_area(
             "Comment",
-            height=100,
+            value=default_comment,
+            height=150,
             placeholder="Add your comment here...",
             key="comment_text"
         )
@@ -1196,6 +1259,9 @@ def render_plm_comment():
 
                     if response.is_success():
                         st.success("✅ Comment submitted successfully!")
+                        # Clear analysis result after successful submission
+                        st.session_state.plm_current_analysis_result = None
+                        st.session_state.navigate_to_comment_tab = False
                     else:
                         st.error(f"Failed: {response.get_error_message()}")
 
@@ -1263,8 +1329,22 @@ def _show_cached_results_in_fragment():
         # Save current selection to preserve across reruns
         st.session_state.plm_quick_search_selected_index = selected_index
         selected_defect = results[selected_index]
+        defect_code = selected_defect.get('defectCode')
+
+        # Button to explicitly set as active defect
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("📌 활성화", key=f"activate_defect_{defect_code}"):
+                st.session_state.plm_active_defect_code = defect_code
+                st.session_state.plm_active_division = division_code
+                st.success(f"✅ {defect_code} 활성화됨")
+
+        # Also set it by default when viewing details
+        st.session_state.plm_active_defect_code = defect_code
+        st.session_state.plm_active_division = division_code
+
         st.divider()
-        st.subheader(f"📋 Details: {selected_defect.get('defectCode')}")
+        st.subheader(f"📋 Details: {defect_code}")
         _render_defect_details(selected_defect, division_code)
 
         # Show files section
@@ -1756,6 +1836,11 @@ def render_plm_section():
     if st.session_state.get('trigger_auto_analysis', False):
         st.info("🚀 자동 분석 파이프라인이 시작되었습니다.")
 
+    # Determine which tab to show based on navigation flag
+    default_tab_index = 0
+    if st.session_state.get('navigate_to_comment_tab', False):
+        default_tab_index = 3
+
     # Create tabs
     tab0, tab1, tab2, tab3, tab4 = st.tabs([
         "🔍 Quick Search",
@@ -1815,7 +1900,7 @@ def render_plm_sidebar_stats():
     """
     Render PLM status in sidebar
 
-    Shows connection status and quick actions
+    Shows connection status, active defect, and quick actions
     """
     _initialize_plm_session()
 
@@ -1828,6 +1913,15 @@ def render_plm_sidebar_stats():
 
         try:
             st.caption("✅ Connected to PLM")
+
+            # Show active defect if selected
+            active_defect = st.session_state.get('plm_active_defect_code')
+            if active_defect:
+                st.info(f"**활성 결함:**\n`{active_defect}`")
+            else:
+                st.caption("활성 결함: 없음")
+
+            st.divider()
 
             # Quick actions
             if st.button("🔄 Refresh Cache", key="btn_refresh_plm"):

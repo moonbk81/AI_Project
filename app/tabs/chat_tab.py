@@ -146,6 +146,28 @@ def _render_chat_answer(engine, prompt):
     })
     # Do NOT call st.rerun() here - it causes infinite loops
 
+def _render_plm_comment_button(answer_content):
+    """Render button to post assistant answer as PLM comment"""
+    active_defect = st.session_state.get('plm_active_defect_code')
+    active_division = st.session_state.get('plm_active_division')
+
+    if active_defect:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption(f"📌 활성 결함: `{active_defect}`")
+        with col2:
+            if st.button("📝 PLM Comment 등록", key=f"post_comment_{hash(answer_content)}"):
+                # Store the answer to be posted as comment
+                st.session_state.plm_current_analysis_result = {
+                    'answer': answer_content,
+                    'from_chat': True
+                }
+                st.session_state.plm_active_defect_code = active_defect
+                st.session_state.plm_active_division = active_division
+                st.info("💬 댓글 탭에서 등록할 수 있습니다")
+    else:
+        st.caption("⚠️ 활성된 PLM 결함이 없습니다. Quick Search에서 결함을 선택해주세요.")
+
 def render_chat_tab(engine):
     _render_quick_prompt_guide()
     quick_prompt = _render_quick_prompt_buttons()
@@ -208,7 +230,7 @@ def render_chat_tab(engine):
 
         st.divider()
 
-    render_chat_interface(engine, key_suffix="main", show_input=False)
+    render_chat_interface(engine, key_suffix="main", show_input=False, show_plm_button=True)
 
     # Placeholder text changes based on PLM query availability
     placeholder_text = "증상 또는 확인할 내용을 입력하세요"
