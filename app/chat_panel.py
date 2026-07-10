@@ -87,7 +87,7 @@ def _build_reference_text(metas):
     return ref_text
 
 
-def _render_existing_messages(key_suffix, show_plm_button=False):
+def _render_existing_messages(key_suffix):
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             if msg["role"] == "assistant" and msg.get("thinking"):
@@ -103,16 +103,9 @@ def _render_existing_messages(key_suffix, show_plm_button=False):
                 with st.expander(f"Reference Logs ({key_suffix})"):
                     st.markdown(msg["references"])
 
-            # Show PLM Comment button for last assistant message
-            if show_plm_button and msg["role"] == "assistant" and msg_idx == len(st.session_state.messages) - 1:
-                st.divider()
-                # Import here to avoid circular dependency
-                from app.tabs.chat_tab import _render_plm_comment_button
-                _render_plm_comment_button(msg["content"])
 
-
-def render_chat_interface(engine, key_suffix="main", show_input=True, show_plm_button=False):
-    _render_existing_messages(key_suffix, show_plm_button=show_plm_button)
+def render_chat_interface(engine, key_suffix="main", show_input=True):
+    _render_existing_messages(key_suffix)
 
     if not show_input:
         return
