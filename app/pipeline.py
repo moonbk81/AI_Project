@@ -155,7 +155,8 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
                         else:
                             st.write(f"  {filename} - failed to update status")
 
-            st.rerun()
+            # Don't rerun - keep current screen state
+            st.success("Analysis complete. Current screen state is preserved.")
         except Exception as e:
             status.update(label="파이프라인 실행 오류", state="error")
             st.error(f"System Error: {e}")

@@ -1237,14 +1237,20 @@ def _show_cached_results_in_fragment():
         defect_options.append(f"{code} - {title} [{status}]")
 
     # Use radio button instead of selectbox to avoid rerun issues
+    # Preserve selected index across reruns
+    current_selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+
     selected_display = st.radio(
         "Select a defect to view details",
         options=defect_options,
+        index=current_selected_index,
         key="quick_search_select"
     )
 
     if selected_display:
         selected_index = defect_options.index(selected_display)
+        # Save current selection to preserve across reruns
+        st.session_state.plm_quick_search_selected_index = selected_index
         selected_defect = results[selected_index]
         st.divider()
         st.subheader(f"📋 Details: {selected_defect.get('defectCode')}")
