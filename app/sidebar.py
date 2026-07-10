@@ -153,7 +153,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
 
     # Check for PLM analysis queue items
     if total_in_queue > 0:
-        st.info(f"📋 분석 대기 로그: {total_in_queue}개\n\n'⚙️ Analysis Queue' 탭에서 관리하세요")
+        st.info(f"Analysis Queue: {total_in_queue} files pending\n\nManage in 'Analysis Queue' tab")
 
     # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
     def set_running():
@@ -171,7 +171,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         st.session_state.trigger_auto_analysis = False
         st.session_state.is_running = True
         button_click = True
-        st.warning("🚀 자동으로 분석을 시작합니다...")
+        st.info("Auto-starting analysis with queued files...")
     else:
         button_click = st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running)
 

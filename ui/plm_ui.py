@@ -1371,14 +1371,14 @@ def _show_cached_results_in_fragment():
                     # Auto-process downloaded files
                     if st.session_state.plm_quick_search_downloads:
                         st.divider()
-                        st.subheader("💾 Downloaded Files - Auto Processing")
+                        st.subheader("Downloaded Files - Auto Processing")
 
                         # Show auto-save status and analysis queue info
                         st.info(
-                            "📥 **Auto-processing enabled:**\n"
-                            "• Non-ZIP files → Auto-saved to Downloads folder\n"
-                            "• ZIP files → Auto-extract log files\n"
-                            "• Log files → Auto-added to analysis pipeline\n"
+                            "Auto-processing enabled:\n"
+                            "• Non-ZIP files are auto-saved to Downloads folder\n"
+                            "• ZIP files are automatically extracted\n"
+                            "• Log files are added to the analysis pipeline\n"
                         )
 
                         for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
@@ -1408,23 +1408,23 @@ def _show_cached_results_in_fragment():
 
                                         # Show processing results
                                         if result['success']:
-                                            st.success(f"✅ Processing completed")
+                                            st.success("Processing completed successfully")
                                             for msg in result['messages']:
-                                                st.info(msg)
+                                                st.write(msg)
 
                                             # Show extracted logs if any
                                             if result['extracted_logs']:
-                                                st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
-                                                for log_name in result['extracted_logs']:
-                                                    st.caption(f"  • {log_name}")
+                                                with st.expander(f"Extracted {len(result['extracted_logs'])} log file(s)", expanded=True):
+                                                    for log_name in result['extracted_logs']:
+                                                        st.write(log_name)
 
                                             # Trigger auto-analysis if logs were extracted
                                             if result['extracted_logs']:
                                                 st.rerun()
                                         else:
-                                            st.warning(f"⚠️ Processing had issues")
+                                            st.error("Processing encountered issues")
                                             for msg in result['messages']:
-                                                st.warning(msg)
+                                                st.write(msg)
 
                             with col3:
                                 # Direct save button (for users who prefer manual control)
@@ -1612,6 +1612,101 @@ def _show_search_input_form_fragment():
             except Exception as e:
                 logger.error(f"Unexpected error: {e}", exc_info=True)
                 st.error(f"Error: {e}")
+
+
+def render_analysis_queue():
+    """
+    Render the log analysis queue dashboard
+
+    Shows extracted log files waiting for analysis and their status
+    """
+    st.subheader("Analysis Queue Status")
+
+    # Get queue status
+    queue_status = LogAnalysisPipeline.get_queue_status()
+    queue = queue_status.get('queue', [])
+
+    # Display metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Total", queue_status['total'])
+    with col2:
+        st.metric("Pending", queue_status['pending'])
+    with col3:
+        st.metric("Processing", queue_status['processing'])
+    with col4:
+        st.metric("Completed", queue_status['completed'])
+    with col5:
+        st.metric("Failed", queue_status['failed'])
+
+    st.divider()
+
+    if queue:
+        st.subheader("Queued Log Files")
+
+        # Create table view
+        table_data = []
+        for idx, item in enumerate(queue, 1):
+            status_text = item.get('status', 'unknown').upper()
+            table_data.append({
+                '#': idx,
+                'Status': status_text,
+                'Filename': item.get('filename', 'Unknown'),
+                'Size (KB)': f"{item.get('size', 0) / 1024:.1f}",
+                'Source': item.get('source_defect', '-'),
+                'Added': item.get('added_at', '')[-19:-9]
+            })
+
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # Detail view
+        if queue:
+            st.subheader("Log File Details")
+            selected_idx = st.selectbox(
+                "Select a log file to view details",
+                options=range(len(queue)),
+                format_func=lambda i: f"{queue[i].get('filename', f'File {i}')} ({queue[i].get('status', 'unknown')})"
+            )
+
+            if selected_idx is not None and selected_idx < len(queue):
+                item = queue[selected_idx]
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Filename:**", item.get('filename'))
+                    st.write("**Size:**", f"{item.get('size', 0) / 1024:.1f} KB")
+                    st.write("**Status:**", item.get('status', 'unknown'))
+                with col2:
+                    st.write("**Added at:**", item.get('added_at', 'Unknown'))
+                    st.write("**Source Defect:**", item.get('source_defect', '-'))
+
+                # Show file content preview
+                with st.expander("Content Preview (first 2000 chars)"):
+                    content = item.get('content', b'')
+                    if isinstance(content, bytes):
+                        try:
+                            preview = content[:2000].decode('utf-8', errors='ignore')
+                        except:
+                            preview = "[Binary content - cannot display]"
+                    else:
+                        preview = str(content)[:2000]
+
+                    st.text(preview)
+
+        # Queue management
+        st.divider()
+        st.subheader("Queue Management")
+
+        if st.button("Clear Queue", key="btn_clear_queue"):
+            LogAnalysisPipeline.clear_queue()
+            st.success("Queue cleared")
+            st.rerun()
+
+    else:
+        st.info("No log files in the queue. Files will appear here after extraction from ZIP archives.")
 
 
 def render_plm_section():

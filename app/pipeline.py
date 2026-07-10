@@ -66,7 +66,7 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             files_to_process = list(uploaded_files) if uploaded_files else []
 
             if queue:
-                st.write(f"📋 분석 큐에서 {len(queue)}개의 로그 파일 로드 중...")
+                st.write(f"Loading {len(queue)} log files from analysis queue...")
                 queue_filenames = []  # Track which files we're processing
                 for queue_item in queue:
                     if queue_item.get('status') == 'pending':
@@ -83,7 +83,7 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
                         plm_file.name = filename
                         plm_file.getbuffer = lambda content=queue_item.get('content'): content
                         files_to_process.append(plm_file)
-                        st.caption(f"✓ {plm_file.name} (🔄 분석 중...)")
+                        st.caption(f"{plm_file.name} (processing...)")
 
             # Process all files
             for file in files_to_process:
@@ -144,16 +144,16 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
 
             # Update queue items to completed
             if queue:
-                st.write("📊 큐 상태 업데이트 중...")
+                st.write("Updating queue status...")
                 for queue_item in queue:
                     filename = queue_item.get('filename')
                     # Update all items that were processing
                     if queue_item.get('status') in ['processing', 'pending']:
                         success = LogAnalysisPipeline.update_item_status(filename, 'completed')
                         if success:
-                            st.write(f"  ✅ {filename}")
+                            st.write(f"  {filename} - completed")
                         else:
-                            st.write(f"  ⚠️ {filename} (상태 업데이트 실패)")
+                            st.write(f"  {filename} - failed to update status")
 
             st.rerun()
         except Exception as e:
@@ -162,9 +162,9 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
 
             # Update failed items
             if queue:
-                st.write("❌ 큐 항목 상태를 실패로 업데이트 중...")
+                st.write("Marking queue items as failed...")
                 for queue_item in queue:
                     filename = queue_item.get('filename')
                     if queue_item.get('status') == 'processing':
                         LogAnalysisPipeline.update_item_status(filename, 'failed')
-                        st.write(f"  ❌ {filename}")
+                        st.write(f"  {filename} - failed")
