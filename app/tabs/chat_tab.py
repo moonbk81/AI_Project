@@ -190,7 +190,6 @@ def render_chat_tab(engine):
 
         # Mark as analyzed so we don't loop
         st.session_state.plm_problem_analyzed = True
-        return  # Exit early to prevent further processing
 
     elif plm_problem and plm_problem_analyzed:
         # Already analyzed, show info and clear button
@@ -211,7 +210,7 @@ def render_chat_tab(engine):
     render_chat_interface(engine, key_suffix="main", show_input=False)
 
     # Show PLM Comment button if there are messages
-    if st.session_state.messages:
+    if st.session_state.messages and len(st.session_state.messages) > 0:
         last_msg = st.session_state.messages[-1]
         if last_msg.get("role") == "assistant":
             st.divider()
@@ -223,7 +222,9 @@ def render_chat_tab(engine):
                 with col1:
                     st.caption(f"📌 활성 결함: `{active_defect}`")
                 with col2:
-                    if st.button("📝 Comment로 등록", key=f"post_to_plm_{hash(last_msg['content'])}"):
+                    # Use index as part of key to ensure uniqueness
+                    msg_key = f"post_to_plm_{len(st.session_state.messages)}"
+                    if st.button("📝 Comment로 등록", key=msg_key):
                         # Store the answer to be posted as comment
                         st.session_state.plm_current_analysis_result = {
                             'answer': last_msg['content'],
