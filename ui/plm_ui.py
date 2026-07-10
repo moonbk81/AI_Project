@@ -208,7 +208,7 @@ def render_plm_search():
                     st.rerun()
 
             st.divider()
-            _render_defects_table(st.session_state.plm_search_results)
+            _render_defects_table(st.session_state.plm_search_results, st.session_state.plm_search_division)
 
             # Show details for cached results
             for i, defect in enumerate(st.session_state.plm_search_results):
@@ -292,7 +292,7 @@ def render_plm_search():
                             st.session_state.plm_selected_defect_code = search_values[0]
                             st.session_state.plm_selected_division = division_code
                         st.success(f"Found {len(defects)} defect(s)")
-                        _render_defects_table(defects)
+                        _render_defects_table(defects, division_code)
 
                         # Show details for each defect
                         for i, defect in enumerate(defects):
@@ -316,32 +316,43 @@ def render_plm_search():
                 st.error(f"Error: {e}")
 
 
-def _render_defects_table(defects: List[Dict[str, Any]]):
-    """Render defects in a table"""
-    df_data = []
+def _get_plm_site_url(defect_id: str) -> str:
+    """
+    Generate PLM site URL for a defect
+
+    Args:
+        defect_id: Defect ID (e.g., 02FBN2PGBtPMWL1000)
+
+    Returns:
+        PLM site URL
+    """
+    # PLM site URL pattern
+    base_url = "http://splm.sec.samsung.net/wl/tqm/defect/defectreg/goDefectDetail.do"
+    # Construct URL with defectId
+    return f"{base_url}?isPopUp=Y&menuGubun=&defectId={defect_id}"
+
+
+def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "25"):
+    """Render defects in a table with clickable code links"""
+    html = '<table style="width:100%; border-collapse:collapse;"><thead><tr style="background-color:#f0f0f0;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Code</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Title</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Status</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Priority</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Owner</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Created</th></tr></thead><tbody>'
 
     for defect in defects:
-        # Safe handling of Title (truncate if too long)
+        defect_code = defect.get('defectCode', '')
+        defect_id = defect.get('defectId', '')
         title = defect.get('plmTitle', '')
         if isinstance(title, str) and len(title) > 50:
             title = title[:50] + "..."
 
-        # Safe handling of Created date (get first 10 chars)
         created = defect.get('createDate', '')
         if isinstance(created, str) and created:
             created = created[:10]
 
-        df_data.append({
-            'Code': defect.get('defectCode'),
-            'Title': title,
-            'Status': defect.get('plmStatus', 'N/A'),
-            'Priority': defect.get('plmPriority', 'N/A'),
-            'Owner': defect.get('mainOwnerName', 'N/A'),
-            'Created': created
-        })
+        plm_url = _get_plm_site_url(defect_id) if defect_id else "#"
 
-    df = pd.DataFrame(df_data)
-    st.dataframe(df, use_container_width=True)
+        html += f'<tr><td style="border:1px solid #ddd; padding:8px;"><a href="{plm_url}" target="_blank" style="color:#1f77b4; font-weight:bold; text-decoration:none;">{defect_code}</a></td><td style="border:1px solid #ddd; padding:8px;">{title}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("plmStatus", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("plmPriority", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("mainOwnerName", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{created}</td></tr>'
+
+    html += '</tbody></table>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
@@ -1225,7 +1236,7 @@ def _show_cached_results_in_fragment():
     results = st.session_state.plm_quick_search_results
     division_code = st.session_state.plm_quick_search_division
 
-    _render_defects_table(results)
+    _render_defects_table(results, division_code)
 
     st.divider()
 
@@ -1458,13 +1469,15 @@ def _show_cached_results_in_fragment():
     st.markdown("---")
     st.subheader("🔄 New Search")
 
-    if st.button("🔄 Clear and Search Again", key="btn_new_search"):
+    if st.button("Clear and Search Again", key="btn_new_search"):
         st.session_state.plm_quick_search_results = None
         st.session_state.plm_quick_search_division = None
         st.session_state.plm_quick_search_label = None
         st.session_state.plm_quick_search_status = None
         st.session_state.plm_quick_search_downloads = {}
-        st.rerun()
+        st.session_state.plm_quick_search_selected_index = 0
+        st.session_state.plm_quick_search_files = {}
+        st.success("Search cleared. Scroll up to search again.")
 
 
 def _show_search_input_form_fragment():
