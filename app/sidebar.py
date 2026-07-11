@@ -146,12 +146,6 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     queue_status = LogAnalysisPipeline.get_queue_status()
     total_in_queue = queue_status['total']
 
-    # Debug: Show queue status
-    with st.expander("🐛 Debug - Queue & Auto-Analysis", expanded=False):
-        st.write(f"trigger_auto_analysis: {st.session_state.get('trigger_auto_analysis', False)}")
-        st.write(f"total_in_queue: {total_in_queue}")
-        st.write(f"is_running: {st.session_state.get('is_running', False)}")
-
     if total_in_queue > 0:
         col1, col2 = st.columns([2, 1])
         with col1:

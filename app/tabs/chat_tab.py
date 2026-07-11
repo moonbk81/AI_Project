@@ -6,6 +6,13 @@ from app.chat_panel import render_chat_interface
 from core.config import QUICK_PROMPTS
 from ui.common import parse_raw_logs
 
+
+def _get_last_assistant_message():
+    for message in reversed(st.session_state.get("messages", [])):
+        if message.get("role") == "assistant":
+            return message
+    return None
+
 def _build_reference_text(metas):
     ref_text = ""
     for i, meta in enumerate(metas):
@@ -146,6 +153,122 @@ def _render_chat_answer(engine, prompt):
     })
     # Do NOT call st.rerun() here - it causes infinite loops
 
+
+def _render_plm_comment_registration(last_answer: str, active_defect: str):
+    """Render PLM comment registration controls for the latest chat answer."""
+    from ui.plm_ui import _format_analysis_as_comment
+
+    st.divider()
+    st.caption(f"활성 결함: `{active_defect}`")
+
+    status = st.session_state.get("plm_comment_submit_status")
+    if status:
+        if status.get("success"):
+            st.success(status.get("message", "PLM Comment 등록 완료"))
+        else:
+            st.error(status.get("message", "PLM Comment 등록 실패"))
+
+        if status.get("local_test"):
+            with st.expander("Local test payload", expanded=False):
+                st.json(status.get("request", {}))
+
+    global_local_test = bool(st.session_state.get("plm_local_test_mode", False))
+    if global_local_test:
+        local_test = True
+        st.caption("PLM 로컬 테스트 모드: 실제 등록 없이 요청 payload만 검증합니다.")
+    else:
+        local_test = st.checkbox(
+            "PLM 로컬 테스트 모드",
+            key="plm_comment_local_test",
+            help="실제 PLM 시스템에 등록하지 않고 UI 흐름과 요청 payload만 검증합니다.",
+        )
+
+    with st.form("plm_chat_comment_form"):
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            knox_id = st.text_input("Knox ID", key="plm_knox_id")
+        with col2:
+            system_code = st.text_input("System Code", value="AI_ANALYSIS", key="plm_system_code")
+
+        comment_text = _format_analysis_as_comment({
+            'answer': last_answer,
+            'from_chat': True
+        })
+
+        with st.expander("등록될 Comment 미리보기", expanded=False):
+            st.markdown(comment_text)
+
+        submitted = st.form_submit_button("PLM Comment 등록", width="stretch")
+
+    if not submitted:
+        return
+
+    st.session_state.plm_comment_submit_status = None
+
+    if not knox_id:
+        st.session_state.plm_comment_submit_status = {
+            "success": False,
+            "message": "Knox ID는 필수입니다",
+            "local_test": local_test,
+        }
+        st.rerun()
+        return
+
+    division_code = st.session_state.get('plm_active_division') or "25"
+    request_payload = {
+        "divisionCode": division_code,
+        "systemCode": system_code,
+        "defectCode": active_defect,
+        "defectComment": comment_text,
+        "createUser": knox_id,
+        "changeType": "S",
+        "docAttachedYn": "N",
+    }
+
+    if local_test:
+        st.session_state.plm_comment_submit_status = {
+            "success": True,
+            "message": "PLM 로컬 테스트 완료: 실제 등록은 수행하지 않았습니다.",
+            "local_test": True,
+            "request": request_payload,
+        }
+        st.rerun()
+        return
+
+    try:
+        import logging
+        from plm.plm_api_client import CommentRegistrationRequest
+
+        logger = logging.getLogger(__name__)
+        logger.info("=== PLM Comment 등록 시작 ===")
+        logger.info(f"Defect: {active_defect}, Division: {division_code}")
+
+        request = CommentRegistrationRequest(**request_payload)
+
+        with st.spinner("PLM에 등록 중..."):
+            response = st.session_state.plm_integration.client.register_comment(request)
+
+        if response.is_success():
+            st.session_state.plm_comment_submit_status = {
+                "success": True,
+                "message": "PLM Comment 등록 완료",
+                "local_test": False,
+            }
+        else:
+            st.session_state.plm_comment_submit_status = {
+                "success": False,
+                "message": f"실패: {response.get_error_message()}",
+                "local_test": False,
+            }
+    except Exception as e:
+        st.session_state.plm_comment_submit_status = {
+            "success": False,
+            "message": f"오류: {str(e)}",
+            "local_test": False,
+        }
+
+    st.rerun()
+
 def render_chat_tab(engine):
     _render_quick_prompt_guide()
     quick_prompt = _render_quick_prompt_buttons()
@@ -230,62 +353,10 @@ def render_chat_tab(engine):
         _render_chat_answer(engine, prompt)
 
     # PLM Comment registration form (outside chat_message)
-    if st.session_state.messages and st.session_state.messages[-1].get("role") == "assistant":
-        last_answer = st.session_state.messages[-1].get("content", "")
+    last_assistant_message = _get_last_assistant_message()
+    if last_assistant_message:
+        last_answer = last_assistant_message.get("content", "")
         active_defect = st.session_state.get('plm_active_defect_code')
 
         if active_defect and last_answer:
-            st.divider()
-            st.caption(f"📌 활성 결함: `{active_defect}`")
-
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                knox_id = st.text_input("Knox ID", key="plm_knox_id", label_visibility="collapsed")
-            with col2:
-                system_code = st.text_input("System Code", value="AI_ANALYSIS", key="plm_system_code", label_visibility="collapsed")
-            with col3:
-                if st.button("📝 등록", use_container_width=True, key="plm_register_btn"):
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.info("=== PLM Comment 등록 시작 ===")
-                    logger.info(f"Button clicked - Knox ID: {knox_id}")
-
-                    if not knox_id:
-                        st.error("Knox ID는 필수입니다")
-                    else:
-                        try:
-                            from plm.plm_api_client import CommentRegistrationRequest
-                            from ui.plm_ui import _format_analysis_as_comment
-
-                            comment_text = _format_analysis_as_comment({
-                                'answer': last_answer,
-                                'from_chat': True
-                            })
-
-                            division_code = st.session_state.get('plm_active_division')
-                            logger.info(f"Defect: {active_defect}, Division: {division_code}")
-
-                            request = CommentRegistrationRequest(
-                                divisionCode=division_code,
-                                systemCode=system_code,
-                                defectCode=active_defect,
-                                defectComment=comment_text,
-                                createUser=knox_id,
-                                changeType="S",
-                                docAttachedYn="N"
-                            )
-
-                            with st.spinner("PLM에 등록 중..."):
-                                logger.info("Calling API...")
-                                response = st.session_state.plm_integration.client.register_comment(request)
-
-                                logger.info(f"Response: {response.is_success()}")
-
-                                if response.is_success():
-                                    st.success("✅ PLM Comment 등록 완료!")
-                                else:
-                                    error_msg = response.get_error_message()
-                                    st.error(f"❌ 실패: {error_msg}")
-                        except Exception as e:
-                            logger.exception(f"Exception: {e}")
-                            st.error(f"❌ 오류: {str(e)}")
+            _render_plm_comment_registration(last_answer, active_defect)

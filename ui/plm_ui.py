@@ -34,6 +34,98 @@ from ui.plm_auto_download import (
 logger = logging.getLogger(__name__)
 
 
+def _is_plm_local_test_mode() -> bool:
+    return bool(st.session_state.get('plm_local_test_mode', False))
+
+
+def _get_plm_local_test_defects() -> List[Dict[str, Any]]:
+    """Return deterministic sample defects for offline PLM UI testing."""
+    return [
+        {
+            'defectCode': 'P260711-LOCAL01',
+            'defectId': 'LOCAL_DEFECT_001',
+            'plmTitle': 'IMS registration retry failure after network handover',
+            'plmStatus': 'Open',
+            'plmPriority': 'A',
+            'mainOwnerName': 'local.tester',
+            'createDate': '2026-07-11T09:15:00',
+            'content': 'After LTE to NR handover, IMS registration retries repeatedly and voice service is delayed.',
+            'reason': 'Local test root cause: retry timer and registration state are not synchronized after handover.',
+            'countermeasure': 'Local test solution: reset IMS registration state when handover completion is received.',
+        },
+        {
+            'defectCode': 'P260711-LOCAL02',
+            'defectId': 'LOCAL_DEFECT_002',
+            'plmTitle': 'Data stall observed after airplane mode toggle',
+            'plmStatus': 'Resolve',
+            'plmPriority': 'B',
+            'mainOwnerName': 'local.owner',
+            'createDate': '2026-07-10T16:42:00',
+            'content': 'Packet data appears connected, but DNS and TCP connection attempts time out after airplane mode toggle.',
+            'reason': 'Local test root cause: stale network capabilities remain cached after radio reset.',
+            'countermeasure': 'Local test solution: invalidate network capabilities and trigger reconnect.',
+        },
+        {
+            'defectCode': 'P260711-LOCAL03',
+            'defectId': 'LOCAL_DEFECT_003',
+            'plmTitle': 'Battery drain during repeated modem recovery',
+            'plmStatus': 'Close',
+            'plmPriority': 'C',
+            'mainOwnerName': 'local.review',
+            'createDate': '2026-07-09T11:05:00',
+            'content': 'Repeated modem recovery events keep radio components active and increase standby battery drain.',
+            'reason': 'Local test root cause: recovery retry interval is too short under persistent radio errors.',
+            'countermeasure': 'Local test solution: apply exponential backoff and stop retry after threshold.',
+        },
+    ]
+
+
+def _apply_plm_local_test_data(force: bool = False):
+    """Seed sample PLM state so offline UI flows can be tested."""
+    if not _is_plm_local_test_mode():
+        return
+
+    if force or not st.session_state.get('plm_quick_search_results'):
+        sample_defects = _get_plm_local_test_defects()
+        st.session_state.plm_quick_search_results = sample_defects
+        st.session_state.plm_quick_search_division = "25"
+        st.session_state.plm_quick_search_label = "Local Test"
+        st.session_state.plm_quick_search_status = "Open"
+        st.session_state.plm_quick_search_selected_index = 0
+
+        first_defect = sample_defects[0]
+        st.session_state.plm_active_defect_code = first_defect.get('defectCode')
+        st.session_state.plm_active_division = "25"
+
+
+def _render_plm_local_test_controls():
+    """Render global PLM local test controls."""
+    local_test = st.checkbox(
+        "PLM 로컬 테스트 모드",
+        key="plm_local_test_mode",
+        help="사내 PLM 연결 없이 샘플 defect와 comment 등록 UI를 테스트합니다.",
+    )
+
+    if local_test:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption("샘플 defect list와 active defect를 사용합니다. 실제 PLM API 호출은 comment 로컬 테스트에서 수행하지 않습니다.")
+        with col2:
+            if st.button("샘플 재생성", key="btn_seed_plm_local_test"):
+                _apply_plm_local_test_data(force=True)
+                st.rerun()
+
+        _apply_plm_local_test_data()
+    elif st.session_state.get('plm_quick_search_label') == "Local Test":
+        st.session_state.plm_quick_search_results = None
+        st.session_state.plm_quick_search_division = None
+        st.session_state.plm_quick_search_label = None
+        st.session_state.plm_quick_search_status = None
+        st.session_state.plm_quick_search_selected_index = 0
+        st.session_state.plm_active_defect_code = None
+        st.session_state.plm_active_division = None
+
+
 def _refine_problem_description(problem_content: str, use_llm: bool = True) -> str:
     """
     Refine problem description by extracting key points
@@ -96,28 +188,36 @@ Rules:
 
 def _initialize_plm_session():
     """Initialize Streamlit session state for PLM"""
+    defaults = {
+        'plm_local_test_mode': False,
+        'plm_cache': {},
+        'plm_search_results': None,
+        'plm_search_division': None,
+        'plm_quick_search_results': None,
+        'plm_quick_search_division': None,
+        'plm_quick_search_label': None,
+        'plm_quick_search_status': None,
+        'plm_analysis_results': None,
+        'plm_selected_defect_code': None,
+        'plm_selected_division': None,
+        'plm_files_list': None,
+        'plm_download_data': {},
+        'plm_zip_file_data': None,
+        'plm_zip_file_list': {},
+        'plm_selected_from_zip': None,
+        'plm_active_defect_code': None,
+        'plm_active_division': None,
+        'plm_current_analysis_result': None,
+        'plm_groups_cache': {},
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
     if 'plm_integration' not in st.session_state:
         try:
             st.session_state.plm_integration = create_plm_integration()
             st.session_state.plm_available = True
-            st.session_state.plm_cache = {}
-            st.session_state.plm_search_results = None
-            st.session_state.plm_search_division = None
-            st.session_state.plm_quick_search_results = None
-            st.session_state.plm_quick_search_division = None
-            st.session_state.plm_quick_search_label = None
-            st.session_state.plm_quick_search_status = None
-            st.session_state.plm_analysis_results = None
-            st.session_state.plm_selected_defect_code = None
-            st.session_state.plm_selected_division = None
-            st.session_state.plm_files_list = None
-            st.session_state.plm_download_data = {}  # {file_id: (file_data, file_name)}
-            st.session_state.plm_zip_file_data = None  # Binary data of ZIP file (for lazy extraction)
-            st.session_state.plm_zip_file_list = {}  # {filename: file_size} - metadata only
-            st.session_state.plm_selected_from_zip = None  # Selected file from ZIP
-            st.session_state.plm_active_defect_code = None  # Currently active PLM defect
-            st.session_state.plm_active_division = None  # Currently active division
-            st.session_state.plm_current_analysis_result = None  # Current analysis result to be posted
 
             # Pre-load groups for Quick Search (Mobile division - 25)
             try:
@@ -1411,6 +1511,15 @@ def _show_cached_results_in_fragment():
         if should_load:
             st.caption("Load the current defect's attachments from PLM.")
             if st.button("Load Attached Files", key=f"load_files_{defect_code}"):
+                if _is_plm_local_test_mode():
+                    st.session_state.plm_quick_search_files[defect_code] = {
+                        'files': [],
+                        'division_code': division_code,
+                        'defect_code': defect_code,
+                    }
+                    st.rerun()
+                    return
+
                 try:
                     client = _get_plm_client()
                     if not client:
@@ -1592,6 +1701,12 @@ def _show_cached_results_in_fragment():
                                     st.error(f"Failed: {path_or_error}")
 
                 # Clear button
+                if st.button("Refresh File List", key=f"reload_files_{defect_code}"):
+                    st.session_state.plm_quick_search_files.pop(defect_code, None)
+                    st.rerun()
+            else:
+                st.info("No attached files for this defect.")
+
                 if st.button("Refresh File List", key=f"reload_files_{defect_code}"):
                     st.session_state.plm_quick_search_files.pop(defect_code, None)
                     st.rerun()
@@ -1885,10 +2000,14 @@ def render_plm_section():
     st.header("📋 PLM Defect Management")
 
     _initialize_plm_session()
+    _render_plm_local_test_controls()
 
-    if not st.session_state.get('plm_available', False):
+    if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
         st.warning("⚠️ PLM API is not configured. Check credentials and network.")
         return
+
+    if _is_plm_local_test_mode():
+        st.info("PLM 로컬 테스트 모드가 활성화되어 있습니다. 샘플 defect로 UI를 검증합니다.")
 
     # Initialize analysis queue in session state
     if 'plm_analysis_queue' not in st.session_state:
@@ -1966,7 +2085,7 @@ def render_plm_sidebar_stats():
     """
     _initialize_plm_session()
 
-    if not st.session_state.get('plm_available', False):
+    if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
         return
 
     with st.sidebar:
@@ -1974,7 +2093,10 @@ def render_plm_sidebar_stats():
         st.subheader("📋 PLM Status")
 
         try:
-            st.caption("✅ Connected to PLM")
+            if _is_plm_local_test_mode():
+                st.caption("PLM local test mode")
+            else:
+                st.caption("✅ Connected to PLM")
 
             # Show active defect if selected
             active_defect = st.session_state.get('plm_active_defect_code')
@@ -1986,8 +2108,8 @@ def render_plm_sidebar_stats():
             st.divider()
 
             # Quick actions
-            if st.button("🔄 Refresh Cache", key="btn_refresh_plm"):
-                if 'plm_integration' in st.session_state:
+            if not _is_plm_local_test_mode() and st.button("🔄 Refresh Cache", key="btn_refresh_plm"):
+                if st.session_state.get('plm_integration'):
                     st.session_state.plm_integration.clear_documents()
                     st.success("Cache cleared")
 
