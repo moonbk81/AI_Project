@@ -367,6 +367,71 @@ def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "2
     st.markdown(html, unsafe_allow_html=True)
 
 
+def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
+    """Render Quick Search results as a selectable table and return selected row index."""
+    table_data = []
+
+    for defect in defects:
+        defect_code = defect.get('defectCode', '')
+        defect_id = defect.get('defectId', '')
+        title = defect.get('plmTitle', '')
+        created = defect.get('createDate', '')
+
+        if isinstance(title, str) and len(title) > 80:
+            title = title[:80] + "..."
+        if isinstance(created, str) and created:
+            created = created[:10]
+
+        plm_url = _get_plm_site_url(defect_id) if defect_id else ""
+        if plm_url and defect_code:
+            plm_url = f"{plm_url}#{defect_code}"
+
+        table_data.append({
+            "Code": plm_url,
+            "Title": title,
+            "Status": defect.get("plmStatus", "N/A"),
+            "Priority": defect.get("plmPriority", "N/A"),
+            "Owner": defect.get("mainOwnerName", "N/A"),
+            "Created": created,
+        })
+
+    table_state = st.dataframe(
+        pd.DataFrame(table_data),
+        width="stretch",
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="quick_search_results_table",
+        column_config={
+            "Code": st.column_config.LinkColumn(
+                "Code",
+                display_text=r"#([^#]+)$",
+                help="Open this defect in PLM",
+                width="medium",
+            ),
+            "Title": st.column_config.TextColumn("Title", width="large"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Priority": st.column_config.TextColumn("Priority", width="small"),
+            "Owner": st.column_config.TextColumn("Owner", width="medium"),
+            "Created": st.column_config.TextColumn("Created", width="small"),
+        },
+    )
+
+    selected_rows = table_state.selection.rows if table_state and table_state.selection else []
+    if selected_rows:
+        selected_index = selected_rows[0]
+        if selected_index >= len(defects):
+            selected_index = 0
+        st.session_state.plm_quick_search_selected_index = selected_index
+        return selected_index
+
+    selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+    if selected_index >= len(defects):
+        selected_index = 0
+        st.session_state.plm_quick_search_selected_index = selected_index
+    return selected_index
+
+
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
     """Render detailed view of a defect"""
     # Validate input is a dictionary
@@ -1285,22 +1350,22 @@ def render_plm_comment():
 
 
 def _show_cached_results_in_fragment():
-    """Show cached results with radio button selection"""
+    """Show cached Quick Search results with row selection."""
     # Safety check
     if not st.session_state.get('plm_quick_search_results'):
         st.info("No cached results")
         return
 
-    st.subheader("🔍 Quick Search Results")
+    st.subheader("Quick Search Results")
 
     col1, col2 = st.columns([3, 1])
     with col1:
         search_label = st.session_state.get('plm_quick_search_label', 'Unknown')
         status_cached = st.session_state.get('plm_quick_search_status', 'Unknown')
         results_count = len(st.session_state.plm_quick_search_results) if st.session_state.plm_quick_search_results else 0
-        st.info(f"📌 Cached [{status_cached}] results for {search_label}: {results_count} defect(s)")
+        st.caption(f"Cached results · {status_cached} · {search_label} · {results_count} defect(s)")
     with col2:
-        if st.button("Clear Cache", key="btn_clear_quick_search"):
+        if st.button("Clear Results", key="btn_clear_quick_search"):
             st.session_state.plm_quick_search_results = None
             st.session_state.plm_quick_search_division = None
             st.session_state.plm_quick_search_label = None
@@ -1314,254 +1379,229 @@ def _show_cached_results_in_fragment():
     results = st.session_state.plm_quick_search_results
     division_code = st.session_state.plm_quick_search_division
 
-    _render_defects_table(results, division_code)
+    st.caption("Select a row to view details. Click the defect code to open PLM.")
+    selected_index = _render_selectable_defects_table(results)
+    selected_defect = results[selected_index]
+    defect_code = selected_defect.get('defectCode')
+
+    st.session_state.plm_active_defect_code = defect_code
+    st.session_state.plm_active_division = division_code
 
     st.divider()
+    st.subheader("Defect Details")
+    st.caption(defect_code)
+    _render_defect_details(selected_defect, division_code)
 
-    defect_options = []
-    for defect in results:
-        code = defect.get('defectCode', 'Unknown')
-        title = defect.get('plmTitle', 'No title')[:40]
-        status = defect.get('plmStatus', '')
-        defect_options.append(f"{code} - {title} [{status}]")
+    # Show files section
+    st.divider()
+    st.subheader("Attached Files")
 
-    # Use radio button instead of selectbox to avoid rerun issues
-    # Preserve selected index across reruns
-    current_selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+    defect_code = selected_defect.get('defectCode')
 
-    selected_display = st.radio(
-        "Select a defect to view details",
-        options=defect_options,
-        index=current_selected_index,
-        key="quick_search_select"
-    )
+    # Initialize file storage in session state
+    if 'plm_quick_search_files' not in st.session_state:
+        st.session_state.plm_quick_search_files = {}
+    if 'plm_quick_search_downloads' not in st.session_state:
+        st.session_state.plm_quick_search_downloads = {}
 
-    if selected_display:
-        selected_index = defect_options.index(selected_display)
-        # Save current selection to preserve across reruns
-        st.session_state.plm_quick_search_selected_index = selected_index
-        selected_defect = results[selected_index]
-        defect_code = selected_defect.get('defectCode')
+    if defect_code:
+        # Check if we need to load files for this defect
+        should_load = defect_code not in st.session_state.plm_quick_search_files
 
-        # Button to explicitly set as active defect
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            if st.button("📌 활성화", key=f"activate_defect_{defect_code}"):
-                st.session_state.plm_active_defect_code = defect_code
-                st.session_state.plm_active_division = division_code
-                st.success(f"✅ {defect_code} 활성화됨")
+        if should_load:
+            st.caption("Load the current defect's attachments from PLM.")
+            if st.button("Load Attached Files", key=f"load_files_{defect_code}"):
+                try:
+                    client = _get_plm_client()
+                    if not client:
+                        st.error("PLM API not configured")
+                    else:
+                        with st.spinner(f"Loading attached files for {defect_code}..."):
+                            response = client.get_file_list(
+                                division_code=division_code,
+                                defect_code=defect_code
+                            )
 
-        # Also set it by default when viewing details
-        st.session_state.plm_active_defect_code = defect_code
-        st.session_state.plm_active_division = division_code
+                            if response.is_success():
+                                result = response.result if response.result else []
+                                files = []
 
-        st.divider()
-        st.subheader(f"📋 Details: {defect_code}")
-        _render_defect_details(selected_defect, division_code)
+                                if isinstance(result, list) and len(result) > 0:
+                                    data = result[0].get('data', []) if isinstance(result[0], dict) else []
+                                    files = [f for f in data if f.get('title') and f.get('fileId')]
+                                elif isinstance(result, dict):
+                                    data = result.get('data', [])
+                                    files = [f for f in data if f.get('title') and f.get('fileId')]
 
-        # Show files section
-        st.divider()
-        st.subheader("📁 Attached Files")
+                                # Store files in session state
+                                st.session_state.plm_quick_search_files[defect_code] = {
+                                    'files': files,
+                                    'division_code': division_code,
+                                    'defect_code': defect_code
+                                }
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to list files: {response.get_error_message()}")
 
-        defect_code = selected_defect.get('defectCode')
+                except Exception as e:
+                    logger.error(f"Error loading files: {e}", exc_info=True)
+                    st.error(f"Error: {e}")
 
-        # Initialize file storage in session state
-        if 'plm_quick_search_files' not in st.session_state:
-            st.session_state.plm_quick_search_files = {}
-        if 'plm_quick_search_downloads' not in st.session_state:
-            st.session_state.plm_quick_search_downloads = {}
+        # Display files if loaded
+        if defect_code in st.session_state.plm_quick_search_files:
+            file_data = st.session_state.plm_quick_search_files[defect_code]
+            files = file_data.get('files', [])
 
-        if defect_code:
-            # Check if we need to load files for this defect
-            should_load = defect_code not in st.session_state.plm_quick_search_files
+            if files:
+                st.caption(f"{len(files)} attached file(s)")
 
-            if should_load:
-                if st.button(f"📂 Load Files for {defect_code}", key=f"load_files_{defect_code}"):
-                    try:
-                        client = _get_plm_client()
-                        if not client:
-                            st.error("PLM API not configured")
-                        else:
-                            with st.spinner(f"Loading files for {defect_code}..."):
-                                response = client.get_file_list(
-                                    division_code=division_code,
-                                    defect_code=defect_code
-                                )
+                table_data = []
+                for file in files:
+                    table_data.append({
+                        'Filename': file.get('title', 'N/A'),
+                        'Size': f"{file.get('fileSize', 0) / 1024:.1f} KB" if file.get('fileSize') else 'N/A',
+                        'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
+                    })
 
-                                if response.is_success():
-                                    result = response.result if response.result else []
-                                    files = []
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
 
-                                    if isinstance(result, list) and len(result) > 0:
-                                        data = result[0].get('data', []) if isinstance(result[0], dict) else []
-                                        files = [f for f in data if f.get('title') and f.get('fileId')]
-                                    elif isinstance(result, dict):
-                                        data = result.get('data', [])
-                                        files = [f for f in data if f.get('title') and f.get('fileId')]
+                st.markdown("**Download Files**")
+                for file in files:
+                    doc_id = file.get('docId')
+                    file_id = file.get('fileId')
+                    title = file.get('title', f'file_{file_id}')
+                    file_size = file.get('fileSize', 0)
+                    created = file.get('createDate', '')[:10] if file.get('createDate') else ''
 
-                                    # Store files in session state
-                                    st.session_state.plm_quick_search_files[defect_code] = {
-                                        'files': files,
-                                        'division_code': division_code,
-                                        'defect_code': defect_code
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.write(title)
+                        details = []
+                        if file_size:
+                            details.append(f"{file_size / 1024:.1f} KB")
+                        if created:
+                            details.append(created)
+                        if details:
+                            st.caption(" · ".join(details))
+                    with col2:
+                        # Check if already downloaded
+                        is_downloaded = file_id in st.session_state.plm_quick_search_downloads
+
+                        if st.button("Download", key=f"download_{file_id}", disabled=is_downloaded):
+                            # Download and store in session state
+                            client = _get_plm_client()
+                            download_result = client.download_file(
+                                division_code=division_code,
+                                doc_id=doc_id,
+                                title=title,
+                                file_id=file_id
+                            )
+
+                            if download_result.get('success'):
+                                file_content = download_result.get('data')
+                                file_size = download_result.get('size', 0)
+
+                                if file_content and file_size > 0:
+                                    # Store in session state for display
+                                    st.session_state.plm_quick_search_downloads[file_id] = {
+                                        'content': file_content,
+                                        'filename': title,
+                                        'size': file_size
                                     }
                                     st.rerun()
                                 else:
-                                    st.error(f"Failed to list files: {response.get_error_message()}")
+                                    st.warning(f"File content not available")
+                            else:
+                                error_msg = download_result.get('message', 'Unknown error')
+                                st.error(f"Download failed: {error_msg}")
 
-                    except Exception as e:
-                        logger.error(f"Error loading files: {e}", exc_info=True)
-                        st.error(f"Error: {e}")
+                        # Show download status
+                        if is_downloaded:
+                            st.caption("Downloaded")
 
-            # Display files if loaded
-            if defect_code in st.session_state.plm_quick_search_files:
-                file_data = st.session_state.plm_quick_search_files[defect_code]
-                files = file_data.get('files', [])
+                # Auto-process downloaded files
+                if st.session_state.plm_quick_search_downloads:
+                    st.divider()
+                    st.subheader("Downloaded Files")
 
-                if files:
-                    st.success(f"Found {len(files)} file(s)")
+                    # Show auto-save status and analysis queue info
+                    st.caption(
+                        "Process saves non-ZIP files to Downloads, extracts ZIP files, and queues log files for analysis."
+                    )
 
-                    table_data = []
-                    for file in files:
-                        table_data.append({
-                            'File': file.get('title', 'N/A'),
-                            'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
-                            'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
-                        })
+                    for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
+                        filename = file_info['filename']
+                        content = file_info['content']
+                        file_size_kb = len(content) / 1024
 
-                    df = pd.DataFrame(table_data)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-
-                    st.subheader("📥 Download Files")
-                    for file in files:
-                        doc_id = file.get('docId')
-                        file_id = file.get('fileId')
-                        title = file.get('title', f'file_{file_id}')
-
-                        col1, col2 = st.columns([3, 1])
+                        col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
-                            st.text(f"📄 {title}")
+                            st.write(filename)
+                            st.caption(f"{file_size_kb:.1f} KB")
+
                         with col2:
-                            # Check if already downloaded
-                            is_downloaded = file_id in st.session_state.plm_quick_search_downloads
-
-                            if st.button("⬇️ Download", key=f"download_{file_id}", disabled=is_downloaded):
-                                # Download and store in session state
-                                client = _get_plm_client()
-                                download_result = client.download_file(
-                                    division_code=division_code,
-                                    doc_id=doc_id,
-                                    title=title,
-                                    file_id=file_id
-                                )
-
-                                if download_result.get('success'):
-                                    file_content = download_result.get('data')
-                                    file_size = download_result.get('size', 0)
-
-                                    if file_content and file_size > 0:
-                                        # Store in session state for display
-                                        st.session_state.plm_quick_search_downloads[file_id] = {
-                                            'content': file_content,
-                                            'filename': title,
-                                            'size': file_size
-                                        }
-                                        st.rerun()
-                                    else:
-                                        st.warning(f"File content not available")
-                                else:
-                                    error_msg = download_result.get('message', 'Unknown error')
-                                    st.error(f"Download failed: {error_msg}")
-
-                            # Show download status
-                            if is_downloaded:
-                                st.caption("✅ Downloaded")
-
-                    # Auto-process downloaded files
-                    if st.session_state.plm_quick_search_downloads:
-                        st.divider()
-                        st.subheader("Downloaded Files - Auto Processing")
-
-                        # Show auto-save status and analysis queue info
-                        st.info(
-                            "Auto-processing enabled:\n"
-                            "• Non-ZIP files are auto-saved to Downloads folder\n"
-                            "• ZIP files are automatically extracted\n"
-                            "• Log files are added to the analysis pipeline\n"
-                        )
-
-                        for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
-                            filename = file_info['filename']
-                            content = file_info['content']
-                            file_size_kb = len(content) / 1024
-
-                            col1, col2, col3 = st.columns([2, 1, 1])
-                            with col1:
-                                st.text(f"📄 {filename} ({file_size_kb:.1f} KB)")
-
-                            with col2:
-                                # Auto-download button
-                                if st.button(
-                                    "⬇️ Auto-Download",
-                                    key=f"auto_download_{file_id}",
-                                    help="Auto-save to Downloads folder and process"
-                                ):
-                                    with st.spinner(f"Processing {filename}..."):
-                                        result = PLMAutoDownloadFlow.process_downloaded_file(
-                                            filename=filename,
-                                            file_content=content,
-                                            source_defect=defect_code,
-                                            auto_save=True,
-                                            auto_extract_logs=True
-                                        )
-
-                                        # Show processing results
-                                        if result['success']:
-                                            st.success("Processing completed successfully")
-                                            for msg in result['messages']:
-                                                st.write(msg)
-
-                                            # Show extracted logs if any
-                                            if result['extracted_logs']:
-                                                with st.expander(f"Extracted {len(result['extracted_logs'])} log file(s)", expanded=True):
-                                                    for log_name in result['extracted_logs']:
-                                                        st.write(log_name)
-
-                                            # Trigger auto-analysis if logs were extracted
-                                            if result['extracted_logs']:
-                                                st.rerun()
-                                        else:
-                                            st.error("Processing encountered issues")
-                                            for msg in result['messages']:
-                                                st.write(msg)
-
-                            with col3:
-                                # Direct save button (for users who prefer manual control)
-                                if st.button(
-                                    "💾 Save",
-                                    key=f"manual_save_{file_id}",
-                                    help="Manually save to Downloads"
-                                ):
-                                    success, path_or_error = AutoDownloadManager.save_to_downloads(
-                                        filename, content
+                            # Auto-download button
+                            if st.button(
+                                "Process",
+                                key=f"auto_download_{file_id}",
+                                help="Auto-save to Downloads folder and process"
+                            ):
+                                with st.spinner(f"Processing {filename}..."):
+                                    result = PLMAutoDownloadFlow.process_downloaded_file(
+                                        filename=filename,
+                                        file_content=content,
+                                        source_defect=defect_code,
+                                        auto_save=True,
+                                        auto_extract_logs=True
                                     )
-                                    if success:
-                                        st.success(f"✅ Saved to: {path_or_error}")
-                                    else:
-                                        st.error(f"❌ Failed: {path_or_error}")
 
-                    # Clear button
-                    if st.button("🔄 Reload Files", key=f"reload_files_{defect_code}"):
-                        st.session_state.plm_quick_search_files.pop(defect_code, None)
-                        st.rerun()
-        else:
-            st.info("Select a defect to view files")
+                                    # Show processing results
+                                    if result['success']:
+                                        st.success("Processing completed successfully")
+                                        for msg in result['messages']:
+                                            st.write(msg)
+
+                                        # Show extracted logs if any
+                                        if result['extracted_logs']:
+                                            with st.expander(f"Extracted {len(result['extracted_logs'])} log file(s)", expanded=True):
+                                                for log_name in result['extracted_logs']:
+                                                    st.write(log_name)
+
+                                        # Trigger auto-analysis if logs were extracted
+                                        if result['extracted_logs']:
+                                            st.rerun()
+                                    else:
+                                        st.error("Processing encountered issues")
+                                        for msg in result['messages']:
+                                            st.write(msg)
+
+                        with col3:
+                            # Direct save button (for users who prefer manual control)
+                            if st.button(
+                                "Save",
+                                key=f"manual_save_{file_id}",
+                                help="Manually save to Downloads"
+                            ):
+                                success, path_or_error = AutoDownloadManager.save_to_downloads(
+                                    filename, content
+                                )
+                                if success:
+                                    st.success(f"Saved to: {path_or_error}")
+                                else:
+                                    st.error(f"Failed: {path_or_error}")
+
+                # Clear button
+                if st.button("Refresh File List", key=f"reload_files_{defect_code}"):
+                    st.session_state.plm_quick_search_files.pop(defect_code, None)
+                    st.rerun()
+    else:
+        st.info("Select a defect to view files")
 
     st.divider()
-    st.markdown("---")
-    st.subheader("🔄 New Search")
+    st.subheader("New Search")
 
-    if st.button("Clear and Search Again", key="btn_new_search"):
+    if st.button("Start New Search", key="btn_new_search"):
         st.session_state.plm_quick_search_results = None
         st.session_state.plm_quick_search_division = None
         st.session_state.plm_quick_search_label = None
@@ -1580,7 +1620,7 @@ def _show_cached_results_in_fragment():
 
 def _show_search_input_form_fragment():
     """Display search input form using radio buttons"""
-    st.subheader("🔍 Quick Search")
+    st.subheader("Quick Search")
 
     # Division fixed to Mobile
     division = "Mobile"
@@ -1619,7 +1659,7 @@ def _show_search_input_form_fragment():
             groups = st.session_state.get('plm_groups_cache', {})
 
             if not groups:
-                st.warning(f"No groups defined for {division}")
+                st.warning(f"No groups are defined for {division}")
                 return
 
             selected_group_key = st.radio(
@@ -1639,7 +1679,7 @@ def _show_search_input_form_fragment():
             )
             group_key = None
 
-    if st.button("🔍 Search", key="btn_quick_search"):
+    if st.button("Search", key="btn_quick_search"):
         if search_method == "Group":
             if not group_key:
                 st.error("Please select a group")
@@ -1705,7 +1745,7 @@ def _show_search_input_form_fragment():
                 codes_to_fetch = defect_codes[:50]
                 st.info(f"Found {len(defect_codes)} {status} defect code(s). Loading details...")
                 if len(defect_codes) > 50:
-                    st.warning(f"⚠️ Showing first 50 out of {len(defect_codes)} defects")
+                    st.warning(f"Showing first 50 out of {len(defect_codes)} defects")
 
                 response_details = client.get_defect_info(
                     division_code=division_code,
@@ -1723,9 +1763,8 @@ def _show_search_input_form_fragment():
                         st.session_state.plm_quick_search_division = division_code
                         st.session_state.plm_quick_search_label = search_label
                         st.session_state.plm_quick_search_status = status
-                        st.session_state.quick_search_select = 0
+                        st.session_state.plm_quick_search_selected_index = 0
                         st.success(f"Loaded {len(defects)} {status} defect(s)")
-                        st.divider()
                         # Show results immediately after loading
                         _show_cached_results_in_fragment()
                         return

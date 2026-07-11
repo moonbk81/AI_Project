@@ -11,6 +11,10 @@ from benchmark_ui import get_installed_ollama_models
 from ui.plm_ui import render_plm_sidebar_stats
 from ui.plm_auto_download import LogAnalysisPipeline
 
+_INGESTED_FILES_CACHE_KEY = "ingested_files_cache"
+_INGESTED_FILES_CACHE_DIRTY_KEY = "ingested_files_cache_dirty"
+
+
 def _render_sidebar_style():
     st.markdown(
         """
@@ -73,14 +77,36 @@ def _render_engine_settings():
     st.divider()
     render_plm_sidebar_stats()
 
+
+def _invalidate_ingested_files_cache():
+    st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = True
+
+
+def _get_ingested_files(engine):
+    if (
+        _INGESTED_FILES_CACHE_KEY not in st.session_state
+        or st.session_state.get(_INGESTED_FILES_CACHE_DIRTY_KEY, True)
+    ):
+        st.session_state[_INGESTED_FILES_CACHE_KEY] = engine.get_all_files()
+        st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = False
+
+    return st.session_state[_INGESTED_FILES_CACHE_KEY]
+
+
 def _render_file_session_manager(engine, reset_analysis_context):
     st.divider()
     st.subheader("분석 세션 및 데이터베이스 관리")
 
-    existing_files = engine.get_all_files()
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("새로고침", key="btn_refresh_ingested_files", help="적재 파일 목록을 다시 조회합니다."):
+            _invalidate_ingested_files_cache()
+
+    existing_files = _get_ingested_files(engine)
     if existing_files:
         default_idx = existing_files.index(st.session_state.current_file) + 1 if st.session_state.current_file in existing_files else 0
-        selected_file = st.selectbox("기존 적재 파일 선택", options=["선택 안 함"] + existing_files, index=default_idx)
+        with col1:
+            selected_file = st.selectbox("기존 적재 파일 선택", options=["선택 안 함"] + existing_files, index=default_idx)
         if selected_file != "선택 안 함" and st.session_state.current_file != selected_file:
             st.session_state.current_file = selected_file
             st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
@@ -100,6 +126,8 @@ def _render_file_session_manager(engine, reset_analysis_context):
                     shutil.rmtree(folder)
                 os.makedirs(folder, exist_ok=True)
             st.session_state.current_file = None
+            st.session_state[_INGESTED_FILES_CACHE_KEY] = []
+            st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = False
             reset_analysis_context()
             st.success("데이터베이스 및 물리적 파일이 초기화되었습니다.")
             time.sleep(1)
@@ -197,6 +225,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
             else:
                 st.session_state.uploader_key += 1
                 run_analysis_pipeline(files_to_analyze, False, "", "", engine)
+                _invalidate_ingested_files_cache()
                 # Clear PLM selected file after analysis
                 st.session_state.plm_selected_from_zip = None
 
