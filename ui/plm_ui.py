@@ -1552,7 +1552,7 @@ def _show_cached_results_in_fragment():
 
                     # Clear button
                     if st.button("🔄 Reload Files", key=f"reload_files_{defect_code}"):
-                        st.session_state.plm_quick_search_files[defect_code] = None
+                        st.session_state.plm_quick_search_files.pop(defect_code, None)
                         st.rerun()
         else:
             st.info("Select a defect to view files")

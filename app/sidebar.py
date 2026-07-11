@@ -152,8 +152,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         st.success(f"✅ PLM 파일 준비됨: `{plm_selected_file['filename']}`")
 
     # Check for PLM analysis queue items
-    if total_in_queue > 0:
-        st.info(f"Analysis Queue: {total_in_queue} files pending\n\nManage in 'Analysis Queue' tab")
+    pending_files = queue_status.get('pending', 0)
+    if pending_files > 0:
+        st.info(f"Analysis Queue: {pending_files} files pending\n\nManage in 'Analysis Queue' tab")
 
     # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
     def set_running():
@@ -162,7 +163,6 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     # Auto-trigger analysis if:
     # 1. trigger_auto_analysis flag is set OR
     # 2. Queue has pending files and is_running is False
-    pending_files = queue_status.get('pending', 0)
     should_auto_trigger = (st.session_state.get('trigger_auto_analysis', False) or pending_files > 0) and not st.session_state.is_running
 
     # 3. 버튼에 disabled 속성과 on_click 콜백 적용
@@ -190,9 +190,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
                 plm_file.getbuffer = lambda: plm_selected_file['content']
                 files_to_analyze.append(plm_file)
 
-            # If no uploaded files and no PLM files, but queue has files, that's OK
+            # If no uploaded files and no PLM files, pending queue items are valid input.
             # Pipeline will handle queue files automatically
-            if not files_to_analyze and total_in_queue == 0:
+            if not files_to_analyze and pending_files == 0:
                 st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
             else:
                 st.session_state.uploader_key += 1
