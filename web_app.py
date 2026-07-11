@@ -25,13 +25,13 @@ st.markdown(
     """
     <style>
     :root {
-        --app-text: #242733;
-        --app-muted: #6f7582;
-        --app-border: #d8dde5;
-        --app-soft-bg: #f7f8fa;
-        --app-panel-bg: #ffffff;
-        --app-primary: #2f5f9f;
-        --app-danger: #d63f3f;
+        --app-text: var(--text-color);
+        --app-muted: color-mix(in srgb, var(--text-color) 68%, transparent);
+        --app-border: color-mix(in srgb, var(--text-color) 22%, transparent);
+        --app-soft-bg: var(--secondary-background-color);
+        --app-panel-bg: var(--background-color);
+        --app-primary: var(--primary-color);
+        --app-danger: #d94a4a;
     }
 
     html, body, [class*="css"] {
@@ -88,8 +88,8 @@ st.markdown(
     code {
         border-radius: 6px;
         padding: 0.12rem 0.38rem;
-        background: #f2f5f7;
-        color: #256a3b;
+        background: var(--app-soft-bg);
+        color: var(--app-text);
         font-size: 0.84rem;
     }
 

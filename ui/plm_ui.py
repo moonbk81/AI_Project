@@ -446,7 +446,18 @@ def _get_plm_site_url(defect_id: str) -> str:
 
 def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "25"):
     """Render defects in a table with clickable code links"""
-    html = '<table style="width:100%; border-collapse:collapse;"><thead><tr style="background-color:#f0f0f0;"><th style="border:1px solid #ddd; padding:8px; text-align:left;">Code</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Title</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Status</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Priority</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Owner</th><th style="border:1px solid #ddd; padding:8px; text-align:left;">Created</th></tr></thead><tbody>'
+    cell_style = "border:1px solid var(--app-border); padding:8px; text-align:left;"
+    html = (
+        '<table style="width:100%; border-collapse:collapse;">'
+        '<thead><tr style="background-color:var(--app-soft-bg);">'
+        f'<th style="{cell_style}">Code</th>'
+        f'<th style="{cell_style}">Title</th>'
+        f'<th style="{cell_style}">Status</th>'
+        f'<th style="{cell_style}">Priority</th>'
+        f'<th style="{cell_style}">Owner</th>'
+        f'<th style="{cell_style}">Created</th>'
+        '</tr></thead><tbody>'
+    )
 
     for defect in defects:
         defect_code = defect.get('defectCode', '')
@@ -461,7 +472,16 @@ def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "2
 
         plm_url = _get_plm_site_url(defect_id) if defect_id else "#"
 
-        html += f'<tr><td style="border:1px solid #ddd; padding:8px;"><a href="{plm_url}" target="_blank" style="color:#1f77b4; font-weight:bold; text-decoration:none;">{defect_code}</a></td><td style="border:1px solid #ddd; padding:8px;">{title}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("plmStatus", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("plmPriority", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{defect.get("mainOwnerName", "N/A")}</td><td style="border:1px solid #ddd; padding:8px;">{created}</td></tr>'
+        html += (
+            "<tr>"
+            f'<td style="{cell_style}"><a href="{plm_url}" target="_blank" style="color:var(--app-primary); font-weight:700; text-decoration:none;">{defect_code}</a></td>'
+            f'<td style="{cell_style}">{title}</td>'
+            f'<td style="{cell_style}">{defect.get("plmStatus", "N/A")}</td>'
+            f'<td style="{cell_style}">{defect.get("plmPriority", "N/A")}</td>'
+            f'<td style="{cell_style}">{defect.get("mainOwnerName", "N/A")}</td>'
+            f'<td style="{cell_style}">{created}</td>'
+            "</tr>"
+        )
 
     html += '</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)

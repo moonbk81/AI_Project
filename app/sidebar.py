@@ -18,7 +18,7 @@ def _render_sidebar_style():
         """
         <style>
             [data-testid="stSidebar"] {
-                color: #242733;
+                color: var(--text-color);
             }
 
             [data-testid="stSidebar"] section {
@@ -43,15 +43,15 @@ def _render_sidebar_style():
 
             [data-testid="stSidebar"] code {
                 font-size: 0.82rem;
-                color: #256a3b;
-                background: #f5f7f8;
+                color: var(--text-color);
+                background: var(--secondary-background-color);
                 border-radius: 6px;
                 padding: 0.12rem 0.38rem;
             }
 
             [data-testid="stSidebar"] hr {
                 margin: 1rem 0;
-                border-color: #d7dbe1;
+                border-color: color-mix(in srgb, var(--text-color) 22%, transparent);
             }
 
             [data-testid="stSidebar"] .stAlert {
@@ -74,8 +74,8 @@ def _render_sidebar_style():
             }
 
             [data-testid="stSidebar"] .stButton > button[kind="primary"] {
-                background: #d63f3f;
-                border-color: #d63f3f;
+                background: #d94a4a;
+                border-color: #d94a4a;
             }
 
             [data-testid="stSidebar"] [data-testid="stFileUploader"] {
@@ -85,7 +85,7 @@ def _render_sidebar_style():
             [data-testid="stSidebar"] [data-testid="stFileUploader"] section {
                 padding: 0.9rem;
                 border-radius: 8px;
-                border-color: #d7dbe1;
+                border-color: color-mix(in srgb, var(--text-color) 22%, transparent);
             }
 
             [data-testid="stSidebar"] [data-testid="stFileUploader"] section > div {
@@ -102,7 +102,7 @@ def _render_sidebar_style():
 
             [data-testid="stSidebar"] [data-testid="stFileUploader"] small {
                 font-size: 0.78rem;
-                color: #777d89;
+                color: color-mix(in srgb, var(--text-color) 68%, transparent);
             }
 
             [data-testid="stSidebar"] .stSelectbox {
