@@ -3,11 +3,9 @@
 import os
 import shutil
 import time
-from datetime import datetime
 
 import streamlit as st
 
-from benchmark_ui import get_installed_ollama_models
 from ui.plm_ui import render_plm_sidebar_stats
 from ui.plm_auto_download import LogAnalysisPipeline
 
@@ -19,67 +17,110 @@ def _render_sidebar_style():
     st.markdown(
         """
         <style>
-            [data-testid="stSidebar"] .stSelectbox, [data-testid="stSidebar"] .stRadio { margin-bottom: -15px; }
-            [data-testid="stSidebar"] hr { margin-top: 10px; margin-bottom: 10px; }
-            [data-testid="stSidebar"] .stAlert p { line-height: 1.4; margin-bottom: 0px; }
+            [data-testid="stSidebar"] {
+                color: #242733;
+            }
+
+            [data-testid="stSidebar"] section {
+                padding-top: 1.1rem;
+            }
+
+            [data-testid="stSidebar"] h2,
+            [data-testid="stSidebar"] h3 {
+                font-size: 1.05rem;
+                line-height: 1.3;
+                font-weight: 700;
+                letter-spacing: 0;
+                margin: 0 0 0.65rem;
+            }
+
+            [data-testid="stSidebar"] p,
+            [data-testid="stSidebar"] label,
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+                font-size: 0.88rem;
+                line-height: 1.45;
+            }
+
+            [data-testid="stSidebar"] code {
+                font-size: 0.82rem;
+                color: #256a3b;
+                background: #f5f7f8;
+                border-radius: 6px;
+                padding: 0.12rem 0.38rem;
+            }
+
+            [data-testid="stSidebar"] hr {
+                margin: 1rem 0;
+                border-color: #d7dbe1;
+            }
+
+            [data-testid="stSidebar"] .stAlert {
+                padding: 0.72rem 0.85rem;
+                border-radius: 8px;
+            }
+
+            [data-testid="stSidebar"] .stAlert p {
+                line-height: 1.45;
+                margin-bottom: 0;
+            }
+
+            [data-testid="stSidebar"] .stButton > button {
+                min-height: 2.35rem;
+                border-radius: 8px;
+                font-size: 0.9rem;
+                font-weight: 600;
+                padding: 0.38rem 0.75rem;
+                white-space: nowrap;
+            }
+
+            [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+                background: #d63f3f;
+                border-color: #d63f3f;
+            }
+
+            [data-testid="stSidebar"] [data-testid="stFileUploader"] {
+                margin-top: 0.25rem;
+            }
+
+            [data-testid="stSidebar"] [data-testid="stFileUploader"] section {
+                padding: 0.9rem;
+                border-radius: 8px;
+                border-color: #d7dbe1;
+            }
+
+            [data-testid="stSidebar"] [data-testid="stFileUploader"] section > div {
+                display: flex;
+                align-items: center;
+                gap: 0.9rem;
+            }
+
+            [data-testid="stSidebar"] [data-testid="stFileUploader"] button {
+                min-height: 2.2rem;
+                border-radius: 8px;
+                font-size: 0.88rem;
+            }
+
+            [data-testid="stSidebar"] [data-testid="stFileUploader"] small {
+                font-size: 0.78rem;
+                color: #777d89;
+            }
+
+            [data-testid="stSidebar"] .stSelectbox {
+                margin-bottom: 0;
+            }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _render_engine_settings():
-    st.title("System Configuration")
-    st.header("분석 엔진 설정")
-    st.divider()
-
-    available_models = get_installed_ollama_models()
-    if available_models is None:
-        available_models = ["gemma4:12b", "gemma4:e4b", "gemma3:12b", "gemma3:4b", "qwen2.5-coder:7b"]
-
-    try:
-        current_model_idx = available_models.index(st.session_state['active_model'])
-    except ValueError:
-        current_model_idx = 0
-
-    ui_model = st.selectbox("AI 모델 선택", options=available_models, index=current_model_idx)
-
-    routing_options = ["semantic", "llm", "hybrid"]
-    try:
-        current_mode_idx = routing_options.index(st.session_state['active_routing_mode'])
-    except ValueError:
-        current_mode_idx = 0
-
-    ui_mode = st.radio("라우팅 모드", options=routing_options, index=current_mode_idx)
-
-    if st.button("설정 적용 및 엔진 로드", width="stretch"):
-        if (st.session_state['active_model'] != ui_model) or (st.session_state['active_routing_mode'] != ui_mode):
-            st.session_state['active_model'] = ui_model
-            st.session_state['active_routing_mode'] = ui_mode
-            st.session_state['last_loaded_at'] = f"Loaded @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            st.toast(f"엔진 설정이 업데이트 되었습니다. ({ui_model} / {ui_mode})")
-            st.rerun()
-        else:
-            st.info("변경 사항이 없습니다.")
-
-    st.divider()
-    st.markdown("### 현재 활성 상태")
-
-    loaded_at = st.session_state.get('last_loaded_at', '')
-    if not loaded_at or loaded_at == 'System Initializing...':
-        loaded_at = 'Ready'
-
-    st.info(
-        f"**Model:** `{st.session_state['active_model']}`  \n"
-        f"**Mode:** `{st.session_state['active_routing_mode']}`  \n"
-        f"**Status:** `{loaded_at}`"
-    )
-    st.divider()
-    render_plm_sidebar_stats()
-
-
 def _invalidate_ingested_files_cache():
     st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = True
+
+
+def _render_engine_status():
+    st.subheader("분석 엔진")
+    st.caption(f"Model: `{st.session_state.get('active_model', 'N/A')}`")
 
 
 def _get_ingested_files(engine):
@@ -97,21 +138,28 @@ def _render_file_session_manager(engine, reset_analysis_context):
     st.divider()
     st.subheader("분석 세션 및 데이터베이스 관리")
 
-    col1, col2 = st.columns([3, 1])
+    col1, col2 = st.columns([4, 1])
     with col2:
-        if st.button("새로고침", key="btn_refresh_ingested_files", help="적재 파일 목록을 다시 조회합니다."):
+        if st.button("갱신", key="btn_refresh_ingested_files", help="적재 파일 목록을 다시 조회합니다."):
             _invalidate_ingested_files_cache()
 
     existing_files = _get_ingested_files(engine)
     if existing_files:
         default_idx = existing_files.index(st.session_state.current_file) + 1 if st.session_state.current_file in existing_files else 0
         with col1:
-            selected_file = st.selectbox("기존 적재 파일 선택", options=["선택 안 함"] + existing_files, index=default_idx)
-        if selected_file != "선택 안 함" and st.session_state.current_file != selected_file:
+            selected_file = st.selectbox(
+                "기존 적재 파일",
+                options=["기존 적재파일 선택 안 함"] + existing_files,
+                index=default_idx,
+                label_visibility="collapsed",
+            )
+        if selected_file == "기존 적재파일 선택 안 함":
+            selected_file = None
+
+        if selected_file and st.session_state.current_file != selected_file:
             st.session_state.current_file = selected_file
             st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
             st.session_state.messages = []
-            st.rerun()
     else:
         st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드하십시오.")
         st.session_state.current_file = None
@@ -135,7 +183,7 @@ def _render_file_session_manager(engine, reset_analysis_context):
 
 def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
-    st.header("자동 분석 파이프라인")
+    st.subheader("자동 분석 파이프라인")
 
     # Check if auto-analysis should be triggered
     if st.session_state.get('trigger_auto_analysis', False):
@@ -166,6 +214,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         "원시 로그 파일 업로드 (다중 선택 가능)",
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}",
+        label_visibility="collapsed",
     )
 
     # Check for PLM ZIP selected file
@@ -235,6 +284,7 @@ def _reset_analysis_context():
 
 def render_sidebar(engine, run_analysis_pipeline):
     _render_sidebar_style()
-    _render_engine_settings()
+    _render_engine_status()
+    render_plm_sidebar_stats()
     _render_pipeline_controls(engine, run_analysis_pipeline)
     _render_file_session_manager(engine, _reset_analysis_context)

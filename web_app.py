@@ -24,14 +24,152 @@ st.set_page_config(page_title="Log Analysis Console", layout="wide")
 st.markdown(
     """
     <style>
+    :root {
+        --app-text: #242733;
+        --app-muted: #6f7582;
+        --app-border: #d8dde5;
+        --app-soft-bg: #f7f8fa;
+        --app-panel-bg: #ffffff;
+        --app-primary: #2f5f9f;
+        --app-danger: #d63f3f;
+    }
+
     html, body, [class*="css"] {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+        color: var(--app-text);
     }
+
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.35rem;
+        padding-bottom: 2rem;
+        max-width: 1440px;
     }
+
     h1, h2, h3 {
-        letter-spacing: -0.02em;
+        letter-spacing: 0;
+        color: var(--app-text);
+        font-weight: 700;
+    }
+
+    h1 {
+        font-size: 1.55rem !important;
+        line-height: 1.25 !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    h2 {
+        font-size: 1.25rem !important;
+        line-height: 1.3 !important;
+        margin-top: 0.45rem !important;
+        margin-bottom: 0.65rem !important;
+    }
+
+    h3 {
+        font-size: 1.05rem !important;
+        line-height: 1.35 !important;
+        margin-top: 0.35rem !important;
+        margin-bottom: 0.55rem !important;
+    }
+
+    p, label, [data-testid="stMarkdownContainer"] {
+        font-size: 0.92rem;
+        line-height: 1.5;
+    }
+
+    [data-testid="stMarkdownContainer"] p {
+        margin-bottom: 0.35rem;
+    }
+
+    hr {
+        margin: 1.05rem 0 !important;
+        border-color: var(--app-border) !important;
+    }
+
+    code {
+        border-radius: 6px;
+        padding: 0.12rem 0.38rem;
+        background: #f2f5f7;
+        color: #256a3b;
+        font-size: 0.84rem;
+    }
+
+    [data-testid="stTabs"] [role="tablist"] {
+        gap: 0.2rem;
+        border-bottom: 1px solid var(--app-border);
+    }
+
+    [data-testid="stTabs"] [role="tab"] {
+        height: 2.45rem;
+        padding: 0 0.8rem;
+        border-radius: 8px 8px 0 0;
+        color: var(--app-muted);
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+        color: var(--app-text);
+        background: var(--app-panel-bg);
+        border-bottom: 2px solid var(--app-primary);
+    }
+
+    div[data-testid="stButton"] > button {
+        min-height: 2.35rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        padding: 0.38rem 0.8rem;
+    }
+
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background: var(--app-danger);
+        border-color: var(--app-danger);
+    }
+
+    [data-testid="stAlert"] {
+        border-radius: 8px;
+        padding: 0.78rem 0.9rem;
+    }
+
+    [data-testid="stAlert"] p {
+        line-height: 1.45;
+        margin-bottom: 0;
+    }
+
+    [data-testid="stMetric"] {
+        background: var(--app-panel-bg);
+        border: 1px solid var(--app-border);
+        border-radius: 8px;
+        padding: 0.75rem 0.85rem;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: var(--app-muted);
+        font-size: 0.78rem;
+    }
+
+    [data-testid="stMetricValue"] {
+        font-size: 1.15rem;
+        font-weight: 700;
+    }
+
+    [data-testid="stDataFrame"] {
+        border: 1px solid var(--app-border);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    [data-testid="stExpander"] {
+        border: 1px solid var(--app-border);
+        border-radius: 8px;
+        background: var(--app-panel-bg);
+    }
+
+    [data-testid="stTextInput"] input,
+    [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    [data-testid="stTextArea"] textarea {
+        border-radius: 8px;
+        font-size: 0.9rem;
     }
     </style>
     """,
@@ -89,7 +227,7 @@ init_session_states()
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
 st.title("Android Log Analysis Console")
-st.markdown("단말 로그를 업로드하고 주요 통신 이슈, 장애 이벤트, 관련 근거를 확인합니다.")
+st.caption("단말 로그를 업로드하고 주요 통신 이슈, 장애 이벤트, 관련 근거를 확인합니다.")
 
 # Show notification if coming from PLM analysis
 if st.session_state.get('navigate_to_chat', False):

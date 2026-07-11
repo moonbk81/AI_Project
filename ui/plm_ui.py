@@ -2089,14 +2089,11 @@ def render_plm_sidebar_stats():
         return
 
     with st.sidebar:
-        st.markdown("---")
-        st.subheader("📋 PLM Status")
+        st.subheader("PLM 상태")
 
         try:
             if _is_plm_local_test_mode():
-                st.caption("PLM local test mode")
-            else:
-                st.caption("✅ Connected to PLM")
+                st.caption("로컬 테스트 모드")
 
             # Show active defect if selected
             active_defect = st.session_state.get('plm_active_defect_code')
@@ -2105,16 +2102,8 @@ def render_plm_sidebar_stats():
             else:
                 st.caption("활성 결함: 없음")
 
-            st.divider()
-
-            # Quick actions
-            if not _is_plm_local_test_mode() and st.button("🔄 Refresh Cache", key="btn_refresh_plm"):
-                if st.session_state.get('plm_integration'):
-                    st.session_state.plm_integration.clear_documents()
-                    st.success("Cache cleared")
-
         except Exception as e:
-            st.caption(f"❌ {str(e)[:30]}")
+            st.caption(str(e)[:30])
 
 
 # Export functions for use in other modules
