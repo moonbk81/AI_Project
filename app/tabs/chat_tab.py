@@ -162,6 +162,11 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
     st.caption(f"활성 결함: `{active_defect}`")
 
     status = st.session_state.get("plm_comment_submit_status")
+    # Only show the status banner for the defect it was produced for,
+    # so a previous defect's success/failure doesn't leak onto another.
+    if status and status.get("defect") != active_defect:
+        status = None
+        st.session_state.plm_comment_submit_status = None
     if status:
         if status.get("success"):
             st.success(status.get("message", "PLM Comment 등록 완료"))
@@ -210,6 +215,7 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
             "success": False,
             "message": "Knox ID는 필수입니다",
             "local_test": local_test,
+            "defect": active_defect,
         }
         st.rerun()
         return
@@ -231,6 +237,7 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
             "message": "PLM 로컬 테스트 완료: 실제 등록은 수행하지 않았습니다.",
             "local_test": True,
             "request": request_payload,
+            "defect": active_defect,
         }
         st.rerun()
         return
@@ -253,18 +260,21 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
                 "success": True,
                 "message": "PLM Comment 등록 완료",
                 "local_test": False,
+                "defect": active_defect,
             }
         else:
             st.session_state.plm_comment_submit_status = {
                 "success": False,
                 "message": f"실패: {response.get_error_message()}",
                 "local_test": False,
+                "defect": active_defect,
             }
     except Exception as e:
         st.session_state.plm_comment_submit_status = {
             "success": False,
             "message": f"오류: {str(e)}",
             "local_test": False,
+            "defect": active_defect,
         }
 
     st.rerun()
