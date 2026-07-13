@@ -315,8 +315,31 @@ def render_chat_tab(engine):
                 st.caption("💡 정제된 내용이 분석에 사용됩니다.")
             st.divider()
 
+        # Include developer comments selected on the PLM detail screen
+        comments = plm_problem.get('comments') or []
+        comment_block = ""
+        if comments:
+            lines = []
+            for c in comments:
+                header = " · ".join(x for x in [c.get('user', ''), c.get('date', '')] if x)
+                text = c.get('text', '')
+                lines.append(f"- ({header}) {text}" if header else f"- {text}")
+            comment_block = "\n\n**개발자 코멘트:**\n" + "\n".join(lines)
+
+            with st.expander(f"💬 함께 분석할 개발자 코멘트 ({len(comments)}건)", expanded=False):
+                for c in comments:
+                    header = " · ".join(x for x in [c.get('user', ''), c.get('date', '')] if x)
+                    if header:
+                        st.markdown(f"**{header}**")
+                    st.write(c.get('text', ''))
+            st.divider()
+
         # Auto-analyze the PLM problem
-        auto_prompt = f"PLM 결함 분석:\n결함 코드: {plm_problem.get('defect_code')}\n\n**문제 내용:**\n{problem_content}\n\n위 문제에 대해 분석해 주세요."
+        auto_prompt = (
+            f"PLM 결함 분석:\n결함 코드: {plm_problem.get('defect_code')}\n\n"
+            f"**문제 내용:**\n{problem_content}{comment_block}\n\n"
+            f"위 문제 내용{'과 개발자 코멘트를 종합' if comments else ''}하여 분석해 주세요."
+        )
 
         render_chat_interface(engine, key_suffix="main", show_input=False)
         _render_chat_answer(engine, auto_prompt)

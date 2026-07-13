@@ -552,6 +552,93 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     return selected_index
 
 
+# Prefixes of comments auto-registered by this tool (excluded from human comments).
+# Kept in sync with _format_analysis_as_comment().
+_AI_COMMENT_SIGNATURES = ("💬 **AI Chat 분석 결과", "🤖 AI 분석 결과")
+
+# System/automated registrants whose comments are not developer input (excluded).
+_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development")
+
+
+def _is_ai_generated_comment(text: str) -> bool:
+    """True if the comment was auto-registered by this tool (AI analysis)."""
+    stripped = (text or "").lstrip()
+    return any(stripped.startswith(sig) for sig in _AI_COMMENT_SIGNATURES)
+
+
+def _is_excluded_comment_user(history_user: str) -> bool:
+    """True for system/automated registrants that should not surface as comments."""
+    name = (history_user or "").lower()
+    return any(excluded in name for excluded in _EXCLUDED_COMMENT_USERS)
+
+
+def _fetch_human_comments(defect_code: str, division_code: str) -> List[Dict[str, Any]]:
+    """
+    Fetch developer-written comments for a defect via get_defect_history.
+
+    The history API does not expose a per-comment systemCode, so "human" comments
+    are identified as historyType == 'C' entries with non-empty text that are not
+    this tool's own AI-generated comments.
+    """
+    if _is_plm_local_test_mode():
+        return [
+            {
+                'comment': '[Network팀] 이관합니다. 5G 안테나가 풀인데도 throughput이 안 나옵니다. NSA/SA 전환 구간이 의심됩니다.',
+                'historyDate': '2026-07-13 10:32:11',
+                'historyUser': 'Jinsu Park/Network Group',
+                'commentId': 'LOCAL_C0001',
+            },
+            {
+                'comment': '특정 gNB에서만 PDCP 재전송이 급증하는 로그를 확인했습니다. 첨부 로그 7시 11분대 참고 부탁드립니다.',
+                'historyDate': '2026-07-13 11:05:44',
+                'historyUser': 'Hana Kim/Modem Group',
+                'commentId': 'LOCAL_C0002',
+            },
+        ]
+
+    # Cache per defect so checkbox toggles (which rerun the script) don't re-hit the API.
+    cache = st.session_state.setdefault('plm_defect_comments_cache', {})
+    if defect_code in cache:
+        return cache[defect_code]
+
+    comments = []
+    try:
+        client = _get_plm_client()
+        if not client:
+            return []
+
+        response = client.get_defect_history(
+            division_code=division_code,
+            defect_codes=[defect_code],
+        )
+        if not response.is_success():
+            logger.warning(f"get_defect_history failed: {response.get_error_message()}")
+            return []
+
+        result = response.result or {}
+        for arr in result.get('defectHistoryListArr', []) or []:
+            for entry in arr.get('defectHistoryList', []) or []:
+                if entry.get('historyType') != 'C':
+                    continue
+                if _is_excluded_comment_user(entry.get('historyUser', '')):
+                    continue
+                text = (entry.get('comment') or '').strip()
+                if not text or _is_ai_generated_comment(text):
+                    continue
+                comments.append({
+                    'comment': text,
+                    'historyDate': entry.get('historyDate', ''),
+                    'historyUser': entry.get('historyUser', ''),
+                    'commentId': entry.get('commentId', ''),
+                })
+    except Exception as e:
+        logger.error(f"Error fetching defect comments: {e}", exc_info=True)
+        return []
+
+    cache[defect_code] = comments
+    return comments
+
+
 def _render_defect_details(defect: Dict[str, Any], division_code: str):
     """Render detailed view of a defect"""
     # Validate input is a dictionary
@@ -594,52 +681,78 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
         else:
             st.info("No problem content available")
 
-        # Button to send to Chat analysis
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            # Check if we just saved this problem to avoid duplicate processing
-            current_defect_code = defect.get('defectCode')
+        current_defect_code = defect.get('defectCode')
+        defect_code_str = str(current_defect_code) if current_defect_code else "unknown"
 
-            # Explicitly check conditions and convert to bool
-            plm_query = st.session_state.get('plm_problem_query')
-            if plm_query and isinstance(plm_query, dict):
-                is_already_sent = (
-                    plm_query.get('defect_code') == current_defect_code and
-                    not st.session_state.get('plm_problem_analyzed', False)
+        # Developer comments carried over from other teams.
+        comments = _fetch_human_comments(current_defect_code, division_code) if current_defect_code else []
+
+        # Check if we already sent this problem, to avoid duplicate processing.
+        plm_query = st.session_state.get('plm_problem_query')
+        is_already_sent = bool(
+            plm_query and isinstance(plm_query, dict)
+            and plm_query.get('defect_code') == current_defect_code
+            and not st.session_state.get('plm_problem_analyzed', False)
+        )
+
+        # Comment checkboxes + the analyze button live inside a form so that toggling
+        # a checkbox does NOT trigger a full-app rerun (which dims the whole screen).
+        # Streamlit only reruns on form submit ("분석하기").
+        with st.form(f"analyze_form_{defect_code_str}"):
+            if comments:
+                st.markdown(f"**💬 등록된 개발자 코멘트 ({len(comments)}건)**")
+                st.caption("분석에 함께 반영할 코멘트를 선택하세요. (AI 자동 분석 코멘트는 제외됨)")
+                for idx, cmt in enumerate(comments):
+                    meta = " · ".join(
+                        x for x in [cmt.get('historyUser', ''), cmt.get('historyDate', '')] if x
+                    )
+                    st.checkbox(meta or f"Comment {idx + 1}", key=f"cmt_sel_{defect_code_str}_{idx}")
+                    st.caption(cmt.get('comment', ''))
+                st.divider()
+
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                submitted = st.form_submit_button(
+                    "🚀 분석하기",
+                    help="Send this problem to Chat tab for analysis",
+                    disabled=is_already_sent,
                 )
-            else:
-                is_already_sent = False
 
-            # Ensure it's a boolean for Streamlit
-            is_already_sent = bool(is_already_sent)
+        if is_already_sent:
+            st.caption("⏳ Pending analysis")
 
-            # Create safe button key
-            defect_code_str = str(current_defect_code) if current_defect_code else "unknown"
-            button_key = f"analyze_problem_{defect_code_str}"
+        if submitted:
+            # Read checkbox selections from session state (set inside the form).
+            selected_comments = [
+                cmt for idx, cmt in enumerate(comments)
+                if st.session_state.get(f"cmt_sel_{defect_code_str}_{idx}")
+            ]
 
-            if st.button(
-                "🚀 분석하기",
-                key=button_key,
-                help="Send this problem to Chat tab for analysis",
-                disabled=is_already_sent
-            ):
-                # Refine problem description before sending to Chat
-                with st.spinner("💡 Refining problem description..."):
-                    refined_content = _refine_problem_description(problem_content)
+            # Refine problem description before sending to Chat
+            with st.spinner("💡 Refining problem description..."):
+                refined_content = _refine_problem_description(problem_content)
 
-                # Store refined problem content in session for Chat tab
-                st.session_state.plm_problem_query = {
-                    'content': refined_content,
-                    'original_content': problem_content,
-                    'defect_code': defect.get('defectCode'),
-                    'defect_title': defect.get('plmTitle', 'Unknown'),
-                    'timestamp': datetime.now().isoformat()
-                }
-                st.session_state.plm_problem_analyzed = False  # Reset analyzed flag
-                st.session_state.plm_last_analyzed_code = current_defect_code
-                st.session_state.navigate_to_chat = True  # Flag to navigate to chat tab
-                st.success("✅ Problem refined! Navigating to Log Analysis tab...")
-                st.rerun()  # Rerun to apply navigation
+            # Store refined problem content in session for Chat tab
+            st.session_state.plm_problem_query = {
+                'content': refined_content,
+                'original_content': problem_content,
+                'defect_code': defect.get('defectCode'),
+                'defect_title': defect.get('plmTitle', 'Unknown'),
+                'comments': [
+                    {
+                        'user': c.get('historyUser', ''),
+                        'date': c.get('historyDate', ''),
+                        'text': c.get('comment', ''),
+                    }
+                    for c in selected_comments
+                ],
+                'timestamp': datetime.now().isoformat()
+            }
+            st.session_state.plm_problem_analyzed = False  # Reset analyzed flag
+            st.session_state.plm_last_analyzed_code = current_defect_code
+            st.session_state.navigate_to_chat = True  # Flag to navigate to chat tab
+            st.success("✅ Problem refined! Navigating to Log Analysis tab...")
+            st.rerun()  # Rerun to apply navigation
 
             # Show status if already sent
             if is_already_sent:
