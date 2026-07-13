@@ -7,7 +7,6 @@ import streamlit as st
 
 from log_orchestrator import LogOrchestrator
 from prepare_rag_payload import RagPayloadBuilder
-from ui.plm_auto_download import LogAnalysisPipeline
 
 def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
     pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
@@ -58,32 +57,7 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             os.makedirs("./temp_logs", exist_ok=True)
             saved_paths = []
 
-            # Add files from analysis queue (PLM extracted logs)
-            queue_status = LogAnalysisPipeline.get_queue_status()
-            queue = queue_status.get('queue', [])
-
-            # Prepare queue files
             files_to_process = list(uploaded_files) if uploaded_files else []
-
-            if queue:
-                st.write(f"Loading {len(queue)} log files from analysis queue...")
-                queue_filenames = []  # Track which files we're processing
-                for queue_item in queue:
-                    if queue_item.get('status') == 'pending':
-                        # Update status to processing immediately
-                        filename = queue_item.get('filename')
-                        LogAnalysisPipeline.update_item_status(filename, 'processing')
-                        queue_filenames.append(filename)
-
-                        # Create a file-like object from queue item
-                        from types import SimpleNamespace
-                        import io
-
-                        plm_file = SimpleNamespace()
-                        plm_file.name = filename
-                        plm_file.getbuffer = lambda content=queue_item.get('content'): content
-                        files_to_process.append(plm_file)
-                        st.caption(f"{plm_file.name} (processing...)")
 
             # Process all files
             for file in files_to_process:
@@ -142,30 +116,8 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
             st.session_state.current_file = f"{base_name}_payload.json"
             st.session_state.messages = []
 
-            # Update queue items to completed
-            if queue:
-                st.write("Updating queue status...")
-                for queue_item in queue:
-                    filename = queue_item.get('filename')
-                    # Update all items that were processing
-                    if queue_item.get('status') in ['processing', 'pending']:
-                        success = LogAnalysisPipeline.update_item_status(filename, 'completed')
-                        if success:
-                            st.write(f"  {filename} - completed")
-                        else:
-                            st.write(f"  {filename} - failed to update status")
-
             # Don't rerun - keep current screen state
             st.success("Analysis complete. Current screen state is preserved.")
         except Exception as e:
             status.update(label="파이프라인 실행 오류", state="error")
             st.error(f"System Error: {e}")
-
-            # Update failed items
-            if queue:
-                st.write("Marking queue items as failed...")
-                for queue_item in queue:
-                    filename = queue_item.get('filename')
-                    if queue_item.get('status') == 'processing':
-                        LogAnalysisPipeline.update_item_status(filename, 'failed')
-                        st.write(f"  {filename} - failed")

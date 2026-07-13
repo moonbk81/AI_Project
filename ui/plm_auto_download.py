@@ -14,9 +14,39 @@ import io
 import logging
 from typing import Optional, Dict, List, Tuple
 from pathlib import Path
-from datetime import datetime
+
+import streamlit as st
 
 logger = logging.getLogger(__name__)
+
+
+def add_pending_log(filename: str, content: bytes) -> bool:
+    """
+    Register an extracted log file for the unified analysis pipeline.
+
+    The sidebar pipeline consumes ``st.session_state.plm_pending_logs`` directly,
+    so no intermediate queue/status tracking is needed.
+
+    Args:
+        filename: Name of the log file
+        content: File content as bytes
+
+    Returns:
+        True if registered successfully
+    """
+    try:
+        if 'plm_pending_logs' not in st.session_state:
+            st.session_state.plm_pending_logs = []
+
+        st.session_state.plm_pending_logs.append({
+            'filename': filename,
+            'content': content,
+        })
+        logger.info(f"Registered {filename} for analysis (size: {len(content)} bytes)")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to register pending log: {e}")
+        return False
 
 
 class LogFileExtractor:
@@ -43,9 +73,8 @@ class LogFileExtractor:
         Returns:
             True if matches log pattern, False otherwise
         """
-        filename_lower = filename.lower()
         for pattern in LogFileExtractor.LOG_PATTERNS:
-            if re.match(pattern, filename_lower):
+            if re.match(pattern, filename, re.IGNORECASE):
                 return True
         return False
 
@@ -124,120 +153,6 @@ class LogFileExtractor:
         except Exception as e:
             logger.error(f"Error extracting single file: {e}")
             return None
-
-
-class LogAnalysisPipeline:
-    """
-    Integration point for log analysis pipeline
-
-    Manages queuing of extracted log files for analysis
-    """
-
-    # This will be populated from session state
-    _analysis_queue = []
-
-    @staticmethod
-    def add_log_to_queue(filename: str, content: bytes, source_defect: Optional[str] = None) -> bool:
-        """
-        Add extracted log file to analysis queue
-
-        Args:
-            filename: Name of the log file
-            content: File content as bytes
-            source_defect: Optional defect code that the log came from
-
-        Returns:
-            True if added successfully
-        """
-        try:
-            import streamlit as st
-
-            # Initialize queue in session state if needed
-            if 'plm_analysis_queue' not in st.session_state:
-                st.session_state.plm_analysis_queue = []
-
-            # Create queue entry
-            queue_entry = {
-                'filename': filename,
-                'content': content,
-                'size': len(content),
-                'source_defect': source_defect,
-                'added_at': datetime.now().isoformat(),
-                'status': 'pending'  # pending, processing, completed, failed
-            }
-
-            st.session_state.plm_analysis_queue.append(queue_entry)
-            logger.info(f"Added {filename} to analysis queue (size: {len(content)} bytes)")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to add to analysis queue: {e}")
-            return False
-
-    @staticmethod
-    def get_queue_status() -> Dict:
-        """Get current analysis queue status"""
-        try:
-            import streamlit as st
-            queue = st.session_state.get('plm_analysis_queue', [])
-
-            return {
-                'total': len(queue),
-                'pending': len([q for q in queue if q.get('status') == 'pending']),
-                'processing': len([q for q in queue if q.get('status') == 'processing']),
-                'completed': len([q for q in queue if q.get('status') == 'completed']),
-                'failed': len([q for q in queue if q.get('status') == 'failed']),
-                'queue': queue
-            }
-        except Exception as e:
-            logger.error(f"Error getting queue status: {e}")
-            return {'total': 0, 'pending': 0, 'processing': 0, 'completed': 0, 'failed': 0}
-
-    @staticmethod
-    def update_item_status(filename: str, new_status: str) -> bool:
-        """
-        Update status of a queued item
-
-        Args:
-            filename: Filename to update
-            new_status: New status (processing, completed, failed)
-
-        Returns:
-            True if updated successfully
-        """
-        try:
-            import streamlit as st
-
-            if 'plm_analysis_queue' not in st.session_state:
-                return False
-
-            # Directly update the session state queue
-            queue = st.session_state.plm_analysis_queue
-
-            for i, item in enumerate(queue):
-                if item.get('filename') == filename:
-                    # Update via index to ensure session state is modified
-                    queue[i]['status'] = new_status
-                    st.session_state.plm_analysis_queue = queue  # Force update
-                    logger.info(f"Updated {filename} status to {new_status}")
-                    return True
-
-            logger.warning(f"File {filename} not found in queue")
-            return False
-        except Exception as e:
-            logger.error(f"Error updating status: {e}")
-            return False
-
-    @staticmethod
-    def clear_queue():
-        """Clear the analysis queue"""
-        try:
-            import streamlit as st
-            st.session_state.plm_analysis_queue = []
-            logger.info("Analysis queue cleared")
-        except Exception as e:
-            logger.error(f"Error clearing queue: {e}")
 
 
 class AutoDownloadManager:
@@ -373,17 +288,13 @@ class PLMAutoDownloadFlow:
                     result['extracted_logs'] = list(logs.keys())
                     result['messages'].append(f"Found {len(logs)} log file(s)")
 
-                    # Add logs to analysis queue
+                    # Register logs directly for the unified analysis pipeline
                     for log_filename, log_content in logs.items():
-                        success = LogAnalysisPipeline.add_log_to_queue(
-                            log_filename,
-                            log_content,
-                            source_defect=source_defect
-                        )
+                        success = add_pending_log(log_filename, log_content)
                         if success:
-                            result['messages'].append(f"✅ {log_filename} added to analysis queue")
+                            result['messages'].append(f"✅ {log_filename} 분석 파이프라인에 추가됨")
                         else:
-                            result['messages'].append(f"❌ Failed to queue {log_filename}")
+                            result['messages'].append(f"❌ {log_filename} 추가 실패")
 
                     result['success'] = True
                 else:
@@ -406,12 +317,9 @@ class PLMAutoDownloadFlow:
             logger.error(f"Error processing file: {e}", exc_info=True)
             result['messages'].append(f"Error: {str(e)}")
 
-        # Set flag to auto-start analysis if logs were extracted
+        # Flag auto-start of the analysis pipeline if logs were extracted
         if auto_analyze and result['success'] and result['extracted_logs']:
-            try:
-                st.session_state.trigger_auto_analysis = True
-                result['messages'].append("🚀 자동 분석 파이프라인 시작 중...")
-            except Exception as e:
-                logger.warning(f"Could not set auto-analysis flag: {e}")
+            st.session_state.trigger_auto_analysis = True
+            result['messages'].append("🚀 자동 분석 파이프라인 시작 중...")
 
         return result

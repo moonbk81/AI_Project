@@ -7,7 +7,6 @@ import time
 import streamlit as st
 
 from ui.plm_ui import render_plm_sidebar_stats
-from ui.plm_auto_download import LogAnalysisPipeline
 
 _INGESTED_FILES_CACHE_KEY = "ingested_files_cache"
 _INGESTED_FILES_CACHE_DIRTY_KEY = "ingested_files_cache_dirty"
@@ -185,23 +184,8 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.subheader("자동 분석 파이프라인")
 
-    # Check if auto-analysis should be triggered
-    if st.session_state.get('trigger_auto_analysis', False):
-        st.session_state.trigger_auto_analysis = False
-        st.info("🚀 자동 분석 파이프라인 시작 중...")
-
-    # Show analysis queue status
-    queue_status = LogAnalysisPipeline.get_queue_status()
-    total_in_queue = queue_status['total']
-
-    if total_in_queue > 0:
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.info(f"📋 분석 큐: {total_in_queue}개 파일\n⏳ {queue_status['pending']} • 🔄 {queue_status['processing']} • ✅ {queue_status['completed']}")
-        with col2:
-            if st.button("🗑️ 큐 초기화", key="btn_clear_queue_sidebar"):
-                LogAnalysisPipeline.clear_queue()
-                st.rerun()
+    # PLM에서 추출되어 분석 대기 중인 로그 파일
+    pending_logs = st.session_state.get('plm_pending_logs', [])
 
     # 1. 실행 상태를 관리할 세션 변수 초기화
     if "is_running" not in st.session_state:
@@ -222,10 +206,10 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     if plm_selected_file:
         st.success(f"✅ PLM 파일 준비됨: `{plm_selected_file['filename']}`")
 
-    # Check for PLM analysis queue items
-    pending_files = queue_status.get('pending', 0)
-    if pending_files > 0:
-        st.info(f"Analysis Queue: {pending_files} files pending\n\nManage in 'Analysis Queue' tab")
+    # Show PLM extracted logs waiting for analysis
+    if pending_logs:
+        names = ", ".join(log['filename'] for log in pending_logs)
+        st.info(f"📥 PLM 추출 로그 {len(pending_logs)}개 분석 대기 중\n\n{names}")
 
     # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
     def set_running():
@@ -233,8 +217,8 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
 
     # Auto-trigger analysis if:
     # 1. trigger_auto_analysis flag is set OR
-    # 2. Queue has pending files and is_running is False
-    should_auto_trigger = (st.session_state.get('trigger_auto_analysis', False) or pending_files > 0) and not st.session_state.is_running
+    # 2. There are PLM extracted logs pending and is_running is False
+    should_auto_trigger = (st.session_state.get('trigger_auto_analysis', False) or bool(pending_logs)) and not st.session_state.is_running
 
     # 3. 버튼에 disabled 속성과 on_click 콜백 적용
     if should_auto_trigger:
@@ -242,35 +226,40 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         st.session_state.trigger_auto_analysis = False
         st.session_state.is_running = True
         button_click = True
-        st.info("Auto-starting analysis with queued files...")
+        st.info("PLM 추출 로그로 분석을 자동 시작합니다...")
     else:
         button_click = st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running)
 
     if button_click or should_auto_trigger:
         try:
-            # Combine uploaded files and PLM selected file
+            # Combine uploaded files, PLM selected file, and PLM extracted logs
             files_to_analyze = list(uploaded_files) if uploaded_files else []
+
+            from types import SimpleNamespace
 
             if plm_selected_file:
                 # Create a file-like object from PLM selected file
-                import io
-                from types import SimpleNamespace
-
                 plm_file = SimpleNamespace()
                 plm_file.name = plm_selected_file['filename']
                 plm_file.getbuffer = lambda: plm_selected_file['content']
                 files_to_analyze.append(plm_file)
 
-            # If no uploaded files and no PLM files, pending queue items are valid input.
-            # Pipeline will handle queue files automatically
-            if not files_to_analyze and pending_files == 0:
+            # Create file-like objects from PLM extracted logs
+            for log in pending_logs:
+                log_file = SimpleNamespace()
+                log_file.name = log['filename']
+                log_file.getbuffer = lambda content=log['content']: content
+                files_to_analyze.append(log_file)
+
+            if not files_to_analyze:
                 st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
             else:
                 st.session_state.uploader_key += 1
                 run_analysis_pipeline(files_to_analyze, False, "", "", engine)
                 _invalidate_ingested_files_cache()
-                # Clear PLM selected file after analysis
+                # Clear PLM selected file and extracted logs after analysis
                 st.session_state.plm_selected_from_zip = None
+                st.session_state.plm_pending_logs = []
 
         finally:
             # 4. 분석이 끝나거나 에러가 나더라도 무조건 상태를 해제하고 새로고침

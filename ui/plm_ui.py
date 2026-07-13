@@ -26,7 +26,6 @@ from plm.plm_rag_integration import (
 from plm.plm_api_client import DivisionCode, PLMAPIException
 from ui.plm_auto_download import (
     LogFileExtractor,
-    LogAnalysisPipeline,
     AutoDownloadManager,
     PLMAutoDownloadFlow
 )
@@ -205,6 +204,7 @@ def _initialize_plm_session():
         'plm_zip_file_data': None,
         'plm_zip_file_list': {},
         'plm_selected_from_zip': None,
+        'plm_pending_logs': [],
         'plm_active_defect_code': None,
         'plm_active_division': None,
         'plm_current_analysis_result': None,
@@ -1207,112 +1207,6 @@ def render_plm_files():
                     st.code(str(e), language="text")
 
 
-def render_analysis_queue():
-    """
-    Render the log analysis queue dashboard
-
-    Shows extracted log files waiting for analysis and their status
-    """
-    st.subheader("📋 Analysis Queue Status")
-
-    # Get queue status
-    queue_status = LogAnalysisPipeline.get_queue_status()
-    queue = queue_status.get('queue', [])
-
-    # Display metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Total", queue_status['total'])
-    with col2:
-        st.metric("Pending", queue_status['pending'], delta="⏳")
-    with col3:
-        st.metric("Processing", queue_status['processing'], delta="🔄")
-    with col4:
-        st.metric("Completed", queue_status['completed'], delta="✅")
-    with col5:
-        st.metric("Failed", queue_status['failed'], delta="❌")
-
-    st.divider()
-
-    if queue:
-        st.subheader("📁 Queued Log Files")
-
-        # Create table view
-        table_data = []
-        for idx, item in enumerate(queue, 1):
-            status_icon = {
-                'pending': '⏳',
-                'processing': '🔄',
-                'completed': '✅',
-                'failed': '❌'
-            }.get(item.get('status'), '?')
-
-            table_data.append({
-                '#': idx,
-                'Status': f"{status_icon} {item.get('status', 'unknown')}",
-                'Filename': item.get('filename', 'Unknown'),
-                'Size (KB)': f"{item.get('size', 0) / 1024:.1f}",
-                'Source': item.get('source_defect', '-'),
-                'Added': item.get('added_at', '')[-19:-9]  # YYYY-MM-DD
-            })
-
-        df = pd.DataFrame(table_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # Detail view
-        if queue:
-            st.subheader("📄 Log File Details")
-            selected_idx = st.selectbox(
-                "Select a log file to view details",
-                options=range(len(queue)),
-                format_func=lambda i: f"{queue[i].get('filename', f'File {i}')} ({queue[i].get('status', 'unknown')})"
-            )
-
-            if selected_idx is not None and selected_idx < len(queue):
-                item = queue[selected_idx]
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Filename:**", item.get('filename'))
-                    st.write("**Size:**", f"{item.get('size', 0) / 1024:.1f} KB")
-                    st.write("**Status:**", item.get('status', 'unknown'))
-                with col2:
-                    st.write("**Added at:**", item.get('added_at', 'Unknown'))
-                    st.write("**Source Defect:**", item.get('source_defect', '-'))
-
-                # Show file content preview
-                with st.expander("📋 Content Preview (first 2000 chars)"):
-                    content = item.get('content', b'')
-                    if isinstance(content, bytes):
-                        try:
-                            preview = content[:2000].decode('utf-8', errors='ignore')
-                        except:
-                            preview = "[Binary content - cannot display]"
-                    else:
-                        preview = str(content)[:2000]
-
-                    st.text(preview)
-
-        # Queue management
-        st.divider()
-        st.subheader("⚙️ Queue Management")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🗑️ Clear Queue", key="btn_clear_queue"):
-                LogAnalysisPipeline.clear_queue()
-                st.success("Queue cleared")
-                st.rerun()
-
-        with col2:
-            st.caption("Clear all pending files from the queue")
-
-    else:
-        st.info("📭 No log files in the queue. Files will appear here after extraction from ZIP archives.")
-
-
 def _format_analysis_as_comment(context: Dict[str, Any]) -> str:
     """
     Format analysis context as a PLM comment
@@ -1663,7 +1557,7 @@ def _show_cached_results_in_fragment():
 
                     # Show auto-save status and analysis queue info
                     st.caption(
-                        "Process saves non-ZIP files to Downloads, extracts ZIP files, and queues log files for analysis."
+                        "Process saves non-ZIP files to Downloads, extracts ZIP files, and sends log files straight to the analysis pipeline."
                     )
 
                     for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
@@ -1923,101 +1817,6 @@ def _show_search_input_form_fragment():
                 st.error(f"Error: {e}")
 
 
-def render_analysis_queue():
-    """
-    Render the log analysis queue dashboard
-
-    Shows extracted log files waiting for analysis and their status
-    """
-    st.subheader("Analysis Queue Status")
-
-    # Get queue status
-    queue_status = LogAnalysisPipeline.get_queue_status()
-    queue = queue_status.get('queue', [])
-
-    # Display metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Total", queue_status['total'])
-    with col2:
-        st.metric("Pending", queue_status['pending'])
-    with col3:
-        st.metric("Processing", queue_status['processing'])
-    with col4:
-        st.metric("Completed", queue_status['completed'])
-    with col5:
-        st.metric("Failed", queue_status['failed'])
-
-    st.divider()
-
-    if queue:
-        st.subheader("Queued Log Files")
-
-        # Create table view
-        table_data = []
-        for idx, item in enumerate(queue, 1):
-            status_text = item.get('status', 'unknown').upper()
-            table_data.append({
-                '#': idx,
-                'Status': status_text,
-                'Filename': item.get('filename', 'Unknown'),
-                'Size (KB)': f"{item.get('size', 0) / 1024:.1f}",
-                'Source': item.get('source_defect', '-'),
-                'Added': item.get('added_at', '')[-19:-9]
-            })
-
-        df = pd.DataFrame(table_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # Detail view
-        if queue:
-            st.subheader("Log File Details")
-            selected_idx = st.selectbox(
-                "Select a log file to view details",
-                options=range(len(queue)),
-                format_func=lambda i: f"{queue[i].get('filename', f'File {i}')} ({queue[i].get('status', 'unknown')})"
-            )
-
-            if selected_idx is not None and selected_idx < len(queue):
-                item = queue[selected_idx]
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Filename:**", item.get('filename'))
-                    st.write("**Size:**", f"{item.get('size', 0) / 1024:.1f} KB")
-                    st.write("**Status:**", item.get('status', 'unknown'))
-                with col2:
-                    st.write("**Added at:**", item.get('added_at', 'Unknown'))
-                    st.write("**Source Defect:**", item.get('source_defect', '-'))
-
-                # Show file content preview
-                with st.expander("Content Preview (first 2000 chars)"):
-                    content = item.get('content', b'')
-                    if isinstance(content, bytes):
-                        try:
-                            preview = content[:2000].decode('utf-8', errors='ignore')
-                        except:
-                            preview = "[Binary content - cannot display]"
-                    else:
-                        preview = str(content)[:2000]
-
-                    st.text(preview)
-
-        # Queue management
-        st.divider()
-        st.subheader("Queue Management")
-
-        if st.button("Clear Queue", key="btn_clear_queue"):
-            LogAnalysisPipeline.clear_queue()
-            st.success("Queue cleared")
-            st.rerun()
-
-    else:
-        st.info("No log files in the queue. Files will appear here after extraction from ZIP archives.")
-
-
 def render_plm_section():
     """
     Main PLM section renderer
@@ -2036,10 +1835,6 @@ def render_plm_section():
     if _is_plm_local_test_mode():
         st.info("PLM 로컬 테스트 모드가 활성화되어 있습니다. 샘플 defect로 UI를 검증합니다.")
 
-    # Initialize analysis queue in session state
-    if 'plm_analysis_queue' not in st.session_state:
-        st.session_state.plm_analysis_queue = []
-
     # Check if auto-analysis should be triggered
     if st.session_state.get('trigger_auto_analysis', False):
         st.info("🚀 자동 분석 파이프라인이 시작되었습니다.")
@@ -2050,12 +1845,11 @@ def render_plm_section():
         default_tab_index = 3
 
     # Create tabs
-    tab0, tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab1, tab2, tab3 = st.tabs([
         "🔍 Quick Search",
         "🔍 검색 및 파일",
         "📊 분석",
-        "💬 댓글",
-        "⚙️ Analysis Queue"
+        "💬 댓글"
     ])
 
     with tab0:
@@ -2096,13 +1890,6 @@ def render_plm_section():
             logger.error(f"Error in Comments: {e}", exc_info=True)
             st.error(f"Error: {e}")
 
-    with tab4:
-        try:
-            render_analysis_queue()
-        except Exception as e:
-            logger.error(f"Error in Analysis Queue: {e}", exc_info=True)
-            st.error(f"Error: {e}")
-
 
 def render_plm_sidebar_stats():
     """
@@ -2141,7 +1928,6 @@ __all__ = [
     'render_plm_register',
     'render_plm_comment',
     'render_plm_files',
-    'render_analysis_queue',
     'render_plm_sidebar_stats',
     '_initialize_plm_session',
     '_get_plm_client',
