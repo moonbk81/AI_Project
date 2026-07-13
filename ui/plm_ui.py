@@ -1507,6 +1507,13 @@ def _show_cached_results_in_fragment():
     st.session_state.plm_active_defect_code = defect_code
     st.session_state.plm_active_division = division_code
 
+    # Clear downloads from previous defect when selecting a new one
+    current_active = st.session_state.get('plm_quick_search_current_defect_code')
+    if current_active and current_active != defect_code:
+        st.session_state.plm_quick_search_downloads = {}
+        st.session_state.plm_quick_search_files = {}
+    st.session_state.plm_quick_search_current_defect_code = defect_code
+
     st.divider()
     st.subheader("Defect Details")
     st.caption(defect_code)

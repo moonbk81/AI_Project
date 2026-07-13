@@ -329,8 +329,9 @@ def render_chat_tab(engine):
                 st.rerun()
 
         st.divider()
-
-    render_chat_interface(engine, key_suffix="main", show_input=False)
+        render_chat_interface(engine, key_suffix="main", show_input=False)
+    else:
+        render_chat_interface(engine, key_suffix="main", show_input=False)
 
     st.divider()
 

@@ -24,13 +24,12 @@ class LogFileExtractor:
 
     # Log file patterns to match
     LOG_PATTERNS = [
-        r'^dumpState_.*\.log$',           # dumpState_model_timestamp.log
         r'^dumpstate\.log$',              # dumpstate.log (case insensitive match)
         r'^dumpstate\.txt$',              # dumpstate.txt
         r'^dumpState\.log$',              # dumpState.log
+        r'^dumpState_\d+\.log$',          # dumpState_1783577655961.log (Unix timestamp only)
+        r'^dumpState_[A-Z0-9]+_\d{10,}\.log$',  # dumpState_S911NKSS7EZCI_202607070957.log (device ID + timestamp)
         r'^act_dumpstate\.txt$',          # act_dumpstate.txt
-        r'^.*dumpstate.*\.log$',          # Any file with dumpstate and .log
-        r'^.*dumpstate.*\.txt$',          # Any file with dumpstate and .txt
     ]
 
     @staticmethod

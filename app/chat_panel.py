@@ -140,4 +140,3 @@ def render_chat_interface(engine, key_suffix="main", show_input=True):
                 })
                 st.session_state.last_ids = ids
                 st.session_state.last_metas = metas
-                st.rerun()
