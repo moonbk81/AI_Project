@@ -334,12 +334,54 @@ def render_chat_tab(engine):
                     st.write(c.get('text', ''))
             st.divider()
 
-        # Auto-analyze the PLM problem
-        auto_prompt = (
-            f"PLM 결함 분석:\n결함 코드: {plm_problem.get('defect_code')}\n\n"
-            f"**문제 내용:**\n{problem_content}{comment_block}\n\n"
-            f"위 문제 내용{'과 개발자 코멘트를 종합' if comments else ''}하여 분석해 주세요."
+        # Auto-analyze the PLM problem with structured information
+        defect_info = []
+
+        # Add defect metadata
+        if plm_problem.get('defect_code'):
+            defect_info.append(f"**결함 코드:** {plm_problem.get('defect_code')}")
+        if plm_problem.get('defect_title'):
+            defect_info.append(f"**제목:** {plm_problem.get('defect_title')}")
+        if plm_problem.get('status'):
+            defect_info.append(f"**상태:** {plm_problem.get('status')}")
+        if plm_problem.get('priority'):
+            defect_info.append(f"**우선순위:** {plm_problem.get('priority')}")
+        if plm_problem.get('owner'):
+            defect_info.append(f"**담당자:** {plm_problem.get('owner')}")
+
+        defect_header = "\n".join(defect_info) if defect_info else ""
+
+        # Build structured prompt
+        auto_prompt_parts = [
+            "## PLM 결함 분석 요청",
+            "",
+            defect_header,
+            "",
+            "### 문제 내용",
+            problem_content,
+        ]
+
+        # Add root cause if available
+        reason = plm_problem.get('reason', '').strip()
+        if reason:
+            auto_prompt_parts.extend(["", "### 등록된 근본 원인", reason])
+
+        # Add solution if available
+        solution = plm_problem.get('countermeasure', '').strip()
+        if solution:
+            auto_prompt_parts.extend(["", "### 등록된 해결방안", solution])
+
+        # Add developer comments
+        if comments:
+            auto_prompt_parts.extend(["", "### 개발자 코멘트", comment_block.replace("**개발자 코멘트:**\n", "")])
+
+        # Add analysis instruction
+        auto_prompt_parts.append("")
+        auto_prompt_parts.append(
+            f"위 정보를 기반으로{' 개발자 코멘트를 고려하여' if comments else ''} 문제의 원인을 분석하고 해결 방안을 제시해 주세요."
         )
+
+        auto_prompt = "\n".join(auto_prompt_parts)
 
         render_chat_interface(engine, key_suffix="main", show_input=False)
         _render_chat_answer(engine, auto_prompt)

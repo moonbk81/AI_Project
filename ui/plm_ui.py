@@ -150,16 +150,18 @@ def _refine_problem_description(problem_content: str, use_llm: bool = True) -> s
             # Get the active model from session state
             model_name = st.session_state.get('active_model', 'gemma4:12b')
 
-            system_prompt = """You are an expert at summarizing technical problem descriptions.
-Your task is to extract and refine the essential information from a problem description.
+            system_prompt = """You are an expert at refining technical problem descriptions for intent recognition.
+Your task is to extract and refine the essential information while preserving critical intent signals.
 
 Rules:
-1. Keep only the core problem statement
-2. Remove redundant details and unnecessary explanations
-3. Extract key technical details (error codes, symptoms, affected components)
-4. Make it concise but complete (aim for 2-3 sentences max)
-5. Use bullet points for multiple issues
-6. Return ONLY the refined description, no additional text"""
+1. Preserve the specific symptom/behavior (e.g., "intermittent data drops", "call fails", "battery drain")
+2. Preserve affected component/app/feature names (these are intent signals)
+3. Preserve specific conditions when they occur (e.g., "during handover", "when using app X")
+4. Remove redundant details and unnecessary explanations
+5. Extract and include key technical details (error codes, version info, network info if present)
+6. Make it concise but complete (aim for 2-3 sentences max)
+7. Use bullet points only for multiple distinct issues
+8. Return ONLY the refined description, no additional text or explanation"""
 
             response = ollama.chat(
                 model=model_name,
@@ -738,6 +740,12 @@ def _render_defect_details(defect: Dict[str, Any], division_code: str):
                 'original_content': problem_content,
                 'defect_code': defect.get('defectCode'),
                 'defect_title': defect.get('plmTitle', 'Unknown'),
+                'reason': defect.get('reason', ''),
+                'countermeasure': defect.get('countermeasure', ''),
+                'status': defect.get('plmStatus', ''),
+                'priority': defect.get('plmPriority', ''),
+                'owner': defect.get('mainOwnerName', ''),
+                'created_date': defect.get('createDate', ''),
                 'comments': [
                     {
                         'user': c.get('historyUser', ''),
