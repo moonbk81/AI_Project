@@ -1322,36 +1322,33 @@ def render_plm_files():
 
 def _format_analysis_as_comment(context: Dict[str, Any]) -> str:
     """
-    Format analysis context as a PLM comment with proper line breaks
+    Format analysis context as a PLM comment
 
     Args:
         context: Analysis context from PLMDefectContextBuilder or Chat answer
 
     Returns:
-        Formatted comment text with HTML line breaks for PLM display
+        Formatted comment text
     """
     # Check if it's from Chat (has 'answer' and 'from_chat' flag)
     if context.get('from_chat'):
-        answer = context.get('answer', 'N/A')
-        formatted_answer = answer.replace('\n', '<br>')
-        return f"💬 **AI Chat 분석 결과**<br><br>{formatted_answer}"
+        return f"💬 **AI Chat 분석 결과**\n\n{context.get('answer', 'N/A')}"
 
     # Otherwise it's from PLM analysis tab
-    # Use <br> instead of \n for proper line breaks in PLM system
-    comment_parts = [
+    comment_lines = [
         "🤖 AI 분석 결과",
         "",
-        "**문제점:**",
+        f"**문제점:**",
         context.get('problem', 'N/A'),
         "",
-        "**근본 원인:**",
+        f"**근본 원인:**",
         context.get('root_cause', 'N/A'),
         "",
-        "**해결 방안:**",
+        f"**해결 방안:**",
         context.get('solution', 'N/A'),
     ]
 
-    return "<br>".join(comment_parts)
+    return "\n".join(comment_lines)
 
 
 def render_plm_comment():
