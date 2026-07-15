@@ -211,6 +211,7 @@ def _initialize_plm_session():
         'plm_active_division': None,
         'plm_current_analysis_result': None,
         'plm_groups_cache': {},
+        'plm_groups_loading': False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -221,18 +222,30 @@ def _initialize_plm_session():
             st.session_state.plm_integration = create_plm_integration()
             st.session_state.plm_available = True
 
-            # Pre-load groups for Quick Search (Mobile division - 25)
-            try:
-                config_manager = PLMConfigManager()
-                st.session_state.plm_groups_cache = config_manager.get_groups_by_division("25")
-                logger.info(f"Groups pre-loaded: {len(st.session_state.plm_groups_cache)} groups")
-            except Exception as e:
-                logger.warning(f"Failed to pre-load groups: {e}")
-                st.session_state.plm_groups_cache = {}
+            # Lazy-load groups for Quick Search only when needed (not on init)
+            if 'plm_groups_cache' not in st.session_state or not st.session_state.plm_groups_cache:
+                _lazy_load_groups()
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
             st.session_state.plm_integration = None
+
+
+def _lazy_load_groups():
+    """Lazy-load groups in background when needed"""
+    if st.session_state.get('plm_groups_loading', False) or st.session_state.get('plm_groups_cache'):
+        return  # Already loading or loaded
+
+    st.session_state.plm_groups_loading = True
+    try:
+        config_manager = PLMConfigManager()
+        st.session_state.plm_groups_cache = config_manager.get_groups_by_division("25")
+        logger.info(f"Groups pre-loaded: {len(st.session_state.plm_groups_cache)} groups")
+    except Exception as e:
+        logger.warning(f"Failed to pre-load groups: {e}")
+        st.session_state.plm_groups_cache = {}
+    finally:
+        st.session_state.plm_groups_loading = False
 
 
 def _get_plm_client():
@@ -1484,6 +1497,115 @@ def render_plm_comment():
 
 
 
+def _research_with_same_conditions():
+    """Re-search using the same conditions as the previous search"""
+    search_label = st.session_state.get('plm_quick_search_label', '')
+    status = st.session_state.get('plm_quick_search_status', '')
+    division_code = st.session_state.get('plm_quick_search_division', '25')
+
+    # Extract search_id and search_method from label
+    search_id = None
+    search_method = "Group"
+
+    if search_label and "Group" in search_label:
+        # Extract from "Group (15 users)" format
+        import re
+        match = re.search(r'Group \((\d+) users\)', search_label)
+        if match:
+            # Re-fetch users for the previously selected group
+            try:
+                config_manager = PLMConfigManager()
+                # We need to find which group was selected - for now, get users dynamically
+                groups = config_manager.get_groups_by_division("25")
+                if groups:
+                    # Use the first group as fallback, ideally we'd store the group key
+                    first_group_key = list(groups.keys())[0] if groups else None
+                    if first_group_key:
+                        users = config_manager.get_users_for_search(first_group_key)
+                        search_id = ",".join(users)
+            except Exception as e:
+                logger.error(f"Failed to get users for re-search: {e}")
+                st.error("Failed to re-search: Could not fetch group users")
+                return
+    elif search_label and "User:" in search_label:
+        # Extract from "User: bongki.moon" format
+        search_id = search_label.replace("User: ", "").strip()
+        search_method = "User ID"
+
+    if not search_id or not status:
+        st.error("Cannot re-search: Missing search conditions")
+        return
+
+    with st.spinner(f"Searching {status} defects with same conditions..."):
+        try:
+            client = _get_plm_client()
+            if not client:
+                st.error("PLM API not configured")
+                return
+
+            response = client.get_defect_list(
+                division_code=division_code,
+                main_owner_id=search_id,
+                status=status.lower(),
+                search_type="main"
+            )
+
+            if not response.is_success():
+                error_msg = response.get_error_message()
+                st.error(f"Search failed: {error_msg}")
+                return
+
+            result_data = response.result.get('resultData', [])
+
+            if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
+                st.info(f"No defects found")
+                return
+
+            defect_codes = []
+            for result in result_data:
+                if isinstance(result, dict) and 'defectCode' in result:
+                    codes = result['defectCode']
+                    if isinstance(codes, list):
+                        defect_codes.extend(codes)
+                    elif isinstance(codes, str):
+                        defect_codes.extend([code.strip() for code in codes.split(',') if code.strip()])
+
+            if not defect_codes:
+                st.info(f"No {status} defects found")
+                return
+
+            codes_to_fetch = defect_codes[:50]
+            st.info(f"Found {len(defect_codes)} {status} defect code(s). Loading details...")
+            if len(defect_codes) > 50:
+                st.warning(f"Showing first 50 out of {len(defect_codes)} defects")
+
+            response_details = client.get_defect_info(
+                division_code=division_code,
+                defect_codes=codes_to_fetch
+            )
+
+            if response_details.is_success():
+                defects = response_details.result.get('defectList', [])
+
+                if defects:
+                    st.session_state.plm_quick_search_results = defects
+                    st.session_state.plm_quick_search_selected_index = 0
+                    st.session_state.navigate_to_chat = False
+                    st.success(f"Refreshed: {len(defects)} {status} defect(s)")
+                    st.rerun()
+                else:
+                    st.info(f"No defect details available")
+            else:
+                error_msg = response_details.get_error_message()
+                st.error(f"Failed to load details: {error_msg}")
+
+        except PLMAPIException as e:
+            st.error(f"API Error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}", exc_info=True)
+            st.error(f"Error: {e}")
+
+
 def _show_cached_results_in_fragment():
     """Show cached Quick Search results with row selection."""
     # Safety check
@@ -1493,13 +1615,16 @@ def _show_cached_results_in_fragment():
 
     st.subheader("Quick Search Results")
 
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         search_label = st.session_state.get('plm_quick_search_label', 'Unknown')
         status_cached = st.session_state.get('plm_quick_search_status', 'Unknown')
         results_count = len(st.session_state.plm_quick_search_results) if st.session_state.plm_quick_search_results else 0
         st.caption(f"Cached results · {status_cached} · {search_label} · {results_count} defect(s)")
     with col2:
+        if st.button("Search Again", key="btn_search_again"):
+            _research_with_same_conditions()
+    with col3:
         if st.button("Clear Results", key="btn_clear_quick_search"):
             st.session_state.plm_quick_search_results = None
             st.session_state.plm_quick_search_division = None
@@ -1812,11 +1937,19 @@ def _show_search_input_form_fragment():
 
     with st.container():
         if search_method == "Group":
-            # Use pre-loaded groups cache (loaded during initialization)
+            # Lazy-load groups if not already loaded
             groups = st.session_state.get('plm_groups_cache', {})
 
+            if not groups and not st.session_state.get('plm_groups_loading', False):
+                with st.spinner("Loading groups..."):
+                    _lazy_load_groups()
+                groups = st.session_state.get('plm_groups_cache', {})
+
             if not groups:
-                st.warning(f"No groups are defined for {division}")
+                if st.session_state.get('plm_groups_loading', False):
+                    st.info("Loading groups from PLM...")
+                else:
+                    st.warning(f"No groups are defined for {division}")
                 return
 
             selected_group_key = st.radio(
@@ -1965,6 +2098,12 @@ def render_plm_section():
     if st.session_state.get('navigate_to_comment_tab', False):
         default_tab_index = 3
 
+    # Lazy-load groups in background (non-blocking)
+    if (not st.session_state.get('plm_groups_cache') and
+        not st.session_state.get('plm_groups_loading') and
+        not _is_plm_local_test_mode()):
+        _lazy_load_groups()
+
     # Create tabs
     tab0, tab1, tab2, tab3 = st.tabs([
         "🔍 Quick Search",
@@ -2018,7 +2157,9 @@ def render_plm_sidebar_stats():
 
     Shows connection status, active defect, and quick actions
     """
-    _initialize_plm_session()
+    # Only initialize if not already done
+    if 'plm_integration' not in st.session_state:
+        _initialize_plm_session()
 
     if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
         return
