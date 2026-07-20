@@ -11,7 +11,7 @@ import requests
 import json
 import re
 import sys
-from typing import Dict, List, Optional, Any, Union
+from typing import Callable, Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
@@ -779,7 +779,8 @@ class PLMDefectAPIClient:
         division_code: str,
         doc_id: str,
         title: str,
-        file_id: str
+        file_id: str,
+        progress_callback: Optional[Callable[[int, Optional[int]], None]] = None
     ) -> Dict[str, Any]:
         """
         Download file from defect
@@ -789,6 +790,9 @@ class PLMDefectAPIClient:
             doc_id: Document ID (from file list response)
             title: File title (from file list response)
             file_id: File ID (from file list response)
+            progress_callback: Optional callable invoked as (downloaded_bytes, total_bytes)
+                as the file streams in. total_bytes is None when the server does not
+                report Content-Length.
 
         Returns:
             Dictionary with 'success' and 'data' keys. 'data' contains the file binary content.
@@ -843,7 +847,24 @@ class PLMDefectAPIClient:
                     }
             else:
                 # Binary file response
-                file_content = response.content
+                if progress_callback:
+                    total = response.headers.get('content-length')
+                    total = int(total) if total and str(total).isdigit() else None
+                    chunks = []
+                    downloaded = 0
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
+                        if not chunk:
+                            continue
+                        chunks.append(chunk)
+                        downloaded += len(chunk)
+                        try:
+                            progress_callback(downloaded, total)
+                        except Exception:
+                            pass
+                    file_content = b"".join(chunks)
+                else:
+                    file_content = response.content
+
                 if file_content and len(file_content) > 0:
                     return {
                         'success': True,
