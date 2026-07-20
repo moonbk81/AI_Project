@@ -1146,23 +1146,23 @@ def render_plm_files():
                             )
 
                             if download_result.get('success'):
-                                    file_content = download_result.get('data')
-                                    file_size = download_result.get('size', 0)
+                                file_content = download_result.get('data')
+                                file_size = download_result.get('size', 0)
 
-                                    if file_content and file_size > 0:
-                                        st.session_state.plm_download_data[file_id] = (file_content, title)
-                                        logger.info(f"File downloaded: {title} ({file_size} bytes)")
-                                        st.success(f"✅ Downloaded {file_size:,} bytes - Scroll down to save file")
-                                    else:
-                                        st.warning(f"File content not available (size: {file_size} bytes)")
+                                if file_content and file_size > 0:
+                                    st.session_state.plm_download_data[file_id] = (file_content, title)
+                                    logger.info(f"File downloaded: {title} ({file_size} bytes)")
+                                    st.success(f"✅ Downloaded {file_size:,} bytes - Scroll down to save file")
                                 else:
-                                    error_msg = download_result.get('message', 'Unknown error')
-                                    st.error(f"Download failed: {error_msg}")
-                                    if "권한" in error_msg or "권" in error_msg:
-                                        st.info("💡 권한 문제: 파일에 접근할 권한이 없습니다. 관리자에게 문의하세요.")
+                                    st.warning(f"File content not available (size: {file_size} bytes)")
+                            else:
+                                error_msg = download_result.get('message', 'Unknown error')
+                                st.error(f"Download failed: {error_msg}")
+                                if "권한" in error_msg or "권" in error_msg:
+                                    st.info("💡 권한 문제: 파일에 접근할 권한이 없습니다. 관리자에게 문의하세요.")
 
-                            except Exception as e:
-                                st.error(f"Error: {e}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
             # Auto-process downloaded files
             if st.session_state.plm_download_data:
