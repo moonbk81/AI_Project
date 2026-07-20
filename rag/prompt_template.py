@@ -37,6 +37,12 @@ def get_domain_guidelines(query_lower: str, log_guidelines: dict, prompts: dict)
     elif any(k in query_lower for k in ["ps call", "volte", "ims"]):
         guidelines.append("### [PS(VoLTE) Call 전용 분석]\n비정상 종료 발생 시 시간과 에러 코드만 추출하십시오.")
 
+    # [PLM 결함 분석]
+    if any(k in query_lower for k in ["plm", "결함", "defect", "p26", "p25"]):
+        rule = prompts.get('plm_defect_analysis', "")
+        if rule:
+            guidelines.append(f"### [PLM 결함 분석 규칙]\n{rule}")
+
     return guidelines
 
 def format_system_wtf_stats(wtf_stats: dict) -> str:
