@@ -1124,19 +1124,28 @@ def render_plm_files():
                         "⬇️ Download",
                         key=f"btn_download_{file_id}"
                     ):
-                        with st.spinner(f"Downloading {title}..."):
-                            try:
-                                client = _get_plm_client()
-                                division_code = cached_division or "25"
+                        progress_placeholder = st.empty()
+                        status_placeholder = st.empty()
 
-                                download_result = client.download_file(
-                                    division_code=division_code,
-                                    doc_id=doc_id,
-                                    title=title,
-                                    file_id=file_id
-                                )
+                        def download_progress(downloaded, total):
+                            if total:
+                                percent = min(100, int(100 * downloaded / total))
+                                progress_placeholder.progress(percent)
+                                status_placeholder.caption(f"Downloading: {percent}% ({downloaded:,} / {total:,} bytes)")
 
-                                if download_result.get('success'):
+                        try:
+                            client = _get_plm_client()
+                            division_code = cached_division or "25"
+
+                            download_result = client.download_file(
+                                division_code=division_code,
+                                doc_id=doc_id,
+                                title=title,
+                                file_id=file_id,
+                                progress_callback=download_progress
+                            )
+
+                            if download_result.get('success'):
                                     file_content = download_result.get('data')
                                     file_size = download_result.get('size', 0)
 
@@ -1765,13 +1774,23 @@ def _show_cached_results_in_fragment():
                         is_downloaded = file_id in st.session_state.plm_quick_search_downloads
 
                         if st.button("Download", key=f"download_{file_id}", disabled=is_downloaded):
+                            progress_placeholder = st.empty()
+                            status_placeholder = st.empty()
+
+                            def download_progress(downloaded, total):
+                                if total:
+                                    percent = min(100, int(100 * downloaded / total))
+                                    progress_placeholder.progress(percent)
+                                    status_placeholder.caption(f"Downloading: {percent}% ({downloaded:,} / {total:,} bytes)")
+
                             # Download and store in session state
                             client = _get_plm_client()
                             download_result = client.download_file(
                                 division_code=division_code,
                                 doc_id=doc_id,
                                 title=title,
-                                file_id=file_id
+                                file_id=file_id,
+                                progress_callback=download_progress
                             )
 
                             if download_result.get('success'):
