@@ -13,7 +13,10 @@ def get_domain_guidelines(query_lower: str, log_guidelines: dict, prompts: dict)
             "### [시스템 크래시/재부팅 분석 최우선 규칙]\n"
             "KERNEL_PANIC이나 FATAL 크래시가 감지되면, 단순히 발생 횟수나 유형만 나열하지 마십시오. "
             "반드시 팩트 데이터에 포함된 'exception_info'와 'pre_context(단서 로그)'를 분석하여, "
-            "**왜 패닉이 발생했는지(예: 모뎀 미응답(MNR), 메모리 오류 등) 근본 원인(Root Cause)을 문장으로 상세히 설명**하십시오."
+            "**왜 패닉이 발생했는지(예: 모뎀 미응답(MNR), 메모리 오류 등) 근본 원인(Root Cause)을 문장으로 상세히 설명**하십시오.\n"
+            "\n### [Native Crash 분석 규칙]\n"
+            "Native Crash 질의 시 'native_crash_history'의 'full_callstack' 필드를 반드시 Response에 포함시키십시오. "
+            "분석 결과(signal, abort_message, 원인 분석)와 함께 전체 콜스택 데이터를 보여주어 사용자가 상세히 검토할 수 있도록 하십시오."
         )
         guidelines.append(rule)
 

@@ -32,16 +32,18 @@ def get_crash_anr_analytics(base_name: str, result_dir: str = "./result") -> str
 
     native_crash_facts = []
     for n in native_crashes:
+        callstack_all = [
+            f"#{c['frame_level']} {c['library']} ({c['function']})"
+            for c in n.get("callstack", [])
+        ]
         native_crash_facts.append({
             "time": n.get("timestamp"),
             "process": n.get("process"),
             "type": "NATIVE_CRASH",
             "signal": n.get("signal"),
             "abort_message": n.get("abort_message"),
-            "top_callstack": [
-                f"#{c['frame_level']} {c['library']} ({c['function']})"
-                for c in n.get("callstack", [])
-            ][:5]
+            "top_callstack": callstack_all[:5],
+            "full_callstack": callstack_all
         })
 
     if isinstance(anr, dict):
