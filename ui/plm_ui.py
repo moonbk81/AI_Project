@@ -314,6 +314,226 @@ def _extract_file_from_zip(file_data: bytes, target_filename: str) -> Optional[b
         return None
 
 
+def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: str):
+    """
+    Automatically load files and start background processing when defect is selected
+
+    This function:
+    1. Auto-loads attached files from PLM
+    2. Auto-downloads ZIP files
+    3. Extracts LOG files and adds them to analysis queue
+
+    Args:
+        defect: Selected defect dictionary
+        division_code: PLM division code
+    """
+    defect_code = defect.get('defectCode')
+    if not defect_code:
+        return
+
+    # Skip if files already loaded for this defect
+    if defect_code in st.session_state.get('plm_quick_search_files', {}):
+        return
+
+    # Skip if auto-processing is already in progress
+    if st.session_state.get(f'plm_auto_processing_{defect_code}'):
+        return
+
+    # Mark as in progress
+    st.session_state[f'plm_auto_processing_{defect_code}'] = True
+
+    # Initialize session state if needed
+    if 'plm_quick_search_files' not in st.session_state:
+        st.session_state.plm_quick_search_files = {}
+    if 'plm_quick_search_downloads' not in st.session_state:
+        st.session_state.plm_quick_search_downloads = {}
+
+    # Show progress container
+    progress_container = st.container()
+
+    try:
+        with progress_container.status("📥 PLM 첨부 파일 자동 처리 중...", expanded=True) as status:
+            client = _get_plm_client()
+            if not client and not _is_plm_local_test_mode():
+                status.update(label="❌ PLM 클라이언트 연결 실패", state="error")
+                st.session_state[f'plm_auto_processing_{defect_code}'] = False
+                return
+
+            # Get file list
+            if _is_plm_local_test_mode():
+                st.write("🧪 로컬 테스트 모드: 파일 목록이 비어있습니다")
+                st.session_state.plm_quick_search_files[defect_code] = {
+                    'files': [],
+                    'division_code': division_code,
+                    'defect_code': defect_code,
+                }
+                status.update(label="✅ 파일 로드 완료 (로컬 테스트 모드)", state="complete", expanded=False)
+                st.session_state[f'plm_auto_processing_{defect_code}'] = False
+                return
+
+            st.write("📋 파일 목록 조회 중...")
+            response = client.get_file_list(
+                division_code=division_code,
+                defect_code=defect_code
+            )
+
+            if not response.is_success():
+                status.update(label="❌ 파일 목록 조회 실패", state="error")
+                st.session_state[f'plm_auto_processing_{defect_code}'] = False
+                return
+
+            # Extract files from response
+            result = response.result if response.result else []
+            files = []
+
+            if isinstance(result, list) and len(result) > 0:
+                data = result[0].get('data', []) if isinstance(result[0], dict) else []
+                files = [f for f in data if f.get('title') and f.get('fileId')]
+            elif isinstance(result, dict):
+                data = result.get('data', [])
+                files = [f for f in data if f.get('title') and f.get('fileId')]
+
+            if files:
+                st.write(f"✅ {len(files)}개 파일 발견")
+            else:
+                st.write("ℹ️ 첨부 파일이 없습니다")
+
+            # Store files in session state
+            st.session_state.plm_quick_search_files[defect_code] = {
+                'files': files,
+                'division_code': division_code,
+                'defect_code': defect_code
+            }
+
+            # Auto-download and process ZIP files in background
+            total_logs = 0
+            if files:
+                total_logs = _auto_download_and_extract_logs(defect_code, division_code, files, status)
+                status.update(label="✅ 자동 처리 완료", state="complete", expanded=False)
+            else:
+                status.update(label="✅ 파일 로드 완료", state="complete", expanded=False)
+
+            # If logs were extracted, trigger auto-analysis by rerunning
+            if total_logs > 0:
+                # Give Streamlit a moment to close the status container
+                st.rerun()
+
+    except Exception as e:
+        logger.error(f"Error auto-loading files for {defect_code}: {e}", exc_info=True)
+        progress_container.error(f"❌ 오류 발생: {e}")
+    finally:
+        st.session_state[f'plm_auto_processing_{defect_code}'] = False
+
+
+def _auto_download_and_extract_logs(defect_code: str, division_code: str, files: List[Dict[str, Any]], status=None) -> int:
+    """
+    Auto-download and extract LOG files from ZIP attachments
+
+    Args:
+        defect_code: Defect code
+        division_code: PLM division code
+        files: List of attached files
+        status: Streamlit status object for progress updates (optional)
+
+    Returns:
+        Total number of LOG files extracted and added to queue
+    """
+    if not files:
+        return 0
+
+    # Find ZIP files
+    zip_files = [f for f in files if f.get('title', '').lower().endswith('.zip')]
+    if not zip_files:
+        if status:
+            st.write("ℹ️ ZIP 파일이 없습니다")
+        return 0
+
+    client = _get_plm_client()
+    if not client:
+        return
+
+    if status:
+        st.write(f"📦 {len(zip_files)}개 ZIP 파일 발견")
+
+    # Download each ZIP file and extract logs
+    total_logs_found = 0
+    for idx, zip_file in enumerate(zip_files, 1):
+        try:
+            doc_id = zip_file.get('docId')
+            file_id = zip_file.get('fileId')
+            file_title = zip_file.get('title')
+
+            if not file_id or not file_title or not doc_id:
+                logger.warning(f"Skipping file (missing docId/fileId/title): {file_title}")
+                continue
+
+            if status:
+                st.write(f"⬇️ [{idx}/{len(zip_files)}] {file_title} 다운로드 중...")
+
+            logger.info(f"Auto-downloading {file_title} for {defect_code}")
+
+            # Download the file
+            response = client.download_file(
+                division_code=division_code,
+                doc_id=doc_id,
+                title=file_title,
+                file_id=file_id
+            )
+
+            if not response.get('success'):
+                error_msg = response.get('message', 'Unknown error')
+                if status:
+                    st.write(f"❌ {file_title} 다운로드 실패: {error_msg}")
+                logger.error(f"Failed to download {file_title}: {error_msg}")
+                continue
+
+            file_data = response.get('data')
+            if not file_data:
+                if status:
+                    st.write(f"❌ {file_title} 데이터 없음")
+                logger.error(f"No data returned for {file_title}")
+                continue
+
+            if status:
+                st.write(f"📂 {file_title}에서 LOG 파일 추출 중...")
+
+            # Extract LOG files from ZIP
+            logger.info(f"Extracting LOG files from {file_title}")
+            log_extractor = LogFileExtractor()
+            extracted_logs = log_extractor.extract_logs_from_zip(file_data)
+
+            if extracted_logs:
+                if status:
+                    st.write(f"✅ {len(extracted_logs)}개 LOG 파일 추출됨")
+                logger.info(f"Found {len(extracted_logs)} LOG file(s) in {file_title}")
+
+                # Add each log to analysis queue
+                for log_filename, log_content in extracted_logs.items():
+                    logger.info(f"Adding {log_filename} to analysis queue")
+                    from ui.plm_auto_download import add_pending_log
+                    add_pending_log(log_filename, log_content)
+                    if status:
+                        st.write(f"  ➕ {log_filename} → 분석 큐에 추가됨")
+                    total_logs_found += 1
+
+                # Trigger auto-analysis in sidebar
+                st.session_state.trigger_auto_analysis = True
+            else:
+                if status:
+                    st.write(f"ℹ️ {file_title}에서 LOG 파일을 찾을 수 없음")
+                logger.info(f"No LOG files found in {file_title}")
+
+        except Exception as e:
+            if status:
+                st.write(f"❌ {zip_file.get('title', 'unknown')} 처리 중 오류: {e}")
+            logger.error(f"Error processing {zip_file.get('title', 'unknown')}: {e}", exc_info=True)
+
+    if total_logs_found > 0 and status:
+        st.write(f"\n🎯 총 {total_logs_found}개 LOG 파일이 분석 큐에 추가되었습니다")
+
+    return total_logs_found
+
+
 def render_plm_search():
     """
     Render PLM defect search interface
@@ -1662,6 +1882,9 @@ def _show_cached_results_in_fragment():
         st.session_state.plm_quick_search_downloads = {}
         st.session_state.plm_quick_search_files = {}
     st.session_state.plm_quick_search_current_defect_code = defect_code
+
+    # Auto-load files and start background processing when defect is selected
+    _auto_load_and_process_defect_files(selected_defect, division_code)
 
     st.divider()
     st.subheader("Defect Details")
