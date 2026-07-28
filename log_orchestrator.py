@@ -2,6 +2,7 @@ import os
 import json
 import argparse
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser, OosParser
@@ -122,25 +123,61 @@ class LogOrchestrator:
 
             result = {}
 
+            # ========== 1단계: 병렬 처리 가능한 parser들 실행 ==========
+            # 의존성이 없는 파서들을 ThreadPoolExecutor로 병렬 실행
+            parallel_tasks = []
+
+            def run_parser_with_key(key, parser_func, *args):
+                """Parser 실행 후 (key, result) 튜플 반환"""
+                try:
+                    res = parser_func(*args)
+                    return (key, res)
+                except Exception as e:
+                    print(f"⚠️ {key} 파서 오류: {e}")
+                    return (key, None)
+
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = {
+                    executor.submit(run_parser_with_key, 'nitz_history', self.nitz_parser.analyze, buckets['nitz']): 'nitz',
+                    executor.submit(run_parser_with_key, 'crash_context', self.crash_parser.analyze, buckets['crash']): 'crash',
+                    executor.submit(run_parser_with_key, 'native_crash_context', self.native_crash_parser.analyze, buckets['native_crash']): 'native_crash',
+                    executor.submit(run_parser_with_key, 'anr_context', self.anr_parser.analyze, buckets['anr']): 'anr',
+                    executor.submit(run_parser_with_key, 'radio_power', self.radio_power_parser.analyze, buckets['radio_power']): 'radio_power',
+                    executor.submit(run_parser_with_key, 'ntn_data', self.ntn_processor.analyze, buckets['ntn']): 'ntn',
+                    executor.submit(run_parser_with_key, 'boot_stats', self.boot_parser.analyze, buckets['boot']): 'boot',
+                    executor.submit(run_parser_with_key, 'signal_level_history', self.signal_parser.analyze, buckets['signal']): 'signal',
+                    executor.submit(run_parser_with_key, 'data_usage_stats', self.data_usage_parser.analyze, buckets['usage'], global_uid_map): 'usage',
+                    executor.submit(run_parser_with_key, 'battery_stats', self.battery_parser.analyze, lines): 'battery',
+                    executor.submit(run_parser_with_key, 'cpu_usage_stats', self.cpu_usage_parser.analyze, lines): 'cpu',
+                    executor.submit(run_parser_with_key, 'battery_thermal_stats', self.battery_thermal_parser.analyze, lines): 'thermal',
+                    executor.submit(run_parser_with_key, 'binder_warnings', self.binder_parser.analyze, buckets['binder']): 'binder',
+                    executor.submit(run_parser_with_key, 'rilj_transactions', self.rilj_parser.analyze, buckets['rilj']): 'rilj',
+                    executor.submit(run_parser_with_key, 'system_properties', self.sys_prop_parser.analyze, lines): 'sysprop',
+                    executor.submit(run_parser_with_key, 'build_info', self.build_info_parser.analyze, lines): 'build',
+                    executor.submit(run_parser_with_key, 'ims_sip_data', self.ims_sip_parser.analyze, buckets['ims_sip']): 'ims_sip',
+                    executor.submit(run_parser_with_key, 'sat_at_data', self.sat_at_parser.analyze, buckets['sat_at']): 'sat_at',
+                }
+
+                # 결과 수집 (조건부 저장)
+                for future in as_completed(futures):
+                    key, value = future.result()
+                    if value is not None:
+                        result[key] = value
+                    # binder의 경우 추가 처리
+                    if key == 'binder_warnings' and value is not None:
+                        if binder_ctx := self.binder_parser.build_context_summary(buckets.get('binder_context', [])):
+                            result['binder_context_summary'] = binder_ctx
+
+            # ========== 2단계: full lines 필요한 순차 파서들 ==========
             result['call_sessions'] = self.tel_parser.analyze(lines)
             result['oos_events'] = self.oos_parser.analyze(lines)
-            result['nitz_history'] = self.nitz_parser.analyze(buckets['nitz'])
-            result['crash_context'] = self.crash_parser.analyze(buckets['crash'])
-            result['native_crash_context'] = self.native_crash_parser.analyze(buckets['native_crash'])
-            result['anr_context'] = self.anr_parser.analyze(buckets['anr'])
-            result['radio_power'] = self.radio_power_parser.analyze(buckets['radio_power'])
-
-            # section/state 기반 parser는 후보 라인만 주면 누락 위험이 커서 full lines를 유지합니다.
             result['network_timeseries'] = self.net_ts_analyzer.analyze(lines)
-            result['ntn_data'] = self.ntn_processor.analyze(buckets['ntn'])
 
-            # DataCall/InternetStall은 AnalysisBucketBuilder에서 context window를 포함해 선별한 라인을 사용합니다.
-            # full lines를 직접 넣으면 DNS/validation 등 주변 노이즈가 과도하게 섞여 SetupDataCall 실패 원인이 묻힐 수 있습니다.
+            # ========== 3단계: 의존성 있는 parser들 (순차) ==========
             datacall_lines = buckets.get('datacall') or lines
             internet_stall_lines = buckets.get('internet_stall') or lines
             result['datacall_data'] = self.datacall_parser.analyze(datacall_lines)
 
-            # DNS Query를 먼저 생성하여 Internet Stall 분석 시 활용
             if dns_res := self.dns_parser.analyze(
                 buckets['dns'],
                 global_uid_map=global_uid_map
@@ -149,41 +186,21 @@ class LogOrchestrator:
                 if health_warnings := dns_res.get('health_warnings', []):
                     result['dns_health_warnings'] = health_warnings
 
-            result['ims_sip_data'] = self.ims_sip_parser.analyze(buckets['ims_sip'])
-            result['sat_at_data'] = self.sat_at_parser.analyze(buckets['sat_at'])
             result['internet_stall'] = self.internet_stall_parser.analyze(
                 internet_stall_lines,
                 data_call_events=result.get('datacall_data', []),
                 dns_events=result.get('dns_queries', []),
                 report_data=result)
 
-            # 지표성 데이터 추가
-            # battery 계열은 dump section 전체를 읽는 경우가 있어 full lines를 유지합니다.
-            if battery_res := self.battery_parser.analyze(lines): result['battery_stats'] = battery_res
-            if cpu_res := self.cpu_usage_parser.analyze(lines): result['cpu_usage_stats'] = cpu_res
-            if boot_res := self.boot_parser.analyze(buckets['boot']): result['boot_stats'] = boot_res
-            if sig_res := self.signal_parser.analyze(buckets['signal']): result['signal_level_history'] = sig_res
-            if net_usage := self.data_usage_parser.analyze(buckets['usage'], global_uid_map=global_uid_map): result['data_usage_stats'] = net_usage
-            if battery_thermal_res := self.battery_thermal_parser.analyze(lines):
-                result["battery_thermal_stats"] = battery_thermal_res
-            if binder_res := self.binder_parser.analyze(buckets['binder']):
-                result['binder_warnings'] = binder_res
-                # Binder 관련 추가 확인 사항은 UI 테이블에 넣지 않고 별도 요약으로만 보관합니다.
-                if binder_ctx := self.binder_parser.build_context_summary(buckets.get('binder_context', [])):
-                    result['binder_context_summary'] = binder_ctx
-            if rilj_res := self.rilj_parser.analyze(buckets['rilj']):
-                result['rilj_transactions'] = rilj_res
-            result['system_properties'] = self.sys_prop_parser.analyze(lines)
-            result['build_info'] = self.build_info_parser.analyze(lines)
-
-            # 3. 개별 UI 리포트 파일 생성 (하위 호환성 유지)
-            self.ntn_processor.save_ui_report("./result", self.base_name)
-            self.ims_sip_parser.save_ui_report("./result", self.base_name)
-            self.datacall_parser.save_ui_report("./result", self.base_name)
-            self.sat_at_parser.save_ui_report("./result", self.base_name)
-
-            self.ntn_processor.build_and_save_payloads("./payloads")
-            self.internet_stall_parser.save_ui_report("./result", self.base_name, result['internet_stall'])
+            # ========== 4단계: UI 리포트 생성 (병렬) ==========
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                executor.submit(self.ntn_processor.save_ui_report, "./result", self.base_name)
+                executor.submit(self.ims_sip_parser.save_ui_report, "./result", self.base_name)
+                executor.submit(self.datacall_parser.save_ui_report, "./result", self.base_name)
+                executor.submit(self.sat_at_parser.save_ui_report, "./result", self.base_name)
+                executor.submit(self.ntn_processor.build_and_save_payloads, "./payloads")
+                executor.submit(self.internet_stall_parser.save_ui_report, "./result", self.base_name, result['internet_stall'])
+                # 모든 작업 완료 대기
 
             # 4. JSON 저장
             with open(output_path, "w", encoding="utf-8") as j:
