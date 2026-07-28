@@ -221,10 +221,7 @@ def _initialize_plm_session():
         try:
             st.session_state.plm_integration = create_plm_integration()
             st.session_state.plm_available = True
-
-            # Lazy-load groups for Quick Search only when needed (not on init)
-            if 'plm_groups_cache' not in st.session_state or not st.session_state.plm_groups_cache:
-                _lazy_load_groups()
+            # Groups will be lazy-loaded when actually needed (not on init)
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
@@ -2335,17 +2332,6 @@ def render_plm_section():
     if st.session_state.get('trigger_auto_analysis', False):
         st.info("🚀 자동 분석 파이프라인이 시작되었습니다.")
 
-    # Determine which tab to show based on navigation flag
-    default_tab_index = 0
-    if st.session_state.get('navigate_to_comment_tab', False):
-        default_tab_index = 3
-
-    # Lazy-load groups in background (non-blocking)
-    if (not st.session_state.get('plm_groups_cache') and
-        not st.session_state.get('plm_groups_loading') and
-        not _is_plm_local_test_mode()):
-        _lazy_load_groups()
-
     # Create tabs
     tab0, tab1, tab2, tab3 = st.tabs([
         "🔍 Quick Search",
@@ -2367,6 +2353,12 @@ def render_plm_section():
 
     with tab1:
         try:
+            # Lazy-load groups only when tab1 is actually viewed
+            if (not st.session_state.get('plm_groups_cache') and
+                not st.session_state.get('plm_groups_loading') and
+                not _is_plm_local_test_mode()):
+                _lazy_load_groups()
+
             col1, col2 = st.columns([1, 1])
             with col1:
                 st.subheader("🔍 결함 검색")
