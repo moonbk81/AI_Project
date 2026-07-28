@@ -90,18 +90,23 @@ def _build_reference_text(metas):
 def _render_existing_messages(key_suffix):
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
-            if msg["role"] == "assistant" and msg.get("thinking"):
-                with st.expander("AI Reasoning Trace"):
-                    st.markdown(f"```text\n{msg['thinking']}\n```")
+            if msg["role"] == "assistant":
+                # 로그 원본을 먼저 표시 (사용자가 근거를 먼저 확인하고 분석 읽음)
+                if "references" in msg and msg["references"]:
+                    with st.expander(f"📄 Reference Logs (근거 로그 원문)", expanded=True):
+                        st.markdown(msg["references"])
 
-            st.markdown(msg["content"])
+                # AI 추론 과정 (선택사항)
+                if msg.get("thinking"):
+                    with st.expander("🧠 AI Reasoning Trace"):
+                        st.markdown(f"```text\n{msg['thinking']}\n```")
 
-            if "metas" in msg and msg["metas"]:
-                _render_assistant_visual_references(msg, key_suffix, msg_idx)
+                # 분석 결과 (마지막)
+                st.markdown(msg["content"])
 
-            if "references" in msg and msg["references"]:
-                with st.expander(f"Reference Logs ({key_suffix})"):
-                    st.markdown(msg["references"])
+                # 시각화 자료
+                if "metas" in msg and msg["metas"]:
+                    _render_assistant_visual_references(msg, key_suffix, msg_idx)
 
 
 def render_chat_interface(engine, key_suffix="main", show_input=True):
@@ -129,11 +134,19 @@ def render_chat_interface(engine, key_suffix="main", show_input=True):
 
                 ref_text = _build_reference_text(metas)
 
+                # 로그 원본 먼저 표시 (사용자가 근거를 먼저 확인)
+                if ref_text:
+                    with st.expander("📄 Reference Logs (근거 로그 원문)", expanded=True):
+                        st.markdown(ref_text)
+
+                # AI 추론 과정
                 if thinking:
-                    with st.expander("AI Reasoning Trace"):
+                    with st.expander("🧠 AI Reasoning Trace"):
                         st.markdown(f"```text\n{thinking}\n```")
 
+                # 분석 결과
                 st.markdown(answer)
+
                 st.session_state.messages.append({
                     "role": "assistant", "content": answer,
                     "references": ref_text, "metas": metas, "thinking": thinking
