@@ -189,6 +189,9 @@ Rules:
 
 def _initialize_plm_session():
     """Initialize Streamlit session state for PLM"""
+    import time
+    start_time = time.time()
+
     defaults = {
         'plm_local_test_mode': False,
         'plm_cache': {},
@@ -219,25 +222,32 @@ def _initialize_plm_session():
 
     if 'plm_integration' not in st.session_state:
         try:
+            plm_start = time.time()
             st.session_state.plm_integration = create_plm_integration()
             st.session_state.plm_available = True
+            logger.info(f"PLM integration initialized in {time.time() - plm_start:.2f}s")
             # Groups will be lazy-loaded when actually needed (not on init)
         except Exception as e:
             logger.error(f"Failed to initialize PLM: {e}")
             st.session_state.plm_available = False
             st.session_state.plm_integration = None
 
+    logger.info(f"_initialize_plm_session completed in {time.time() - start_time:.2f}s")
+
 
 def _lazy_load_groups():
     """Lazy-load groups in background when needed"""
+    import time
     if st.session_state.get('plm_groups_loading', False) or st.session_state.get('plm_groups_cache'):
         return  # Already loading or loaded
 
     st.session_state.plm_groups_loading = True
     try:
+        start_time = time.time()
         config_manager = PLMConfigManager()
         st.session_state.plm_groups_cache = config_manager.get_groups_by_division("25")
-        logger.info(f"Groups pre-loaded: {len(st.session_state.plm_groups_cache)} groups")
+        elapsed = time.time() - start_time
+        logger.info(f"Groups pre-loaded: {len(st.session_state.plm_groups_cache)} groups in {elapsed:.2f}s")
     except Exception as e:
         logger.warning(f"Failed to pre-load groups: {e}")
         st.session_state.plm_groups_cache = {}
@@ -324,20 +334,25 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
         defect: Selected defect dictionary
         division_code: PLM division code
     """
+    import time
+    auto_start = time.time()
     defect_code = defect.get('defectCode')
     if not defect_code:
         return
 
     # Skip if files already loaded for this defect
     if defect_code in st.session_state.get('plm_quick_search_files', {}):
+        logger.info(f"Files already loaded for {defect_code}, skipping auto-load")
         return
 
     # Skip if auto-processing is already in progress
     if st.session_state.get(f'plm_auto_processing_{defect_code}'):
+        logger.info(f"Auto-processing already in progress for {defect_code}")
         return
 
     # Mark as in progress
     st.session_state[f'plm_auto_processing_{defect_code}'] = True
+    logger.info(f"Starting auto-load for {defect_code}")
 
     # Initialize session state if needed
     if 'plm_quick_search_files' not in st.session_state:
@@ -354,6 +369,7 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
             if not client and not _is_plm_local_test_mode():
                 status.update(label="❌ PLM 클라이언트 연결 실패", state="error")
                 st.session_state[f'plm_auto_processing_{defect_code}'] = False
+                logger.info(f"Auto-load cancelled: no PLM client")
                 return
 
             # Get file list
@@ -413,6 +429,7 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
             # If logs were extracted, trigger auto-analysis by rerunning
             if total_logs > 0:
                 # Give Streamlit a moment to close the status container
+                logger.info(f"Auto-load for {defect_code} completed in {time.time() - auto_start:.2f}s, triggering rerun")
                 st.rerun()
 
     except Exception as e:
@@ -420,6 +437,7 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
         progress_container.error(f"❌ 오류 발생: {e}")
     finally:
         st.session_state[f'plm_auto_processing_{defect_code}'] = False
+        logger.info(f"Auto-load cleanup for {defect_code}, total time: {time.time() - auto_start:.2f}s")
 
 
 def _auto_download_and_extract_logs(defect_code: str, division_code: str, files: List[Dict[str, Any]], status=None) -> int:
@@ -1880,8 +1898,8 @@ def _show_cached_results_in_fragment():
         st.session_state.plm_quick_search_files = {}
     st.session_state.plm_quick_search_current_defect_code = defect_code
 
-    # Auto-load files and start background processing when defect is selected
-    _auto_load_and_process_defect_files(selected_defect, division_code)
+    # Note: Auto-loading disabled for performance. Files are loaded on-demand when user clicks "Load Attached Files"
+    # This prevents 30+ second delays when selecting defects
 
     st.divider()
     st.subheader("Defect Details")
@@ -2316,10 +2334,15 @@ def render_plm_section():
 
     Renders tabs for different PLM operations
     """
+    import time
+    section_start = time.time()
     st.header("📋 PLM Defect Management")
 
     _initialize_plm_session()
+    logger.info(f"After initialize_plm_session: {time.time() - section_start:.2f}s")
+
     _render_plm_local_test_controls()
+    logger.info(f"After render_local_test_controls: {time.time() - section_start:.2f}s")
 
     if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
         st.warning("⚠️ PLM API is not configured. Check credentials and network.")
@@ -2342,22 +2365,26 @@ def render_plm_section():
 
     with tab0:
         try:
+            tab0_start = time.time()
             # Check for cached results directly
             if st.session_state.get('plm_quick_search_results'):
                 _show_cached_results_in_fragment()
             else:
                 _show_search_input_form_fragment()
+            logger.info(f"Tab 0 (Quick Search) rendered in {time.time() - tab0_start:.2f}s")
         except Exception as e:
             logger.error(f"Error in Quick Search: {e}", exc_info=True)
             st.error(f"Error: {e}")
 
     with tab1:
         try:
+            tab1_start = time.time()
             # Lazy-load groups only when tab1 is actually viewed
             if (not st.session_state.get('plm_groups_cache') and
                 not st.session_state.get('plm_groups_loading') and
                 not _is_plm_local_test_mode()):
                 _lazy_load_groups()
+            logger.info(f"After lazy_load_groups in Tab1: {time.time() - tab1_start:.2f}s")
 
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -2366,20 +2393,25 @@ def render_plm_section():
             with col2:
                 st.subheader("📁 파일 관리")
                 render_plm_files()
+            logger.info(f"Tab 1 (Search & Files) rendered in {time.time() - tab1_start:.2f}s")
         except Exception as e:
             logger.error(f"Error in Search & Files: {e}", exc_info=True)
             st.error(f"Error: {e}")
 
     with tab2:
         try:
+            tab2_start = time.time()
             render_plm_analyze()
+            logger.info(f"Tab 2 (Analysis) rendered in {time.time() - tab2_start:.2f}s")
         except Exception as e:
             logger.error(f"Error in Analysis: {e}", exc_info=True)
             st.error(f"Error: {e}")
 
     with tab3:
         try:
+            tab3_start = time.time()
             render_plm_comment()
+            logger.info(f"Tab 3 (Comment) rendered in {time.time() - tab3_start:.2f}s")
         except Exception as e:
             logger.error(f"Error in Comments: {e}", exc_info=True)
             st.error(f"Error: {e}")
