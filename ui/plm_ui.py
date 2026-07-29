@@ -770,7 +770,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         width="stretch",
         hide_index=True,
         on_select="rerun",
-        selection_mode="single-row",
+        selection_mode="multi-row",
         key="quick_search_results_table",
         column_config={
             "Code": st.column_config.LinkColumn(
@@ -787,7 +787,22 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         },
     )
 
+    # Handle checkbox selections (multi-row) for auto-download
     selected_rows = table_state.selection.rows if table_state and table_state.selection else []
+    prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
+
+    # Detect newly checked rows
+    newly_checked = set(selected_rows) - set(prev_selected_rows)
+    for row_idx in newly_checked:
+        if row_idx < len(defects):
+            defect = defects[row_idx]
+            division_code = st.session_state.get('plm_quick_search_division')
+            logger.info(f"Checkbox checked for {defect.get('defectCode')}, starting auto-download")
+            _auto_load_and_process_defect_files(defect, division_code)
+
+    st.session_state.plm_quick_search_prev_selected_rows = selected_rows
+
+    # Use first selected row or last selected
     if selected_rows:
         selected_index = selected_rows[0]
         if selected_index >= len(defects):
