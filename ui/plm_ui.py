@@ -465,7 +465,10 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
 
     client = _get_plm_client()
     if not client:
-        return
+        logger.warning("PLM client unavailable while auto-downloading ZIP files for %s", defect_code)
+        if status:
+            st.write("❌ PLM 클라이언트 연결 실패")
+        return 0
 
     if status:
         st.write(f"📦 {len(zip_files)}개 ZIP 파일 발견")

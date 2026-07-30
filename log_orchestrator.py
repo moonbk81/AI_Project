@@ -59,16 +59,20 @@ class LogOrchestrator:
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
 
+    def _build_time_index(self, lines):
+        """Build the shared time index before parallel parsers read it."""
+        time_index = {}
+        for line in lines:
+            if len(line) > 15:
+                t_str = line[:14]
+                if t_str[2] == '-' and t_str[5] == ' ':
+                    time_index.setdefault(t_str, []).append(line.strip())
+        self._time_index = time_index
+
     def _get_surrounding_context_logs(self, lines, target_time_str, window_seconds=3, max_lines=150):
         """O(1) 인덱싱 기반 초고속 주변 로그 스캐너 (Time-Window Glue)"""
         if self._time_index is None:
-            self._time_index = {}
-            for line in lines:
-                if len(line) > 15:
-                    t_str = line[:14]
-                    if t_str[2] == '-' and t_str[5] == ' ':
-                        if t_str not in self._time_index: self._time_index[t_str] = []
-                        self._time_index[t_str].append(line.strip())
+            self._build_time_index(lines)
 
         if not target_time_str or target_time_str == "00-00 00:00:00.000": return []
         base_time_str = target_time_str.split('.')[0] if '.' in target_time_str else target_time_str
@@ -96,6 +100,8 @@ class LogOrchestrator:
         try:
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
+
+            self._build_time_index(lines)
 
             # ==========================================
             # 🚨 1. [PACKAGE INFO]에서 전역 UID 매핑 테이블(정답지) 추출
