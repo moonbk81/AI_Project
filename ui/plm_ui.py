@@ -567,20 +567,21 @@ def render_plm_search():
                 if st.button("Clear Cache", key="btn_clear_search"):
                     st.session_state.plm_search_results = None
                     st.session_state.plm_search_division = None
+                    st.session_state.plm_search_selected_index = 0
                     st.rerun()
 
             st.divider()
-            _render_defects_table(st.session_state.plm_search_results, st.session_state.plm_search_division)
+            st.write("**Select a defect to view details:**")
+            selected_index = _render_selectable_defects_table_for_search(st.session_state.plm_search_results, st.session_state.plm_search_division)
 
-            # Show details for cached results
-            for i, defect in enumerate(st.session_state.plm_search_results):
-                try:
-                    defect_code = defect.get('defectCode') if isinstance(defect, dict) else 'Unknown'
-                    with st.expander(f"📋 Details: {defect_code}"):
-                        _render_defect_details(defect, st.session_state.plm_search_division)
-                except Exception as e:
-                    logger.error(f"Error rendering cached defect details: {e}", exc_info=True)
-                    st.error(f"Error displaying defect details: {str(e)}")
+            # Show details for selected defect
+            if selected_index is not None and 0 <= selected_index < len(st.session_state.plm_search_results):
+                selected_defect = st.session_state.plm_search_results[selected_index]
+                st.session_state.plm_selected_defect_code = selected_defect.get('defectCode')
+                st.session_state.plm_selected_division = st.session_state.plm_search_division
+                st.divider()
+                st.subheader(f"📋 Details: {selected_defect.get('defectCode')}")
+                _render_defect_details(selected_defect, st.session_state.plm_search_division)
 
             st.divider()
             st.markdown("**New Search**")
@@ -654,17 +655,20 @@ def render_plm_search():
                             st.session_state.plm_selected_defect_code = search_values[0]
                             st.session_state.plm_selected_division = division_code
                         st.success(f"Found {len(defects)} defect(s)")
-                        _render_defects_table(defects, division_code)
 
-                        # Show details for each defect
-                        for i, defect in enumerate(defects):
-                            try:
-                                defect_code = defect.get('defectCode') if isinstance(defect, dict) else 'Unknown'
-                                with st.expander(f"📋 Details: {defect_code}"):
-                                    _render_defect_details(defect, division_code)
-                            except Exception as e:
-                                logger.error(f"Error rendering defect details: {e}", exc_info=True)
-                                st.error(f"Error displaying defect details: {str(e)}")
+                        # Use selectable table for search results
+                        st.divider()
+                        st.write("**Select a defect to view details:**")
+                        selected_index = _render_selectable_defects_table_for_search(defects, division_code)
+
+                        # Show details for selected defect
+                        if selected_index is not None and 0 <= selected_index < len(defects):
+                            selected_defect = defects[selected_index]
+                            st.session_state.plm_selected_defect_code = selected_defect.get('defectCode')
+                            st.session_state.plm_selected_division = division_code
+                            st.divider()
+                            st.subheader(f"📋 Details: {selected_defect.get('defectCode')}")
+                            _render_defect_details(selected_defect, division_code)
                     else:
                         st.info("No defects found")
 
@@ -735,6 +739,73 @@ def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "2
 
     html += '</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
+
+
+def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]], division_code: str) -> Optional[int]:
+    """Render search results as a selectable table and return selected row index."""
+    table_data = []
+
+    for defect in defects:
+        defect_code = defect.get('defectCode', '')
+        defect_id = defect.get('defectId', '')
+        title = defect.get('plmTitle', '')
+        created = defect.get('createDate', '')
+
+        if isinstance(title, str) and len(title) > 80:
+            title = title[:80] + "..."
+        if isinstance(created, str) and created:
+            created = created[:10]
+
+        plm_url = _get_plm_site_url(defect_id) if defect_id else ""
+        if plm_url and defect_code:
+            plm_url = f"{plm_url}#{defect_code}"
+
+        table_data.append({
+            "Code": plm_url,
+            "Title": title,
+            "Status": defect.get("plmStatus", "N/A"),
+            "Priority": defect.get("plmPriority", "N/A"),
+            "Owner": defect.get("mainOwnerName", "N/A"),
+            "Created": created,
+        })
+
+    table_state = st.dataframe(
+        pd.DataFrame(table_data),
+        width="stretch",
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="search_results_table",
+        column_config={
+            "Code": st.column_config.LinkColumn(
+                "Code",
+                display_text=r"#([^#]+)$",
+                help="Open this defect in PLM",
+                width="medium",
+            ),
+            "Title": st.column_config.TextColumn("Title", width="large"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Priority": st.column_config.TextColumn("Priority", width="small"),
+            "Owner": st.column_config.TextColumn("Owner", width="medium"),
+            "Created": st.column_config.TextColumn("Created", width="small"),
+        },
+    )
+
+    # Handle single-row selection for search results
+    selected_rows = table_state.selection.rows if table_state and table_state.selection else []
+
+    if selected_rows:
+        selected_index = selected_rows[0]
+        if selected_index >= len(defects):
+            selected_index = 0
+        st.session_state.plm_search_selected_index = selected_index
+        return selected_index
+
+    selected_index = st.session_state.get('plm_search_selected_index', 0)
+    if selected_index >= len(defects):
+        selected_index = 0
+        st.session_state.plm_search_selected_index = selected_index
+    return selected_index
 
 
 def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:

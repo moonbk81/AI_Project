@@ -123,12 +123,14 @@ def render_search_defects_tab():
 
                     if defects:
                         st.success(f"Found {len(defects)} defect(s)")
-                        render_defects_table(defects)
 
-                        # Show details for first defect
-                        if defects:
-                            st.subheader("Detailed View")
-                            render_defect_details(defects[0], division_code)
+                        # Store search results in session state
+                        st.session_state.search_defects = defects
+                        st.session_state.search_division_code = division_code
+
+                        # Initialize selected defect to first one
+                        if 'selected_defect_index' not in st.session_state:
+                            st.session_state.selected_defect_index = 0
                     else:
                         st.info("No defects found matching the criteria")
 
@@ -139,6 +141,21 @@ def render_search_defects_tab():
                 st.error(f"API Error: {e}")
             except Exception as e:
                 st.error(f"Error: {e}")
+
+    # Display search results if available
+    if 'search_defects' in st.session_state and st.session_state.search_defects:
+        defects = st.session_state.search_defects
+
+        st.subheader("Search Results")
+        selected_index = render_defects_table_with_selection(defects)
+
+        # Update selected defect
+        if selected_index is not None:
+            st.session_state.selected_defect_index = selected_index
+            selected_defect = defects[selected_index]
+
+            st.subheader("Detailed View")
+            render_defect_details(selected_defect, st.session_state.search_division_code)
 
 
 def render_defects_table(defects: List[Dict[str, Any]]):
@@ -157,6 +174,44 @@ def render_defects_table(defects: List[Dict[str, Any]]):
 
     df = pd.DataFrame(df_data)
     st.dataframe(df, use_container_width=True)
+
+
+def render_defects_table_with_selection(defects: List[Dict[str, Any]]) -> Optional[int]:
+    """Render defects with selection capability and return selected index"""
+    df_data = []
+    defect_codes = []
+
+    for i, defect in enumerate(defects):
+        defect_codes.append(defect.get('defectCode'))
+        df_data.append({
+            'Code': defect.get('defectCode'),
+            'Title': defect.get('plmTitle')[:50] + "..." if len(defect.get('plmTitle', '')) > 50 else defect.get('plmTitle'),
+            'Status': defect.get('plmStatus'),
+            'Priority': defect.get('plmPriority'),
+            'Owner': defect.get('mainOwnerName'),
+            'Created': defect.get('createDate')[:10] if defect.get('createDate') else ''
+        })
+
+    # Selection radio button
+    st.write("**Select Defect:**")
+    default_index = st.session_state.get('selected_defect_index', 0)
+    selected_code = st.radio(
+        "Choose a defect to view details",
+        options=defect_codes,
+        index=default_index if default_index < len(defect_codes) else 0,
+        format_func=lambda x: f"{x}",
+        horizontal=True,
+        label_visibility="collapsed",
+        key="defect_selection_radio"
+    )
+
+    selected_index = defect_codes.index(selected_code) if selected_code in defect_codes else 0
+
+    # Display table
+    df = pd.DataFrame(df_data)
+    st.dataframe(df, use_container_width=True)
+
+    return selected_index
 
 
 def render_defect_details(defect: Dict[str, Any], division_code: str):
