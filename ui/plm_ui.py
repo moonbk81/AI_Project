@@ -879,12 +879,20 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         if selected_index >= len(defects):
             selected_index = 0
         st.session_state.plm_quick_search_selected_index = selected_index
+        # Update active defect when selection changes
+        if selected_index < len(defects):
+            st.session_state.plm_active_defect_code = defects[selected_index].get('defectCode')
+            st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
         return selected_index
 
     selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
     if selected_index >= len(defects):
         selected_index = 0
         st.session_state.plm_quick_search_selected_index = selected_index
+    # Update active defect with currently selected index
+    if selected_index < len(defects):
+        st.session_state.plm_active_defect_code = defects[selected_index].get('defectCode')
+        st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
     return selected_index
 
 
