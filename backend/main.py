@@ -82,6 +82,10 @@ class JobStatusResponse(BaseModel):
     updated_at: str
 
 
+class JobsResponse(BaseModel):
+    jobs: List[JobStatusResponse]
+
+
 app = FastAPI(title="AI Project RAG Backend")
 _engine = None
 _jobs: Dict[str, Dict[str, Any]] = {}
@@ -157,12 +161,17 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> Dict[str, Any]:
     model_name = get_default_llm_model("gemma4:12b")
+    with _jobs_lock:
+        active_jobs = len([job for job in _jobs.values() if job.get("status") in {"pending", "running"}])
     return {
         "status": "ok",
         "model": model_name,
         "runtime": get_llm_runtime_label(model_name),
+        "engine_loaded": _engine is not None,
+        "active_jobs": active_jobs,
+        "supported_artifacts": sorted(_RESULT_ARTIFACTS),
     }
 
 
@@ -284,6 +293,17 @@ async def create_analyze_job(
 
     _executor.submit(_run_analyze_job, job_id, file_paths, use_slice, start_t, end_t)
     return AnalyzeJobResponse(job_id=job_id)
+
+
+@app.get("/jobs", response_model=JobsResponse)
+def list_jobs(limit: int = 20) -> JobsResponse:
+    with _jobs_lock:
+        jobs = sorted(
+            (dict(job) for job in _jobs.values()),
+            key=lambda job: job.get("created_at", ""),
+            reverse=True,
+        )[:limit]
+    return JobsResponse(jobs=[JobStatusResponse(**job) for job in jobs])
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatusResponse)

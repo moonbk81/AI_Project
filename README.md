@@ -114,12 +114,14 @@ vLLM 실행 시 `--served-model-name qwen2.5-72b-instruct`처럼 별도 이름�
 기존 Streamlit 직접 호출 구조는 그대로 유지됩니다. 채팅 질의, 적재 파일 목록 조회, DB 초기화, 로그 업로드/분석 job을 FastAPI backend로 우회해보고 싶다면 별도 터미널에서 backend를 먼저 실행합니다.
 
 ```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8080
+conda activate ai
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
 ```
 
 그 다음 Streamlit을 backend 사용 모드로 실행합니다.
 
 ```bash
+conda activate ai
 export USE_BACKEND_API=1
 export BACKEND_API_URL=http://localhost:8080
 streamlit run web_app.py
@@ -127,7 +129,7 @@ streamlit run web_app.py
 
 `USE_BACKEND_API`를 지정하지 않으면 기존처럼 Streamlit 프로세스 안에서 `RilRagChat.ask()`를 직접 호출합니다.
 
-Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다.
+Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.
 
 ## 폴더 구조
 

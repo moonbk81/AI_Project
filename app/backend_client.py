@@ -267,6 +267,18 @@ def get_job_status_via_backend(job_id: str) -> Dict[str, Any]:
     return response.json()
 
 
+def list_jobs_via_backend(limit: int = 20) -> List[Dict[str, Any]]:
+    import requests
+
+    response = requests.get(
+        f"{get_backend_api_url()}/jobs",
+        params={"limit": limit},
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json().get("jobs", [])
+
+
 def wait_for_job_via_backend(job_id: str, poll_interval: float = 1.0) -> Dict[str, Any]:
     while True:
         status = get_job_status_via_backend(job_id)
