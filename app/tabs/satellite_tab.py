@@ -1,38 +1,27 @@
-import json
-import os
-
 import streamlit as st
 
 import ui
 from agent_tools import get_device_health_kpi
-from app.backend_client import ask_with_optional_backend
+from app.backend_client import ask_with_optional_backend, get_result_json_with_optional_backend
 from core.config import SATELLITE_PROMPTS
 
-def _detect_satellite_type(current_base):
-    sat_at_path = f"./result/{current_base}_sat_at.json"
-    ntn_fw_path = f"./result/{current_base}_ntn.json"
+def _detect_satellite_type(current_base, sat_at_data=None, ntn_data=None):
     has_tiantong = False
     has_spacex = False
 
-    if os.path.exists(sat_at_path):
-        try:
-            with open(sat_at_path, "r", encoding="utf-8") as f:
-                t_data = json.load(f)
-                if len(t_data.get("call_flow", [])) > 0:
-                    has_tiantong = True
-        except Exception:
-            pass
+    try:
+        if sat_at_data and len(sat_at_data.get("call_flow", [])) > 0:
+            has_tiantong = True
+    except Exception:
+        pass
 
-    if os.path.exists(ntn_fw_path):
-        try:
-            with open(ntn_fw_path, "r", encoding="utf-8") as f:
-                s_data = json.load(f)
-                if isinstance(s_data, dict) and any(v for v in s_data.values() if v):
-                    has_spacex = True
-                elif isinstance(s_data, list) and len(s_data) > 0:
-                    has_spacex = True
-        except Exception:
-            pass
+    try:
+        if isinstance(ntn_data, dict) and any(v for v in ntn_data.values() if v):
+            has_spacex = True
+        elif isinstance(ntn_data, list) and len(ntn_data) > 0:
+            has_spacex = True
+    except Exception:
+        pass
 
     if has_tiantong:
         return "Tiantong"
@@ -49,12 +38,14 @@ def render_satellite_tab(engine):
         st.warning("분석 대상 파일을 선택해 주십시오.")
         return
 
-    sat_type = _detect_satellite_type(current_base)
+    sat_at_data = get_result_json_with_optional_backend(current_base, "sat_at", default={})
+    ntn_data = get_result_json_with_optional_backend(current_base, "ntn", default={})
+    sat_type = _detect_satellite_type(current_base, sat_at_data=sat_at_data, ntn_data=ntn_data)
 
     if sat_type == "Tiantong":
-        ui.render_sat_at_analyzer(current_base)
+        ui.render_sat_at_analyzer(current_base, data=sat_at_data)
     elif sat_type == "SpaceX":
-        ui.render_ntn_advanced_fw_analyzer(current_base)
+        ui.render_ntn_advanced_fw_analyzer(current_base, data=ntn_data)
     else:
         st.info("NTN 위성 통신 로그가 존재하지 않습니다.")
 

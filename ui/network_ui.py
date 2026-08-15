@@ -262,7 +262,7 @@ def render_data_usage_timeline(df):
 
     st.plotly_chart(fig, width="stretch")
 
-def render_internet_stall_analyzer(current_base, result_dir="./result"):
+def render_internet_stall_analyzer(current_base, result_dir="./result", data=None):
     st.subheader("인터넷 연결 품질 분석")
 
     if not current_base:
@@ -270,7 +270,8 @@ def render_internet_stall_analyzer(current_base, result_dir="./result"):
         return
 
     path = os.path.join(result_dir, f"{current_base}_internet_stall.json")
-    data = _load_json(path, {})
+    if data is None:
+        data = _load_json(path, {})
 
     if not data:
         st.info(f"인터넷 품질 분석 결과가 없습니다. 확인 경로: `{path}`")

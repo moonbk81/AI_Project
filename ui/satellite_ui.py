@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-def render_ntn_advanced_fw_analyzer(current_base):
+def render_ntn_advanced_fw_analyzer(current_base, data=None):
     st.subheader("NTN 로밍 정책 및 UI 상태")
 
     if not current_base:
@@ -14,12 +14,13 @@ def render_ntn_advanced_fw_analyzer(current_base):
         return
 
     file_path = f"./result/{current_base}_ntn.json"
-    if not os.path.exists(file_path):
+    if data is None and not os.path.exists(file_path):
         st.info("NTN 분석 결과 파일이 없습니다.")
         return
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    if data is None:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
     if not data:
         st.error("로그에서 추출된 NTN 데이터가 없습니다.")
@@ -102,15 +103,16 @@ def render_ntn_advanced_fw_analyzer(current_base):
     final_table_df = clean_df[display_cols].fillna("-")
     st.dataframe(final_table_df, width="stretch")
 
-def render_sat_at_analyzer(current_base=None):
+def render_sat_at_analyzer(current_base=None, data=None):
     st.subheader("위성 모뎀 제어 상태")
 
     if not current_base: return
     file_path = f"./result/{current_base}_sat_at.json"
-    if not os.path.exists(file_path): return
+    if data is None and not os.path.exists(file_path): return
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    if data is None:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
     metrics = data.get("metrics", {})
     flow = data.get("call_flow", [])
