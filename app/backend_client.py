@@ -112,6 +112,73 @@ def get_metadata_with_optional_backend(engine, source_file: Optional[str] = None
     return get_collection_metadatas_batched(engine.collection, batch_size=500, where=where)
 
 
+def get_knowledge_via_backend() -> Dict[str, Any]:
+    import requests
+
+    response = requests.get(
+        f"{get_backend_api_url()}/knowledge",
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def save_knowledge_via_backend(
+    target_ids: List[str],
+    feedback: str,
+    severity: str = "Normal",
+    build_info: Optional[Dict[str, Any]] = None,
+) -> bool:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/knowledge",
+        json={
+            "target_ids": target_ids,
+            "feedback": feedback,
+            "severity": severity,
+            "build_info": build_info or {},
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return bool(response.json().get("success", False))
+
+
+def get_knowledge_with_optional_backend(engine) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return get_knowledge_via_backend()
+    if engine is None:
+        raise RuntimeError("Local RAG engine is not available.")
+    return engine.knowledge_collection.get()
+
+
+def save_knowledge_with_optional_backend(
+    engine,
+    target_ids: List[str],
+    feedback: str,
+    severity: str = "Normal",
+    build_info: Optional[Dict[str, Any]] = None,
+) -> bool:
+    if is_backend_api_enabled():
+        return save_knowledge_via_backend(
+            target_ids,
+            feedback,
+            severity=severity,
+            build_info=build_info,
+        )
+    if engine is None:
+        raise RuntimeError("Local RAG engine is not available.")
+    return bool(
+        engine.save_knowledge(
+            target_ids,
+            feedback,
+            severity=severity,
+            build_info=build_info,
+        )
+    )
+
+
 def get_files_with_optional_backend(engine) -> List[str]:
     if is_backend_api_enabled():
         return get_files_via_backend()

@@ -273,10 +273,7 @@ with tab_benchmark:
     render_benchmark_tab()
 
 with tab_knowledge:
-    if backend_mode:
-        st.info("Backend 모드에서는 지식 베이스 API 이관 후 사용할 수 있습니다.")
-    else:
-        render_knowledge_tab(engine)
+    render_knowledge_tab(engine)
 
 with tab_plm:
     render_plm_section_tab()

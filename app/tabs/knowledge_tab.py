@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import time
 
+from app.backend_client import get_knowledge_with_optional_backend, save_knowledge_with_optional_backend
+
 def _recommend_knowledge_category(text, categories):
     """코멘트 내용을 분석하여 적절한 로그 카테고리를 추천합니다."""
     mapping = {
@@ -34,7 +36,7 @@ def render_knowledge_tab(engine):
 def _render_search_ui(engine):
     """등록된 지식 베이스를 조회, 필터링, 상세 보기하는 UI"""
     try:
-        kb_data = engine.knowledge_collection.get()
+        kb_data = get_knowledge_with_optional_backend(engine)
     except Exception as e:
         st.error(f"분석 사례 데이터를 불러오는 중 오류가 발생했습니다: {e}")
         return
@@ -157,13 +159,18 @@ def _render_registration_ui(engine):
                     "kernel": base_meta.get("kernel", "Unknown")
                 }
 
-                # 🚨 [수정] save_knowledge 호출 시 build_info 파라미터로 묶어서 전달
-                engine.save_knowledge(
+                # save_knowledge 호출 시 build_info 파라미터로 묶어서 전달
+                success = save_knowledge_with_optional_backend(
+                    engine,
                     target_ids,
                     feedback,
                     severity=severity,
                     build_info=build_info_dict
                 )
+
+                if not success:
+                    st.error("사례 등록에 실패했습니다.")
+                    return
 
                 st.success(f"[{target_type}] 분류에 {severity} 등급으로 사례를 등록했습니다.")
 

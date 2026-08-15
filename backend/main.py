@@ -47,6 +47,23 @@ class MetadataResponse(BaseModel):
     ids: List[str]
 
 
+class KnowledgeResponse(BaseModel):
+    ids: List[str]
+    documents: List[str]
+    metadatas: List[Dict[str, Any]]
+
+
+class KnowledgeSaveRequest(BaseModel):
+    target_ids: List[str]
+    feedback: str = Field(min_length=1)
+    severity: str = "Normal"
+    build_info: Optional[Dict[str, Any]] = None
+
+
+class KnowledgeSaveResponse(BaseModel):
+    success: bool
+
+
 class AnalyzeJobResponse(BaseModel):
     job_id: str
 
@@ -181,6 +198,27 @@ def metadata(source_file: Optional[str] = None, batch_size: int = 500) -> Metada
         metadatas=data.get("metadatas", []),
         ids=data.get("ids", []),
     )
+
+
+@app.get("/knowledge", response_model=KnowledgeResponse)
+def knowledge() -> KnowledgeResponse:
+    data = get_engine().knowledge_collection.get()
+    return KnowledgeResponse(
+        ids=data.get("ids", []) if data else [],
+        documents=data.get("documents", []) if data else [],
+        metadatas=data.get("metadatas", []) if data else [],
+    )
+
+
+@app.post("/knowledge", response_model=KnowledgeSaveResponse)
+def save_knowledge(req: KnowledgeSaveRequest) -> KnowledgeSaveResponse:
+    success = get_engine().save_knowledge(
+        req.target_ids,
+        req.feedback,
+        severity=req.severity,
+        build_info=req.build_info,
+    )
+    return KnowledgeSaveResponse(success=bool(success))
 
 
 @app.post("/jobs/analyze", response_model=AnalyzeJobResponse)
