@@ -6,6 +6,13 @@ import time
 
 import streamlit as st
 
+from app.backend_client import (
+    get_backend_api_url,
+    get_backend_health,
+    get_files_with_optional_backend,
+    is_backend_api_enabled,
+    reset_db_with_optional_backend,
+)
 from rag.llm_provider import get_llm_provider
 from ui.plm_ui import render_plm_sidebar_stats
 
@@ -120,8 +127,16 @@ def _invalidate_ingested_files_cache():
 
 def _render_engine_status():
     st.subheader("분석 엔진")
-    st.caption(f"Provider: `{get_llm_provider()}`")
-    st.caption(f"Model: `{st.session_state.get('active_model', 'N/A')}`")
+    if is_backend_api_enabled():
+        st.caption(f"Backend: `{get_backend_api_url()}`")
+        try:
+            health = get_backend_health()
+            st.caption(f"Runtime: `{health.get('runtime', 'N/A')}`")
+        except Exception as e:
+            st.caption(f"Backend 연결 실패: `{e}`")
+    else:
+        st.caption(f"Provider: `{get_llm_provider()}`")
+        st.caption(f"Model: `{st.session_state.get('active_model', 'N/A')}`")
 
 
 def _get_ingested_files(engine):
@@ -129,7 +144,7 @@ def _get_ingested_files(engine):
         _INGESTED_FILES_CACHE_KEY not in st.session_state
         or st.session_state.get(_INGESTED_FILES_CACHE_DIRTY_KEY, True)
     ):
-        st.session_state[_INGESTED_FILES_CACHE_KEY] = engine.get_all_files()
+        st.session_state[_INGESTED_FILES_CACHE_KEY] = get_files_with_optional_backend(engine)
         st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = False
 
     return st.session_state[_INGESTED_FILES_CACHE_KEY]
@@ -169,7 +184,7 @@ def _render_file_session_manager(engine, reset_analysis_context):
         st.success(f"활성 파일: `{st.session_state.current_file}`")
 
     if st.button("전체 DB 초기화", width="stretch", help="Vector DB의 모든 지식을 삭제합니다."):
-        if engine.reset_db():
+        if reset_db_with_optional_backend(engine):
             for folder in ["./payloads", "./result", "./temp_logs"]:
                 if os.path.exists(folder):
                     shutil.rmtree(folder)
@@ -185,6 +200,10 @@ def _render_file_session_manager(engine, reset_analysis_context):
 def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.subheader("자동 분석 파이프라인")
+
+    if is_backend_api_enabled():
+        st.info("Backend 모드에서는 로그 업로드/파싱/DB 적재 API 이관 후 사용할 수 있습니다.")
+        return
 
     # PLM에서 추출되어 분석 대기 중인 로그 파일
     pending_logs = st.session_state.get('plm_pending_logs', [])

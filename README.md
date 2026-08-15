@@ -111,7 +111,7 @@ vLLM 실행 시 `--served-model-name qwen2.5-72b-instruct`처럼 별도 이름�
 
 ## Backend API 실험
 
-기존 Streamlit 직접 호출 구조는 그대로 유지됩니다. 채팅 질의만 FastAPI backend로 우회해보고 싶다면 별도 터미널에서 backend를 먼저 실행합니다.
+기존 Streamlit 직접 호출 구조는 그대로 유지됩니다. 채팅 질의, 적재 파일 목록 조회, DB 초기화를 FastAPI backend로 우회해보고 싶다면 별도 터미널에서 backend를 먼저 실행합니다.
 
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8080

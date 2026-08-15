@@ -5,6 +5,7 @@ import streamlit as st
 
 import ui
 from agent_tools import get_device_health_kpi
+from app.backend_client import ask_with_optional_backend
 from core.config import SATELLITE_PROMPTS
 
 def _detect_satellite_type(current_base):
@@ -68,7 +69,7 @@ def render_satellite_tab(engine):
             prompt_template = SATELLITE_PROMPTS.get(sat_type, "Prompt template not found.")
             sat_query = prompt_template.format(health_kpi_json=health_kpi_json)
 
-            raw_result = engine.ask(sat_query, current_file=current_target)
+            raw_result = ask_with_optional_backend(engine, sat_query, current_file=current_target)
 
             final_text = raw_result[0] if isinstance(raw_result, (tuple, list)) else raw_result
             sat_thinking = raw_result[3] if isinstance(raw_result, (tuple, list)) and len(raw_result) > 3 else ""

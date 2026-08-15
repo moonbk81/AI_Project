@@ -1,8 +1,8 @@
 import streamlit as st
-import torch
 import warnings
 
 from app.pipeline import run_analysis_pipeline
+from app.backend_client import is_backend_api_enabled
 from app.sidebar import render_sidebar
 from app.tabs import (
     render_benchmark_tab,
@@ -14,7 +14,6 @@ from app.tabs import (
     render_knowledge_tab,
     render_plm_section_tab,
 )
-from ril_rag_chat import RilRagChat
 from core.config import DEFAULT_MODEL_BY_DEVICE
 from rag.llm_provider import get_default_llm_model
 
@@ -177,18 +176,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if 'active_model' not in st.session_state:
-    if torch.cuda.is_available():
-        device_type = "cuda"
-    elif torch.backends.mps.is_available():
-        device_type = "mps"
-    else:
-        device_type = "cpu"
+backend_mode = is_backend_api_enabled()
 
-    default_model = DEFAULT_MODEL_BY_DEVICE.get(
-        device_type,
-        "gemma4:12b"
-    )
+if 'active_model' not in st.session_state:
+    if backend_mode:
+        default_model = get_default_llm_model("gemma4:12b")
+    else:
+        import torch
+
+        if torch.cuda.is_available():
+            device_type = "cuda"
+        elif torch.backends.mps.is_available():
+            device_type = "mps"
+        else:
+            device_type = "cpu"
+
+        default_model = DEFAULT_MODEL_BY_DEVICE.get(
+            device_type,
+            "gemma4:12b"
+        )
 
     st.session_state['active_model'] = get_default_llm_model(default_model)
 
@@ -200,16 +206,21 @@ if 'last_loaded_at' not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def load_rag_engine(model_name, routing_mode):
+    from ril_rag_chat import RilRagChat
+
     return RilRagChat(
         model_name=model_name,
         routing_mode=routing_mode
     )
 
 try:
-    engine = load_rag_engine(
-        st.session_state.get('active_model'),
-        st.session_state.get('active_routing_mode')
-    )
+    if backend_mode:
+        engine = None
+    else:
+        engine = load_rag_engine(
+            st.session_state.get('active_model'),
+            st.session_state.get('active_routing_mode')
+        )
 except Exception as e:
     st.error(f"엔진 초기화에 실패했습니다. LLM 서비스 연결 상태를 확인하십시오.\nError Details: {e}")
     st.stop()
@@ -247,7 +258,10 @@ with tab_chat:
     render_chat_tab(engine)
 
 with tab_dash:
-    render_dashboard_tab(engine)
+    if backend_mode:
+        st.info("Backend 모드에서는 통계 대시보드 API 이관 후 사용할 수 있습니다.")
+    else:
+        render_dashboard_tab(engine)
 
 with tab_boot:
     render_boot_tab()
@@ -262,7 +276,10 @@ with tab_benchmark:
     render_benchmark_tab()
 
 with tab_knowledge:
-    render_knowledge_tab(engine)
+    if backend_mode:
+        st.info("Backend 모드에서는 지식 베이스 API 이관 후 사용할 수 있습니다.")
+    else:
+        render_knowledge_tab(engine)
 
 with tab_plm:
     render_plm_section_tab()

@@ -29,6 +29,14 @@ class AskResponse(BaseModel):
     thinking: str = ""
 
 
+class FilesResponse(BaseModel):
+    files: List[str]
+
+
+class ResetResponse(BaseModel):
+    success: bool
+
+
 app = FastAPI(title="AI Project RAG Backend")
 _engine = None
 
@@ -67,3 +75,13 @@ def ask(req: AskRequest) -> AskResponse:
         metas=metas,
         thinking=thinking or "",
     )
+
+
+@app.get("/files", response_model=FilesResponse)
+def files() -> FilesResponse:
+    return FilesResponse(files=get_engine().get_all_files())
+
+
+@app.post("/db/reset", response_model=ResetResponse)
+def reset_db() -> ResetResponse:
+    return ResetResponse(success=bool(get_engine().reset_db()))
