@@ -7,9 +7,11 @@ import time
 import streamlit as st
 
 from app.backend_client import (
+    create_analyze_job_via_backend,
     get_backend_api_url,
     get_backend_health,
     get_files_with_optional_backend,
+    get_job_status_via_backend,
     is_backend_api_enabled,
     reset_db_with_optional_backend,
 )
@@ -201,10 +203,6 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.subheader("자동 분석 파이프라인")
 
-    if is_backend_api_enabled():
-        st.info("Backend 모드에서는 로그 업로드/파싱/DB 적재 API 이관 후 사용할 수 있습니다.")
-        return
-
     # PLM에서 추출되어 분석 대기 중인 로그 파일
     pending_logs = st.session_state.get('plm_pending_logs', [])
 
@@ -276,7 +274,32 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
                 st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
             else:
                 st.session_state.uploader_key += 1
-                run_analysis_pipeline(files_to_analyze, False, "", "", engine)
+                if is_backend_api_enabled():
+                    job_id = create_analyze_job_via_backend(files_to_analyze, False, "", "")
+                    with st.status(f"Backend 분석 작업 실행 중... ({job_id[:8]})", expanded=True) as status:
+                        progress_slot = st.empty()
+                        last_message = None
+                        while True:
+                            job = get_job_status_via_backend(job_id)
+                            message = job.get("message") or job.get("status", "")
+                            progress = int(job.get("progress") or 0)
+                            if message and message != last_message:
+                                st.write(message)
+                                last_message = message
+                            progress_slot.progress(progress)
+
+                            if job.get("status") == "done":
+                                st.session_state.current_file = job.get("current_file")
+                                st.session_state.messages = []
+                                status.update(label="Backend 분석 완료", state="complete", expanded=False)
+                                break
+                            if job.get("status") == "error":
+                                status.update(label="Backend 분석 실패", state="error")
+                                st.error(job.get("error") or "Backend 분석 작업 실패")
+                                break
+                            time.sleep(1)
+                else:
+                    run_analysis_pipeline(files_to_analyze, False, "", "", engine)
                 _invalidate_ingested_files_cache()
                 # Clear PLM selected file and extracted logs after analysis
                 st.session_state.plm_selected_from_zip = None

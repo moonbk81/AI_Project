@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -99,3 +100,57 @@ def reset_db_with_optional_backend(engine) -> bool:
     if engine is None:
         raise RuntimeError("Local RAG engine is not available.")
     return engine.reset_db()
+
+
+def create_analyze_job_via_backend(
+    uploaded_files,
+    use_slice: bool = False,
+    start_t: str = "",
+    end_t: str = "",
+) -> str:
+    import requests
+
+    files = []
+    for file in uploaded_files or []:
+        files.append(
+            (
+                "files",
+                (
+                    getattr(file, "name", "uploaded.log"),
+                    bytes(file.getbuffer()),
+                    "application/octet-stream",
+                ),
+            )
+        )
+
+    response = requests.post(
+        f"{get_backend_api_url()}/jobs/analyze",
+        files=files,
+        data={
+            "use_slice": str(bool(use_slice)).lower(),
+            "start_t": start_t or "",
+            "end_t": end_t or "",
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()["job_id"]
+
+
+def get_job_status_via_backend(job_id: str) -> Dict[str, Any]:
+    import requests
+
+    response = requests.get(
+        f"{get_backend_api_url()}/jobs/{job_id}",
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def wait_for_job_via_backend(job_id: str, poll_interval: float = 1.0) -> Dict[str, Any]:
+    while True:
+        status = get_job_status_via_backend(job_id)
+        if status.get("status") in {"done", "error"}:
+            return status
+        time.sleep(poll_interval)
