@@ -1,15 +1,16 @@
 """Dashboard tab renderer."""
 
-import json
-import os
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import ui
 from agent_tools import get_device_health_kpi
-from app.backend_client import ask_with_optional_backend, get_metadata_with_optional_backend
+from app.backend_client import (
+    ask_with_optional_backend,
+    get_metadata_with_optional_backend,
+    get_result_json_with_optional_backend,
+)
 
 def render_dashboard_tab(engine):
     st.header("로그 통계 대시보드")
@@ -135,14 +136,12 @@ def _render_integrated_timeline():
         return
 
     current_base_name = st.session_state.current_file.replace("_payload.json", "")
-    target_report_path = os.path.join("./result", f"{current_base_name}_report.json")
-    if not os.path.exists(target_report_path):
+    loaded_report_data = get_result_json_with_optional_backend(current_base_name, "report")
+    if not loaded_report_data:
         st.info("통합 타임라인 생성을 위한 JSON 데이터가 부족합니다.")
         return
 
     try:
-        with open(target_report_path, 'r', encoding='utf-8') as _f:
-            loaded_report_data = json.load(_f)
         ui.render_integrated_rf_call_timeline(loaded_report_data)
     except Exception as e:
         st.error(f"차트 렌더링 오류 발생: {e}")
@@ -204,10 +203,7 @@ def _render_detail_sections(df):
 
     current_dc_data = []
     if current_base:
-        dc_json_path = f"./result/{current_base}_datacall.json"
-        if os.path.exists(dc_json_path):
-            with open(dc_json_path, 'r', encoding='utf-8') as f:
-                current_dc_data = json.load(f)
+        current_dc_data = get_result_json_with_optional_backend(current_base, "datacall", default=[])
     ui.render_data_call_analyzer(current_dc_data)
 
 def _render_ai_integrated_report(engine, df):

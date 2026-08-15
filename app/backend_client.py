@@ -112,6 +112,32 @@ def get_metadata_with_optional_backend(engine, source_file: Optional[str] = None
     return get_collection_metadatas_batched(engine.collection, batch_size=500, where=where)
 
 
+def get_result_json_via_backend(base_name: str, artifact: str, default=None):
+    import requests
+
+    response = requests.get(
+        f"{get_backend_api_url()}/results/{base_name}/{artifact}",
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    if response.status_code == 404:
+        return default
+    response.raise_for_status()
+    return response.json()
+
+
+def get_result_json_with_optional_backend(base_name: str, artifact: str, default=None):
+    if is_backend_api_enabled():
+        return get_result_json_via_backend(base_name, artifact, default=default)
+
+    import json
+
+    path = os.path.join("./result", f"{base_name}_{artifact}.json")
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def get_knowledge_via_backend() -> Dict[str, Any]:
     import requests
 

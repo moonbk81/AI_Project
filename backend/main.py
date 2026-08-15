@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from fastapi import File, Form, UploadFile, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
@@ -86,6 +87,14 @@ _engine = None
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=1)
+_RESULT_ARTIFACTS = {
+    "report",
+    "datacall",
+    "ims_sip",
+    "ntn",
+    "sat_at",
+    "internet_stall",
+}
 
 
 def get_engine():
@@ -198,6 +207,20 @@ def metadata(source_file: Optional[str] = None, batch_size: int = 500) -> Metada
         metadatas=data.get("metadatas", []),
         ids=data.get("ids", []),
     )
+
+
+@app.get("/results/{base_name}/{artifact}")
+def result_json(base_name: str, artifact: str):
+    if artifact not in _RESULT_ARTIFACTS:
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact: {artifact}")
+    safe_base = os.path.basename(base_name)
+    path = os.path.join("./result", f"{safe_base}_{artifact}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Result artifact not found: {artifact}")
+    import json
+
+    with open(path, "r", encoding="utf-8") as f:
+        return JSONResponse(content=json.load(f))
 
 
 @app.get("/knowledge", response_model=KnowledgeResponse)

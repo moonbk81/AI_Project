@@ -1,11 +1,9 @@
-import json
-import os
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import ui
+from app.backend_client import get_result_json_with_optional_backend
 
 def render_boot_tab():
     st.subheader("부팅 시퀀스 분석")
@@ -16,14 +14,11 @@ def render_boot_tab():
         return
 
     base_name = current_target.replace("_payload.json", "")
-    report_path = f"./result/{base_name}_report.json"
+    report_data = get_result_json_with_optional_backend(base_name, "report")
 
-    if not os.path.exists(report_path):
+    if not report_data:
         st.error(f"분석 결과 파일을 찾을 수 없습니다. ({base_name}_report.json)")
         return
-
-    with open(report_path, 'r', encoding='utf-8') as f:
-        report_data = json.load(f)
 
     boot_raw = report_data.get('boot_stats', [])
     events = boot_raw.get('events', []) if isinstance(boot_raw, dict) else boot_raw
