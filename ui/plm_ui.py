@@ -145,7 +145,7 @@ def _refine_problem_description(problem_content: str, use_llm: bool = True) -> s
 
     if use_llm:
         try:
-            import ollama
+            from rag.llm_provider import chat
 
             # Get the active model from session state
             model_name = st.session_state.get('active_model', 'gemma4:12b')
@@ -163,13 +163,12 @@ Rules:
 7. Use bullet points only for multiple distinct issues
 8. Return ONLY the refined description, no additional text or explanation"""
 
-            response = ollama.chat(
+            response = chat(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Please refine this problem description:\n\n{problem_content}"}
                 ],
-                stream=False
             )
 
             refined = response['message']['content'].strip()

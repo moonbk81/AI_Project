@@ -51,6 +51,7 @@ from rag.ingest import (
 from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
 from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
+from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
 from core.golden_matcher import DynamicGoldenMatcher
 
 class RilRagChat:
@@ -81,9 +82,9 @@ class RilRagChat:
             device,
             "gemma4:12b"
         )
-        self.llm_model_name = model_name or default_model_name
+        self.llm_model_name = model_name or get_default_llm_model(default_model_name)
         self.routing_mode = routing_mode
-        print(f" LLM 연결 준비 중...(Local Ollama - {self.llm_model_name})")
+        print(f" LLM 연결 준비 중...({get_llm_runtime_label(self.llm_model_name)})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
 

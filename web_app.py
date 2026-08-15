@@ -16,6 +16,7 @@ from app.tabs import (
 )
 from ril_rag_chat import RilRagChat
 from core.config import DEFAULT_MODEL_BY_DEVICE
+from rag.llm_provider import get_default_llm_model
 
 warnings.filterwarnings("ignore")
 
@@ -189,7 +190,7 @@ if 'active_model' not in st.session_state:
         "gemma4:12b"
     )
 
-    st.session_state['active_model'] = default_model
+    st.session_state['active_model'] = get_default_llm_model(default_model)
 
 if 'active_routing_mode' not in st.session_state:
     st.session_state['active_routing_mode'] = "semantic"
@@ -210,7 +211,7 @@ try:
         st.session_state.get('active_routing_mode')
     )
 except Exception as e:
-    st.error(f"엔진 초기화에 실패했습니다. Ollama 서비스 활성화 여부를 확인하십시오.\nError Details: {e}")
+    st.error(f"엔진 초기화에 실패했습니다. LLM 서비스 연결 상태를 확인하십시오.\nError Details: {e}")
     st.stop()
 
 def init_session_states():

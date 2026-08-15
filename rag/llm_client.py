@@ -2,7 +2,8 @@
 
 import re
 import os
-import ollama
+
+from rag.llm_provider import chat
 
 def call_llm(
     system_prompt: str,  # 💡 단일 prompt가 아닌 system_prompt와 user_query로 분리
@@ -11,7 +12,7 @@ def call_llm(
     model_config_registry: dict,
     is_bench: bool = False,
 ) -> tuple[str, str]:
-    """Call Ollama and split final answer from model reasoning/thinking text."""
+    """Call the configured LLM and split final answer from reasoning/thinking text."""
     cfg = model_config_registry.get(
         model_name,
         model_config_registry.get("default")
@@ -53,7 +54,7 @@ def call_llm(
             {"role": "user", "content": user_query}
         ]
 
-        res = ollama.chat(
+        res = chat(
             model=model_name,
             messages=messages,
             options=cfg,

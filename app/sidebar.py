@@ -6,6 +6,7 @@ import time
 
 import streamlit as st
 
+from rag.llm_provider import get_llm_provider
 from ui.plm_ui import render_plm_sidebar_stats
 
 _INGESTED_FILES_CACHE_KEY = "ingested_files_cache"
@@ -119,6 +120,7 @@ def _invalidate_ingested_files_cache():
 
 def _render_engine_status():
     st.subheader("분석 엔진")
+    st.caption(f"Provider: `{get_llm_provider()}`")
     st.caption(f"Model: `{st.session_state.get('active_model', 'N/A')}`")
 
 

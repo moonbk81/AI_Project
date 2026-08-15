@@ -1,6 +1,6 @@
 # Android RIL RAG Dashboard
 
-Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 Local LLM + RAG로 장애 원인을 분석하는 Streamlit 기반 로그 분석 콘솔입니다.
+Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 Local/Ollama 또는 vLLM 기반 LLM + RAG로 장애 원인을 분석하는 Streamlit 기반 로그 분석 콘솔입니다.
 
 이 프로젝트는 단순히 로그를 벡터 DB에 넣고 질의하는 구조가 아니라, `Parser -> Analysis Bucket -> Structured Event -> RAG Payload -> Retrieval/Rerank -> Guardrail -> LLM` 흐름으로 동작합니다. 목적은 통신 장애 RCA(Root Cause Analysis)를 로그 팩트 기반으로 생성하고, Local LLM의 환각을 줄이는 것입니다.
 
@@ -92,8 +92,22 @@ RilRagChat.ask()
   - guardrails
         |
         v
-Ollama Local LLM Answer
+Configured LLM Answer
 ```
+
+## LLM 연결 설정
+
+기본값은 기존과 동일하게 로컬 Ollama를 사용합니다. DGX Spark의 vLLM OpenAI-compatible 서버를 사용하려면 앱 실행 전에 환경변수를 지정합니다.
+
+```bash
+export RAG_LLM_PROVIDER=vllm
+export RAG_LLM_BASE_URL=http://<DGX_HOST>:8000/v1
+export RAG_LLM_MODEL=Qwen/Qwen2.5-72B-Instruct
+export RAG_LLM_API_KEY=EMPTY
+streamlit run web_app.py
+```
+
+vLLM 실행 시 `--served-model-name qwen2.5-72b-instruct`처럼 별도 이름을 지정했다면 `RAG_LLM_MODEL`도 동일하게 맞춥니다.
 
 ## 폴더 구조
 

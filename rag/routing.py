@@ -4,7 +4,8 @@ import json
 import re
 
 import numpy as np
-import ollama
+
+from rag.llm_provider import chat
 
 def _is_crash_absence_check_query(query_lower: str) -> bool:
     has_crash_scope = any(k in query_lower for k in [
@@ -365,11 +366,11 @@ def get_llm_routing(query: str, routing_map: dict, llm_model_name: str) -> dict:
 사용자 질문: {query}
 """
     try:
-        res = ollama.chat(
+        res = chat(
             model=llm_model_name,
             messages=[{"role": "user", "content": prompt}],
-            format="json",
             options={"num_ctx": 4096, "temperature": 0.0},
+            response_format={"type": "json_object"},
         )
         content = res["message"]["content"].strip()
         content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()

@@ -30,8 +30,34 @@ DEFAULT_MODEL_BY_DEVICE = {
 }
 
 # 모델별 추론/임베딩 배치 설정입니다.
-# 키는 Ollama에서 사용하는 모델명을 그대로 맞춥니다.
+# 키는 Ollama 모델명 또는 vLLM served model name과 그대로 맞춥니다.
 MODEL_CONFIG = {
+    "Qwen/Qwen2.5-72B-Instruct": {
+        "num_ctx": 32768,
+        "num_predict": 8192,
+        "embed_batch_size": 32,
+        "add_batch_size": 256,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.05,
+        "stop": ["<|im_end|>", "<|endoftext|>"],
+        "max_doc_chars": 2200,
+        "max_meta_chars": 3600,
+        "top_k": 5,
+    },
+    "qwen2.5-72b-instruct": {
+        "num_ctx": 32768,
+        "num_predict": 8192,
+        "embed_batch_size": 32,
+        "add_batch_size": 256,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.05,
+        "stop": ["<|im_end|>", "<|endoftext|>"],
+        "max_doc_chars": 2200,
+        "max_meta_chars": 3600,
+        "top_k": 5,
+    },
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
@@ -142,4 +168,3 @@ MODEL_CONFIG = {
         "top_k": 3,
     }
 }
-
