@@ -86,6 +86,32 @@ def reset_db_via_backend() -> bool:
     return bool(response.json().get("success", False))
 
 
+def get_metadata_via_backend(source_file: Optional[str] = None) -> Dict[str, Any]:
+    import requests
+
+    params = {}
+    if source_file:
+        params["source_file"] = source_file
+    response = requests.get(
+        f"{get_backend_api_url()}/metadata",
+        params=params,
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_metadata_with_optional_backend(engine, source_file: Optional[str] = None) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return get_metadata_via_backend(source_file=source_file)
+    if engine is None:
+        raise RuntimeError("Local RAG engine is not available.")
+    from app.helpers import get_collection_metadatas_batched
+
+    where = {"source_file": source_file} if source_file else None
+    return get_collection_metadatas_batched(engine.collection, batch_size=500, where=where)
+
+
 def get_files_with_optional_backend(engine) -> List[str]:
     if is_backend_api_enabled():
         return get_files_via_backend()

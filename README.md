@@ -127,7 +127,7 @@ streamlit run web_app.py
 
 `USE_BACKEND_API`를 지정하지 않으면 기존처럼 Streamlit 프로세스 안에서 `RilRagChat.ask()`를 직접 호출합니다.
 
-Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}`로 진행 상태를 조회합니다.
+Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`에서 조회합니다.
 
 ## 폴더 구조
 

@@ -258,10 +258,7 @@ with tab_chat:
     render_chat_tab(engine)
 
 with tab_dash:
-    if backend_mode:
-        st.info("Backend 모드에서는 통계 대시보드 API 이관 후 사용할 수 있습니다.")
-    else:
-        render_dashboard_tab(engine)
+    render_dashboard_tab(engine)
 
 with tab_boot:
     render_boot_tab()

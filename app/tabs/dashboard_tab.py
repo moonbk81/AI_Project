@@ -9,14 +9,14 @@ import streamlit as st
 
 import ui
 from agent_tools import get_device_health_kpi
-from app.helpers import get_collection_metadatas_batched
+from app.backend_client import ask_with_optional_backend, get_metadata_with_optional_backend
 
 def render_dashboard_tab(engine):
     st.header("로그 통계 대시보드")
     st.markdown("적재된 로그 데이터의 통계와 기존 분석 사례를 확인합니다.")
 
     try:
-        all_data = get_collection_metadatas_batched(engine.collection, batch_size=500)
+        all_data = get_metadata_with_optional_backend(engine)
     except Exception as e:
         st.error(f"Vector DB metadata 조회 중 오류가 발생했습니다: {e}")
         all_data = {"metadatas": [], "ids": []}
@@ -234,7 +234,7 @@ def _render_ai_integrated_report(engine, df):
         * 규칙: 데이터에 없는 수치나 원인을 임의로 추측하거나 지어내지 마십시오.
         """
 
-        raw_result = engine.ask(combined_query, current_file=actual_file_name)
+        raw_result = ask_with_optional_backend(engine, combined_query, current_file=actual_file_name)
 
         if isinstance(raw_result, (tuple, list)):
             report_answer = raw_result[0]
@@ -251,11 +251,7 @@ def _render_ai_integrated_report(engine, df):
 
         _render_copyable_report(report_answer)
 
-        all_db_data = get_collection_metadatas_batched(
-            engine.collection,
-            batch_size=500,
-            where={"source_file": actual_file_name}
-        )
+        all_db_data = get_metadata_with_optional_backend(engine, source_file=actual_file_name)
         if all_db_data and all_db_data.get('ids'):
             st.session_state.last_ids = all_db_data['ids']
             st.session_state.last_metas = all_db_data['metadatas']

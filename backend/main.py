@@ -42,6 +42,11 @@ class ResetResponse(BaseModel):
     success: bool
 
 
+class MetadataResponse(BaseModel):
+    metadatas: List[Dict[str, Any]]
+    ids: List[str]
+
+
 class AnalyzeJobResponse(BaseModel):
     job_id: str
 
@@ -160,6 +165,22 @@ def files() -> FilesResponse:
 @app.post("/db/reset", response_model=ResetResponse)
 def reset_db() -> ResetResponse:
     return ResetResponse(success=bool(get_engine().reset_db()))
+
+
+@app.get("/metadata", response_model=MetadataResponse)
+def metadata(source_file: Optional[str] = None, batch_size: int = 500) -> MetadataResponse:
+    from app.helpers import get_collection_metadatas_batched
+
+    where = {"source_file": source_file} if source_file else None
+    data = get_collection_metadatas_batched(
+        get_engine().collection,
+        batch_size=batch_size,
+        where=where,
+    )
+    return MetadataResponse(
+        metadatas=data.get("metadatas", []),
+        ids=data.get("ids", []),
+    )
 
 
 @app.post("/jobs/analyze", response_model=AnalyzeJobResponse)
