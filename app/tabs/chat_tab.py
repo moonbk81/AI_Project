@@ -2,6 +2,7 @@
 import streamlit as st
 
 from agent_tools import get_device_health_kpi
+from app.backend_client import ask_with_optional_backend
 from app.chat_panel import render_chat_interface
 from core.config import QUICK_PROMPTS
 from ui.common import parse_raw_logs
@@ -127,7 +128,8 @@ def _render_chat_answer(engine, prompt):
             current_target = st.session_state.get("current_file", None)
             health_kpi_json = _get_current_health_kpi()
 
-            answer, ids, metas, thinking = engine.ask(
+            answer, ids, metas, thinking = ask_with_optional_backend(
+                engine,
                 prompt,
                 current_file=current_target,
                 chat_history=st.session_state.messages[-5:],

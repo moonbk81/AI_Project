@@ -2,6 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from app.backend_client import ask_with_optional_backend
 from app.helpers import generate_unique_key
 from ui.common import parse_raw_logs
 
@@ -126,7 +127,8 @@ def render_chat_interface(engine, key_suffix="main", show_input=True):
                     for m in st.session_state.messages[-5:]
                 ]
 
-                answer, ids, metas, thinking = engine.ask(
+                answer, ids, metas, thinking = ask_with_optional_backend(
+                    engine,
                     prompt,
                     current_file=current_target,
                     chat_history=clean_history

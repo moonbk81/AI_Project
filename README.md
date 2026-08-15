@@ -109,6 +109,24 @@ streamlit run web_app.py
 
 vLLM 실행 시 `--served-model-name qwen2.5-72b-instruct`처럼 별도 이름을 지정했다면 `RAG_LLM_MODEL`도 동일하게 맞춥니다.
 
+## Backend API 실험
+
+기존 Streamlit 직접 호출 구조는 그대로 유지됩니다. 채팅 질의만 FastAPI backend로 우회해보고 싶다면 별도 터미널에서 backend를 먼저 실행합니다.
+
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8080
+```
+
+그 다음 Streamlit을 backend 사용 모드로 실행합니다.
+
+```bash
+export USE_BACKEND_API=1
+export BACKEND_API_URL=http://localhost:8080
+streamlit run web_app.py
+```
+
+`USE_BACKEND_API`를 지정하지 않으면 기존처럼 Streamlit 프로세스 안에서 `RilRagChat.ask()`를 직접 호출합니다.
+
 ## 폴더 구조
 
 ```text
