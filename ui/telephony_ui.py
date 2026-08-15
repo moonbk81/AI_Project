@@ -224,17 +224,18 @@ def render_data_call_analyzer(data):
     st.markdown("**Data Call 상세 이력**")
     st.dataframe(df, width="stretch")
 
-def render_ims_sip_flow(current_base=None):
+def render_ims_sip_flow(current_base=None, data=None):
     st.subheader("VoLTE / IMS SIP 흐름")
 
     if not current_base: return
     file_path = f"./result/{current_base}_ims_sip.json"
-    if not os.path.exists(file_path):
+    if data is None and not os.path.exists(file_path):
         st.info("SIP 메시지 로그가 없습니다.")
         return
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    if data is None:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
     if not data:
         st.info("기록된 SIP transaction이 없습니다.")
@@ -322,18 +323,19 @@ def render_ims_sip_flow(current_base=None):
     display_cols = ['time', 'direction', 'msg_type', 'method_code', 'tid', 'cseq', 'raw_log']
     st.dataframe(sip_df[display_cols], width="stretch")
 
-def render_rilj_transactions(current_base=None):
+def render_rilj_transactions(current_base=None, report_data=None):
     st.subheader("RILJ transaction 현황")
 
     if not current_base:
         return
 
     report_path = f"./result/{current_base}_report.json"
-    if not os.path.exists(report_path):
+    if report_data is None and not os.path.exists(report_path):
         return
 
-    with open(report_path, 'r', encoding='utf-8') as f:
-        report_data = json.load(f)
+    if report_data is None:
+        with open(report_path, 'r', encoding='utf-8') as f:
+            report_data = json.load(f)
 
     rilj_data = report_data.get("rilj_transactions", {})
     completed = rilj_data.get("completed", [])

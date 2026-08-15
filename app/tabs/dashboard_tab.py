@@ -178,9 +178,11 @@ def _render_package_deep_dive(df):
 
 def _render_detail_sections(df):
     current_base = st.session_state.current_file.replace("_payload.json", "") if st.session_state.current_file else ""
+    report_data = get_result_json_with_optional_backend(current_base, "report", default={}) if current_base else {}
+    ims_sip_data = get_result_json_with_optional_backend(current_base, "ims_sip", default=[]) if current_base else []
 
     st.divider()
-    ui.render_rilj_transactions(current_base)
+    ui.render_rilj_transactions(current_base, report_data=report_data)
     st.divider()
     ui.render_battery_thermal_chart(df)
     st.divider()
@@ -198,7 +200,7 @@ def _render_detail_sections(df):
     st.divider()
     ui.render_data_usage_timeline(df)
     st.divider()
-    ui.render_ims_sip_flow(current_base)
+    ui.render_ims_sip_flow(current_base, data=ims_sip_data)
     st.divider()
 
     current_dc_data = []
