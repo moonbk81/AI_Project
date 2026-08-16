@@ -9,6 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import os
+import shutil
 import threading
 from typing import Any, Dict, List, Optional
 import uuid
@@ -99,6 +100,7 @@ _RESULT_ARTIFACTS = {
     "sat_at",
     "internet_stall",
 }
+_ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
 
 
 def get_engine():
@@ -160,6 +162,13 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
         _set_job(job_id, status="error", error=str(e), message="분석 실패")
 
 
+def _reset_artifact_dirs():
+    for folder in _ARTIFACT_DIRS:
+        if os.path.exists(folder):
+            shutil.rmtree(folder)
+        os.makedirs(folder, exist_ok=True)
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     model_name = get_default_llm_model("gemma4:12b")
@@ -199,7 +208,12 @@ def files() -> FilesResponse:
 
 @app.post("/db/reset", response_model=ResetResponse)
 def reset_db() -> ResetResponse:
-    return ResetResponse(success=bool(get_engine().reset_db()))
+    success = bool(get_engine().reset_db())
+    if success:
+        _reset_artifact_dirs()
+        with _jobs_lock:
+            _jobs.clear()
+    return ResetResponse(success=success)
 
 
 @app.get("/metadata", response_model=MetadataResponse)

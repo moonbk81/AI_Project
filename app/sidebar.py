@@ -187,10 +187,11 @@ def _render_file_session_manager(engine, reset_analysis_context):
 
     if st.button("전체 DB 초기화", width="stretch", help="Vector DB의 모든 지식을 삭제합니다."):
         if reset_db_with_optional_backend(engine):
-            for folder in ["./payloads", "./result", "./temp_logs"]:
-                if os.path.exists(folder):
-                    shutil.rmtree(folder)
-                os.makedirs(folder, exist_ok=True)
+            if not is_backend_api_enabled():
+                for folder in ["./payloads", "./result", "./temp_logs"]:
+                    if os.path.exists(folder):
+                        shutil.rmtree(folder)
+                    os.makedirs(folder, exist_ok=True)
             st.session_state.current_file = None
             st.session_state[_INGESTED_FILES_CACHE_KEY] = []
             st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = False
