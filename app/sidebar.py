@@ -20,7 +20,10 @@ from ui.plm_ui import render_plm_sidebar_stats
 
 _INGESTED_FILES_CACHE_KEY = "ingested_files_cache"
 _INGESTED_FILES_CACHE_DIRTY_KEY = "ingested_files_cache_dirty"
+_INGESTED_FILES_DEFERRED_KEY = "ingested_files_deferred"
+_INGESTED_FILES_FORCE_LOAD_KEY = "ingested_files_force_load"
 _BACKEND_ANALYSIS_JOB_ID_KEY = "backend_analysis_job_id"
+_BACKEND_HEALTH_CACHE_KEY = "backend_health_cache"
 
 
 def _render_sidebar_style():
@@ -124,8 +127,19 @@ def _render_sidebar_style():
     )
 
 
-def _invalidate_ingested_files_cache():
+def _invalidate_ingested_files_cache(force_load: bool = False):
     st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = True
+    st.session_state[_INGESTED_FILES_DEFERRED_KEY] = False
+    st.session_state[_INGESTED_FILES_FORCE_LOAD_KEY] = force_load
+
+
+def _get_cached_backend_health():
+    try:
+        health = get_backend_health()
+        st.session_state[_BACKEND_HEALTH_CACHE_KEY] = health
+        return health
+    except Exception:
+        return st.session_state.get(_BACKEND_HEALTH_CACHE_KEY, {})
 
 
 def _clear_backend_analysis_job():
@@ -185,7 +199,7 @@ def _render_engine_status():
     if is_backend_api_enabled():
         st.caption(f"Backend: `{get_backend_api_url()}`")
         try:
-            health = get_backend_health()
+            health = _get_cached_backend_health()
             st.caption(f"Runtime: `{health.get('runtime', 'N/A')}`")
         except Exception as e:
             st.caption(f"Backend 연결 실패: `{e}`")
@@ -196,11 +210,24 @@ def _render_engine_status():
 
 def _get_ingested_files(engine):
     if (
+        is_backend_api_enabled()
+        and st.session_state.get(_INGESTED_FILES_CACHE_KEY) is None
+        and st.session_state.get(_INGESTED_FILES_CACHE_DIRTY_KEY, True)
+        and not st.session_state.get(_INGESTED_FILES_FORCE_LOAD_KEY, False)
+    ):
+        health = _get_cached_backend_health()
+        if not health.get("engine_loaded"):
+            st.session_state[_INGESTED_FILES_DEFERRED_KEY] = True
+            return []
+
+    if (
         _INGESTED_FILES_CACHE_KEY not in st.session_state
         or st.session_state.get(_INGESTED_FILES_CACHE_DIRTY_KEY, True)
     ):
         st.session_state[_INGESTED_FILES_CACHE_KEY] = get_files_with_optional_backend(engine)
         st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = False
+        st.session_state[_INGESTED_FILES_DEFERRED_KEY] = False
+        st.session_state[_INGESTED_FILES_FORCE_LOAD_KEY] = False
 
     return st.session_state[_INGESTED_FILES_CACHE_KEY]
 
@@ -212,10 +239,20 @@ def _render_file_session_manager(engine, reset_analysis_context):
     col1, col2 = st.columns([4, 1])
     with col2:
         if st.button("갱신", key="btn_refresh_ingested_files", help="적재 파일 목록을 다시 조회합니다."):
-            _invalidate_ingested_files_cache()
+            _invalidate_ingested_files_cache(force_load=True)
 
     existing_files = _get_ingested_files(engine)
-    if existing_files:
+    if st.session_state.get(_INGESTED_FILES_DEFERRED_KEY):
+        st.caption("파일 목록은 backend 엔진 초기화 후 조회됩니다.")
+        with col1:
+            st.selectbox(
+                "기존 적재 파일",
+                options=["기존 적재파일 선택 안 함"],
+                index=0,
+                label_visibility="collapsed",
+                disabled=True,
+            )
+    elif existing_files:
         default_idx = existing_files.index(st.session_state.current_file) + 1 if st.session_state.current_file in existing_files else 0
         with col1:
             selected_file = st.selectbox(
@@ -232,6 +269,14 @@ def _render_file_session_manager(engine, reset_analysis_context):
             st.toast(f"분석 대상이 '{selected_file}'로 변경되었습니다.")
             st.session_state.messages = []
     else:
+        with col1:
+            st.selectbox(
+                "기존 적재 파일",
+                options=["기존 적재파일 선택 안 함"],
+                index=0,
+                label_visibility="collapsed",
+                disabled=True,
+            )
         st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드하십시오.")
         st.session_state.current_file = None
 
@@ -266,6 +311,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
 
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
+
+    if _INGESTED_FILES_CACHE_KEY not in st.session_state:
+        st.session_state[_INGESTED_FILES_CACHE_KEY] = None
 
     backend_job_running = _has_backend_analysis_job()
     _render_backend_analysis_status()
