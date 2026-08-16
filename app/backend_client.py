@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def is_backend_api_enabled() -> bool:
-    return os.getenv("USE_BACKEND_API", "0").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("USE_BACKEND_API", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_backend_api_url() -> str:

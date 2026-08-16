@@ -47,6 +47,18 @@ def test_backend_api_url_is_normalized():
     assert backend_client.get_backend_api_url() == "http://backend.local:8080"
 
 
+def test_backend_api_enabled_by_default(monkeypatch):
+    monkeypatch.delenv("USE_BACKEND_API", raising=False)
+
+    assert backend_client.is_backend_api_enabled() is True
+
+
+def test_backend_api_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("USE_BACKEND_API", "0")
+
+    assert backend_client.is_backend_api_enabled() is False
+
+
 def test_ask_via_backend_posts_question_payload(monkeypatch):
     calls = []
 
