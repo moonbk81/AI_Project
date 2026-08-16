@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from fastapi import File, Form, UploadFile, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
@@ -102,6 +102,46 @@ class PlmQuickSearchResponse(BaseModel):
     defect_codes: List[str] = Field(default_factory=list)
     total_codes: int = 0
     truncated: bool = False
+
+
+class PlmFileListRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+    attach_type: str = "OP_DEFECT_ATTACH"
+
+
+class PlmFileListResponse(BaseModel):
+    success: bool
+    message: str = ""
+    files: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PlmFileDownloadRequest(BaseModel):
+    division_code: str = "25"
+    doc_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    file_id: str = Field(min_length=1)
+
+
+class PlmCommentRequest(BaseModel):
+    payload: Dict[str, Any]
+
+
+class PlmCommentResponse(BaseModel):
+    success: bool
+    message: str = ""
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PlmAnalyzeRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+
+
+class PlmAnalyzeResponse(BaseModel):
+    success: bool
+    message: str = ""
+    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 app = FastAPI(title="AI Project RAG Backend")
@@ -354,3 +394,57 @@ def plm_quick_search(req: PlmQuickSearchRequest) -> PlmQuickSearchResponse:
         limit=req.limit,
     )
     return PlmQuickSearchResponse(**result)
+
+
+@app.post("/plm/files", response_model=PlmFileListResponse)
+def plm_files(req: PlmFileListRequest) -> PlmFileListResponse:
+    from plm.service import list_attached_files
+
+    result = list_attached_files(
+        division_code=req.division_code,
+        defect_code=req.defect_code,
+        attach_type=req.attach_type,
+    )
+    return PlmFileListResponse(**result)
+
+
+@app.post("/plm/files/download")
+def plm_file_download(req: PlmFileDownloadRequest):
+    from plm.service import download_attached_file
+
+    result = download_attached_file(
+        division_code=req.division_code,
+        doc_id=req.doc_id,
+        title=req.title,
+        file_id=req.file_id,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Download failed"))
+
+    return Response(
+        content=result.get("data") or b"",
+        media_type="application/octet-stream",
+        headers={
+            "X-Filename": result.get("filename") or req.title,
+            "X-File-Size": str(result.get("size") or 0),
+        },
+    )
+
+
+@app.post("/plm/comment", response_model=PlmCommentResponse)
+def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
+    from plm.service import submit_comment
+
+    return PlmCommentResponse(**submit_comment(req.payload))
+
+
+@app.post("/plm/analyze", response_model=PlmAnalyzeResponse)
+def plm_analyze(req: PlmAnalyzeRequest) -> PlmAnalyzeResponse:
+    from plm.service import build_defect_analysis_context
+
+    return PlmAnalyzeResponse(
+        **build_defect_analysis_context(
+            division_code=req.division_code,
+            defect_code=req.defect_code,
+        )
+    )

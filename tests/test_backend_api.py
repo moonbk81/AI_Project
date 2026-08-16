@@ -244,3 +244,82 @@ def test_plm_quick_search_endpoint(client, monkeypatch):
             "limit": 25,
         }
     ]
+
+
+def test_plm_file_endpoints(client, monkeypatch):
+    def fake_list_attached_files(**kwargs):
+        return {
+            "success": True,
+            "message": "",
+            "files": [{"title": "radio.zip", "fileId": "file-1", "docId": "doc-1"}],
+        }
+
+    def fake_download_attached_file(**kwargs):
+        return {
+            "success": True,
+            "message": "",
+            "data": b"zip-bytes",
+            "size": 9,
+            "filename": kwargs["title"],
+        }
+
+    monkeypatch.setattr("plm.service.list_attached_files", fake_list_attached_files)
+    monkeypatch.setattr("plm.service.download_attached_file", fake_download_attached_file)
+
+    list_response = client.post(
+        "/plm/files",
+        json={"division_code": "25", "defect_code": "P260711-001"},
+    )
+    download_response = client.post(
+        "/plm/files/download",
+        json={
+            "division_code": "25",
+            "doc_id": "doc-1",
+            "title": "radio.zip",
+            "file_id": "file-1",
+        },
+    )
+
+    assert list_response.status_code == 200
+    assert list_response.json()["files"] == [{"title": "radio.zip", "fileId": "file-1", "docId": "doc-1"}]
+    assert download_response.status_code == 200
+    assert download_response.content == b"zip-bytes"
+    assert download_response.headers["X-Filename"] == "radio.zip"
+    assert download_response.headers["X-File-Size"] == "9"
+
+
+def test_plm_comment_and_analyze_endpoints(client, monkeypatch):
+    def fake_submit_comment(payload):
+        return {"success": True, "message": "ok", "result": {"commentId": "c-1"}}
+
+    def fake_build_context(**kwargs):
+        return {
+            "success": True,
+            "message": "",
+            "context": {"defect_code": kwargs["defect_code"], "problem": "Data stall"},
+        }
+
+    monkeypatch.setattr("plm.service.submit_comment", fake_submit_comment)
+    monkeypatch.setattr("plm.service.build_defect_analysis_context", fake_build_context)
+
+    comment_response = client.post(
+        "/plm/comment",
+        json={
+            "payload": {
+                "divisionCode": "25",
+                "systemCode": "AI_ANALYSIS",
+                "defectCode": "P260711-001",
+                "defectComment": "analysis",
+                "createUser": "tester",
+            }
+        },
+    )
+    analyze_response = client.post(
+        "/plm/analyze",
+        json={"division_code": "25", "defect_code": "P260711-001"},
+    )
+
+    assert comment_response.status_code == 200
+    assert comment_response.json() == {"success": True, "message": "ok", "result": {"commentId": "c-1"}}
+    assert analyze_response.status_code == 200
+    assert analyze_response.json()["context"] == {"defect_code": "P260711-001", "problem": "Data stall"}

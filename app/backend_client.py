@@ -340,3 +340,148 @@ def plm_quick_search_with_optional_backend(
         limit=limit,
         client=client,
     )
+
+
+def plm_list_files_via_backend(
+    division_code: str,
+    defect_code: str,
+    attach_type: str = "OP_DEFECT_ATTACH",
+) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/files",
+        json={
+            "division_code": division_code,
+            "defect_code": defect_code,
+            "attach_type": attach_type,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_list_files_with_optional_backend(
+    client,
+    division_code: str,
+    defect_code: str,
+    attach_type: str = "OP_DEFECT_ATTACH",
+) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_list_files_via_backend(division_code, defect_code, attach_type=attach_type)
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import list_attached_files
+
+    return list_attached_files(
+        division_code=division_code,
+        defect_code=defect_code,
+        attach_type=attach_type,
+        client=client,
+    )
+
+
+def plm_download_file_via_backend(
+    division_code: str,
+    doc_id: str,
+    title: str,
+    file_id: str,
+) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/files/download",
+        json={
+            "division_code": division_code,
+            "doc_id": doc_id,
+            "title": title,
+            "file_id": file_id,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return {
+        "success": True,
+        "message": "",
+        "data": response.content,
+        "size": int(response.headers.get("X-File-Size") or len(response.content)),
+        "filename": response.headers.get("X-Filename") or title,
+    }
+
+
+def plm_download_file_with_optional_backend(
+    client,
+    division_code: str,
+    doc_id: str,
+    title: str,
+    file_id: str,
+) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_download_file_via_backend(division_code, doc_id, title, file_id)
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import download_attached_file
+
+    return download_attached_file(
+        division_code=division_code,
+        doc_id=doc_id,
+        title=title,
+        file_id=file_id,
+        client=client,
+    )
+
+
+def plm_submit_comment_via_backend(payload: Dict[str, Any]) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/comment",
+        json={"payload": payload},
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_submit_comment_with_optional_backend(client, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_submit_comment_via_backend(payload)
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import submit_comment
+
+    return submit_comment(payload, client=client)
+
+
+def plm_analyze_via_backend(division_code: str, defect_code: str) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/analyze",
+        json={
+            "division_code": division_code,
+            "defect_code": defect_code,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_analyze_with_optional_backend(integration, division_code: str, defect_code: str) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_analyze_via_backend(division_code, defect_code)
+    if integration is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import build_defect_analysis_context
+
+    return build_defect_analysis_context(
+        division_code=division_code,
+        defect_code=defect_code,
+        integration=integration,
+    )

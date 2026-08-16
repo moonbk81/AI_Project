@@ -158,6 +158,7 @@ def _render_chat_answer(engine, prompt):
 
 def _render_plm_comment_registration(last_answer: str, active_defect: str):
     """Render PLM comment registration controls for the latest chat answer."""
+    from app.backend_client import plm_submit_comment_with_optional_backend
     from ui.plm_ui import _format_analysis_as_comment
 
     st.divider()
@@ -246,18 +247,20 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
 
     try:
         import logging
-        from plm.plm_api_client import CommentRegistrationRequest
 
         logger = logging.getLogger(__name__)
         logger.info("=== PLM Comment 등록 시작 ===")
         logger.info(f"Defect: {active_defect}, Division: {division_code}")
 
-        request = CommentRegistrationRequest(**request_payload)
-
+        plm_integration = st.session_state.get("plm_integration")
+        plm_client = getattr(plm_integration, "client", None)
         with st.spinner("PLM에 등록 중..."):
-            response = st.session_state.plm_integration.client.register_comment(request)
+            result = plm_submit_comment_with_optional_backend(
+                plm_client,
+                request_payload,
+            )
 
-        if response.is_success():
+        if result.get("success"):
             st.session_state.plm_comment_submit_status = {
                 "success": True,
                 "message": "PLM Comment 등록 완료",
@@ -267,7 +270,7 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
         else:
             st.session_state.plm_comment_submit_status = {
                 "success": False,
-                "message": f"실패: {response.get_error_message()}",
+                "message": f"실패: {result.get('message', 'Unknown error')}",
                 "local_test": False,
                 "defect": active_defect,
             }

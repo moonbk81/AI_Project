@@ -172,3 +172,98 @@ def test_plm_quick_search_via_backend_posts_search_payload(monkeypatch):
             },
         )
     ]
+
+
+def test_plm_file_client_helpers(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/plm/files/download"):
+            response = FakeResponse()
+            response.content = b"file-bytes"
+            response.headers = {"X-File-Size": "10", "X-Filename": "radio.zip"}
+            return response
+        return FakeResponse(
+            {
+                "success": True,
+                "files": [{"title": "radio.zip", "fileId": "file-1", "docId": "doc-1"}],
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    files = backend_client.plm_list_files_via_backend("25", "P260711-001")
+    download = backend_client.plm_download_file_via_backend("25", "doc-1", "radio.zip", "file-1")
+
+    assert files["files"][0]["title"] == "radio.zip"
+    assert download == {
+        "success": True,
+        "message": "",
+        "data": b"file-bytes",
+        "size": 10,
+        "filename": "radio.zip",
+    }
+    assert calls[0] == (
+        "http://backend.local:8080/plm/files",
+        {
+            "json": {
+                "division_code": "25",
+                "defect_code": "P260711-001",
+                "attach_type": "OP_DEFECT_ATTACH",
+            },
+            "timeout": 12.5,
+        },
+    )
+    assert calls[1] == (
+        "http://backend.local:8080/plm/files/download",
+        {
+            "json": {
+                "division_code": "25",
+                "doc_id": "doc-1",
+                "title": "radio.zip",
+                "file_id": "file-1",
+            },
+            "timeout": 12.5,
+        },
+    )
+
+
+def test_plm_comment_and_analyze_client_helpers(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/plm/comment"):
+            return FakeResponse({"success": True, "message": "ok", "result": {"commentId": "c-1"}})
+        return FakeResponse(
+            {
+                "success": True,
+                "message": "",
+                "context": {"defect_code": "P260711-001", "problem": "Data stall"},
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    payload = {
+        "divisionCode": "25",
+        "systemCode": "AI_ANALYSIS",
+        "defectCode": "P260711-001",
+        "defectComment": "analysis",
+        "createUser": "tester",
+    }
+
+    comment = backend_client.plm_submit_comment_via_backend(payload)
+    analysis = backend_client.plm_analyze_via_backend("25", "P260711-001")
+
+    assert comment["result"] == {"commentId": "c-1"}
+    assert analysis["context"] == {"defect_code": "P260711-001", "problem": "Data stall"}
+    assert calls[0] == (
+        "http://backend.local:8080/plm/comment",
+        {"json": {"payload": payload}, "timeout": 12.5},
+    )
+    assert calls[1] == (
+        "http://backend.local:8080/plm/analyze",
+        {"json": {"division_code": "25", "defect_code": "P260711-001"}, "timeout": 12.5},
+    )

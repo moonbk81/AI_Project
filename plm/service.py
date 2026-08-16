@@ -5,6 +5,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Dict, List
 
+from plm.plm_api_client import CommentRegistrationRequest
+from plm.plm_rag_integration import PLMDefectContextBuilder
 from plm.plm_rag_integration import create_plm_integration
 
 
@@ -95,4 +97,111 @@ def quick_search_defects(
         "defect_codes": defect_codes,
         "total_codes": len(defect_codes),
         "truncated": len(defect_codes) > limit,
+    }
+
+
+def list_attached_files(
+    division_code: str,
+    defect_code: str,
+    attach_type: str = "OP_DEFECT_ATTACH",
+    client=None,
+) -> Dict[str, Any]:
+    """List files attached to a PLM defect."""
+    if client is None:
+        client = get_plm_integration().client
+
+    response = client.get_file_list(
+        division_code=division_code,
+        defect_code=defect_code,
+        attach_type=attach_type,
+    )
+    if not response.is_success():
+        return {"success": False, "message": response.get_error_message(), "files": []}
+
+    result = response.result if response.result else []
+    files: List[Dict[str, Any]] = []
+    if isinstance(result, list) and result:
+        data = result[0].get("data", []) if isinstance(result[0], dict) else []
+        files = [file for file in data if file.get("title") and file.get("fileId")]
+    elif isinstance(result, dict):
+        data = result.get("data", [])
+        files = [file for file in data if file.get("title") and file.get("fileId")]
+
+    return {"success": True, "message": "", "files": files}
+
+
+def download_attached_file(
+    division_code: str,
+    doc_id: str,
+    title: str,
+    file_id: str,
+    client=None,
+) -> Dict[str, Any]:
+    """Download one PLM attached file."""
+    if client is None:
+        client = get_plm_integration().client
+
+    result = client.download_file(
+        division_code=division_code,
+        doc_id=doc_id,
+        title=title,
+        file_id=file_id,
+    )
+    if not result.get("success"):
+        return {
+            "success": False,
+            "message": result.get("message", "Download failed"),
+            "data": None,
+            "size": 0,
+            "filename": title,
+        }
+
+    data = result.get("data") or b""
+    return {
+        "success": True,
+        "message": "",
+        "data": data,
+        "size": result.get("size", len(data)),
+        "filename": title,
+    }
+
+
+def submit_comment(
+    payload: Dict[str, Any],
+    client=None,
+) -> Dict[str, Any]:
+    """Register, modify, or delete a PLM defect comment."""
+    if client is None:
+        client = get_plm_integration().client
+
+    request = CommentRegistrationRequest(**payload)
+    response = client.register_comment(request)
+    if response.is_success():
+        return {
+            "success": True,
+            "message": "PLM Comment 등록 완료",
+            "result": response.result or {},
+        }
+    return {
+        "success": False,
+        "message": response.get_error_message(),
+        "result": response.result or {},
+    }
+
+
+def build_defect_analysis_context(
+    division_code: str,
+    defect_code: str,
+    integration=None,
+) -> Dict[str, Any]:
+    """Build PLM defect analysis context."""
+    if integration is None:
+        integration = get_plm_integration()
+
+    builder = PLMDefectContextBuilder(integration)
+    context = builder.build_defect_context(defect_code, division_code)
+    return {
+        "success": bool(context),
+        "message": "" if context else "Defect not found",
+        "context": context or {},
     }

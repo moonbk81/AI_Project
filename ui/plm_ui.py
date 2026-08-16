@@ -18,10 +18,15 @@ import io
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.backend_client import plm_quick_search_with_optional_backend
+from app.backend_client import (
+    plm_analyze_with_optional_backend,
+    plm_download_file_with_optional_backend,
+    plm_list_files_with_optional_backend,
+    plm_quick_search_with_optional_backend,
+    plm_submit_comment_with_optional_backend,
+)
 from plm.plm_rag_integration import (
     create_plm_integration,
-    PLMDefectContextBuilder,
     PLMConfigManager
 )
 from plm.plm_api_client import DivisionCode, PLMAPIException
@@ -385,26 +390,18 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
                 return
 
             st.write("📋 파일 목록 조회 중...")
-            response = client.get_file_list(
+            result = plm_list_files_with_optional_backend(
+                client,
                 division_code=division_code,
                 defect_code=defect_code
             )
 
-            if not response.is_success():
+            if not result.get("success"):
                 status.update(label="❌ 파일 목록 조회 실패", state="error")
                 st.session_state[f'plm_auto_processing_{defect_code}'] = False
                 return
 
-            # Extract files from response
-            result = response.result if response.result else []
-            files = []
-
-            if isinstance(result, list) and len(result) > 0:
-                data = result[0].get('data', []) if isinstance(result[0], dict) else []
-                files = [f for f in data if f.get('title') and f.get('fileId')]
-            elif isinstance(result, dict):
-                data = result.get('data', [])
-                files = [f for f in data if f.get('title') and f.get('fileId')]
+            files = result.get("files", [])
 
             if files:
                 st.write(f"✅ {len(files)}개 파일 발견")
@@ -491,7 +488,8 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
             logger.info(f"Auto-downloading {file_title} for {defect_code}")
 
             # Download the file
-            response = client.download_file(
+            response = plm_download_file_with_optional_backend(
+                client,
                 division_code=division_code,
                 doc_id=doc_id,
                 title=file_title,
@@ -1186,10 +1184,39 @@ def render_plm_analyze():
 
         with st.spinner("Analyzing defect..."):
             try:
-                integration = st.session_state.plm_integration
-                builder = PLMDefectContextBuilder(integration)
-
-                context = builder.build_defect_context(defect_code, division_code)
+                if _is_plm_local_test_mode():
+                    defect = next(
+                        (
+                            item for item in _get_plm_local_test_defects()
+                            if item.get("defectCode") == defect_code
+                        ),
+                        _get_plm_local_test_defects()[0],
+                    )
+                    result = {
+                        "success": True,
+                        "message": "",
+                        "context": {
+                            "defect_code": defect.get("defectCode"),
+                            "title": defect.get("plmTitle"),
+                            "status": defect.get("plmStatus"),
+                            "priority": defect.get("plmPriority"),
+                            "problem": defect.get("content"),
+                            "root_cause": defect.get("reason"),
+                            "solution": defect.get("countermeasure"),
+                            "main_owner": defect.get("mainOwnerName"),
+                            "created_date": defect.get("createDate"),
+                            "updated_date": defect.get("updateDate", ""),
+                            "version_detected": defect.get("swRegVersion"),
+                            "version_resolved": defect.get("swResolveVersion"),
+                        },
+                    }
+                else:
+                    result = plm_analyze_with_optional_backend(
+                        st.session_state.plm_integration,
+                        division_code,
+                        defect_code,
+                    )
+                context = result.get("context", {}) if result.get("success") else None
 
                 if context:
                     st.success("Analysis Complete")
@@ -1251,7 +1278,7 @@ def render_plm_analyze():
                             st.rerun()
 
                 else:
-                    st.error("Defect not found")
+                    st.error(result.get("message") or "Defect not found")
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
@@ -1456,25 +1483,16 @@ def render_plm_files():
                         "⬇️ Download",
                         key=f"btn_download_{file_id}"
                     ):
-                        progress_placeholder = st.empty()
-                        status_placeholder = st.empty()
-
-                        def download_progress(downloaded, total):
-                            if total:
-                                percent = min(100, int(100 * downloaded / total))
-                                progress_placeholder.progress(percent)
-                                status_placeholder.caption(f"Downloading: {percent}% ({downloaded:,} / {total:,} bytes)")
-
                         try:
                             client = _get_plm_client()
                             division_code = cached_division or "25"
 
-                            download_result = client.download_file(
+                            download_result = plm_download_file_with_optional_backend(
+                                client,
                                 division_code=division_code,
                                 doc_id=doc_id,
                                 title=title,
                                 file_id=file_id,
-                                progress_callback=download_progress
                             )
 
                             if download_result.get('success'):
@@ -1630,33 +1648,27 @@ def render_plm_files():
 
         with st.spinner("Loading files..."):
             try:
+                if _is_plm_local_test_mode():
+                    st.session_state.plm_files_list = []
+                    st.session_state.plm_files_division = "25" if division == "Mobile" else "26"
+                    st.info("No files attached to this defect in local test mode")
+                    return
+
                 client = _get_plm_client()
-                if not client:
+                if not client and not _is_plm_local_test_mode():
                     st.error("PLM API not configured")
                     return
 
                 division_code = "25" if division == "Mobile" else "26"
 
-                # Note: The get_file_list API requires specific parameters that may differ
-                # from the defect code. The API expects moduleCode and code parameters.
-                response = client.get_file_list(
+                result = plm_list_files_with_optional_backend(
+                    client,
                     division_code=division_code,
                     defect_code=defect_code
                 )
 
-                if response.is_success():
-                    # Response format: result is a list with objects containing 'data' array
-                    result = response.result if response.result else []
-                    files = []
-
-                    # Extract files from the response structure
-                    if isinstance(result, list) and len(result) > 0:
-                        data = result[0].get('data', []) if isinstance(result[0], dict) else []
-                        # Filter out non-file entries (messages)
-                        files = [f for f in data if f.get('title') and f.get('fileId')]
-                    elif isinstance(result, dict):
-                        data = result.get('data', [])
-                        files = [f for f in data if f.get('title') and f.get('fileId')]
+                if result.get("success"):
+                    files = result.get("files", [])
 
                     if files:
                         # Cache files and division
@@ -1669,7 +1681,7 @@ def render_plm_files():
                         st.info("No files attached to this defect")
 
                 else:
-                    st.error(f"Failed to list files: {response.get_error_message()}")
+                    st.error(f"Failed to list files: {result.get('message', 'Unknown error')}")
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
@@ -1803,33 +1815,41 @@ def render_plm_comment():
                 return
 
             try:
-                from plm.plm_api_client import CommentRegistrationRequest
-
                 division_code = "25" if division == "Mobile" else "26"
                 change_map = {"Save": "S", "Modify": "M", "Delete": "D"}
 
-                request = CommentRegistrationRequest(
-                    divisionCode=division_code,
-                    systemCode=system_code,
-                    defectCode=defect_code,
-                    defectComment=comment,
-                    createUser=create_user,
-                    changeType=change_map[change_type]
-                )
+                request_payload = {
+                    "divisionCode": division_code,
+                    "systemCode": system_code,
+                    "defectCode": defect_code,
+                    "defectComment": comment,
+                    "createUser": create_user,
+                    "changeType": change_map[change_type],
+                    "docAttachedYn": "N",
+                }
 
                 if change_type in ["Modify", "Delete"] and comment_id:
-                    request.defectCommentId = comment_id
+                    request_payload["defectCommentId"] = comment_id
+
+                if _is_plm_local_test_mode():
+                    st.success("✅ Local test completed. Comment was not submitted to PLM.")
+                    with st.expander("Local test payload", expanded=False):
+                        st.json(request_payload)
+                    return
 
                 with st.spinner("Submitting comment..."):
-                    response = st.session_state.plm_integration.client.register_comment(request)
+                    result = plm_submit_comment_with_optional_backend(
+                        _get_plm_client(),
+                        request_payload,
+                    )
 
-                    if response.is_success():
+                    if result.get("success"):
                         st.success("✅ Comment submitted successfully!")
                         # Clear analysis result after successful submission
                         st.session_state.plm_current_analysis_result = None
                         st.session_state.navigate_to_comment_tab = False
                     else:
-                        st.error(f"Failed: {response.get_error_message()}")
+                        st.error(f"Failed: {result.get('message', 'Unknown error')}")
 
             except Exception as e:
                 logger.error(f"Error: {e}")
@@ -2009,26 +2029,18 @@ def _show_cached_results_in_fragment():
 
                 try:
                     client = _get_plm_client()
-                    if not client:
+                    if not client and not _is_plm_local_test_mode():
                         st.error("PLM API not configured")
                     else:
                         with st.spinner(f"Loading attached files for {defect_code}..."):
-                            response = client.get_file_list(
+                            result = plm_list_files_with_optional_backend(
+                                client,
                                 division_code=division_code,
                                 defect_code=defect_code
                             )
 
-                            if response.is_success():
-                                result = response.result if response.result else []
-                                files = []
-
-                                if isinstance(result, list) and len(result) > 0:
-                                    data = result[0].get('data', []) if isinstance(result[0], dict) else []
-                                    files = [f for f in data if f.get('title') and f.get('fileId')]
-                                elif isinstance(result, dict):
-                                    data = result.get('data', [])
-                                    files = [f for f in data if f.get('title') and f.get('fileId')]
-
+                            if result.get("success"):
+                                files = result.get("files", [])
                                 # Store files in session state
                                 st.session_state.plm_quick_search_files[defect_code] = {
                                     'files': files,
@@ -2037,7 +2049,7 @@ def _show_cached_results_in_fragment():
                                 }
                                 st.rerun()
                             else:
-                                st.error(f"Failed to list files: {response.get_error_message()}")
+                                st.error(f"Failed to list files: {result.get('message', 'Unknown error')}")
 
                 except Exception as e:
                     logger.error(f"Error loading files: {e}", exc_info=True)
@@ -2085,23 +2097,14 @@ def _show_cached_results_in_fragment():
                         is_downloaded = file_id in st.session_state.plm_quick_search_downloads
 
                         if st.button("Download", key=f"download_{file_id}", disabled=is_downloaded):
-                            progress_placeholder = st.empty()
-                            status_placeholder = st.empty()
-
-                            def download_progress(downloaded, total):
-                                if total:
-                                    percent = min(100, int(100 * downloaded / total))
-                                    progress_placeholder.progress(percent)
-                                    status_placeholder.caption(f"Downloading: {percent}% ({downloaded:,} / {total:,} bytes)")
-
                             # Download and store in session state
                             client = _get_plm_client()
-                            download_result = client.download_file(
+                            download_result = plm_download_file_with_optional_backend(
+                                client,
                                 division_code=division_code,
                                 doc_id=doc_id,
                                 title=title,
                                 file_id=file_id,
-                                progress_callback=download_progress
                             )
 
                             if download_result.get('success'):
