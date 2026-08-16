@@ -157,10 +157,6 @@ def _render_backend_analysis_status() -> bool:
     progress = int(job.get("progress") or 0)
     message = job.get("message") or status
 
-    st.info(f"Backend 분석 작업 실행 중... `{job_id[:8]}`")
-    st.progress(progress)
-    st.caption(message)
-
     if status == "done":
         st.session_state.current_file = job.get("current_file")
         st.session_state.messages = []
@@ -168,16 +164,19 @@ def _render_backend_analysis_status() -> bool:
         st.session_state.plm_pending_logs = []
         _invalidate_ingested_files_cache()
         _clear_backend_analysis_job()
-        st.success("Backend 분석 완료")
-        st.rerun()
+        st.toast("Backend 분석 완료")
+        st.rerun(scope="app")
         return False
 
     if status == "error":
         _clear_backend_analysis_job()
         st.error(job.get("error") or "Backend 분석 작업 실패")
-        st.rerun()
+        st.rerun(scope="app")
         return False
 
+    st.info(f"Backend 분석 작업 실행 중... `{job_id[:8]}`")
+    st.progress(progress)
+    st.caption(message)
     return True
 
 
