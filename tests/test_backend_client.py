@@ -174,6 +174,43 @@ def test_plm_quick_search_via_backend_posts_search_payload(monkeypatch):
     ]
 
 
+def test_plm_defect_details_via_backend_posts_lookup_payload(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse(
+            {
+                "success": True,
+                "message": "",
+                "defects": [{"defectCode": "P260711-001"}],
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    result = backend_client.plm_get_defect_details_via_backend(
+        division_code="25",
+        defect_codes=["P260711-001"],
+        defect_ids=None,
+    )
+
+    assert result["defects"] == [{"defectCode": "P260711-001"}]
+    assert calls == [
+        (
+            "http://backend.local:8080/plm/defects",
+            {
+                "json": {
+                    "division_code": "25",
+                    "defect_codes": ["P260711-001"],
+                    "defect_ids": None,
+                },
+                "timeout": 12.5,
+            },
+        )
+    ]
+
+
 def test_plm_file_client_helpers(monkeypatch):
     calls = []
 
@@ -265,5 +302,38 @@ def test_plm_comment_and_analyze_client_helpers(monkeypatch):
     )
     assert calls[1] == (
         "http://backend.local:8080/plm/analyze",
+        {"json": {"division_code": "25", "defect_code": "P260711-001"}, "timeout": 12.5},
+    )
+
+
+def test_plm_register_and_human_comments_client_helpers(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/plm/defects/register"):
+            return FakeResponse({"success": True, "message": "ok", "result": {"defectCode": "AI-1"}})
+        return FakeResponse(
+            {
+                "success": True,
+                "message": "",
+                "comments": [{"comment": "please check modem logs", "commentId": "c-1"}],
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    payload = {"divisionCode": "25", "externalDefectId": "AI-1", "title": "Data stall"}
+    register = backend_client.plm_register_defect_via_backend(payload)
+    comments = backend_client.plm_get_human_comments_via_backend("25", "P260711-001")
+
+    assert register["result"] == {"defectCode": "AI-1"}
+    assert comments["comments"] == [{"comment": "please check modem logs", "commentId": "c-1"}]
+    assert calls[0] == (
+        "http://backend.local:8080/plm/defects/register",
+        {"json": {"payload": payload}, "timeout": 12.5},
+    )
+    assert calls[1] == (
+        "http://backend.local:8080/plm/defect-history/comments",
         {"json": {"division_code": "25", "defect_code": "P260711-001"}, "timeout": 12.5},
     )

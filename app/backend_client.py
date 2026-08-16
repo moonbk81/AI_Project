@@ -342,6 +342,51 @@ def plm_quick_search_with_optional_backend(
     )
 
 
+def plm_get_defect_details_via_backend(
+    division_code: str,
+    defect_codes: Optional[List[str]] = None,
+    defect_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/defects",
+        json={
+            "division_code": division_code,
+            "defect_codes": defect_codes,
+            "defect_ids": defect_ids,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_get_defect_details_with_optional_backend(
+    client,
+    division_code: str,
+    defect_codes: Optional[List[str]] = None,
+    defect_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_get_defect_details_via_backend(
+            division_code=division_code,
+            defect_codes=defect_codes,
+            defect_ids=defect_ids,
+        )
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import get_defect_details
+
+    return get_defect_details(
+        division_code=division_code,
+        defect_codes=defect_codes,
+        defect_ids=defect_ids,
+        client=client,
+    )
+
+
 def plm_list_files_via_backend(
     division_code: str,
     defect_code: str,
@@ -455,6 +500,59 @@ def plm_submit_comment_with_optional_backend(client, payload: Dict[str, Any]) ->
     from plm.service import submit_comment
 
     return submit_comment(payload, client=client)
+
+
+def plm_register_defect_via_backend(payload: Dict[str, Any]) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/defects/register",
+        json={"payload": payload},
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_register_defect_with_optional_backend(client, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_register_defect_via_backend(payload)
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import register_defect
+
+    return register_defect(payload, client=client)
+
+
+def plm_get_human_comments_via_backend(division_code: str, defect_code: str) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/defect-history/comments",
+        json={
+            "division_code": division_code,
+            "defect_code": defect_code,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_get_human_comments_with_optional_backend(client, division_code: str, defect_code: str) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_get_human_comments_via_backend(division_code, defect_code)
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import get_human_comments
+
+    return get_human_comments(
+        division_code=division_code,
+        defect_code=defect_code,
+        client=client,
+    )
 
 
 def plm_analyze_via_backend(division_code: str, defect_code: str) -> Dict[str, Any]:

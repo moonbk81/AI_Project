@@ -275,6 +275,43 @@ def test_plm_quick_search_endpoint(client, monkeypatch):
     ]
 
 
+def test_plm_defect_detail_endpoint(client, monkeypatch):
+    calls = []
+
+    def fake_get_defect_details(**kwargs):
+        calls.append(kwargs)
+        return {
+            "success": True,
+            "message": "",
+            "defects": [{"defectCode": "P260711-001", "plmTitle": "Data stall"}],
+        }
+
+    monkeypatch.setattr("plm.service.get_defect_details", fake_get_defect_details)
+
+    response = client.post(
+        "/plm/defects",
+        json={
+            "division_code": "25",
+            "defect_codes": ["P260711-001"],
+            "defect_ids": None,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "message": "",
+        "defects": [{"defectCode": "P260711-001", "plmTitle": "Data stall"}],
+    }
+    assert calls == [
+        {
+            "division_code": "25",
+            "defect_codes": ["P260711-001"],
+            "defect_ids": None,
+        }
+    ]
+
+
 def test_plm_file_endpoints(client, monkeypatch):
     def fake_list_attached_files(**kwargs):
         return {
@@ -352,3 +389,41 @@ def test_plm_comment_and_analyze_endpoints(client, monkeypatch):
     assert comment_response.json() == {"success": True, "message": "ok", "result": {"commentId": "c-1"}}
     assert analyze_response.status_code == 200
     assert analyze_response.json()["context"] == {"defect_code": "P260711-001", "problem": "Data stall"}
+
+
+def test_plm_register_and_human_comments_endpoints(client, monkeypatch):
+    def fake_register_defect(payload):
+        return {
+            "success": True,
+            "message": "ok",
+            "result": {"defectCode": payload["externalDefectId"], "defectId": "id-1"},
+        }
+
+    def fake_get_human_comments(**kwargs):
+        return {
+            "success": True,
+            "message": "",
+            "comments": [{"comment": "please check modem logs", "commentId": "c-1"}],
+        }
+
+    monkeypatch.setattr("plm.service.register_defect", fake_register_defect)
+    monkeypatch.setattr("plm.service.get_human_comments", fake_get_human_comments)
+
+    payload = {
+        "divisionCode": "25",
+        "systemCode": "AI_ANALYSIS",
+        "externalDefectId": "AI-1",
+        "title": "Data stall",
+        "createUser": "tester",
+        "Content": "Packet data stalled",
+    }
+    register_response = client.post("/plm/defects/register", json={"payload": payload})
+    comments_response = client.post(
+        "/plm/defect-history/comments",
+        json={"division_code": "25", "defect_code": "P260711-001"},
+    )
+
+    assert register_response.status_code == 200
+    assert register_response.json()["result"] == {"defectCode": "AI-1", "defectId": "id-1"}
+    assert comments_response.status_code == 200
+    assert comments_response.json()["comments"] == [{"comment": "please check modem logs", "commentId": "c-1"}]

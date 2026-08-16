@@ -22,8 +22,11 @@ from app.backend_client import (
     is_backend_api_enabled,
     plm_analyze_with_optional_backend,
     plm_download_file_with_optional_backend,
+    plm_get_defect_details_with_optional_backend,
+    plm_get_human_comments_with_optional_backend,
     plm_list_files_with_optional_backend,
     plm_quick_search_with_optional_backend,
+    plm_register_defect_with_optional_backend,
     plm_submit_comment_with_optional_backend,
 )
 from plm.plm_rag_integration import (
@@ -636,18 +639,19 @@ def render_plm_search():
         with st.spinner("Searching defects..."):
             try:
                 client = _get_plm_client()
-                if not client:
+                if not client and not is_backend_api_enabled():
                     st.error("PLM API not configured")
                     return
 
-                response = client.get_defect_info(
+                result = plm_get_defect_details_with_optional_backend(
+                    client,
                     division_code=division_code,
                     defect_codes=search_values if is_code_search else None,
                     defect_ids=search_values if not is_code_search else None
                 )
 
-                if response.is_success():
-                    defects = response.result.get('defectList', [])
+                if result.get("success"):
+                    defects = result.get('defects', [])
 
                     if defects:
                         st.session_state.plm_search_results = defects
@@ -675,7 +679,7 @@ def render_plm_search():
                         st.info("No defects found")
 
                 else:
-                    st.error(f"Search failed: {response.get_error_message()}")
+                    st.error(f"Search failed: {result.get('message', 'Unknown error')}")
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
@@ -947,36 +951,20 @@ def _fetch_human_comments(defect_code: str, division_code: str) -> List[Dict[str
     if defect_code in cache:
         return cache[defect_code]
 
-    comments = []
     try:
         client = _get_plm_client()
-        if not client:
+        if not client and not is_backend_api_enabled():
             return []
 
-        response = client.get_defect_history(
+        result = plm_get_human_comments_with_optional_backend(
+            client,
             division_code=division_code,
-            defect_codes=[defect_code],
+            defect_code=defect_code,
         )
-        if not response.is_success():
-            logger.warning(f"get_defect_history failed: {response.get_error_message()}")
+        if not result.get("success"):
+            logger.warning(f"get_human_comments failed: {result.get('message', 'Unknown error')}")
             return []
-
-        result = response.result or {}
-        for arr in result.get('defectHistoryListArr', []) or []:
-            for entry in arr.get('defectHistoryList', []) or []:
-                if entry.get('historyType') != 'C':
-                    continue
-                if _is_excluded_comment_user(entry.get('historyUser', '')):
-                    continue
-                text = (entry.get('comment') or '').strip()
-                if not text or _is_ai_generated_comment(text):
-                    continue
-                comments.append({
-                    'comment': text,
-                    'historyDate': entry.get('historyDate', ''),
-                    'historyUser': entry.get('historyUser', ''),
-                    'commentId': entry.get('commentId', ''),
-                })
+        comments = result.get("comments", [])
     except Exception as e:
         logger.error(f"Error fetching defect comments: {e}", exc_info=True)
         return []
@@ -1351,47 +1339,47 @@ def render_plm_register():
                 return
 
             try:
-                from plm.plm_api_client import DefectRegistrationRequest
-
                 division_code = "25" if division == "Mobile" else "26"
 
-                request = DefectRegistrationRequest(
-                    divisionCode=division_code,
-                    systemCode=system_code,
-                    changeType=change_type,
-                    refObjectName=project_name,
-                    refObjectType="MFG",
-                    externalDefectId=external_id or f"AI_{datetime.now().timestamp()}",
-                    defectCategory="SW",
-                    createUser=create_user,
-                    title=title,
-                    inChargeUser=create_user,
-                    Content=content,
-                    importance=importance,
-                    occurRateType=occur_rate,
-                    occurPhase="DV",
-                    testUnit=test_unit,
-                    testItem=test_item,
-                    functionBlock=function_block,
-                    detailFunctionclass=detail_function,
-                    reappearancePath=reappearance if reappearance else None,
-                    forecastResult=forecast if forecast else None,
-                    swVersion=sw_version if sw_version else None
-                )
+                payload = {
+                    "divisionCode": division_code,
+                    "systemCode": system_code,
+                    "changeType": change_type,
+                    "refObjectName": project_name,
+                    "refObjectType": "MFG",
+                    "externalDefectId": external_id or f"AI_{datetime.now().timestamp()}",
+                    "defectCategory": "SW",
+                    "createUser": create_user,
+                    "title": title,
+                    "inChargeUser": create_user,
+                    "Content": content,
+                    "importance": importance,
+                    "occurRateType": occur_rate,
+                    "occurPhase": "DV",
+                    "testUnit": test_unit,
+                    "testItem": test_item,
+                    "functionBlock": function_block,
+                    "detailFunctionclass": detail_function,
+                    "reappearancePath": reappearance if reappearance else None,
+                    "forecastResult": forecast if forecast else None,
+                    "swVersion": sw_version if sw_version else None,
+                }
 
                 with st.spinner("Registering defect..."):
-                    response = st.session_state.plm_integration.client.register_defect(request)
+                    client = _get_plm_client()
+                    response = plm_register_defect_with_optional_backend(client, payload)
 
-                    if response.is_success():
-                        defect_code = response.result.get('defectCode')
-                        defect_id = response.result.get('defectId')
+                    if response.get("success"):
+                        result = response.get("result") or {}
+                        defect_code = result.get('defectCode')
+                        defect_id = result.get('defectId')
                         st.success(
                             f"✅ Defect registered successfully!\n\n"
                             f"**Code:** {defect_code}\n"
                             f"**ID:** {defect_id}"
                         )
                     else:
-                        st.error(f"Registration failed: {response.get_error_message()}")
+                        st.error(f"Registration failed: {response.get('message', 'Unknown error')}")
 
             except Exception as e:
                 logger.error(f"Error: {e}")
@@ -2333,7 +2321,7 @@ def _show_search_input_form_fragment():
         with st.spinner(f"Searching {status} defects for {search_label}..."):
             try:
                 client = _get_plm_client()
-                if not client and not _is_plm_local_test_mode():
+                if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                     st.error("PLM API not configured")
                     return
 

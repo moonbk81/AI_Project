@@ -104,6 +104,18 @@ class PlmQuickSearchResponse(BaseModel):
     truncated: bool = False
 
 
+class PlmDefectDetailsRequest(BaseModel):
+    division_code: str = "25"
+    defect_codes: Optional[List[str]] = None
+    defect_ids: Optional[List[str]] = None
+
+
+class PlmDefectDetailsResponse(BaseModel):
+    success: bool
+    message: str = ""
+    defects: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class PlmFileListRequest(BaseModel):
     division_code: str = "25"
     defect_code: str = Field(min_length=1)
@@ -131,6 +143,27 @@ class PlmCommentResponse(BaseModel):
     success: bool
     message: str = ""
     result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PlmDefectRegisterRequest(BaseModel):
+    payload: Dict[str, Any]
+
+
+class PlmDefectRegisterResponse(BaseModel):
+    success: bool
+    message: str = ""
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PlmHumanCommentsRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+
+
+class PlmHumanCommentsResponse(BaseModel):
+    success: bool
+    message: str = ""
+    comments: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PlmAnalyzeRequest(BaseModel):
@@ -413,6 +446,18 @@ def plm_quick_search(req: PlmQuickSearchRequest) -> PlmQuickSearchResponse:
     return PlmQuickSearchResponse(**result)
 
 
+@app.post("/plm/defects", response_model=PlmDefectDetailsResponse)
+def plm_defect_details(req: PlmDefectDetailsRequest) -> PlmDefectDetailsResponse:
+    from plm.service import get_defect_details
+
+    result = get_defect_details(
+        division_code=req.division_code,
+        defect_codes=req.defect_codes,
+        defect_ids=req.defect_ids,
+    )
+    return PlmDefectDetailsResponse(**result)
+
+
 @app.post("/plm/files", response_model=PlmFileListResponse)
 def plm_files(req: PlmFileListRequest) -> PlmFileListResponse:
     from plm.service import list_attached_files
@@ -453,6 +498,24 @@ def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
     from plm.service import submit_comment
 
     return PlmCommentResponse(**submit_comment(req.payload))
+
+
+@app.post("/plm/defects/register", response_model=PlmDefectRegisterResponse)
+def plm_defect_register(req: PlmDefectRegisterRequest) -> PlmDefectRegisterResponse:
+    from plm.service import register_defect
+
+    return PlmDefectRegisterResponse(**register_defect(req.payload))
+
+
+@app.post("/plm/defect-history/comments", response_model=PlmHumanCommentsResponse)
+def plm_human_comments(req: PlmHumanCommentsRequest) -> PlmHumanCommentsResponse:
+    from plm.service import get_human_comments
+
+    result = get_human_comments(
+        division_code=req.division_code,
+        defect_code=req.defect_code,
+    )
+    return PlmHumanCommentsResponse(**result)
 
 
 @app.post("/plm/analyze", response_model=PlmAnalyzeResponse)

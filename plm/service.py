@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Dict, List
 
-from plm.plm_api_client import CommentRegistrationRequest
+from plm.plm_api_client import CommentRegistrationRequest, DefectRegistrationRequest
 from plm.plm_rag_integration import PLMDefectContextBuilder
 from plm.plm_rag_integration import create_plm_integration
 
@@ -100,6 +100,32 @@ def quick_search_defects(
     }
 
 
+def get_defect_details(
+    division_code: str,
+    defect_codes: List[str] | None = None,
+    defect_ids: List[str] | None = None,
+    client=None,
+) -> Dict[str, Any]:
+    """Load PLM defect detail rows by defect code or defect id."""
+    if client is None:
+        client = get_plm_integration().client
+
+    response = client.get_defect_info(
+        division_code=division_code,
+        defect_codes=defect_codes,
+        defect_ids=defect_ids,
+    )
+    if not response.is_success():
+        return {"success": False, "message": response.get_error_message(), "defects": []}
+
+    result = response.result or {}
+    return {
+        "success": True,
+        "message": "",
+        "defects": result.get("defectList", []),
+    }
+
+
 def list_attached_files(
     division_code: str,
     defect_code: str,
@@ -187,6 +213,82 @@ def submit_comment(
         "message": response.get_error_message(),
         "result": response.result or {},
     }
+
+
+def register_defect(
+    payload: Dict[str, Any],
+    client=None,
+) -> Dict[str, Any]:
+    """Register a new PLM defect."""
+    if client is None:
+        client = get_plm_integration().client
+
+    request = DefectRegistrationRequest(**payload)
+    response = client.register_defect(request)
+    if response.is_success():
+        return {
+            "success": True,
+            "message": "PLM Defect 등록 완료",
+            "result": response.result or {},
+        }
+    return {
+        "success": False,
+        "message": response.get_error_message(),
+        "result": response.result or {},
+    }
+
+
+_AI_COMMENT_SIGNATURES = ("💬 **AI Chat 분석 결과", "🤖 AI 분석 결과")
+_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development")
+
+
+def _is_ai_generated_comment(text: str) -> bool:
+    stripped = (text or "").lstrip()
+    return any(stripped.startswith(sig) for sig in _AI_COMMENT_SIGNATURES)
+
+
+def _is_excluded_comment_user(history_user: str) -> bool:
+    name = (history_user or "").lower()
+    return any(excluded in name for excluded in _EXCLUDED_COMMENT_USERS)
+
+
+def get_human_comments(
+    division_code: str,
+    defect_code: str,
+    client=None,
+) -> Dict[str, Any]:
+    """Fetch developer-written comments for a defect history."""
+    if client is None:
+        client = get_plm_integration().client
+
+    response = client.get_defect_history(
+        division_code=division_code,
+        defect_codes=[defect_code],
+    )
+    if not response.is_success():
+        return {"success": False, "message": response.get_error_message(), "comments": []}
+
+    comments: List[Dict[str, Any]] = []
+    result = response.result or {}
+    for arr in result.get("defectHistoryListArr", []) or []:
+        for entry in arr.get("defectHistoryList", []) or []:
+            if entry.get("historyType") != "C":
+                continue
+            if _is_excluded_comment_user(entry.get("historyUser", "")):
+                continue
+            text = (entry.get("comment") or "").strip()
+            if not text or _is_ai_generated_comment(text):
+                continue
+            comments.append(
+                {
+                    "comment": text,
+                    "historyDate": entry.get("historyDate", ""),
+                    "historyUser": entry.get("historyUser", ""),
+                    "commentId": entry.get("commentId", ""),
+                }
+            )
+
+    return {"success": True, "message": "", "comments": comments}
 
 
 def build_defect_analysis_context(
