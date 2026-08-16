@@ -127,6 +127,14 @@ export BACKEND_API_URL=http://localhost:8080
 streamlit run web_app.py
 ```
 
+macOS에서는 아래 스크립트로 backend와 Streamlit 터미널 2개를 한 번에 띄울 수 있습니다.
+
+```bash
+./scripts/start_backend_streamlit.command
+```
+
+DGX vLLM을 사용할 때는 `RAG_LLM_PROVIDER`, `RAG_LLM_BASE_URL`, `RAG_LLM_MODEL`, `RAG_LLM_API_KEY`를 지정한 상태로 실행하면 backend 터미널에 전달됩니다.
+
 `USE_BACKEND_API`를 지정하지 않으면 기존처럼 Streamlit 프로세스 안에서 `RilRagChat.ask()`를 직접 호출합니다.
 
 Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.
