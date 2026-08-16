@@ -1,0 +1,131 @@
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from app import backend_client
+
+
+class FakeResponse:
+    def __init__(self, payload=None, status_code=200):
+        self._payload = payload or {}
+        self.status_code = status_code
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class FakeUpload:
+    name = "radio.log"
+
+    def getbuffer(self):
+        return b"log-body"
+
+
+@pytest.fixture(autouse=True)
+def backend_env(monkeypatch):
+    monkeypatch.setenv("USE_BACKEND_API", "1")
+    monkeypatch.setenv("BACKEND_API_URL", "http://backend.local:8080/")
+    monkeypatch.setenv("BACKEND_API_TIMEOUT", "12.5")
+
+
+def install_fake_requests(monkeypatch, *, get=None, post=None):
+    fake_requests = SimpleNamespace(
+        get=get or (lambda *args, **kwargs: FakeResponse()),
+        post=post or (lambda *args, **kwargs: FakeResponse()),
+    )
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    return fake_requests
+
+
+def test_backend_api_url_is_normalized():
+    assert backend_client.is_backend_api_enabled() is True
+    assert backend_client.get_backend_api_url() == "http://backend.local:8080"
+
+
+def test_ask_via_backend_posts_question_payload(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse(
+            {
+                "answer": "ok",
+                "ids": ["id-1"],
+                "metas": [{"source_file": "radio.log"}],
+                "thinking": "trace",
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    result = backend_client.ask_via_backend(
+        "why did data stall?",
+        current_file="radio.log",
+        chat_history=[{"role": "user", "content": "hello"}],
+        top_k=3,
+        health_kpi="data",
+    )
+
+    assert result == ("ok", ["id-1"], [{"source_file": "radio.log"}], "trace")
+    assert calls == [
+        (
+            "http://backend.local:8080/ask",
+            {
+                "json": {
+                    "question": "why did data stall?",
+                    "current_file": "radio.log",
+                    "chat_history": [{"role": "user", "content": "hello"}],
+                    "top_k": 3,
+                    "health_kpi": "data",
+                },
+                "timeout": 12.5,
+            },
+        )
+    ]
+
+
+def test_result_json_returns_default_for_missing_backend_artifact(monkeypatch):
+    def fake_get(url, **kwargs):
+        return FakeResponse(status_code=404)
+
+    install_fake_requests(monkeypatch, get=fake_get)
+
+    assert backend_client.get_result_json_via_backend("radio", "report", default={}) == {}
+
+
+def test_create_analyze_job_uploads_files_and_options(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse({"job_id": "job-123"})
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    job_id = backend_client.create_analyze_job_via_backend(
+        [FakeUpload()],
+        use_slice=True,
+        start_t="00:00:01",
+        end_t="00:00:05",
+    )
+
+    assert job_id == "job-123"
+    url, kwargs = calls[0]
+    assert url == "http://backend.local:8080/jobs/analyze"
+    assert kwargs["data"] == {
+        "use_slice": "true",
+        "start_t": "00:00:01",
+        "end_t": "00:00:05",
+    }
+    assert kwargs["timeout"] == 12.5
+    assert kwargs["files"] == [
+        (
+            "files",
+            ("radio.log", b"log-body", "application/octet-stream"),
+        )
+    ]
