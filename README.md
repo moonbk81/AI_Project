@@ -362,7 +362,7 @@ python run_golden_eval.py \
 Backend client 단위 테스트:
 
 ```bash
-conda run -n ai python -m pytest tests/test_backend_client.py
+conda run -n ai python -m pytest tests/test_backend_api.py tests/test_backend_client.py
 ```
 
 Semantic routing 테스트:
