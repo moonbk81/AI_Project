@@ -20,6 +20,7 @@ from ui.plm_ui import render_plm_sidebar_stats
 
 _INGESTED_FILES_CACHE_KEY = "ingested_files_cache"
 _INGESTED_FILES_CACHE_DIRTY_KEY = "ingested_files_cache_dirty"
+_BACKEND_ANALYSIS_JOB_ID_KEY = "backend_analysis_job_id"
 
 
 def _render_sidebar_style():
@@ -127,6 +128,54 @@ def _invalidate_ingested_files_cache():
     st.session_state[_INGESTED_FILES_CACHE_DIRTY_KEY] = True
 
 
+def _clear_backend_analysis_job():
+    st.session_state[_BACKEND_ANALYSIS_JOB_ID_KEY] = None
+    st.session_state.is_running = False
+
+
+def _render_backend_analysis_status() -> bool:
+    if not is_backend_api_enabled():
+        return False
+
+    job_id = st.session_state.get(_BACKEND_ANALYSIS_JOB_ID_KEY)
+    if not job_id:
+        return False
+
+    try:
+        job = get_job_status_via_backend(job_id)
+    except Exception as e:
+        st.error(f"Backend 분석 작업 상태 조회 실패: {e}")
+        _clear_backend_analysis_job()
+        return False
+
+    status = job.get("status", "unknown")
+    progress = int(job.get("progress") or 0)
+    message = job.get("message") or status
+
+    st.info(f"Backend 분석 작업 실행 중... `{job_id[:8]}`")
+    st.progress(progress)
+    st.caption(message)
+
+    if status == "done":
+        st.session_state.current_file = job.get("current_file")
+        st.session_state.messages = []
+        st.session_state.plm_selected_from_zip = None
+        st.session_state.plm_pending_logs = []
+        _invalidate_ingested_files_cache()
+        _clear_backend_analysis_job()
+        st.success("Backend 분석 완료")
+        return False
+
+    if status == "error":
+        _clear_backend_analysis_job()
+        st.error(job.get("error") or "Backend 분석 작업 실패")
+        return False
+
+    time.sleep(1)
+    st.rerun()
+    return True
+
+
 def _render_engine_status():
     st.subheader("분석 엔진")
     if is_backend_api_enabled():
@@ -214,6 +263,8 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
+    backend_job_running = _render_backend_analysis_status()
+
     uploaded_files = st.file_uploader(
         "원시 로그 파일 업로드 (다중 선택 가능)",
         accept_multiple_files=True,
@@ -238,7 +289,9 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     # Auto-trigger analysis if:
     # 1. trigger_auto_analysis flag is set OR
     # 2. There are PLM extracted logs pending and is_running is False
-    should_auto_trigger = (st.session_state.get('trigger_auto_analysis', False) or bool(pending_logs)) and not st.session_state.is_running
+    should_auto_trigger = (
+        st.session_state.get('trigger_auto_analysis', False) or bool(pending_logs)
+    ) and not st.session_state.is_running and not backend_job_running
 
     # 3. 버튼에 disabled 속성과 on_click 콜백 적용
     if should_auto_trigger:
@@ -248,64 +301,58 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
         button_click = True
         st.info("PLM 추출 로그로 분석을 자동 시작합니다...")
     else:
-        button_click = st.button("분석 및 DB 적재 시작", width="stretch", type="primary", on_click=set_running, disabled=st.session_state.is_running)
+        button_click = st.button(
+            "분석 및 DB 적재 시작",
+            width="stretch",
+            type="primary",
+            on_click=set_running,
+            disabled=st.session_state.is_running or backend_job_running,
+        )
 
     if button_click or should_auto_trigger:
+        # Combine uploaded files, PLM selected file, and PLM extracted logs
+        files_to_analyze = list(uploaded_files) if uploaded_files else []
+
+        from types import SimpleNamespace
+
+        if plm_selected_file:
+            # Create a file-like object from PLM selected file
+            plm_file = SimpleNamespace()
+            plm_file.name = plm_selected_file['filename']
+            plm_file.getbuffer = lambda: plm_selected_file['content']
+            files_to_analyze.append(plm_file)
+
+        # Create file-like objects from PLM extracted logs
+        for log in pending_logs:
+            log_file = SimpleNamespace()
+            log_file.name = log['filename']
+            log_file.getbuffer = lambda content=log['content']: content
+            files_to_analyze.append(log_file)
+
+        if not files_to_analyze:
+            st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
+            st.session_state.is_running = False
+            return
+
+        st.session_state.uploader_key += 1
+        if is_backend_api_enabled():
+            try:
+                job_id = create_analyze_job_via_backend(files_to_analyze, False, "", "")
+            except Exception as e:
+                st.session_state.is_running = False
+                st.error(f"Backend 분석 작업 생성 실패: {e}")
+                return
+
+            st.session_state[_BACKEND_ANALYSIS_JOB_ID_KEY] = job_id
+            st.rerun()
+            return
+
         try:
-            # Combine uploaded files, PLM selected file, and PLM extracted logs
-            files_to_analyze = list(uploaded_files) if uploaded_files else []
-
-            from types import SimpleNamespace
-
-            if plm_selected_file:
-                # Create a file-like object from PLM selected file
-                plm_file = SimpleNamespace()
-                plm_file.name = plm_selected_file['filename']
-                plm_file.getbuffer = lambda: plm_selected_file['content']
-                files_to_analyze.append(plm_file)
-
-            # Create file-like objects from PLM extracted logs
-            for log in pending_logs:
-                log_file = SimpleNamespace()
-                log_file.name = log['filename']
-                log_file.getbuffer = lambda content=log['content']: content
-                files_to_analyze.append(log_file)
-
-            if not files_to_analyze:
-                st.error("파일을 하나 이상 업로드하거나 PLM에서 선택하십시오.")
-            else:
-                st.session_state.uploader_key += 1
-                if is_backend_api_enabled():
-                    job_id = create_analyze_job_via_backend(files_to_analyze, False, "", "")
-                    with st.status(f"Backend 분석 작업 실행 중... ({job_id[:8]})", expanded=True) as status:
-                        progress_slot = st.empty()
-                        last_message = None
-                        while True:
-                            job = get_job_status_via_backend(job_id)
-                            message = job.get("message") or job.get("status", "")
-                            progress = int(job.get("progress") or 0)
-                            if message and message != last_message:
-                                st.write(message)
-                                last_message = message
-                            progress_slot.progress(progress)
-
-                            if job.get("status") == "done":
-                                st.session_state.current_file = job.get("current_file")
-                                st.session_state.messages = []
-                                status.update(label="Backend 분석 완료", state="complete", expanded=False)
-                                break
-                            if job.get("status") == "error":
-                                status.update(label="Backend 분석 실패", state="error")
-                                st.error(job.get("error") or "Backend 분석 작업 실패")
-                                break
-                            time.sleep(1)
-                else:
-                    run_analysis_pipeline(files_to_analyze, False, "", "", engine)
-                _invalidate_ingested_files_cache()
-                # Clear PLM selected file and extracted logs after analysis
-                st.session_state.plm_selected_from_zip = None
-                st.session_state.plm_pending_logs = []
-
+            run_analysis_pipeline(files_to_analyze, False, "", "", engine)
+            _invalidate_ingested_files_cache()
+            # Clear PLM selected file and extracted logs after analysis
+            st.session_state.plm_selected_from_zip = None
+            st.session_state.plm_pending_logs = []
         finally:
             # 4. 분석이 끝나거나 에러가 나더라도 무조건 상태를 해제하고 새로고침
             st.session_state.is_running = False
