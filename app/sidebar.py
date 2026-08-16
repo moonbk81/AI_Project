@@ -133,6 +133,11 @@ def _clear_backend_analysis_job():
     st.session_state.is_running = False
 
 
+def _has_backend_analysis_job() -> bool:
+    return bool(is_backend_api_enabled() and st.session_state.get(_BACKEND_ANALYSIS_JOB_ID_KEY))
+
+
+@st.fragment(run_every="1s")
 def _render_backend_analysis_status() -> bool:
     if not is_backend_api_enabled():
         return False
@@ -164,15 +169,15 @@ def _render_backend_analysis_status() -> bool:
         _invalidate_ingested_files_cache()
         _clear_backend_analysis_job()
         st.success("Backend 분석 완료")
+        st.rerun()
         return False
 
     if status == "error":
         _clear_backend_analysis_job()
         st.error(job.get("error") or "Backend 분석 작업 실패")
+        st.rerun()
         return False
 
-    time.sleep(1)
-    st.rerun()
     return True
 
 
@@ -263,7 +268,8 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0
 
-    backend_job_running = _render_backend_analysis_status()
+    backend_job_running = _has_backend_analysis_job()
+    _render_backend_analysis_status()
 
     uploaded_files = st.file_uploader(
         "원시 로그 파일 업로드 (다중 선택 가능)",
