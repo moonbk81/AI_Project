@@ -19,6 +19,7 @@ import io
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.backend_client import (
+    is_backend_api_enabled,
     plm_analyze_with_optional_backend,
     plm_download_file_with_optional_backend,
     plm_list_files_with_optional_backend,
@@ -371,7 +372,7 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
     try:
         with progress_container.status("📥 PLM 첨부 파일 자동 처리 중...", expanded=True) as status:
             client = _get_plm_client()
-            if not client and not _is_plm_local_test_mode():
+            if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                 status.update(label="❌ PLM 클라이언트 연결 실패", state="error")
                 st.session_state[f'plm_auto_processing_{defect_code}'] = False
                 logger.info(f"Auto-load cancelled: no PLM client")
@@ -461,7 +462,7 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
         return 0
 
     client = _get_plm_client()
-    if not client:
+    if not client and not is_backend_api_enabled():
         logger.warning("PLM client unavailable while auto-downloading ZIP files for %s", defect_code)
         if status:
             st.write("❌ PLM 클라이언트 연결 실패")
@@ -1655,7 +1656,7 @@ def render_plm_files():
                     return
 
                 client = _get_plm_client()
-                if not client and not _is_plm_local_test_mode():
+                if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                     st.error("PLM API not configured")
                     return
 
@@ -1906,7 +1907,7 @@ def _research_with_same_conditions():
     with st.spinner(f"Searching {status} defects with same conditions..."):
         try:
             client = _get_plm_client()
-            if not client and not _is_plm_local_test_mode():
+            if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                 st.error("PLM API not configured")
                 return
 
@@ -2029,7 +2030,7 @@ def _show_cached_results_in_fragment():
 
                 try:
                     client = _get_plm_client()
-                    if not client and not _is_plm_local_test_mode():
+                    if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                         st.error("PLM API not configured")
                     else:
                         with st.spinner(f"Loading attached files for {defect_code}..."):
@@ -2394,7 +2395,11 @@ def render_plm_section():
     _render_plm_local_test_controls()
     logger.info(f"After render_local_test_controls: {time.time() - section_start:.2f}s")
 
-    if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
+    if (
+        not st.session_state.get('plm_available', False)
+        and not _is_plm_local_test_mode()
+        and not is_backend_api_enabled()
+    ):
         st.warning("⚠️ PLM API is not configured. Check credentials and network.")
         return
 
@@ -2432,7 +2437,8 @@ def render_plm_section():
             # Lazy-load groups only when tab1 is actually viewed
             if (not st.session_state.get('plm_groups_cache') and
                 not st.session_state.get('plm_groups_loading') and
-                not _is_plm_local_test_mode()):
+                not _is_plm_local_test_mode() and
+                not is_backend_api_enabled()):
                 _lazy_load_groups()
             logger.info(f"After lazy_load_groups in Tab1: {time.time() - tab1_start:.2f}s")
 
@@ -2477,7 +2483,11 @@ def render_plm_sidebar_stats():
     if 'plm_integration' not in st.session_state:
         _initialize_plm_session()
 
-    if not st.session_state.get('plm_available', False) and not _is_plm_local_test_mode():
+    if (
+        not st.session_state.get('plm_available', False)
+        and not _is_plm_local_test_mode()
+        and not is_backend_api_enabled()
+    ):
         return
 
     with st.sidebar:

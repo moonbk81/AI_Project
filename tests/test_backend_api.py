@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -85,6 +88,28 @@ def client(monkeypatch, tmp_path, fake_engine, fake_executor):
     with backend_main._jobs_lock:
         backend_main._jobs.clear()
     return TestClient(backend_main.app)
+
+
+def test_get_engine_initializes_once_under_concurrent_requests(monkeypatch):
+    created = []
+
+    class FakeRilRagChat:
+        def __init__(self, model_name):
+            time.sleep(0.05)
+            self.model_name = model_name
+            created.append(self)
+
+    monkeypatch.setattr(backend_main, "_engine", None)
+    monkeypatch.setitem(sys.modules, "ril_rag_chat", type("FakeModule", (), {"RilRagChat": FakeRilRagChat}))
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            engines = list(executor.map(lambda _: backend_main.get_engine(), range(4)))
+    finally:
+        backend_main._engine = None
+
+    assert len(created) == 1
+    assert all(engine is created[0] for engine in engines)
 
 
 def test_health_reports_backend_status(client):

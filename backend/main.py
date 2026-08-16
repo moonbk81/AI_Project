@@ -146,6 +146,7 @@ class PlmAnalyzeResponse(BaseModel):
 
 app = FastAPI(title="AI Project RAG Backend")
 _engine = None
+_engine_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=1)
@@ -163,9 +164,11 @@ _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
 def get_engine():
     global _engine
     if _engine is None:
-        from ril_rag_chat import RilRagChat
+        with _engine_lock:
+            if _engine is None:
+                from ril_rag_chat import RilRagChat
 
-        _engine = RilRagChat(model_name=get_default_llm_model("gemma4:12b"))
+                _engine = RilRagChat(model_name=get_default_llm_model("gemma4:12b"))
     return _engine
 
 
