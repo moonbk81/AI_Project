@@ -119,6 +119,10 @@ def test_health_reports_backend_status(client):
     data = response.json()
     assert data["status"] == "ok"
     assert data["engine_loaded"] is True
+    assert data["engine_status"] == "loaded"
+    assert data["engine_initializing"] is False
+    assert data["chroma_db_path"] == "./chroma_db"
+    assert "provider" in data
     assert "report" in data["supported_artifacts"]
 
 

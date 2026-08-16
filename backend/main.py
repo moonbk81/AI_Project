@@ -18,7 +18,7 @@ from fastapi import File, Form, UploadFile, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
+from rag.llm_provider import get_default_llm_model, get_llm_provider, get_llm_runtime_label
 
 
 class AskRequest(BaseModel):
@@ -159,6 +159,7 @@ _RESULT_ARTIFACTS = {
     "internet_stall",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
+_CHROMA_DB_PATH = "./chroma_db"
 
 
 def get_engine():
@@ -170,6 +171,14 @@ def get_engine():
 
                 _engine = RilRagChat(model_name=get_default_llm_model("gemma4:12b"))
     return _engine
+
+
+def _get_engine_status() -> str:
+    if _engine is not None:
+        return "loaded"
+    if _engine_lock.locked():
+        return "initializing"
+    return "not_loaded"
 
 
 def _set_job(job_id: str, **updates):
@@ -237,8 +246,13 @@ def health() -> Dict[str, Any]:
     return {
         "status": "ok",
         "model": model_name,
+        "provider": get_llm_provider(),
         "runtime": get_llm_runtime_label(model_name),
+        "engine_status": _get_engine_status(),
         "engine_loaded": _engine is not None,
+        "engine_initializing": _engine_lock.locked(),
+        "chroma_db_path": _CHROMA_DB_PATH,
+        "artifact_dirs": {folder: os.path.exists(folder) for folder in _ARTIFACT_DIRS},
         "active_jobs": active_jobs,
         "supported_artifacts": sorted(_RESULT_ARTIFACTS),
     }

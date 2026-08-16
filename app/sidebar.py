@@ -201,6 +201,9 @@ def _render_engine_status():
         try:
             health = _get_cached_backend_health()
             st.caption(f"Runtime: `{health.get('runtime', 'N/A')}`")
+            st.caption(f"Engine: `{health.get('engine_status', 'unknown')}`")
+            if health.get("provider"):
+                st.caption(f"Provider: `{health.get('provider')}`")
         except Exception as e:
             st.caption(f"Backend 연결 실패: `{e}`")
     else:
