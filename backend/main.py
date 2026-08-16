@@ -87,6 +87,23 @@ class JobsResponse(BaseModel):
     jobs: List[JobStatusResponse]
 
 
+class PlmQuickSearchRequest(BaseModel):
+    division_code: str = "25"
+    main_owner_id: str = Field(min_length=1)
+    status: str = "open"
+    search_type: str = "main"
+    limit: int = 50
+
+
+class PlmQuickSearchResponse(BaseModel):
+    success: bool
+    message: str = ""
+    defects: List[Dict[str, Any]] = Field(default_factory=list)
+    defect_codes: List[str] = Field(default_factory=list)
+    total_codes: int = 0
+    truncated: bool = False
+
+
 app = FastAPI(title="AI Project RAG Backend")
 _engine = None
 _jobs: Dict[str, Dict[str, Any]] = {}
@@ -323,3 +340,17 @@ def list_jobs(limit: int = 20) -> JobsResponse:
 @app.get("/jobs/{job_id}", response_model=JobStatusResponse)
 def get_job_status(job_id: str) -> JobStatusResponse:
     return JobStatusResponse(**_get_job(job_id))
+
+
+@app.post("/plm/quick-search", response_model=PlmQuickSearchResponse)
+def plm_quick_search(req: PlmQuickSearchRequest) -> PlmQuickSearchResponse:
+    from plm.service import quick_search_defects
+
+    result = quick_search_defects(
+        division_code=req.division_code,
+        main_owner_id=req.main_owner_id,
+        status=req.status,
+        search_type=req.search_type,
+        limit=req.limit,
+    )
+    return PlmQuickSearchResponse(**result)

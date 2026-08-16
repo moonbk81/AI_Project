@@ -18,6 +18,7 @@ import io
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from app.backend_client import plm_quick_search_with_optional_backend
 from plm.plm_rag_integration import (
     create_plm_integration,
     PLMDefectContextBuilder,
@@ -1839,6 +1840,12 @@ def render_plm_comment():
 
 def _research_with_same_conditions():
     """Re-search using the same conditions as the previous search"""
+    if _is_plm_local_test_mode():
+        _apply_plm_local_test_data(force=True)
+        st.success("Local test samples refreshed")
+        st.rerun()
+        return
+
     search_label = st.session_state.get('plm_quick_search_label', '')
     status = st.session_state.get('plm_quick_search_status', '')
     division_code = st.session_state.get('plm_quick_search_division', '25')
@@ -1879,65 +1886,35 @@ def _research_with_same_conditions():
     with st.spinner(f"Searching {status} defects with same conditions..."):
         try:
             client = _get_plm_client()
-            if not client:
+            if not client and not _is_plm_local_test_mode():
                 st.error("PLM API not configured")
                 return
 
-            response = client.get_defect_list(
+            result = plm_quick_search_with_optional_backend(
+                client,
                 division_code=division_code,
                 main_owner_id=search_id,
-                status=status.lower(),
-                search_type="main"
+                status=status,
+                search_type="main",
             )
 
-            if not response.is_success():
-                error_msg = response.get_error_message()
-                st.error(f"Search failed: {error_msg}")
+            if not result.get("success"):
+                st.error(f"Search failed: {result.get('message', 'Unknown error')}")
                 return
 
-            result_data = response.result.get('resultData', [])
-
-            if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
-                st.info(f"No defects found")
-                return
-
-            defect_codes = []
-            for result in result_data:
-                if isinstance(result, dict) and 'defectCode' in result:
-                    codes = result['defectCode']
-                    if isinstance(codes, list):
-                        defect_codes.extend(codes)
-                    elif isinstance(codes, str):
-                        defect_codes.extend([code.strip() for code in codes.split(',') if code.strip()])
-
-            if not defect_codes:
+            defects = result.get("defects", [])
+            if not defects:
                 st.info(f"No {status} defects found")
                 return
 
-            codes_to_fetch = defect_codes[:50]
-            st.info(f"Found {len(defect_codes)} {status} defect code(s). Loading details...")
-            if len(defect_codes) > 50:
-                st.warning(f"Showing first 50 out of {len(defect_codes)} defects")
+            if result.get("truncated"):
+                st.warning(f"Showing first {len(defects)} out of {result.get('total_codes', len(defects))} defects")
 
-            response_details = client.get_defect_info(
-                division_code=division_code,
-                defect_codes=codes_to_fetch
-            )
-
-            if response_details.is_success():
-                defects = response_details.result.get('defectList', [])
-
-                if defects:
-                    st.session_state.plm_quick_search_results = defects
-                    st.session_state.plm_quick_search_selected_index = 0
-                    st.session_state.navigate_to_chat = False
-                    st.success(f"Refreshed: {len(defects)} {status} defect(s)")
-                    st.rerun()
-                else:
-                    st.info(f"No defect details available")
-            else:
-                error_msg = response_details.get_error_message()
-                st.error(f"Failed to load details: {error_msg}")
+            st.session_state.plm_quick_search_results = defects
+            st.session_state.plm_quick_search_selected_index = 0
+            st.session_state.navigate_to_chat = False
+            st.success(f"Refreshed: {len(defects)} {status} defect(s)")
+            st.rerun()
 
         except PLMAPIException as e:
             st.error(f"API Error: {e}")
@@ -2323,6 +2300,12 @@ def _show_search_input_form_fragment():
             group_key = None
 
     if st.button("Search", key="btn_quick_search"):
+        if _is_plm_local_test_mode():
+            _apply_plm_local_test_data(force=True)
+            st.success("Local test samples loaded")
+            _show_cached_results_in_fragment()
+            return
+
         if search_method == "Group":
             if not group_key:
                 st.error("Please select a group")
@@ -2346,76 +2329,44 @@ def _show_search_input_form_fragment():
         with st.spinner(f"Searching {status} defects for {search_label}..."):
             try:
                 client = _get_plm_client()
-                if not client:
+                if not client and not _is_plm_local_test_mode():
                     st.error("PLM API not configured")
                     return
 
-                response = client.get_defect_list(
+                result = plm_quick_search_with_optional_backend(
+                    client,
                     division_code=division_code,
                     main_owner_id=search_id,
-                    status=status.lower(),
-                    search_type="main"
+                    status=status,
+                    search_type="main",
                 )
 
-                if not response.is_success():
-                    error_msg = response.get_error_message()
-                    st.error(f"Search failed: {error_msg}")
+                if not result.get("success"):
+                    st.error(f"Search failed: {result.get('message', 'Unknown error')}")
                     return
 
-                result_data = response.result.get('resultData', [])
-
-                if not result_data or not isinstance(result_data, list) or len(result_data) == 0:
-                    st.info(f"No defects found")
-                    return
-
-                # Extract defect codes from ALL items in resultData
-                # API returns an array where each item contains defectCode(s) for one owner
-                defect_codes = []
-                for result in result_data:
-                    if isinstance(result, dict) and 'defectCode' in result:
-                        codes = result['defectCode']
-                        if isinstance(codes, list):
-                            # defectCode is already a list
-                            defect_codes.extend(codes)
-                        elif isinstance(codes, str):
-                            # defectCode is a comma-separated string
-                            defect_codes.extend([code.strip() for code in codes.split(',') if code.strip()])
-
-                if not defect_codes:
+                defects = result.get("defects", [])
+                if not defects:
                     st.info(f"No {status} defects found")
                     return
 
-                codes_to_fetch = defect_codes[:50]
-                st.info(f"Found {len(defect_codes)} {status} defect code(s). Loading details...")
-                if len(defect_codes) > 50:
-                    st.warning(f"Showing first 50 out of {len(defect_codes)} defects")
-
-                response_details = client.get_defect_info(
-                    division_code=division_code,
-                    defect_codes=codes_to_fetch
+                logger.info(
+                    "Quick search loaded %s defect detail rows from %s code(s)",
+                    len(defects),
+                    result.get("total_codes", len(defects)),
                 )
+                if result.get("truncated"):
+                    st.warning(f"Showing first {len(defects)} out of {result.get('total_codes', len(defects))} defects")
 
-                logger.info(f"API call: codes_to_fetch={len(codes_to_fetch)}, response codes={len(response_details.result.get('defectList', []))}")
-
-                if response_details.is_success():
-                    defects = response_details.result.get('defectList', [])
-                    logger.info(f"Loaded {len(defects)} defect details")
-
-                    if defects:
-                        st.session_state.plm_quick_search_results = defects
-                        st.session_state.plm_quick_search_division = division_code
-                        st.session_state.plm_quick_search_label = search_label
-                        st.session_state.plm_quick_search_status = status
-                        st.session_state.plm_quick_search_selected_index = 0
-                        st.success(f"Loaded {len(defects)} {status} defect(s)")
-                        # Show results immediately after loading
-                        _show_cached_results_in_fragment()
-                        return
-                    else:
-                        st.info(f"No defect details available")
-                else:
-                    error_msg = response_details.get_error_message()
-                    st.error(f"Failed to load details: {error_msg}")
+                st.session_state.plm_quick_search_results = defects
+                st.session_state.plm_quick_search_division = division_code
+                st.session_state.plm_quick_search_label = search_label
+                st.session_state.plm_quick_search_status = status
+                st.session_state.plm_quick_search_selected_index = 0
+                st.success(f"Loaded {len(defects)} {status} defect(s)")
+                # Show results immediately after loading
+                _show_cached_results_in_fragment()
+                return
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")

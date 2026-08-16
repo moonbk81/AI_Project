@@ -197,3 +197,50 @@ def test_create_and_list_analyze_job(client, fake_executor):
     uploaded_path = Path(fake_executor.submissions[0][1][1][0])
     assert uploaded_path.name == "radio.log"
     assert uploaded_path.read_bytes() == b"log body"
+
+
+def test_plm_quick_search_endpoint(client, monkeypatch):
+    calls = []
+
+    def fake_quick_search_defects(**kwargs):
+        calls.append(kwargs)
+        return {
+            "success": True,
+            "message": "",
+            "defects": [{"defectCode": "P260711-001", "plmTitle": "Data stall"}],
+            "defect_codes": ["P260711-001"],
+            "total_codes": 1,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr("plm.service.quick_search_defects", fake_quick_search_defects)
+
+    response = client.post(
+        "/plm/quick-search",
+        json={
+            "division_code": "25",
+            "main_owner_id": "user.one,user.two",
+            "status": "Open",
+            "search_type": "main",
+            "limit": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "message": "",
+        "defects": [{"defectCode": "P260711-001", "plmTitle": "Data stall"}],
+        "defect_codes": ["P260711-001"],
+        "total_codes": 1,
+        "truncated": False,
+    }
+    assert calls == [
+        {
+            "division_code": "25",
+            "main_owner_id": "user.one,user.two",
+            "status": "Open",
+            "search_type": "main",
+            "limit": 25,
+        }
+    ]

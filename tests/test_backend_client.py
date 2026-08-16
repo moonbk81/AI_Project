@@ -129,3 +129,46 @@ def test_create_analyze_job_uploads_files_and_options(monkeypatch):
             ("radio.log", b"log-body", "application/octet-stream"),
         )
     ]
+
+
+def test_plm_quick_search_via_backend_posts_search_payload(monkeypatch):
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse(
+            {
+                "success": True,
+                "defects": [{"defectCode": "P260711-001"}],
+                "defect_codes": ["P260711-001"],
+                "total_codes": 1,
+                "truncated": False,
+            }
+        )
+
+    install_fake_requests(monkeypatch, post=fake_post)
+
+    result = backend_client.plm_quick_search_via_backend(
+        division_code="25",
+        main_owner_id="user.one,user.two",
+        status="Open",
+        search_type="main",
+        limit=25,
+    )
+
+    assert result["defects"] == [{"defectCode": "P260711-001"}]
+    assert calls == [
+        (
+            "http://backend.local:8080/plm/quick-search",
+            {
+                "json": {
+                    "division_code": "25",
+                    "main_owner_id": "user.one,user.two",
+                    "status": "Open",
+                    "search_type": "main",
+                    "limit": 25,
+                },
+                "timeout": 12.5,
+            },
+        )
+    ]

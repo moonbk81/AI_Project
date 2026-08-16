@@ -285,3 +285,58 @@ def wait_for_job_via_backend(job_id: str, poll_interval: float = 1.0) -> Dict[st
         if status.get("status") in {"done", "error"}:
             return status
         time.sleep(poll_interval)
+
+
+def plm_quick_search_via_backend(
+    division_code: str,
+    main_owner_id: str,
+    status: str,
+    search_type: str = "main",
+    limit: int = 50,
+) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/quick-search",
+        json={
+            "division_code": division_code,
+            "main_owner_id": main_owner_id,
+            "status": status,
+            "search_type": search_type,
+            "limit": limit,
+        },
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def plm_quick_search_with_optional_backend(
+    client,
+    division_code: str,
+    main_owner_id: str,
+    status: str,
+    search_type: str = "main",
+    limit: int = 50,
+) -> Dict[str, Any]:
+    if is_backend_api_enabled():
+        return plm_quick_search_via_backend(
+            division_code=division_code,
+            main_owner_id=main_owner_id,
+            status=status,
+            search_type=search_type,
+            limit=limit,
+        )
+    if client is None:
+        raise RuntimeError("PLM API not configured")
+
+    from plm.service import quick_search_defects
+
+    return quick_search_defects(
+        division_code=division_code,
+        main_owner_id=main_owner_id,
+        status=status,
+        search_type=search_type,
+        limit=limit,
+        client=client,
+    )
