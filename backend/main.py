@@ -195,6 +195,23 @@ async def validation_exception_handler(request, exc):
         },
     )
 
+# Global exception handler for 500 errors
+from starlette.exceptions import HTTPException
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import sys
+    import traceback
+    print(f"[500_ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": str(exc),
+            "type": type(exc).__name__
+        },
+    )
+
 _engine = None
 _engine_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}

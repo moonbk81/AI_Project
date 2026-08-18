@@ -868,6 +868,11 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     selected_rows = table_state.selection.rows if table_state and table_state.selection else []
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
 
+    import sys
+    print(f"[DEBUG] table_state: {table_state}", file=sys.stderr)
+    print(f"[DEBUG] selected_rows: {selected_rows}", file=sys.stderr)
+    print(f"[DEBUG] prev_selected_rows: {prev_selected_rows}", file=sys.stderr)
+
     # Detect newly checked rows
     newly_checked = set(selected_rows) - set(prev_selected_rows)
     for row_idx in newly_checked:
@@ -887,8 +892,10 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         st.session_state.plm_quick_search_selected_index = selected_index
         # Update active defect when selection changes
         if selected_index < len(defects):
-            st.session_state.plm_active_defect_code = defects[selected_index].get('defectCode')
+            defect_code = defects[selected_index].get('defectCode')
+            st.session_state.plm_active_defect_code = defect_code
             st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
+            logger.info(f"[DEBUG] plm_active_defect_code set to: {defect_code}")
         return selected_index
 
     selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
