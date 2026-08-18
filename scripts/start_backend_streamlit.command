@@ -2,7 +2,16 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONDA_ENV="${CONDA_ENV:-ai}"
+OS_TYPE="$(uname -s)"
+
+# Set default conda environment based on OS
+if [[ "${OS_TYPE}" == "Darwin" ]]; then
+  DEFAULT_CONDA_ENV="ai"
+else
+  DEFAULT_CONDA_ENV="ai_proj"
+fi
+
+CONDA_ENV="${CONDA_ENV:-${DEFAULT_CONDA_ENV}}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 BACKEND_API_URL="${BACKEND_API_URL:-http://localhost:${BACKEND_PORT}}"
@@ -80,7 +89,9 @@ EOF
 
 chmod +x "${BACKEND_RUNNER}" "${FRONTEND_RUNNER}"
 
-osascript - "${BACKEND_RUNNER}" "${FRONTEND_RUNNER}" <<'OSA'
+if [[ "${OS_TYPE}" == "Darwin" ]]; then
+  # macOS: Use osascript to open Terminal windows
+  osascript - "${BACKEND_RUNNER}" "${FRONTEND_RUNNER}" <<'OSA'
 on run argv
   tell application "Terminal"
     activate
@@ -90,5 +101,34 @@ on run argv
   end tell
 end run
 OSA
-
-echo "Started AI_Project backend and Streamlit in two Terminal windows."
+  echo "Started AI_Project backend and Streamlit in two Terminal windows."
+elif command -v tmux >/dev/null 2>&1; then
+  # Linux with tmux: Create two panes in a new session
+  SESSION_NAME="ai_project_$$"
+  tmux new-session -d -s "${SESSION_NAME}" -x 200 -y 50
+  tmux send-keys -t "${SESSION_NAME}:0" "bash ${BACKEND_RUNNER}" Enter
+  tmux new-window -t "${SESSION_NAME}"
+  tmux send-keys -t "${SESSION_NAME}:1" "bash ${FRONTEND_RUNNER}" Enter
+  tmux attach-session -t "${SESSION_NAME}"
+elif command -v gnome-terminal >/dev/null 2>&1; then
+  # Linux with GNOME: Open two terminal tabs
+  gnome-terminal -- bash -c "bash ${BACKEND_RUNNER}; sleep 5" &
+  sleep 2
+  gnome-terminal -- bash -c "bash ${FRONTEND_RUNNER}; sleep 5" &
+  echo "Started AI_Project backend and Streamlit in two GNOME Terminal windows."
+elif command -v konsole >/dev/null 2>&1; then
+  # Linux with KDE: Open two terminal windows
+  konsole -e bash -c "bash ${BACKEND_RUNNER}; sleep 5" &
+  sleep 2
+  konsole -e bash -c "bash ${FRONTEND_RUNNER}; sleep 5" &
+  echo "Started AI_Project backend and Streamlit in two Konsole windows."
+else
+  # Fallback: Run both in background
+  echo "No suitable terminal found. Running backend and Streamlit in background..."
+  bash "${BACKEND_RUNNER}" &
+  BACKEND_PID=$!
+  sleep 3
+  bash "${FRONTEND_RUNNER}" &
+  FRONTEND_PID=$!
+  echo "Backend PID: ${BACKEND_PID}, Frontend PID: ${FRONTEND_PID}"
+fi
