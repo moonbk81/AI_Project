@@ -13,6 +13,7 @@ tqdm>=4.66.0
 
 # HTTP & API
 requests>=2.31.0
+protobuf>=5.0,<7.0
 
 # AI, Vector DB & Embedding Models
 chromadb>=0.4.24

@@ -58,6 +58,19 @@ MODEL_CONFIG = {
         "max_meta_chars": 3600,
         "top_k": 5,
     },
+    "qwen72b": {  # vLLM served model name
+        "num_ctx": 16384,
+        "num_predict": 1024,
+        "embed_batch_size": 32,
+        "add_batch_size": 256,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.05,
+        "stop": ["<|im_end|>", "<|endoftext|>"],
+        "max_doc_chars": 2200,
+        "max_meta_chars": 3600,
+        "top_k": 5,
+    },
     "qwen3.5:9b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보

@@ -24,7 +24,7 @@ from rag.llm_provider import get_default_llm_model, get_llm_provider, get_llm_ru
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     current_file: Optional[str] = None
-    chat_history: Optional[List[Dict[str, str]]] = None
+    chat_history: Optional[List[Dict[str, Any]]] = None
     top_k: Optional[int] = None
     health_kpi: Optional[str] = None
 
@@ -178,6 +178,23 @@ class PlmAnalyzeResponse(BaseModel):
 
 
 app = FastAPI(title="AI Project RAG Backend")
+
+# Exception handler for detailed validation errors
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    import sys
+    print(f"[VALIDATION_ERROR] {exc}", file=sys.stderr)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "body": str(exc)
+        },
+    )
+
 _engine = None
 _engine_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}

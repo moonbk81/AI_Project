@@ -49,7 +49,7 @@ def _vllm_chat(
         "model": model,
         "messages": messages,
         "temperature": float(options.get("temperature", 0.1)),
-        "max_tokens": int(options.get("max_tokens", options.get("num_predict", 2048))),
+        "max_tokens": int(options.get("max_tokens", options.get("num_predict", 1024))),
         "stream": False,
     }
 
@@ -66,16 +66,29 @@ def _vllm_chat(
     if response_format:
         payload["response_format"] = response_format
 
+    url = f"{base_url}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    import sys
+    print(f"[DEBUG] vLLM Request - URL: {url}", file=sys.stderr)
+    print(f"[DEBUG] Headers: {headers}", file=sys.stderr)
+
     response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        url,
+        headers=headers,
         json=payload,
         timeout=timeout,
     )
-    response.raise_for_status()
+
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f"[DEBUG] vLLM API Error - Status: {response.status_code}", file=sys.stderr)
+        print(f"[DEBUG] Response: {response.text}", file=sys.stderr)
+        print(f"[DEBUG] Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}", file=sys.stderr)
+        raise
     data = response.json()
     message = data.get("choices", [{}])[0].get("message", {})
     content = message.get("content") or ""

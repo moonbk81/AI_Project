@@ -101,9 +101,9 @@ Configured LLM Answer
 
 ```bash
 export RAG_LLM_PROVIDER=vllm
-export RAG_LLM_BASE_URL=http://<DGX_HOST>:8000/v1
-export RAG_LLM_MODEL=Qwen/Qwen2.5-72B-Instruct
-export RAG_LLM_API_KEY=EMPTY
+export RAG_LLM_BASE_URL=http://10.253.68.95:3000/api/v1
+export RAG_LLM_MODEL=qwen72b
+export RAG_LLM_API_KEY=sk-db915daba7084878bbeaebf003a64cce
 streamlit run web_app.py
 ```
 
