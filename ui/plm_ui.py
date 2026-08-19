@@ -330,7 +330,7 @@ def _extract_file_from_zip(file_data: bytes, target_filename: str) -> Optional[b
         return None
 
 
-def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: str):
+def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: str, selected_index: int = 0):
     """
     Automatically load files and start background processing when defect is selected
 
@@ -342,6 +342,7 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
     Args:
         defect: Selected defect dictionary
         division_code: PLM division code
+        selected_index: Current row index in the table
     """
     import time
     auto_start = time.time()
@@ -359,9 +360,11 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
         logger.info(f"Auto-processing already in progress for {defect_code}")
         return
 
-    # Mark as in progress
+    # Mark as in progress & preserve selection state before rerun
     st.session_state[f'plm_auto_processing_{defect_code}'] = True
-    logger.info(f"Starting auto-load for {defect_code}")
+    st.session_state.plm_quick_search_selected_indices = [selected_index]
+    st.session_state.plm_quick_search_selected_index = selected_index
+    logger.info(f"Starting auto-load for {defect_code} (preserving selection index {selected_index})")
 
     # Initialize session state if needed
     if 'plm_quick_search_files' not in st.session_state:
@@ -425,15 +428,14 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
             total_logs = 0
             if files:
                 total_logs = _auto_download_and_extract_logs(defect_code, division_code, files, status)
-                status.update(label="✅ 자동 처리 완료", state="complete", expanded=False)
+                if total_logs > 0:
+                    status.update(label=f"✅ {total_logs}개 LOG 파일 로드 완료 - Sidebar에서 분석 시작", state="complete", expanded=False)
+                else:
+                    status.update(label="✅ 자동 처리 완료 (LOG 파일 없음)", state="complete", expanded=False)
             else:
                 status.update(label="✅ 파일 로드 완료", state="complete", expanded=False)
 
-            # If logs were extracted, trigger auto-analysis by rerunning
-            if total_logs > 0:
-                # Give Streamlit a moment to close the status container
-                logger.info(f"Auto-load for {defect_code} completed in {time.time() - auto_start:.2f}s, triggering rerun")
-                st.rerun()
+            logger.info(f"Auto-load for {defect_code} completed in {time.time() - auto_start:.2f}s")
 
     except Exception as e:
         logger.error(f"Error auto-loading files for {defect_code}: {e}", exc_info=True)
@@ -537,9 +539,6 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
                     if status:
                         st.write(f"  ➕ {log_filename} → 분석 큐에 추가됨")
                     total_logs_found += 1
-
-                # Trigger auto-analysis in sidebar
-                st.session_state.trigger_auto_analysis = True
             else:
                 if status:
                     st.write(f"ℹ️ {file_title}에서 LOG 파일을 찾을 수 없음")
@@ -844,6 +843,9 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
             "Created": created,
         })
 
+    # Restore selection state from session (allows selection to persist after rerun)
+    saved_selection = st.session_state.get('plm_quick_search_selected_indices', [])
+
     table_state = st.dataframe(
         pd.DataFrame(table_data),
         width="stretch",
@@ -851,6 +853,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         on_select="rerun",
         selection_mode="multi-row",
         key="quick_search_results_table",
+        selection={"rows": saved_selection} if saved_selection else {},
         column_config={
             "Code": st.column_config.LinkColumn(
                 "Code",
@@ -872,7 +875,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
 
     # Debug: Log selection state
     if selected_rows != prev_selected_rows:
-        logger.info(f"[SELECTION DEBUG] table_state={table_state is not None}, selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}")
+        logger.info(f"[SELECTION DEBUG] selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}, saved_selection={saved_selection}")
 
     division_code = st.session_state.get('plm_quick_search_division')
 
@@ -883,19 +886,23 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
             defect = defects[row_idx]
             defect_code = defect.get('defectCode')
             logger.info(f"Row selected: {defect_code} (index {row_idx})")
-            _auto_load_and_process_defect_files(defect, division_code)
+            _auto_load_and_process_defect_files(defect, division_code, selected_index=row_idx)
         elif row_idx < len(defects):
             logger.warning(f"Row {row_idx} selected but division_code not set")
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
+    st.session_state.plm_quick_search_selected_indices = selected_rows  # Persist selection state
 
-    # Determine selected index: use most recently selected row or fallback to stored index
+    # Determine selected index: use most recently selected row, or restore from preserved state
     if selected_rows:
         selected_index = selected_rows[-1]  # Last (most recent) selected row
         selection_source = "user_selected"
-    else:
+    elif st.session_state.get('plm_quick_search_selected_index') is not None:
         selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
-        selection_source = "fallback"
+        selection_source = "restored"
+    else:
+        selected_index = 0
+        selection_source = "none"
 
     # Validate index
     if selected_index >= len(defects):
@@ -903,13 +910,13 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
 
     st.session_state.plm_quick_search_selected_index = selected_index
 
-    # Update active defect (ALWAYS update with current selected index)
+    # Update active defect based on selected index (persist through rerun)
     if selected_index < len(defects):
         selected_defect = defects[selected_index]
         defect_code = selected_defect.get('defectCode')
         st.session_state.plm_active_defect_code = defect_code
         st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
-        logger.info(f"Active defect updated: {defect_code} (index {selected_index}, source: {selection_source})")
+        logger.info(f"Active defect set: {defect_code} (index {selected_index}, source: {selection_source})")
 
     return selected_index
 
