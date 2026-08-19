@@ -243,3 +243,8 @@ csv/rag_golden_eval_details_output.yaml
 !/tests/*.json
 *.xlsx
 *.bundle
+
+# 따옴표 없는 pip 명령이 만드는 리다이렉트 사고 파일 (예: pip install streamlit>=1.32.0)
+=*
+# 임시 스크린샷
+/screenshot*.png
