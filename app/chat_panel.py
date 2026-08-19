@@ -6,13 +6,12 @@ from app.helpers import generate_unique_key
 
 
 def _render_assistant_visual_references(msg, key_suffix, msg_idx):
-    sig_history = []
-    reg_history = []
-    reg_map = {
-        "IN_SERVICE": 0, "OUT_OF_SERVICE": 1,
-        "EMERGENCY_ONLY": 2, "POWER_OFF": 3
-    }
+    """Render charts for reference metadata attached to an assistant message.
 
+    Only Battery_Drain_Report produces a chart today. OOS_Event / Signal_Level
+    branches used to accumulate reg_history / sig_history lists that nothing ever
+    read or plotted, so they were removed rather than left as silent no-ops.
+    """
     for i, meta in enumerate(msg.get("metas", [])):
         if meta.get('log_type') == 'Battery_Drain_Report':
             signal_data = {
@@ -34,23 +33,6 @@ def _render_assistant_visual_references(msg, key_suffix, msg_idx):
                 )
                 unique_key = generate_unique_key(f"chart_{key_suffix}_{msg_idx}_{i}", str(fig.to_json()[:100]))
                 st.plotly_chart(fig, width="stretch", key=unique_key)
-
-        if meta.get('log_type') == 'OOS_Event':
-            v_reg = meta.get('voice_reg', 'UNKNOWN').upper()
-            d_reg = meta.get('data_reg', 'UNKNOWN').upper()
-            slot = f"Slot{meta.get('slotId', '0')}"
-            time = meta.get('time')
-            if time:
-                reg_history.append({"time": time, "Status": reg_map.get(v_reg, -1), "Type": "Voice", "Slot": slot, "Label": v_reg})
-                reg_history.append({"time": time, "Status": reg_map.get(d_reg, -1), "Type": "Data", "Slot": slot, "Label": d_reg})
-
-        if meta.get('log_type') == 'Signal_Level':
-            lvl = meta.get('level')
-            rt = meta.get('rat', 'Unknown')
-            sl = meta.get('slot', '0')
-            tm = meta.get('time')
-            if tm and lvl is not None:
-                sig_history.append({"time": tm, "Slot": f"Slot {sl}", "RAT": str(rt), "Level": int(lvl), "Info": meta.get('raw_info', '')})
 
 
 def _render_existing_messages(key_suffix):

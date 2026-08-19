@@ -230,7 +230,6 @@ AI_Project/
   prepare_rag_payload.py
   run_golden_eval.py
   agent_tools.py
-  ui_components.py
   config.yaml
   requirements.txt
 ```

@@ -94,10 +94,9 @@ Add PLM section to Streamlit dashboard:
 ```python
 # In your main app.py or streamlit app
 import streamlit as st
-from plm.plm_dashboard import (
-    initialize_session_state,
+from ui.plm_ui import (
     render_plm_section,
-    render_plm_stats_sidebar
+    render_plm_sidebar_stats,
 )
 
 # Initialize
@@ -148,7 +147,7 @@ plm/
 ├── plm_api_example.py            # Usage examples
 ├── plm_config.yaml               # Configuration file
 ├── plm_rag_integration.py        # RAG integration module
-├── plm_dashboard.py              # Streamlit dashboard component
+├── service.py                    # Shared by FastAPI backend and Streamlit UI
 ├── PLM_API_README.md             # API documentation
 ├── INTEGRATION_GUIDE.md          # This file
 └── LICENSE                       # License info
@@ -333,7 +332,7 @@ for doc in batch_context['documents']:
 ```python
 # In your Streamlit app
 import streamlit as st
-from plm.plm_dashboard import initialize_session_state, render_plm_section
+from ui.plm_ui import render_plm_section
 
 st.set_page_config(layout="wide")
 

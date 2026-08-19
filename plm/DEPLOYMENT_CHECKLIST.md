@@ -82,10 +82,7 @@
 ### ✅ Dashboard Integration (if using Streamlit)
 - [ ] Import dashboard components
   ```python
-  from plm.plm_dashboard import (
-      initialize_session_state,
-      render_plm_section
-  )
+  from ui.plm_ui import render_plm_section
   ```
 - [ ] Add to main app
   ```python
@@ -124,7 +121,7 @@
   ```
 - [ ] Test dashboard components
   ```bash
-  python -c "from plm_dashboard import initialize_session_state; print('✓ Import successful')"
+  python -c "from ui.plm_ui import render_plm_section; print('✓ Import successful')"
   ```
 
 ### ✅ Integration Tests
@@ -308,10 +305,9 @@ If issues occur:
 ```python
 # In app.py or main streamlit file
 import streamlit as st
-from plm.plm_dashboard import initialize_session_state, render_plm_section
+from ui.plm_ui import render_plm_section
 
-initialize_session_state()
-render_plm_section()
+render_plm_section()   # session state is initialized inside
 ```
 
 ### Enable PLM in RAG System
