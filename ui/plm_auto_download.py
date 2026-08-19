@@ -78,50 +78,108 @@ class LogFileExtractor:
                 return True
         return False
 
+    # PLM 첨부는 ZIP 안에 ZIP 이 다시 들어있는 경우가 많다(로그는 안쪽에 있음).
+    # 무한 재귀와 zip bomb 을 막기 위한 가드.
+    NESTED_ZIP_MAX_DEPTH = 3
+    MAX_TOTAL_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
     @staticmethod
     def extract_logs_from_zip(zip_data: bytes, return_all: bool = False) -> Dict[str, bytes]:
         """
-        Extract log files from ZIP archive
+        Extract log files from a ZIP archive, descending into nested ZIPs.
+
+        PLM dumpstate attachments commonly wrap the log in an inner ZIP, so a
+        non-recursive scan finds nothing and silently reports "no logs".
 
         Args:
             zip_data: Binary data of ZIP file
-            return_all: If True, return all files; if False, only return log files
+            return_all: If True, return every file; if False, only log files
 
         Returns:
-            Dictionary {filename: file_content} for matching files
+            Dictionary {filename: file_content} for matching files. Names that
+            collide across nested archives keep their inner path as a prefix.
         """
-        extracted = {}
+        extracted: Dict[str, bytes] = {}
+        state = {"bytes": 0}
+        LogFileExtractor._collect_logs(zip_data, extracted, state, return_all, depth=0, origin="")
 
+        if extracted:
+            logger.info(
+                "Extracted %d file(s) from archive (%.1f MB total)",
+                len(extracted),
+                state["bytes"] / 1024 / 1024,
+            )
+        return extracted
+
+    @staticmethod
+    def _collect_logs(
+        zip_data: bytes,
+        extracted: Dict[str, bytes],
+        state: Dict[str, int],
+        return_all: bool,
+        depth: int,
+        origin: str,
+    ) -> None:
+        """Walk one archive level, recursing into nested ZIPs. Mutates ``extracted``."""
+        where = origin or "<root>"
         try:
-            zip_buffer = io.BytesIO(zip_data)
-
-            with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+            with zipfile.ZipFile(io.BytesIO(zip_data), 'r') as zip_ref:
                 for file_info in zip_ref.infolist():
-                    # Skip directories
                     if file_info.is_dir():
                         continue
 
                     filename = file_info.filename
-
-                    # For subdirectories, use only the filename
                     base_filename = os.path.basename(filename)
+                    if not base_filename:
+                        continue
 
-                    # Check if it's a log file (only check filename, not full path)
-                    if return_all or LogFileExtractor.is_log_file(base_filename):
+                    # Nested archive: recurse instead of treating it as a payload.
+                    if base_filename.lower().endswith('.zip'):
+                        if depth >= LogFileExtractor.NESTED_ZIP_MAX_DEPTH:
+                            logger.warning(
+                                "Nested ZIP depth limit (%d) reached at %s%s; not descending further",
+                                LogFileExtractor.NESTED_ZIP_MAX_DEPTH, origin, filename,
+                            )
+                            continue
                         try:
-                            file_content = zip_ref.read(filename)
-                            extracted[base_filename] = file_content
+                            inner = zip_ref.read(filename)
                         except Exception as e:
-                            logger.error(f"Failed to extract {filename}: {e}")
+                            logger.error(f"Failed to read nested ZIP {origin}{filename}: {e}")
+                            continue
+                        logger.info("Descending into nested ZIP %s%s", origin, filename)
+                        LogFileExtractor._collect_logs(
+                            inner, extracted, state, return_all,
+                            depth=depth + 1, origin=f"{origin}{base_filename}/",
+                        )
+                        continue
 
-            return extracted
+                    if not (return_all or LogFileExtractor.is_log_file(base_filename)):
+                        continue
+
+                    if state["bytes"] + file_info.file_size > LogFileExtractor.MAX_TOTAL_EXTRACT_BYTES:
+                        logger.warning(
+                            "Extraction size cap (%d bytes) would be exceeded by %s%s; skipping",
+                            LogFileExtractor.MAX_TOTAL_EXTRACT_BYTES, origin, filename,
+                        )
+                        continue
+
+                    # Same base name in two nested archives must not overwrite.
+                    key = base_filename
+                    if key in extracted:
+                        key = f"{origin}{base_filename}"
+                    try:
+                        content = zip_ref.read(filename)
+                    except Exception as e:
+                        logger.error(f"Failed to extract {origin}{filename}: {e}")
+                        continue
+
+                    extracted[key] = content
+                    state["bytes"] += len(content)
 
         except zipfile.BadZipFile:
-            logger.error("Invalid ZIP file")
-            return {}
+            logger.error("Invalid ZIP data at %s (depth=%d)", where, depth)
         except Exception as e:
-            logger.error(f"Error extracting from ZIP: {e}")
-            return {}
+            logger.error("Error extracting from ZIP at %s: %s", where, e)
 
     @staticmethod
     def extract_single_log(zip_data: bytes, target_filename: str) -> Optional[bytes]:

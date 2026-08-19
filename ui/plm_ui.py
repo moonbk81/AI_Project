@@ -306,6 +306,45 @@ def _list_zip_contents(file_data: bytes) -> Dict[str, int]:
         return {}
 
 
+def _list_archive_contents_recursive(file_data: bytes, _depth: int = 0) -> Dict[str, int]:
+    """
+    List file names inside a ZIP, descending into nested ZIPs.
+
+    Used for diagnostics when no log file matched: the interesting names are
+    usually inside an inner archive, which _list_zip_contents() cannot see.
+
+    Returns:
+        {display_path: file_size_in_bytes}
+    """
+    if _depth > LogFileExtractor.NESTED_ZIP_MAX_DEPTH:
+        return {}
+
+    found: Dict[str, int] = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_data), 'r') as zip_ref:
+            for info in zip_ref.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename
+                if name.lower().endswith('.zip'):
+                    try:
+                        inner = zip_ref.read(name)
+                    except Exception:
+                        found[f"{name} (읽기 실패)"] = info.file_size
+                        continue
+                    for sub, size in _list_archive_contents_recursive(inner, _depth + 1).items():
+                        found[f"{name}/{sub}"] = size
+                else:
+                    found[name] = info.file_size
+    except zipfile.BadZipFile:
+        return {}
+    except Exception as e:
+        logger.error(f"Error listing archive: {e}")
+        return {}
+
+    return found
+
+
 def _extract_file_from_zip(file_data: bytes, target_filename: str) -> Optional[bytes]:
     """
     Extract a single file from ZIP (called only when user selects a file)
@@ -539,10 +578,10 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
                         st.write(f"  ➕ {log_filename} → 분석 큐에 추가됨")
                     total_logs_found += 1
             else:
-                # LOG_PATTERNS 는 dumpstate 계열 6개만 매칭하므로, 이름이 다르거나
-                # ZIP 안에 다시 ZIP 이 들어있으면 아무것도 안 잡힌다. 어떤 파일이
+                # 중첩 ZIP 은 추출기가 재귀로 들어가므로, 여기까지 왔다면 이름이
+                # LOG_PATTERNS(dumpstate 계열)와 맞지 않는 경우다. 어떤 파일이
                 # 있었는지 보여줘야 왜 못 잡았는지 알 수 있다.
-                contents = _list_zip_contents(file_data)
+                contents = _list_archive_contents_recursive(file_data)
                 logger.info(
                     "No LOG files matched in %s; archive root contains: %s",
                     file_title,
