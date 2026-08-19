@@ -2277,6 +2277,11 @@ def _show_cached_results_in_fragment():
 
 def _show_search_input_form_fragment():
     """Display search input form using radio buttons"""
+    # Reset rerun flag to allow next search to trigger rerun
+    if st.session_state.get('plm_search_just_loaded'):
+        st.session_state.plm_search_rerun_done = False
+        st.session_state.plm_search_just_loaded = False
+
     st.subheader("Quick Search")
 
     # Division fixed to Mobile
@@ -2413,7 +2418,11 @@ def _show_search_input_form_fragment():
                     st.session_state.plm_active_defect_code = defects[0].get('defectCode')
                     st.session_state.plm_active_division = division_code
                 st.success(f"Loaded {len(defects)} {status} defect(s)")
-                st.rerun()  # Rerun to update sidebar with active defect
+                # Mark that we've just loaded results to prevent infinite rerun
+                st.session_state.plm_search_just_loaded = True
+                if not st.session_state.get('plm_search_rerun_done'):
+                    st.session_state.plm_search_rerun_done = True
+                    st.rerun()  # First rerun to update sidebar with active defect
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
