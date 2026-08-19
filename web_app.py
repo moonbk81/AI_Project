@@ -4,6 +4,7 @@ import warnings
 from app.pipeline import run_analysis_pipeline
 from app.backend_client import is_backend_api_enabled
 from app.sidebar import render_sidebar
+from ui.plm_ui import refresh_plm_sidebar_active_defect
 from app.tabs import (
     render_benchmark_tab,
     render_boot_tab,
@@ -277,3 +278,7 @@ with tab_knowledge:
 
 with tab_plm:
     render_plm_section_tab()
+
+# The sidebar is drawn above, before the tabs, so a PLM defect selected in the
+# tab above is only known now. Refresh the sidebar's reserved slot in place.
+refresh_plm_sidebar_active_defect()

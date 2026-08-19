@@ -362,7 +362,6 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
 
     # Mark as in progress & preserve selection state before rerun
     st.session_state[f'plm_auto_processing_{defect_code}'] = True
-    st.session_state.plm_quick_search_selected_indices = [selected_index]
     st.session_state.plm_quick_search_selected_index = selected_index
     logger.info(f"Starting auto-load for {defect_code} (preserving selection index {selected_index})")
 
@@ -848,7 +847,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         width="stretch",
         hide_index=True,
         on_select="rerun",
-        selection_mode="multi-row",
+        selection_mode="single-row",
         key="quick_search_results_table",
         column_config={
             "Code": st.column_config.LinkColumn(
@@ -865,64 +864,57 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         },
     )
 
-    # Handle row selections (multi-row) for auto-download
-    selected_rows = table_state.selection.rows if table_state and table_state.selection else []
+    if not defects:
+        return 0
+
+    # single-row mode: Streamlit itself clears the previous row when a new one is
+    # picked, so `rows` holds at most one index.
+    selected_rows = list(table_state.selection.rows) if table_state and table_state.selection else []
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
-
-    # Debug: Log selection state
-    if selected_rows != prev_selected_rows:
-        logger.info(f"[SELECTION DEBUG] selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}")
-
     division_code = st.session_state.get('plm_quick_search_division')
 
-    # Detect newly checked rows
-    newly_checked = set(selected_rows) - set(prev_selected_rows)
-    for row_idx in newly_checked:
-        if row_idx < len(defects) and division_code:
-            defect = defects[row_idx]
-            defect_code = defect.get('defectCode')
-            logger.info(f"Row selected: {defect_code} (index {row_idx})")
-            # Clear previous pending logs when selecting a new defect
+    if selected_rows:
+        selected_index = selected_rows[0]
+        selection_source = "user_selected"
+    else:
+        # Nothing checked (first render, or the user cleared the row): show the
+        # previously viewed defect, defaulting to the first one.
+        selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+        selection_source = "default"
+
+    if not 0 <= selected_index < len(defects):
+        selected_index = 0
+
+    selected_defect = defects[selected_index]
+    defect_code = selected_defect.get('defectCode')
+
+    # Only kick off work when the checked row actually changed, not on every rerun.
+    if selected_rows and selected_rows != prev_selected_rows:
+        logger.info(f"Row selected: {defect_code} (index {selected_index})")
+        if division_code:
+            # Logs from the previously selected defect must not leak into this one.
             st.session_state.plm_pending_logs = []
-            # Update active defect IMMEDIATELY when selected (before auto-load)
-            st.session_state.plm_active_defect_code = defect_code
-            st.session_state.plm_active_division = division_code
-            # Mark for auto-load processing (will happen after UI renders)
+            # Queue the download/extract so it runs after the details have rendered.
             st.session_state.plm_pending_auto_load = {
-                'defect': defect,
+                'defect': selected_defect,
                 'division_code': division_code,
-                'selected_index': row_idx
+                'selected_index': selected_index,
             }
-        elif row_idx < len(defects):
-            logger.warning(f"Row {row_idx} selected but division_code not set")
+        else:
+            logger.warning(f"Row {selected_index} selected but division_code not set")
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
-    st.session_state.plm_quick_search_selected_indices = selected_rows  # Persist selection state
-
-    # Determine selected index: use most recently selected row, or restore from preserved state
-    if selected_rows:
-        selected_index = selected_rows[-1]  # Last (most recent) selected row
-        selection_source = "user_selected"
-    elif st.session_state.get('plm_quick_search_selected_index') is not None:
-        selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
-        selection_source = "restored"
-    else:
-        selected_index = 0
-        selection_source = "none"
-
-    # Validate index
-    if selected_index >= len(defects):
-        selected_index = 0
-
     st.session_state.plm_quick_search_selected_index = selected_index
 
-    # Update active defect based on selected index (persist through rerun)
-    if selected_index < len(defects):
-        selected_defect = defects[selected_index]
-        defect_code = selected_defect.get('defectCode')
-        st.session_state.plm_active_defect_code = defect_code
-        st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
-        logger.info(f"Active defect set: {defect_code} (index {selected_index}, source: {selection_source})")
+    # Active defect always mirrors the row whose details are shown below.
+    st.session_state.plm_active_defect_code = defect_code
+    st.session_state.plm_active_division = division_code
+    logger.info(f"Active defect set: {defect_code} (index {selected_index}, source: {selection_source})")
+
+    # Paint the sidebar slot right now. The end-of-script refresh in web_app.py
+    # would otherwise only land after the (blocking) attachment auto-download
+    # below, which is why the sidebar used to lag a whole selection behind.
+    _write_plm_active_defect_slot()
 
     return selected_index
 
@@ -1964,16 +1956,6 @@ def _show_cached_results_in_fragment():
         st.info("No cached results")
         return
 
-    # Initialize active defect BEFORE sidebar renders (sidebar 렌더링 전에 미리 설정)
-    results = st.session_state.plm_quick_search_results
-    division_code = st.session_state.get('plm_quick_search_division')
-    selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
-
-    if selected_index < len(results) and division_code:
-        selected_defect = results[selected_index]
-        st.session_state.plm_active_defect_code = selected_defect.get('defectCode')
-        st.session_state.plm_active_division = division_code
-
     st.subheader("Quick Search Results")
 
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -2277,11 +2259,6 @@ def _show_cached_results_in_fragment():
 
 def _show_search_input_form_fragment():
     """Display search input form using radio buttons"""
-    # Reset rerun flag to allow next search to trigger rerun
-    if st.session_state.get('plm_search_just_loaded'):
-        st.session_state.plm_search_rerun_done = False
-        st.session_state.plm_search_just_loaded = False
-
     st.subheader("Quick Search")
 
     # Division fixed to Mobile
@@ -2413,16 +2390,12 @@ def _show_search_input_form_fragment():
                 st.session_state.plm_quick_search_label = search_label
                 st.session_state.plm_quick_search_status = status
                 st.session_state.plm_quick_search_selected_index = 0
-                # Set active defect to first result (sidebar 렌더링 전에 미리 설정)
-                if defects:
-                    st.session_state.plm_active_defect_code = defects[0].get('defectCode')
-                    st.session_state.plm_active_division = division_code
+                st.session_state.plm_quick_search_prev_selected_rows = []
                 st.success(f"Loaded {len(defects)} {status} defect(s)")
-                # Mark that we've just loaded results to prevent infinite rerun
-                st.session_state.plm_search_just_loaded = True
-                if not st.session_state.get('plm_search_rerun_done'):
-                    st.session_state.plm_search_rerun_done = True
-                    st.rerun()  # First rerun to update sidebar with active defect
+                # Show results immediately; the sidebar's active-defect slot is
+                # refreshed at the end of the script run (see web_app.py).
+                _show_cached_results_in_fragment()
+                return
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
@@ -2549,15 +2522,43 @@ def render_plm_sidebar_stats():
             if _is_plm_local_test_mode():
                 st.caption("로컬 테스트 모드")
 
-            # Show active defect if selected
-            active_defect = st.session_state.get('plm_active_defect_code')
-            if active_defect:
-                st.info(f"**활성 결함:**\n`{active_defect}`")
-            else:
-                st.caption("활성 결함: 없음")
+            # The sidebar renders before the PLM tab (see web_app.py), so the
+            # selection the user just made is not known yet. Reserve a slot here
+            # and let refresh_plm_sidebar_active_defect() fill it again once the
+            # tab has resolved the selection — no extra rerun needed.
+            st.session_state['_plm_active_defect_slot'] = st.empty()
+            _write_plm_active_defect_slot()
 
         except Exception as e:
             st.caption(str(e)[:30])
+
+
+def _write_plm_active_defect_slot():
+    """Write the current active defect into the reserved sidebar slot."""
+    slot = st.session_state.get('_plm_active_defect_slot')
+    if slot is None:
+        return
+
+    active_defect = st.session_state.get('plm_active_defect_code')
+    if active_defect:
+        slot.info(f"**활성 결함:**\n`{active_defect}`")
+    else:
+        slot.caption("활성 결함: 없음")
+
+
+def refresh_plm_sidebar_active_defect():
+    """
+    Re-render the sidebar's active defect after the tabs have rendered.
+
+    Streamlit runs the script top to bottom and the sidebar is drawn before the
+    PLM tab, so a selection made in the tab would otherwise only show up on the
+    *next* rerun (one frame behind). Calling this at the end of the script run
+    updates the reserved slot in place.
+    """
+    try:
+        _write_plm_active_defect_slot()
+    except Exception as e:  # never break the app over a sidebar refresh
+        logger.warning(f"Failed to refresh PLM sidebar active defect: {e}")
 
 
 # Export functions for use in other modules
@@ -2569,6 +2570,7 @@ __all__ = [
     'render_plm_comment',
     'render_plm_files',
     'render_plm_sidebar_stats',
+    'refresh_plm_sidebar_active_defect',
     '_initialize_plm_session',
     '_get_plm_client',
     '_format_analysis_as_comment',
