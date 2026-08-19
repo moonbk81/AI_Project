@@ -2408,10 +2408,12 @@ def _show_search_input_form_fragment():
                 st.session_state.plm_quick_search_label = search_label
                 st.session_state.plm_quick_search_status = status
                 st.session_state.plm_quick_search_selected_index = 0
+                # Set active defect to first result (sidebar 렌더링 전에 미리 설정)
+                if defects:
+                    st.session_state.plm_active_defect_code = defects[0].get('defectCode')
+                    st.session_state.plm_active_division = division_code
                 st.success(f"Loaded {len(defects)} {status} defect(s)")
-                # Show results immediately after loading
-                _show_cached_results_in_fragment()
-                return
+                st.rerun()  # Rerun to update sidebar with active defect
 
             except PLMAPIException as e:
                 st.error(f"API Error: {e}")
