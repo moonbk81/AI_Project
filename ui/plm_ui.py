@@ -843,9 +843,6 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
             "Created": created,
         })
 
-    # Restore selection state from session (allows selection to persist after rerun)
-    saved_selection = st.session_state.get('plm_quick_search_selected_indices', [])
-
     table_state = st.dataframe(
         pd.DataFrame(table_data),
         width="stretch",
@@ -853,7 +850,6 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         on_select="rerun",
         selection_mode="multi-row",
         key="quick_search_results_table",
-        selection={"rows": saved_selection} if saved_selection else {},
         column_config={
             "Code": st.column_config.LinkColumn(
                 "Code",
@@ -875,7 +871,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
 
     # Debug: Log selection state
     if selected_rows != prev_selected_rows:
-        logger.info(f"[SELECTION DEBUG] selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}, saved_selection={saved_selection}")
+        logger.info(f"[SELECTION DEBUG] selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}")
 
     division_code = st.session_state.get('plm_quick_search_division')
 
