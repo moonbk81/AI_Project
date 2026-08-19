@@ -882,6 +882,8 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
             defect = defects[row_idx]
             defect_code = defect.get('defectCode')
             logger.info(f"Row selected: {defect_code} (index {row_idx})")
+            # Clear previous pending logs when selecting a new defect
+            st.session_state.plm_pending_logs = []
             # Update active defect IMMEDIATELY when selected (before auto-load)
             st.session_state.plm_active_defect_code = defect_code
             st.session_state.plm_active_division = division_code
