@@ -138,6 +138,33 @@ def get_result_json_with_optional_backend(base_name: str, artifact: str, default
         return json.load(f)
 
 
+def get_health_kpi_via_backend(base_name: str) -> str:
+    import requests
+    from urllib.parse import quote
+
+    response = requests.get(
+        f"{get_backend_api_url()}/health-kpi/{quote(base_name, safe='')}",
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json().get("kpi_json", "")
+
+
+def get_health_kpi_with_optional_backend(base_name: str) -> str:
+    """Device health KPI JSON string.
+
+    The KPI is derived from ./result artifacts, which the backend owns. Reading
+    them from the Streamlit process only worked because both run in the same
+    working directory.
+    """
+    if is_backend_api_enabled():
+        return get_health_kpi_via_backend(base_name)
+
+    from agent_toolkit.kpi_tools import get_device_health_kpi
+
+    return get_device_health_kpi(base_name)
+
+
 def get_knowledge_via_backend() -> Dict[str, Any]:
     import requests
 

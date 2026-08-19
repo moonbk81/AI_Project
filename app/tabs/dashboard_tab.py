@@ -5,9 +5,9 @@ import plotly.express as px
 import streamlit as st
 
 import ui
-from agent_tools import get_device_health_kpi
 from app.backend_client import (
     ask_with_optional_backend,
+    get_health_kpi_with_optional_backend,
     get_metadata_with_optional_backend,
     get_result_json_with_optional_backend,
 )
@@ -256,7 +256,7 @@ def _render_ai_integrated_report(engine, df):
     with st.spinner("관련 이벤트와 지표를 정리하는 중입니다..."):
         actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
         current_base = st.session_state.current_file.replace("_payload.json", "")
-        health_kpi_json = get_device_health_kpi(current_base)
+        health_kpi_json = get_health_kpi_with_optional_backend(current_base)
         combined_query = f"""
         [입력 데이터]
         {health_kpi_json}

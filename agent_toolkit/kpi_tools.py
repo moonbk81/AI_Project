@@ -227,7 +227,9 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         reverse=True
     )[:10]
 
-    blocked_packages = list(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
+    # sorted(): set 순회 순서는 프로세스마다 달라(PYTHONHASHSEED) 같은 로그에서도
+    # LLM 프롬프트가 매 실행마다 바뀌었다. 분석 재현성을 위해 정렬한다.
+    blocked_packages = sorted(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
 
     dot_failures = []
     for net_id, info in private_dns.items():
@@ -259,7 +261,7 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
             sip_data = json.load(f)
             if sip_data:
                 sip_errors = [s for s in sip_data if s.get('is_error') == True]
-                error_methods = list(set([s.get('method_code') for s in sip_errors]))
+                error_methods = sorted(set([s.get('method_code') for s in sip_errors]))
                 kpi_report["8_ims_sip_transactions"] = {
                     "total_transactions": len(sip_data),
                     "error_count": len(sip_errors),

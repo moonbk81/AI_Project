@@ -49,6 +49,14 @@ class MetadataResponse(BaseModel):
     ids: List[str]
 
 
+class HealthKpiResponse(BaseModel):
+    base_name: str
+    # get_device_health_kpi() returns a JSON *string* that callers splice into an
+    # LLM prompt verbatim. Passing it through untouched keeps the prompt text
+    # byte-identical to the previous in-Streamlit call.
+    kpi_json: str
+
+
 class KnowledgeResponse(BaseModel):
     ids: List[str]
     documents: List[str]
@@ -385,6 +393,24 @@ def result_json(base_name: str, artifact: str):
 
     with open(path, "r", encoding="utf-8") as f:
         return JSONResponse(content=json.load(f))
+
+
+@app.get("/health-kpi/{base_name}", response_model=HealthKpiResponse)
+def health_kpi(base_name: str) -> HealthKpiResponse:
+    """Device health KPI summary derived from the backend's ./result artifacts.
+
+    Note: get_device_health_kpi() reports a missing report by returning
+    {"error": ...} as its JSON string rather than raising, and callers splice
+    that straight into the prompt. We preserve that instead of returning 404,
+    so moving this off the Streamlit host does not change behavior.
+    """
+    from agent_toolkit.kpi_tools import get_device_health_kpi
+
+    safe_base = os.path.basename(base_name)
+    return HealthKpiResponse(
+        base_name=safe_base,
+        kpi_json=get_device_health_kpi(safe_base),
+    )
 
 
 @app.get("/knowledge", response_model=KnowledgeResponse)

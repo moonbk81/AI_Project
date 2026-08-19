@@ -1,8 +1,11 @@
 import streamlit as st
 
 import ui
-from agent_tools import get_device_health_kpi
-from app.backend_client import ask_with_optional_backend, get_result_json_with_optional_backend
+from app.backend_client import (
+    ask_with_optional_backend,
+    get_health_kpi_with_optional_backend,
+    get_result_json_with_optional_backend,
+)
 from core.config import SATELLITE_PROMPTS
 
 def _detect_satellite_type(current_base, sat_at_data=None, ntn_data=None):
@@ -56,7 +59,7 @@ def render_satellite_tab(engine):
 
     if st.button(f"{sat_type} 위성망 리포트 생성", width="stretch"):
         with st.spinner(f"{sat_type} 위성망 데이터를 정리하는 중입니다..."):
-            health_kpi_json = get_device_health_kpi(current_base)
+            health_kpi_json = get_health_kpi_with_optional_backend(current_base)
             prompt_template = SATELLITE_PROMPTS.get(sat_type, "Prompt template not found.")
             sat_query = prompt_template.format(health_kpi_json=health_kpi_json)
 
