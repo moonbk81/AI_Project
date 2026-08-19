@@ -153,7 +153,6 @@ AI_Project/
       boot_tab.py
       satellite_tab.py
       internet_tab.py
-      benchmark_tab.py
       knowledge_tab.py
   agent_toolkit/
     call_tools.py
@@ -230,7 +229,6 @@ AI_Project/
   log_orchestrator.py
   prepare_rag_payload.py
   run_golden_eval.py
-  benchmark_ui.py
   agent_tools.py
   ui_components.py
   config.yaml
@@ -317,7 +315,6 @@ streamlit run web_app.py
 - `부팅·Crash·ANR·NITZ`: 부팅, crash, ANR, NITZ 관련 분석
 - `위성 통신`: NTN/Tiantong/SpaceX 관련 분석
 - `인터넷 품질`: Internet Stall, DNS, validation 관련 분석
-- `평가 결과`: benchmark/golden eval 결과 확인
 - `지식 베이스`: 분석 사례 조회 및 등록
 
 ## Golden Evaluation
@@ -381,7 +378,7 @@ pytest tests/test_semantic_routing_fuzzy.py
 - `payloads/*_payload.json`: ChromaDB 적재용 RAG payload
 - `chroma_db/`: persistent ChromaDB 저장소
 - `csv/rag_golden_eval_*.csv`: Golden evaluation 결과
-- `benchmark_results/`: 모델 benchmark 결과
+- `benchmark_results/`: 모델 benchmark 결과 (`scripts/benchmark_models.py` CLI 실행 시 생성)
 - `test_reports/`: routing 테스트 로그
 - `debug_prompts/`: `RAG_DEBUG_PROMPT=1` 설정 시 마지막 prompt/retrieval debug 자료
 

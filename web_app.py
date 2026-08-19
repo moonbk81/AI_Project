@@ -6,7 +6,6 @@ from app.backend_client import is_backend_api_enabled
 from app.sidebar import render_sidebar
 from ui.plm_ui import refresh_plm_sidebar_active_defect
 from app.tabs import (
-    render_benchmark_tab,
     render_boot_tab,
     render_chat_tab,
     render_dashboard_tab,
@@ -247,9 +246,9 @@ if st.session_state.get('navigate_to_chat', False):
     st.info("🚀 PLM 결함 분석 정보가 준비되었습니다. **'로그 분석' 탭**을 클릭하면 바로 분석이 시작됩니다!", icon="ℹ️")
     st.session_state.navigate_to_chat = False
 
-tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_benchmark, tab_knowledge, tab_plm = st.tabs([
+tab_chat, tab_dash, tab_boot, tab_ntn, tab_internet, tab_knowledge, tab_plm = st.tabs([
     "로그 분석", "통계 대시보드", "부팅·Crash·ANR·NITZ",
-    "위성 통신", "인터넷 품질", "평가 결과", "지식 베이스",
+    "위성 통신", "인터넷 품질", "지식 베이스",
     "PLM 결함 관리"])
 
 with st.sidebar:
@@ -269,9 +268,6 @@ with tab_ntn:
 
 with tab_internet:
     render_internet_tab()
-
-with tab_benchmark:
-    render_benchmark_tab()
 
 with tab_knowledge:
     render_knowledge_tab(engine)
