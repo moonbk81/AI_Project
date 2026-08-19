@@ -1964,6 +1964,16 @@ def _show_cached_results_in_fragment():
         st.info("No cached results")
         return
 
+    # Initialize active defect BEFORE sidebar renders (sidebar 렌더링 전에 미리 설정)
+    results = st.session_state.plm_quick_search_results
+    division_code = st.session_state.get('plm_quick_search_division')
+    selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+
+    if selected_index < len(results) and division_code:
+        selected_defect = results[selected_index]
+        st.session_state.plm_active_defect_code = selected_defect.get('defectCode')
+        st.session_state.plm_active_division = division_code
+
     st.subheader("Quick Search Results")
 
     col1, col2, col3 = st.columns([2, 1, 1])
