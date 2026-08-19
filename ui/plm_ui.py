@@ -877,6 +877,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
 
     # Detect newly checked rows
     newly_checked = set(selected_rows) - set(prev_selected_rows)
+    should_rerun = False
     for row_idx in newly_checked:
         if row_idx < len(defects) and division_code:
             defect = defects[row_idx]
@@ -893,8 +894,13 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
                 'division_code': division_code,
                 'selected_index': row_idx
             }
+            should_rerun = True
         elif row_idx < len(defects):
             logger.warning(f"Row {row_idx} selected but division_code not set")
+
+    # Trigger rerun to update sidebar immediately
+    if should_rerun:
+        st.rerun()
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
     st.session_state.plm_quick_search_selected_indices = selected_rows  # Persist selection state
