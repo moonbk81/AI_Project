@@ -539,9 +539,29 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
                         st.write(f"  ➕ {log_filename} → 분석 큐에 추가됨")
                     total_logs_found += 1
             else:
+                # LOG_PATTERNS 는 dumpstate 계열 6개만 매칭하므로, 이름이 다르거나
+                # ZIP 안에 다시 ZIP 이 들어있으면 아무것도 안 잡힌다. 어떤 파일이
+                # 있었는지 보여줘야 왜 못 잡았는지 알 수 있다.
+                contents = _list_zip_contents(file_data)
+                logger.info(
+                    "No LOG files matched in %s; archive root contains: %s",
+                    file_title,
+                    list(contents.keys()) or "(unreadable or empty)",
+                )
                 if status:
-                    st.write(f"ℹ️ {file_title}에서 LOG 파일을 찾을 수 없음")
-                logger.info(f"No LOG files found in {file_title}")
+                    st.write(f"ℹ️ {file_title}에서 인식 가능한 LOG 파일을 찾지 못했습니다")
+                    if contents:
+                        st.write(f"  ZIP 최상위 파일 {len(contents)}개:")
+                        for name, size in list(contents.items())[:15]:
+                            st.write(f"  · {name} ({size / 1024:.1f} KB)")
+                        if len(contents) > 15:
+                            st.write(f"  · ... 외 {len(contents) - 15}개")
+                        st.caption(
+                            "위 이름이 dumpstate 계열이 아니면 자동 인식 대상이 아닙니다. "
+                            "'검색 및 파일' 탭의 ZIP 열기로 직접 선택할 수 있습니다."
+                        )
+                    else:
+                        st.write("  ZIP 최상위에 파일이 없습니다 (중첩 ZIP 이거나 하위 폴더 구조)")
 
         except Exception as e:
             if status:
@@ -2236,6 +2256,11 @@ def _show_cached_results_in_fragment():
             pending['division_code'],
             selected_index=pending['selected_index']
         )
+        # The attachment list above and the sidebar's pending-log count were both
+        # drawn before this download finished, so they still show the pre-download
+        # state. Refresh once. On the next run the selection is unchanged, so no
+        # new auto-load is queued and this cannot loop.
+        st.rerun()
 
     st.divider()
     st.subheader("New Search")
@@ -2431,9 +2456,13 @@ def render_plm_section():
     if _is_plm_local_test_mode():
         st.info("PLM 로컬 테스트 모드가 활성화되어 있습니다. 샘플 defect로 UI를 검증합니다.")
 
-    # Check if auto-analysis should be triggered
-    if st.session_state.get('trigger_auto_analysis', False):
-        st.info("🚀 자동 분석 파이프라인이 시작되었습니다.")
+    # 추출된 로그가 대기 중이면 알려주되, 시작은 사용자가 sidebar 버튼으로 한다.
+    pending_logs = st.session_state.get('plm_pending_logs') or []
+    if pending_logs:
+        st.info(
+            f"📥 LOG 파일 {len(pending_logs)}개가 분석 대기 중입니다. "
+            "Sidebar의 **분석 및 DB 적재 시작** 을 누르면 시작합니다."
+        )
 
     # Create tabs
     tab0, tab1, tab2, tab3 = st.tabs([

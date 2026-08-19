@@ -343,30 +343,21 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     def set_running():
         st.session_state.is_running = True
 
-    # Auto-trigger analysis if:
-    # 1. trigger_auto_analysis flag is set OR
-    # 2. There are PLM extracted logs pending and is_running is False
-    should_auto_trigger = (
-        st.session_state.get('trigger_auto_analysis', False) or bool(pending_logs)
-    ) and not st.session_state.is_running and not backend_job_running
+    # 분석/DB 적재는 사용자가 이 버튼을 눌러야만 시작한다.
+    # PLM 첨부 로그가 대기 중이라는 이유로 자동 시작하면, 이슈 하나를 고르는 순간
+    # 분석이 걸려버려 이전 작업이 끝날 때까지 다른 이슈를 볼 수 없다.
+    st.session_state.trigger_auto_analysis = False
 
     # 3. 버튼에 disabled 속성과 on_click 콜백 적용
-    if should_auto_trigger:
-        # Auto-trigger: run analysis immediately
-        st.session_state.trigger_auto_analysis = False
-        st.session_state.is_running = True
-        button_click = True
-        st.info("PLM 추출 로그로 분석을 자동 시작합니다...")
-    else:
-        button_click = st.button(
-            "분석 및 DB 적재 시작",
-            width="stretch",
-            type="primary",
-            on_click=set_running,
-            disabled=st.session_state.is_running or backend_job_running,
-        )
+    button_click = st.button(
+        "분석 및 DB 적재 시작",
+        width="stretch",
+        type="primary",
+        on_click=set_running,
+        disabled=st.session_state.is_running or backend_job_running,
+    )
 
-    if button_click or should_auto_trigger:
+    if button_click:
         # Combine uploaded files, PLM selected file, and PLM extracted logs
         files_to_analyze = list(uploaded_files) if uploaded_files else []
 

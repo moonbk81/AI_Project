@@ -317,9 +317,10 @@ class PLMAutoDownloadFlow:
             logger.error(f"Error processing file: {e}", exc_info=True)
             result['messages'].append(f"Error: {str(e)}")
 
-        # Flag auto-start of the analysis pipeline if logs were extracted
-        if auto_analyze and result['success'] and result['extracted_logs']:
-            st.session_state.trigger_auto_analysis = True
-            result['messages'].append("🚀 자동 분석 파이프라인 시작 중...")
+        # Extraction only queues the logs. Starting the analysis/DB ingest is left to
+        # the user's explicit "분석 및 DB 적재 시작" click in the sidebar, so that
+        # picking a defect never blocks on a long-running analysis.
+        if result['success'] and result['extracted_logs']:
+            result['messages'].append("📥 분석 대기열에 추가됨 - Sidebar에서 분석을 시작하세요")
 
         return result
