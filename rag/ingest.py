@@ -4,7 +4,7 @@ import json
 import os
 from tqdm import tqdm
 
-from core.config import MODEL_CONFIG
+from core.config import get_model_config
 
 from rag.chroma_utils import sanitize_chroma_metadata
 
@@ -82,7 +82,7 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
         _log_warning(f"payload 항목 없음: {filename}")
         return stats
 
-    model_cfg = MODEL_CONFIG.get(model_name, MODEL_CONFIG["default"])
+    model_cfg = get_model_config(model_name)
 
     max_doc_chars = int(model_cfg.get("max_doc_chars", 1200))
     max_meta_chars = int(model_cfg.get("max_meta_chars", 2000))

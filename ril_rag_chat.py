@@ -35,7 +35,7 @@ from agent_toolkit import (
 )
 
 from sentence_transformers import SentenceTransformer
-from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG, DEFAULT_MODEL_BY_DEVICE
+from core.config import ROUTING_MAP, SYSTEM_PROMPTS, PROMPTS, MODEL_CONFIG, DEFAULT_MODEL_BY_DEVICE, get_model_config
 from rca import StructuredEventRenderer
 from rag.chroma_utils import (
     sanitize_chroma_metadata,
@@ -200,7 +200,7 @@ class RilRagChat:
 
             safe_documents = []
             safe_metadatas = []
-            model_config = self.model_config_registry.get(self.llm_model_name, self.model_config_registry.get("default", {}))
+            model_config = get_model_config(self.llm_model_name, self.model_config_registry)
             MAX_DOC_CHARS = model_config.get("max_doc_chars", 1200)
             MAX_META_CHARS = model_config.get("max_meta_chars", 2000)
 
@@ -214,7 +214,7 @@ class RilRagChat:
             print(f"'{filename}' 임베딩 중... ({len(safe_documents)}개 지식)")
 
             import gc
-            model_config = self.model_config_registry.get(self.llm_model_name, self.model_config_registry.get("default", {}))
+            model_config = get_model_config(self.llm_model_name, self.model_config_registry)
             for i in range(0, len(safe_documents), model_config["add_batch_size"]):
                 batch_docs = safe_documents[i:i+model_config["add_batch_size"]]
                 batch_metas = safe_metadatas[i:i+model_config["add_batch_size"]]
@@ -323,10 +323,7 @@ class RilRagChat:
 
     def ask(self, user_query, current_file=None, chat_history=None, top_k=None, health_kpi=None, is_bench=False):
         current_base = current_file.replace("_payload.json", "") if current_file else "Unknown"
-        model_config = self.model_config_registry.get(
-            self.llm_model_name,
-            self.model_config_registry.get("default", {})
-        )
+        model_config = get_model_config(self.llm_model_name, self.model_config_registry)
         if top_k is None:
             top_k = int(model_config.get("top_k", 3))
             print(f"top_k가 지정되지 않아 모델 설정의 기본값 {top_k}를 사용합니다.")

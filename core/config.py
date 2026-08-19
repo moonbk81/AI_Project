@@ -1,6 +1,9 @@
 # core/config.py
+import logging
 import yaml
 import os
+
+logger = logging.getLogger(__name__)
 
 def load_all_config():
     """프로젝트 전체 설정을 로드하여 반환합니다."""
@@ -26,7 +29,7 @@ SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 DEFAULT_MODEL_BY_DEVICE = {
     "cpu": "gemma4:12b",
     "mps": "gemma4:12b",
-    "cuda": "gemma4:31b",  # vLLM served model
+    "cuda": "gemma4-31b",  # 게이트웨이 서빙명 (하이픈)
 }
 
 # 모델별 추론/임베딩 배치 설정입니다.
@@ -83,7 +86,9 @@ MODEL_CONFIG = {
         "max_meta_chars": 3000,
         "top_k": 4,
     },
-    "gemma4:31b": {
+    # 게이트웨이(10.253.68.95:3000) 서빙명 그대로. /api/models 로 확인한 이름과
+    # 정확히 일치해야 하며, 불일치 시 default 로 조용히 폴백된다.
+    "gemma4-31b": {
         "num_ctx": 32768,       # vLLM served model - 대용량 추론 환경
         "num_predict": 8192,    # Thinking과 리포트가 끊기지 않도록 충분히 확보
         "embed_batch_size": 64, # 로컬 GPU 8GB 전체 할당 (LLM은 원격 vLLM)
@@ -94,6 +99,19 @@ MODEL_CONFIG = {
         # "stop": ["<unused", "<|im_end|>", "<eos>"],
         "max_doc_chars": 1500,
         "max_meta_chars": 2500,
+        "top_k": 5,
+    },
+    "qwen3.8-27b": {  # 게이트웨이 서빙명
+        "num_ctx": 32768,
+        "num_predict": 8192,
+        "embed_batch_size": 64,
+        "add_batch_size": 256,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "repeat_penalty": 1.05,
+        "stop": ["<|im_end|>", "<|endoftext|>"],
+        "max_doc_chars": 2200,
+        "max_meta_chars": 3600,
         "top_k": 5,
     },
     "gemma4:12b": {
@@ -194,3 +212,43 @@ MODEL_CONFIG = {
         "top_k": 3,
     }
 }
+
+
+def _normalize_model_key(name) -> str:
+    """Fold naming differences between gateway and Ollama style names.
+
+    The gateway serves hyphenated names (``gemma4-31b``) while Ollama-style keys
+    use a colon (``gemma4:31b``). Both should resolve to the same tuning.
+    """
+    return str(name or "").strip().lower().replace(":", "-")
+
+
+def get_model_config(model_name, registry=None):
+    """Return per-model tuning for ``model_name``.
+
+    An exact-key-only lookup used to fall back to ``default`` silently whenever the
+    served model name was spelled differently (``gemma4-31b`` vs ``gemma4:31b``).
+    That quietly dropped ``embed_batch_size`` to 16 and ``num_predict`` to 2048,
+    which shows up as slow embedding and truncated reports rather than an error —
+    so log loudly when we really have no entry.
+    """
+    reg = MODEL_CONFIG if registry is None else registry
+
+    if model_name in reg:
+        return reg[model_name]
+
+    normalized = _normalize_model_key(model_name)
+    for key, cfg in reg.items():
+        if key != "default" and _normalize_model_key(key) == normalized:
+            return cfg
+
+    fallback = reg.get("default", {})
+    logger.warning(
+        "MODEL_CONFIG has no entry for %r; using 'default' "
+        "(num_predict=%s, embed_batch_size=%s). Check the served name via "
+        "/api/models and add a matching key.",
+        model_name,
+        fallback.get("num_predict"),
+        fallback.get("embed_batch_size"),
+    )
+    return fallback

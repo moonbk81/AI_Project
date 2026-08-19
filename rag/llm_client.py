@@ -3,6 +3,7 @@
 import re
 import os
 
+from core.config import get_model_config
 from rag.llm_provider import chat
 
 def call_llm(
@@ -13,10 +14,7 @@ def call_llm(
     is_bench: bool = False,
 ) -> tuple[str, str]:
     """Call the configured LLM and split final answer from reasoning/thinking text."""
-    cfg = model_config_registry.get(
-        model_name,
-        model_config_registry.get("default")
-    ).copy()
+    cfg = get_model_config(model_name, model_config_registry).copy()
 
     if is_bench:
         cfg["num_ctx"] = 8192
