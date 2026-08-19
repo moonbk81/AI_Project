@@ -183,7 +183,8 @@ def run_analysis_pipeline(uploaded_files, use_slice, start_t, end_t, ai_engine):
 
             status.update(label="분석 완료. 대시보드에서 결과를 확인하십시오.", state="complete", expanded=False)
             st.session_state.current_file = result.current_file
-            st.session_state.messages = []
+            # Don't clear messages - preserve chat history in the Log Analysis tab
+            # Messages should only be cleared when switching files
 
             # Don't rerun - keep current screen state
             st.success("Analysis complete. Current screen state is preserved.")

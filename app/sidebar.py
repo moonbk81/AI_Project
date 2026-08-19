@@ -173,7 +173,8 @@ def _render_backend_analysis_status() -> bool:
 
     if status == "done":
         st.session_state.current_file = job.get("current_file")
-        st.session_state.messages = []
+        # Don't clear messages - preserve chat history in the Log Analysis tab
+        # Messages should only be cleared when switching files (laline 273)
         st.session_state.plm_selected_from_zip = None
         st.session_state.plm_pending_logs = []
         _invalidate_ingested_files_cache()
