@@ -884,9 +884,9 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
 
-    # Use first selected row or last selected
+    # Use last selected row (most recent user selection)
     if selected_rows:
-        selected_index = selected_rows[0]
+        selected_index = selected_rows[-1]  # Last selected row
         if selected_index >= len(defects):
             selected_index = 0
         st.session_state.plm_quick_search_selected_index = selected_index
@@ -1971,6 +1971,15 @@ def _show_cached_results_in_fragment():
 
     results = st.session_state.plm_quick_search_results
     division_code = st.session_state.plm_quick_search_division
+
+    # Check if this is the first render (no selection made yet)
+    is_first_render = (
+        not st.session_state.get('plm_quick_search_prev_selected_rows') and
+        st.session_state.get('plm_quick_search_selected_index', 0) == 0
+    )
+
+    if is_first_render:
+        st.info("💡 첫 번째 결함이 자동 선택되었습니다. 다른 결함을 선택하려면 테이블에서 행을 클릭하세요.")
 
     st.caption("Select a row to view details. Click the defect code to open PLM.")
     selected_index = _render_selectable_defects_table(results)
