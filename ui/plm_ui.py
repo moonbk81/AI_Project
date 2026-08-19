@@ -375,10 +375,12 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
     try:
         with progress_container.status("📥 PLM 첨부 파일 자동 처리 중...", expanded=True) as status:
             client = _get_plm_client()
+            logger.info(f"PLM client check: client={client is not None}, local_test={_is_plm_local_test_mode()}, backend_enabled={is_backend_api_enabled()}")
+
             if not client and not _is_plm_local_test_mode() and not is_backend_api_enabled():
                 status.update(label="❌ PLM 클라이언트 연결 실패", state="error")
                 st.session_state[f'plm_auto_processing_{defect_code}'] = False
-                logger.info(f"Auto-load cancelled: no PLM client")
+                logger.error(f"Auto-load cancelled: no PLM client available for {defect_code}")
                 return
 
             # Get file list
@@ -868,14 +870,18 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     selected_rows = table_state.selection.rows if table_state and table_state.selection else []
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
 
+    division_code = st.session_state.get('plm_quick_search_division')
+
     # Detect newly checked rows
     newly_checked = set(selected_rows) - set(prev_selected_rows)
     for row_idx in newly_checked:
-        if row_idx < len(defects):
+        if row_idx < len(defects) and division_code:
             defect = defects[row_idx]
-            division_code = st.session_state.get('plm_quick_search_division')
-            logger.info(f"Row selected: {defect.get('defectCode')} (index {row_idx})")
+            defect_code = defect.get('defectCode')
+            logger.info(f"Row selected: {defect_code} (index {row_idx})")
             _auto_load_and_process_defect_files(defect, division_code)
+        elif row_idx < len(defects):
+            logger.warning(f"Row {row_idx} selected but division_code not set")
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
 
