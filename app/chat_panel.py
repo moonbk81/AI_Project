@@ -2,9 +2,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from app.backend_client import ask_with_optional_backend
 from app.helpers import generate_unique_key
-from ui.common import parse_raw_logs
 
 
 def _render_assistant_visual_references(msg, key_suffix, msg_idx):
@@ -55,39 +53,6 @@ def _render_assistant_visual_references(msg, key_suffix, msg_idx):
                 sig_history.append({"time": tm, "Slot": f"Slot {sl}", "RAT": str(rt), "Level": int(lvl), "Info": meta.get('raw_info', '')})
 
 
-def _build_reference_text(metas):
-    ref_text = ""
-    for i, meta in enumerate(metas):
-        known_solution = meta.get('known_solution')
-        solution_badge = " [과거 해결 사례 포함]" if known_solution else ""
-        ref_text += f"### 자료 {i+1} (시간: {meta.get('time', 'N/A')}, 슬롯: {meta.get('slot', 'N/A')}){solution_badge}\n"
-        if known_solution:
-            ref_text += f"> **분석 기록:** {known_solution}\n\n"
-
-        raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-        raw_logs = parse_raw_logs(raw_data)
-        if raw_logs:
-            ref_text += "```text\n"
-            for log in raw_logs[:10]:
-                ref_text += f"{log}\n"
-            if len(raw_logs) > 10:
-                ref_text += f"... (생략됨, 총 {len(raw_logs)} 라인) ...\n"
-            ref_text += "```\n"
-
-        raw_req = meta.get('raw_request')
-        raw_resp = meta.get('raw_response')
-        if raw_req or raw_resp:
-            ref_text += "```text\n"
-            if raw_req:
-                ref_text += f"[REQ]  {raw_req}\n"
-            if raw_resp:
-                ref_text += f"[RESP] {raw_resp}\n"
-            ref_text += "```\n"
-        ref_text += "---\n"
-
-    return ref_text
-
-
 def _render_existing_messages(key_suffix):
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
@@ -110,48 +75,14 @@ def _render_existing_messages(key_suffix):
                     _render_assistant_visual_references(msg, key_suffix, msg_idx)
 
 
-def render_chat_interface(engine, key_suffix="main", show_input=True):
+def render_chat_history(key_suffix="main"):
+    """Render the conversation so far.
+
+    The chat input and the LLM call live in app/tabs/chat_tab.py
+    (``_render_chat_answer``). This module only replays history: it used to carry
+    a second, parallel chat-input implementation that every caller disabled via
+    ``show_input=False``, and which — being unreachable — had silently drifted
+    out of sync (it never passed ``health_kpi``). Keeping one input path avoids
+    that class of divergence.
+    """
     _render_existing_messages(key_suffix)
-
-    if not show_input:
-        return
-
-    if prompt := st.chat_input("질의어를 입력하십시오", key=f"chat_input_{key_suffix}"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        with st.chat_message("assistant"):
-            with st.spinner("분석 진행 중..."):
-                current_target = st.session_state.get("current_file", None)
-                clean_history = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages[-5:]
-                ]
-
-                answer, ids, metas, thinking = ask_with_optional_backend(
-                    engine,
-                    prompt,
-                    current_file=current_target,
-                    chat_history=clean_history
-                )
-
-                ref_text = _build_reference_text(metas)
-
-                # 로그 원본 먼저 표시 (사용자가 근거를 먼저 확인)
-                if ref_text:
-                    with st.expander("📄 Reference Logs (근거 로그 원문)", expanded=True):
-                        st.markdown(ref_text)
-
-                # AI 추론 과정
-                if thinking:
-                    with st.expander("🧠 AI Reasoning Trace"):
-                        st.markdown(f"```text\n{thinking}\n```")
-
-                # 분석 결과
-                st.markdown(answer)
-
-                st.session_state.messages.append({
-                    "role": "assistant", "content": answer,
-                    "references": ref_text, "metas": metas, "thinking": thinking
-                })
-                st.session_state.last_ids = ids
-                st.session_state.last_metas = metas

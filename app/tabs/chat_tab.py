@@ -2,7 +2,7 @@
 import streamlit as st
 
 from app.backend_client import ask_with_optional_backend, get_health_kpi_with_optional_backend
-from app.chat_panel import render_chat_interface
+from app.chat_panel import render_chat_history
 from core.config import QUICK_PROMPTS
 from ui.common import parse_raw_logs
 
@@ -387,7 +387,7 @@ def render_chat_tab(engine):
 
         auto_prompt = "\n".join(auto_prompt_parts)
 
-        render_chat_interface(engine, key_suffix="main", show_input=False)
+        render_chat_history(key_suffix="main")
         _render_chat_answer(engine, auto_prompt)
 
         # Mark as analyzed so we don't loop
@@ -408,9 +408,9 @@ def render_chat_tab(engine):
                 st.rerun()
 
         st.divider()
-        render_chat_interface(engine, key_suffix="main", show_input=False)
+        render_chat_history(key_suffix="main")
     else:
-        render_chat_interface(engine, key_suffix="main", show_input=False)
+        render_chat_history(key_suffix="main")
 
     st.divider()
 
