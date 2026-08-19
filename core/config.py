@@ -26,7 +26,7 @@ SATELLITE_PROMPTS = CONFIG.get('satellite_prompts', {})
 DEFAULT_MODEL_BY_DEVICE = {
     "cpu": "gemma4:12b",
     "mps": "gemma4:12b",
-    "cuda": "gemma3:4b",  # 회사 8GB VRAM 환경
+    "cuda": "gemma4:31b",  # vLLM served model
 }
 
 # 모델별 추론/임베딩 배치 설정입니다.
@@ -35,7 +35,7 @@ MODEL_CONFIG = {
     "Qwen/Qwen2.5-72B-Instruct": {
         "num_ctx": 32768,
         "num_predict": 8192,
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         "top_p": 0.9,
@@ -48,7 +48,7 @@ MODEL_CONFIG = {
     "qwen2.5-72b-instruct": {
         "num_ctx": 32768,
         "num_predict": 8192,
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         "top_p": 0.9,
@@ -61,7 +61,7 @@ MODEL_CONFIG = {
     "qwen72b": {  # vLLM served model name
         "num_ctx": 32768,
         "num_predict": 8192,   # 리포트가 중간에 잘리지 않도록 확보 (max_tokens로 전달됨)
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         "top_p": 0.9,
@@ -84,9 +84,9 @@ MODEL_CONFIG = {
         "top_k": 4,
     },
     "gemma4:31b": {
-        "num_ctx": 32768,       # DGX/vLLM 등 대용량 추론 환경용
-        "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 32,
+        "num_ctx": 32768,       # vLLM served model - 대용량 추론 환경
+        "num_predict": 8192,    # Thinking과 리포트가 끊기지 않도록 충분히 확보
+        "embed_batch_size": 64, # 로컬 GPU 8GB 전체 할당 (LLM은 원격 vLLM)
         "add_batch_size": 256,
         "temperature": 0.1,
         "top_p": 0.9,
@@ -99,7 +99,7 @@ MODEL_CONFIG = {
     "gemma4:12b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         # "repeat_penalty": 1.15,
@@ -111,7 +111,7 @@ MODEL_CONFIG = {
     "gemma4:e4b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용
         "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         # "repeat_penalty": 1.15,
@@ -135,7 +135,7 @@ MODEL_CONFIG = {
     "gemma3:12b": {
         "num_ctx": 32768,
         "num_predict": 4096,
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 256,
         "temperature": 0.1,
         # "repeat_penalty": 1.15,
@@ -159,7 +159,7 @@ MODEL_CONFIG = {
     "qwen2.5-coder:7b": {
         "num_ctx": 4096,        # 회사 제한 사양 반영
         "num_predict": 2048,
-        "embed_batch_size": 32,
+        "embed_batch_size": 64,
         "add_batch_size": 128,
         "temperature": 0.0,     # 코딩/정규식 모델은 0.0에 가까울수록 정확함
         "repeat_penalty": 1.1,
