@@ -882,7 +882,15 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
             defect = defects[row_idx]
             defect_code = defect.get('defectCode')
             logger.info(f"Row selected: {defect_code} (index {row_idx})")
-            _auto_load_and_process_defect_files(defect, division_code, selected_index=row_idx)
+            # Update active defect IMMEDIATELY when selected (before auto-load)
+            st.session_state.plm_active_defect_code = defect_code
+            st.session_state.plm_active_division = division_code
+            # Mark for auto-load processing (will happen after UI renders)
+            st.session_state.plm_pending_auto_load = {
+                'defect': defect,
+                'division_code': division_code,
+                'selected_index': row_idx
+            }
         elif row_idx < len(defects):
             logger.warning(f"Row {row_idx} selected but division_code not set")
 
@@ -2225,6 +2233,15 @@ def _show_cached_results_in_fragment():
                     st.rerun()
     else:
         st.info("Select a defect to view files")
+
+    # Process pending auto-load AFTER defect details are rendered
+    if st.session_state.get('plm_pending_auto_load'):
+        pending = st.session_state.pop('plm_pending_auto_load')
+        _auto_load_and_process_defect_files(
+            pending['defect'],
+            pending['division_code'],
+            selected_index=pending['selected_index']
+        )
 
     st.divider()
     st.subheader("New Search")
