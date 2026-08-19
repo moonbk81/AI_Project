@@ -59,8 +59,8 @@ MODEL_CONFIG = {
         "top_k": 5,
     },
     "qwen72b": {  # vLLM served model name
-        "num_ctx": 16384,
-        "num_predict": 1024,
+        "num_ctx": 32768,
+        "num_predict": 8192,   # 리포트가 중간에 잘리지 않도록 확보 (max_tokens로 전달됨)
         "embed_batch_size": 32,
         "add_batch_size": 256,
         "temperature": 0.1,
@@ -82,6 +82,19 @@ MODEL_CONFIG = {
         "max_doc_chars": 1800,
         "max_meta_chars": 3000,
         "top_k": 4,
+    },
+    "gemma4:31b": {
+        "num_ctx": 32768,       # DGX/vLLM 등 대용량 추론 환경용
+        "num_predict": 8192,   # Thinking과 리포트가 끊기지 않도록 충분히 확보
+        "embed_batch_size": 32,
+        "add_batch_size": 256,
+        "temperature": 0.1,
+        "top_p": 0.9,
+        # "repeat_penalty": 1.15,   # Gemma 계열은 1.05 초과 시 조기 종료가 잦아 미사용
+        # "stop": ["<unused", "<|im_end|>", "<eos>"],
+        "max_doc_chars": 1500,
+        "max_meta_chars": 2500,
+        "top_k": 5,
     },
     "gemma4:12b": {
         "num_ctx": 32768,       # 집 맥북 환경 또는 넉넉한 추론용

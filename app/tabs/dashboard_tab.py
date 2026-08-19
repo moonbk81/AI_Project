@@ -12,15 +12,37 @@ from app.backend_client import (
     get_result_json_with_optional_backend,
 )
 
+def _get_cached_metadata(engine):
+    """Cache metadata to avoid repeated DB queries when switching tabs."""
+    cache_key = 'dashboard_metadata_cache'
+    current_file = st.session_state.get('current_file')
+
+    # Invalidate cache if current file changed
+    cached = st.session_state.get(cache_key)
+    if cached and cached.get('current_file') != current_file:
+        st.session_state[cache_key] = None
+        cached = None
+
+    if not cached:
+        try:
+            all_data = get_metadata_with_optional_backend(engine)
+            st.session_state[cache_key] = {
+                'data': all_data,
+                'current_file': current_file
+            }
+        except Exception as e:
+            st.error(f"Vector DB metadata 조회 중 오류가 발생했습니다: {e}")
+            return {"metadatas": [], "ids": []}
+
+    return st.session_state[cache_key].get('data', {"metadatas": [], "ids": []})
+
+
 def render_dashboard_tab(engine):
     st.header("로그 통계 대시보드")
     st.markdown("적재된 로그 데이터의 통계와 기존 분석 사례를 확인합니다.")
 
-    try:
-        all_data = get_metadata_with_optional_backend(engine)
-    except Exception as e:
-        st.error(f"Vector DB metadata 조회 중 오류가 발생했습니다: {e}")
-        all_data = {"metadatas": [], "ids": []}
+    # Use cached metadata instead of querying every time
+    all_data = _get_cached_metadata(engine)
 
     if not all_data or not all_data.get("metadatas") or len(all_data["metadatas"]) == 0:
         st.info("데이터베이스가 비어 있습니다. 로그 파일을 업로드해 주십시오.")
@@ -34,14 +56,29 @@ def render_dashboard_tab(engine):
     df_all = pd.DataFrame(meta_list)
 
     st.divider()
-    view_mode = st.radio("조회 범위", ["현재 세션", "전체 이력"], horizontal=True)
 
-    if view_mode == "현재 세션" and st.session_state.current_file:
+    # Check if current file exists before showing view mode options
+    has_current_file = bool(st.session_state.get('current_file'))
+
+    if has_current_file:
+        view_mode = st.radio("조회 범위", ["현재 세션", "전체 이력"], horizontal=True)
+    else:
+        st.info("현재 분석 대상 파일이 없습니다. 먼저 파일을 선택해 주세요.")
+        view_mode = "전체 이력"
+
+    if view_mode == "현재 세션" and has_current_file:
         df = df_all[df_all['source_file'] == st.session_state.current_file]
         st.info(f"현재 파일: `{st.session_state.current_file}`")
     else:
         df = df_all
-        st.info(f"전체 이력 기준 조회 (총 {df_all['source_file'].nunique()}개 세션)")
+        if len(df) > 0:
+            st.info(f"전체 이력 기준 조회 (총 {df_all['source_file'].nunique()}개 세션)")
+        else:
+            st.info("조회 가능한 데이터가 없습니다.")
+
+    if len(df) == 0:
+        st.warning("선택된 범위에 데이터가 없습니다.")
+        return
 
     col1, col2, col3 = st.columns(3)
     col1.metric("적재 문서 수", f"{len(df)} 건")
@@ -52,7 +89,7 @@ def render_dashboard_tab(engine):
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("로그 유형별 분포")
-        if 'log_type' in df.columns:
+        if 'log_type' in df.columns and len(df) > 0:
             fig1 = px.pie(df, names='log_type', hole=0.4)
             st.plotly_chart(fig1, width="stretch")
         else:
@@ -60,7 +97,7 @@ def render_dashboard_tab(engine):
 
     with c2:
         st.subheader("파일별 로그 비중")
-        if 'source_file' in df.columns:
+        if 'source_file' in df.columns and len(df) > 0:
             file_counts = df['source_file'].value_counts().reset_index()
             file_counts.columns = ['source_file', 'count']
             fig2 = px.bar(file_counts, x='count', y='source_file', orientation='h')
@@ -68,10 +105,13 @@ def render_dashboard_tab(engine):
         else:
             st.info("파일 이름 데이터가 존재하지 않습니다.")
 
-    if view_mode != "현재 세션":
+    # Only render detailed dashboard if current session is selected
+    if view_mode != "현재 세션" or not has_current_file:
         return
 
-    _render_current_session_dashboard(engine, df)
+    st.divider()
+    with st.spinner("세션 상세 정보 로드 중..."):
+        _render_current_session_dashboard(engine, df)
 
 def _render_current_session_dashboard(engine, df):
     _render_kpi_summary(df)

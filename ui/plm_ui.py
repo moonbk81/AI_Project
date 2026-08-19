@@ -864,14 +864,9 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         },
     )
 
-    # Handle checkbox selections (multi-row) for auto-download
+    # Handle row selections (multi-row) for auto-download
     selected_rows = table_state.selection.rows if table_state and table_state.selection else []
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
-
-    import sys
-    print(f"[DEBUG] table_state: {table_state}", file=sys.stderr)
-    print(f"[DEBUG] selected_rows: {selected_rows}", file=sys.stderr)
-    print(f"[DEBUG] prev_selected_rows: {prev_selected_rows}", file=sys.stderr)
 
     # Detect newly checked rows
     newly_checked = set(selected_rows) - set(prev_selected_rows)
@@ -879,33 +874,33 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         if row_idx < len(defects):
             defect = defects[row_idx]
             division_code = st.session_state.get('plm_quick_search_division')
-            logger.info(f"Checkbox checked for {defect.get('defectCode')}, starting auto-download")
+            logger.info(f"Row selected: {defect.get('defectCode')} (index {row_idx})")
             _auto_load_and_process_defect_files(defect, division_code)
 
     st.session_state.plm_quick_search_prev_selected_rows = selected_rows
 
-    # Use last selected row (most recent user selection)
+    # Determine selected index: use most recently selected row or fallback to stored index
     if selected_rows:
-        selected_index = selected_rows[-1]  # Last selected row
-        if selected_index >= len(defects):
-            selected_index = 0
-        st.session_state.plm_quick_search_selected_index = selected_index
-        # Update active defect when selection changes
-        if selected_index < len(defects):
-            defect_code = defects[selected_index].get('defectCode')
-            st.session_state.plm_active_defect_code = defect_code
-            st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
-            logger.info(f"[DEBUG] plm_active_defect_code set to: {defect_code}")
-        return selected_index
+        selected_index = selected_rows[-1]  # Last (most recent) selected row
+        selection_source = "user_selected"
+    else:
+        selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+        selection_source = "fallback"
 
-    selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
+    # Validate index
     if selected_index >= len(defects):
         selected_index = 0
-        st.session_state.plm_quick_search_selected_index = selected_index
-    # Update active defect with currently selected index
+
+    st.session_state.plm_quick_search_selected_index = selected_index
+
+    # Update active defect (ALWAYS update with current selected index)
     if selected_index < len(defects):
-        st.session_state.plm_active_defect_code = defects[selected_index].get('defectCode')
+        selected_defect = defects[selected_index]
+        defect_code = selected_defect.get('defectCode')
+        st.session_state.plm_active_defect_code = defect_code
         st.session_state.plm_active_division = st.session_state.get('plm_quick_search_division')
+        logger.info(f"Active defect updated: {defect_code} (index {selected_index}, source: {selection_source})")
+
     return selected_index
 
 
