@@ -870,6 +870,10 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     selected_rows = table_state.selection.rows if table_state and table_state.selection else []
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
 
+    # Debug: Log selection state
+    if selected_rows != prev_selected_rows:
+        logger.info(f"[SELECTION DEBUG] table_state={table_state is not None}, selected_rows={selected_rows}, prev_selected_rows={prev_selected_rows}")
+
     division_code = st.session_state.get('plm_quick_search_division')
 
     # Detect newly checked rows
