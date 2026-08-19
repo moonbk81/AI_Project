@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def is_backend_api_enabled() -> bool:
@@ -610,3 +613,38 @@ def plm_analyze_with_optional_backend(integration, division_code: str, defect_co
         defect_code=defect_code,
         integration=integration,
     )
+
+
+def plm_refine_description_via_backend(content: str, model: str = "") -> str:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/plm/refine-description",
+        json={"content": content, "model": model},
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json().get("refined", content)
+
+
+def plm_refine_description_with_optional_backend(content: str, model: str = "") -> str:
+    """Condense a PLM problem description.
+
+    The LLM call belongs to the backend, but this must never break the analyze
+    button: if the backend itself is unreachable we degrade to the same plain
+    line extraction the LLM path falls back to.
+    """
+    if is_backend_api_enabled():
+        try:
+            return plm_refine_description_via_backend(content, model=model)
+        except Exception as e:
+            logger.warning(
+                "Backend refine-description failed (%s); falling back to line extraction", e
+            )
+            from plm.service import simplify_problem_description
+
+            return simplify_problem_description(content)
+
+    from plm.service import refine_problem_description
+
+    return refine_problem_description(content, model=model)

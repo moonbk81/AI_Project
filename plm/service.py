@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Any, Dict, List
 
 from plm.plm_api_client import CommentRegistrationRequest, DefectRegistrationRequest
 from plm.plm_rag_integration import PLMDefectContextBuilder
 from plm.plm_rag_integration import create_plm_integration
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -307,3 +310,58 @@ def build_defect_analysis_context(
         "message": "" if context else "Defect not found",
         "context": context or {},
     }
+
+
+# Length below which refining is pointless — the text is already terse.
+_REFINE_MIN_CHARS = 200
+
+_REFINE_SYSTEM_PROMPT = """You are an expert at refining technical problem descriptions for intent recognition.
+Your task is to extract and refine the essential information while preserving critical intent signals.
+
+Rules:
+1. Preserve the specific symptom/behavior (e.g., "intermittent data drops", "call fails", "battery drain")
+2. Preserve affected component/app/feature names (these are intent signals)
+3. Preserve specific conditions when they occur (e.g., "during handover", "when using app X")
+4. Remove redundant details and unnecessary explanations
+5. Extract and include key technical details (error codes, version info, network info if present)
+6. Make it concise but complete (aim for 2-3 sentences max)
+7. Use bullet points only for multiple distinct issues
+8. Return ONLY the refined description, no additional text or explanation"""
+
+
+def simplify_problem_description(problem_content: str) -> str:
+    """Dependency-free fallback: keep the first few meaningful lines."""
+    lines = (problem_content or "").split("\n")
+    meaningful = [line.strip() for line in lines if len(line.strip()) > 10]
+    return "\n".join(meaningful[:3]) if meaningful else problem_content
+
+
+def refine_problem_description(problem_content: str, model: str = "") -> str:
+    """LLM-refine a PLM problem description for downstream intent recognition.
+
+    Degrades to simplify_problem_description() when the LLM call fails, matching
+    the behavior this had while it lived in the Streamlit layer.
+    """
+    if not problem_content or not problem_content.strip():
+        return problem_content
+    if len(problem_content) < _REFINE_MIN_CHARS:
+        return problem_content
+
+    try:
+        from rag.llm_provider import chat
+
+        response = chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": _REFINE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"Please refine this problem description:\n\n{problem_content}",
+                },
+            ],
+        )
+        refined = (response["message"]["content"] or "").strip()
+        return refined if refined else problem_content
+    except Exception as e:
+        logger.warning("LLM refine failed (%s); falling back to line extraction", e)
+        return simplify_problem_description(problem_content)

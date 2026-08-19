@@ -185,6 +185,16 @@ class PlmAnalyzeResponse(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PlmRefineDescriptionRequest(BaseModel):
+    content: str = ""
+    # Empty means "let the gateway config decide" (RAG_LLM_MODEL).
+    model: str = ""
+
+
+class PlmRefineDescriptionResponse(BaseModel):
+    refined: str
+
+
 app = FastAPI(title="AI Project RAG Backend")
 
 # Exception handler for detailed validation errors
@@ -587,4 +597,18 @@ def plm_analyze(req: PlmAnalyzeRequest) -> PlmAnalyzeResponse:
             division_code=req.division_code,
             defect_code=req.defect_code,
         )
+    )
+
+
+@app.post("/plm/refine-description", response_model=PlmRefineDescriptionResponse)
+def plm_refine_description(req: PlmRefineDescriptionRequest) -> PlmRefineDescriptionResponse:
+    """Condense a PLM problem description before it is used as an analysis query.
+
+    Never fails the caller: refine_problem_description() falls back to plain line
+    extraction if the LLM gateway is unreachable.
+    """
+    from plm.service import refine_problem_description
+
+    return PlmRefineDescriptionResponse(
+        refined=refine_problem_description(req.content, model=req.model)
     )

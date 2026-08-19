@@ -26,6 +26,7 @@ from app.backend_client import (
     plm_get_human_comments_with_optional_backend,
     plm_list_files_with_optional_backend,
     plm_quick_search_with_optional_backend,
+    plm_refine_description_with_optional_backend,
     plm_register_defect_with_optional_backend,
     plm_submit_comment_with_optional_backend,
 )
@@ -135,65 +136,16 @@ def _render_plm_local_test_controls():
         st.session_state.plm_active_division = None
 
 
-def _refine_problem_description(problem_content: str, use_llm: bool = True) -> str:
+def _refine_problem_description(problem_content: str) -> str:
+    """Condense a PLM problem description before sending it to the Chat tab.
+
+    The LLM call lives in the backend (POST /plm/refine-description); this used to
+    hit the gateway straight from the UI process, bypassing the backend entirely.
     """
-    Refine problem description by extracting key points
-
-    Args:
-        problem_content: Original problem description
-        use_llm: Whether to use LLM for refinement (True) or simple extraction (False)
-
-    Returns:
-        Refined, concise problem description
-    """
-    if not problem_content or len(problem_content.strip()) == 0:
-        return problem_content
-
-    # If content is already short, return as is
-    if len(problem_content) < 200:
-        return problem_content
-
-    if use_llm:
-        try:
-            from rag.llm_provider import chat
-
-            # Get the active model from session state
-            model_name = st.session_state.get('active_model', 'gemma4:12b')
-
-            system_prompt = """You are an expert at refining technical problem descriptions for intent recognition.
-Your task is to extract and refine the essential information while preserving critical intent signals.
-
-Rules:
-1. Preserve the specific symptom/behavior (e.g., "intermittent data drops", "call fails", "battery drain")
-2. Preserve affected component/app/feature names (these are intent signals)
-3. Preserve specific conditions when they occur (e.g., "during handover", "when using app X")
-4. Remove redundant details and unnecessary explanations
-5. Extract and include key technical details (error codes, version info, network info if present)
-6. Make it concise but complete (aim for 2-3 sentences max)
-7. Use bullet points only for multiple distinct issues
-8. Return ONLY the refined description, no additional text or explanation"""
-
-            response = chat(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Please refine this problem description:\n\n{problem_content}"}
-                ],
-            )
-
-            refined = response['message']['content'].strip()
-            return refined if refined else problem_content
-
-        except Exception as e:
-            logger.warning(f"Failed to refine with LLM: {e}. Using fallback method.")
-            return _refine_problem_description(problem_content, use_llm=False)
-    else:
-        # Fallback: simple extraction method
-        lines = problem_content.split('\n')
-        # Filter empty lines and very short lines
-        meaningful_lines = [line.strip() for line in lines if len(line.strip()) > 10]
-        # Take first 3 meaningful lines
-        return '\n'.join(meaningful_lines[:3]) if meaningful_lines else problem_content
+    return plm_refine_description_with_optional_backend(
+        problem_content,
+        model=st.session_state.get('active_model', ''),
+    )
 
 
 def _initialize_plm_session():
