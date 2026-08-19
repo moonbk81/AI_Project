@@ -264,7 +264,7 @@ def _get_job(job_id: str) -> Dict[str, Any]:
 
 
 def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_t: str, end_t: str):
-    from app.pipeline import run_analysis_core
+    from core.analysis_pipeline import run_analysis_core
 
     def progress(message, value=None):
         updates: Dict[str, Any] = {}
@@ -359,7 +359,7 @@ def reset_db() -> ResetResponse:
 
 @app.get("/metadata", response_model=MetadataResponse)
 def metadata(source_file: Optional[str] = None, batch_size: int = 500) -> MetadataResponse:
-    from app.helpers import get_collection_metadatas_batched
+    from core.chroma_helpers import get_collection_metadatas_batched
 
     where = {"source_file": source_file} if source_file else None
     data = get_collection_metadatas_batched(

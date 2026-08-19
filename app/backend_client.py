@@ -106,7 +106,7 @@ def get_metadata_with_optional_backend(engine, source_file: Optional[str] = None
         return get_metadata_via_backend(source_file=source_file)
     if engine is None:
         raise RuntimeError("Local RAG engine is not available.")
-    from app.helpers import get_collection_metadatas_batched
+    from core.chroma_helpers import get_collection_metadatas_batched
 
     where = {"source_file": source_file} if source_file else None
     return get_collection_metadatas_batched(engine.collection, batch_size=500, where=where)
