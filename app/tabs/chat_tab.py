@@ -4,6 +4,7 @@ import streamlit as st
 from app.backend_client import ask_with_optional_backend, get_health_kpi_with_optional_backend
 from app.chat_panel import render_chat_history
 from core.config import QUICK_PROMPTS
+from plm.service import build_defect_analysis_query
 from ui.common import parse_raw_logs
 
 
@@ -158,7 +159,7 @@ def _render_chat_answer(engine, prompt):
 def _render_plm_comment_registration(last_answer: str, active_defect: str):
     """Render PLM comment registration controls for the latest chat answer."""
     from app.backend_client import plm_submit_comment_with_optional_backend
-    from ui.plm_ui import _format_analysis_as_comment
+    from plm.service import build_comment_payload, format_analysis_as_comment
 
     st.divider()
     st.caption(f"활성 결함: `{active_defect}`")
@@ -197,7 +198,7 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
         with col2:
             system_code = st.text_input("System Code", value="AI_ANALYSIS", key="plm_system_code")
 
-        comment_text = _format_analysis_as_comment({
+        comment_text = format_analysis_as_comment({
             'answer': last_answer,
             'from_chat': True
         })
@@ -223,15 +224,13 @@ def _render_plm_comment_registration(last_answer: str, active_defect: str):
         return
 
     division_code = st.session_state.get('plm_active_division') or "25"
-    request_payload = {
-        "divisionCode": division_code,
-        "systemCode": system_code,
-        "defectCode": active_defect,
-        "defectComment": comment_text,
-        "createUser": knox_id,
-        "changeType": "S",
-        "docAttachedYn": "N",
-    }
+    request_payload = build_comment_payload(
+        division_code=division_code,
+        defect_code=active_defect,
+        comment=comment_text,
+        create_user=knox_id,
+        system_code=system_code,
+    )
 
     if local_test:
         st.session_state.plm_comment_submit_status = {
@@ -321,15 +320,7 @@ def render_chat_tab(engine):
 
         # Include developer comments selected on the PLM detail screen
         comments = plm_problem.get('comments') or []
-        comment_block = ""
         if comments:
-            lines = []
-            for c in comments:
-                header = " · ".join(x for x in [c.get('user', ''), c.get('date', '')] if x)
-                text = c.get('text', '')
-                lines.append(f"- ({header}) {text}" if header else f"- {text}")
-            comment_block = "\n\n**개발자 코멘트:**\n" + "\n".join(lines)
-
             with st.expander(f"💬 함께 분석할 개발자 코멘트 ({len(comments)}건)", expanded=False):
                 for c in comments:
                     header = " · ".join(x for x in [c.get('user', ''), c.get('date', '')] if x)
@@ -338,57 +329,8 @@ def render_chat_tab(engine):
                     st.write(c.get('text', ''))
             st.divider()
 
-        # Auto-analyze the PLM problem with structured information
-        defect_info = []
-
-        # Add defect metadata
-        if plm_problem.get('defect_code'):
-            defect_info.append(f"**결함 코드:** {plm_problem.get('defect_code')}")
-        if plm_problem.get('defect_title'):
-            defect_info.append(f"**제목:** {plm_problem.get('defect_title')}")
-        if plm_problem.get('status'):
-            defect_info.append(f"**상태:** {plm_problem.get('status')}")
-        if plm_problem.get('priority'):
-            defect_info.append(f"**우선순위:** {plm_problem.get('priority')}")
-        if plm_problem.get('owner'):
-            defect_info.append(f"**담당자:** {plm_problem.get('owner')}")
-
-        defect_header = "\n".join(defect_info) if defect_info else ""
-
-        # Build structured prompt
-        auto_prompt_parts = [
-            "## PLM 결함 분석 요청",
-            "",
-            defect_header,
-            "",
-            "### 문제 내용",
-            problem_content,
-        ]
-
-        # Add root cause if available
-        reason = plm_problem.get('reason', '').strip()
-        if reason:
-            auto_prompt_parts.extend(["", "### 등록된 근본 원인", reason])
-
-        # Add solution if available
-        solution = plm_problem.get('countermeasure', '').strip()
-        if solution:
-            auto_prompt_parts.extend(["", "### 등록된 해결방안", solution])
-
-        # Add developer comments
-        if comments:
-            auto_prompt_parts.extend(["", "### 개발자 코멘트", comment_block.replace("**개발자 코멘트:**\n", "")])
-
-        # Add analysis instruction
-        auto_prompt_parts.append("")
-        auto_prompt_parts.append(
-            f"위 정보를 기반으로{' 개발자 코멘트를 고려하여' if comments else ''} 문제의 원인을 분석하고 해결 방안을 제시해 주세요."
-        )
-
-        auto_prompt = "\n".join(auto_prompt_parts)
-
         render_chat_history(key_suffix="main")
-        _render_chat_answer(engine, auto_prompt)
+        _render_chat_answer(engine, build_defect_analysis_query(plm_problem, comments=comments))
 
         # Mark as analyzed so we don't loop
         st.session_state.plm_problem_analyzed = True

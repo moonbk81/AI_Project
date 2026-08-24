@@ -57,6 +57,39 @@ class HealthKpiResponse(BaseModel):
     kpi_json: str
 
 
+class SessionKpiResponse(BaseModel):
+    top_app_name: str
+    top_app_mb: float
+    avg_signal_level: float
+    call_success_rate: float
+    call_drop_count: int
+    oos_count: int
+
+
+class SatelliteOverviewResponse(BaseModel):
+    base_name: str
+    # None when the log carries no NTN traffic at all.
+    sat_type: Optional[str] = None
+    sat_at: Dict[str, Any] = Field(default_factory=dict)
+    ntn: Any = Field(default_factory=dict)
+
+
+class ReportRequest(BaseModel):
+    base_name: str = Field(min_length=1)
+    current_file: Optional[str] = None
+
+
+class SatelliteReportRequest(ReportRequest):
+    sat_type: str = Field(min_length=1)
+
+
+class ReportResponse(BaseModel):
+    answer: str
+    ids: List[str] = Field(default_factory=list)
+    metas: List[Dict[str, Any]] = Field(default_factory=list)
+    thinking: str = ""
+
+
 class KnowledgeResponse(BaseModel):
     ids: List[str]
     documents: List[str]
@@ -421,6 +454,58 @@ def health_kpi(base_name: str) -> HealthKpiResponse:
         base_name=safe_base,
         kpi_json=get_device_health_kpi(safe_base),
     )
+
+
+@app.get("/dashboard/kpi", response_model=SessionKpiResponse)
+def dashboard_kpi(source_file: Optional[str] = None) -> SessionKpiResponse:
+    """Headline device-state numbers for one analyzed session."""
+    from core.chroma_helpers import get_collection_metadatas_batched
+    from core.dashboard_kpi import compute_session_kpi
+
+    where = {"source_file": source_file} if source_file else None
+    data = get_collection_metadatas_batched(get_engine().collection, batch_size=500, where=where)
+    return SessionKpiResponse(**compute_session_kpi(data.get("metadatas", [])))
+
+
+@app.get("/satellite/{base_name}", response_model=SatelliteOverviewResponse)
+def satellite_overview(base_name: str) -> SatelliteOverviewResponse:
+    """Satellite artifacts plus the detected constellation for one log."""
+    from agent_toolkit.satellite_tools import load_satellite_overview
+
+    safe_base = os.path.basename(base_name)
+    return SatelliteOverviewResponse(base_name=safe_base, **load_satellite_overview(safe_base))
+
+
+@app.post("/reports/session", response_model=ReportResponse)
+def session_report(req: ReportRequest) -> ReportResponse:
+    """Current-session diagnostic report."""
+    from core.reports import generate_session_report
+
+    return ReportResponse(
+        **generate_session_report(
+            get_engine(),
+            os.path.basename(req.base_name),
+            current_file=req.current_file,
+        )
+    )
+
+
+@app.post("/reports/satellite", response_model=ReportResponse)
+def satellite_report(req: SatelliteReportRequest) -> ReportResponse:
+    """Satellite (NTN) report for the given constellation."""
+    from core.reports import generate_satellite_report
+
+    try:
+        report = generate_satellite_report(
+            get_engine(),
+            os.path.basename(req.base_name),
+            req.sat_type,
+            current_file=req.current_file,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return ReportResponse(**report)
 
 
 @app.get("/knowledge", response_model=KnowledgeResponse)

@@ -248,6 +248,21 @@ prompts:
     - [로그 간 결합]: RILJ 트랜잭션 에러와 Binder 에러가 동시간대에 발생하더라도 자동으로 하나의 치명적 장애로 묶지 않는다. 동일 프로세스, 동일 시간대, RCA_Event, 또는 명확한 후속 장애 근거가 있을 때만 인과관계로 연결한다.
     - [Binder transaction failure 보수 해석]: BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 단독 Root Cause가 아니라 후속/보조 증상으로 취급한다. thread starvation, buffer 부족, oneway spam, proxy histogram/leak, Too many Binders kill 근거가 없으면 Binder 병목 또는 리소스 고갈로 확정하지 않는다.
 
+  # 대시보드 "현재 세션 리포트 생성" 질의. {health_kpi_json} 는 백엔드가 채웁니다.
+  session_diagnostic_report: |
+    [입력 데이터]
+    {health_kpi_json}
+
+    [지시사항]
+    제공된 데이터와 검색된 로그를 기반으로 단말 상태를 진단하여 다음 항목만 작성하십시오.
+
+    1. 핵심 원인 (Root Cause):
+       - '9_ril_sip_correlation' 항목에 문제가 확인되면 이를 최상단에 가장 먼저 명시하십시오.
+    2. 주요 이상 징후 요약:
+       - 입력 데이터 내 부문별 에러나 특이사항을 사실대로 요약하십시오.
+
+    * 규칙: 데이터에 없는 수치나 원인을 임의로 추측하거나 지어내지 마십시오.
+
   plm_defect_analysis: |
     [PLM 결함 분석 지침]
     제공된 PLM 결함 정보와 [검색된 관련 로그]를 기반으로 구체적인 원인 분석과 해결 방안을 제시하십시오.

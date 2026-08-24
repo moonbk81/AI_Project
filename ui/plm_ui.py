@@ -34,6 +34,7 @@ from plm.plm_rag_integration import (
     create_plm_integration,
     PLMConfigManager
 )
+from plm.service import format_analysis_as_comment
 from plm.plm_api_client import DivisionCode, PLMAPIException
 from ui.plm_auto_download import (
     LogFileExtractor,
@@ -930,26 +931,6 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     return selected_index
 
 
-# Prefixes of comments auto-registered by this tool (excluded from human comments).
-# Kept in sync with _format_analysis_as_comment().
-_AI_COMMENT_SIGNATURES = ("💬 **AI Chat 분석 결과", "🤖 AI 분석 결과")
-
-# System/automated registrants whose comments are not developer input (excluded).
-_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development")
-
-
-def _is_ai_generated_comment(text: str) -> bool:
-    """True if the comment was auto-registered by this tool (AI analysis)."""
-    stripped = (text or "").lstrip()
-    return any(stripped.startswith(sig) for sig in _AI_COMMENT_SIGNATURES)
-
-
-def _is_excluded_comment_user(history_user: str) -> bool:
-    """True for system/automated registrants that should not surface as comments."""
-    name = (history_user or "").lower()
-    return any(excluded in name for excluded in _EXCLUDED_COMMENT_USERS)
-
-
 def _fetch_human_comments(defect_code: str, division_code: str) -> List[Dict[str, Any]]:
     """
     Fetch developer-written comments for a defect via get_defect_history.
@@ -1711,37 +1692,6 @@ def render_plm_files():
                     st.code(str(e), language="text")
 
 
-def _format_analysis_as_comment(context: Dict[str, Any]) -> str:
-    """
-    Format analysis context as a PLM comment
-
-    Args:
-        context: Analysis context from PLMDefectContextBuilder or Chat answer
-
-    Returns:
-        Formatted comment text
-    """
-    # Check if it's from Chat (has 'answer' and 'from_chat' flag)
-    if context.get('from_chat'):
-        return f"💬 **AI Chat 분석 결과**\n\n{context.get('answer', 'N/A')}"
-
-    # Otherwise it's from PLM analysis tab
-    comment_lines = [
-        "🤖 AI 분석 결과",
-        "",
-        f"**문제점:**",
-        context.get('problem', 'N/A'),
-        "",
-        f"**근본 원인:**",
-        context.get('root_cause', 'N/A'),
-        "",
-        f"**해결 방안:**",
-        context.get('solution', 'N/A'),
-    ]
-
-    return "\n".join(comment_lines)
-
-
 def render_plm_comment():
     """
     Render PLM comment management interface
@@ -1792,7 +1742,7 @@ def render_plm_comment():
     # Pre-fill comment if analysis result is available (outside form)
     default_comment = ""
     if analysis_result:
-        default_comment = _format_analysis_as_comment(analysis_result)
+        default_comment = format_analysis_as_comment(analysis_result)
         st.info(f"✅ Chat 분석 결과가 로드되었습니다")
 
     with st.form("add_comment"):
@@ -2593,5 +2543,4 @@ __all__ = [
     'refresh_plm_sidebar_active_defect',
     '_initialize_plm_session',
     '_get_plm_client',
-    '_format_analysis_as_comment',
 ]

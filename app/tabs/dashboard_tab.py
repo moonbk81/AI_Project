@@ -6,10 +6,10 @@ import streamlit as st
 
 import ui
 from app.backend_client import (
-    ask_with_optional_backend,
-    get_health_kpi_with_optional_backend,
+    generate_session_report_with_optional_backend,
     get_metadata_with_optional_backend,
     get_result_json_with_optional_backend,
+    get_session_kpi_with_optional_backend,
 )
 
 def _get_cached_metadata(engine):
@@ -114,46 +114,30 @@ def render_dashboard_tab(engine):
         _render_current_session_dashboard(engine, df)
 
 def _render_current_session_dashboard(engine, df):
-    _render_kpi_summary(df)
+    _render_kpi_summary(engine)
     _render_knowledge_base_table(df)
     _render_integrated_timeline()
     _render_package_deep_dive(df)
     _render_detail_sections(df)
     _render_ai_integrated_report(engine, df)
 
-def _render_kpi_summary(df):
-    du_df = df[df['log_type'] == 'Data_Usage'].copy()
-    if not du_df.empty:
-        du_df['total_mb'] = pd.to_numeric(du_df['total_mb'], errors='coerce')
-        top_1 = du_df.sort_values(by='total_mb', ascending=False).iloc[0]
-        top_app_name, top_app_mb = top_1.get('app_name', 'Unknown'), f"{top_1['total_mb']:,.2f}"
-    else:
-        top_app_name, top_app_mb = "N/A", "0"
-
-    call_df = df[df['log_type'] == 'Call_Session'].copy()
-    if not call_df.empty:
-        total_calls = len(call_df)
-        drop_count = len(call_df[call_df['status'].str.contains('FAIL|DROP', na=False, case=False)]) if 'status' in call_df.columns else 0
-        success_rate = round(((total_calls - drop_count) / total_calls) * 100, 1) if total_calls > 0 else 100
-    else:
-        success_rate, drop_count = 100, 0
-
-    oos_df = df[df['log_type'] == 'OOS_Event'].copy()
-    if not oos_df.empty:
-        is_v_oos = oos_df['voice_reg'].astype(str).str.contains('OUT_OF_SERVICE|OOS', na=False, case=False) if 'voice_reg' in oos_df.columns else False
-        is_d_oos = oos_df['data_reg'].astype(str).str.contains('OUT_OF_SERVICE|OOS', na=False, case=False) if 'data_reg' in oos_df.columns else False
-        oos_count = len(oos_df[is_v_oos | is_d_oos])
-    else:
-        oos_count = 0
-
-    sig_df = df[df['log_type'] == 'Signal_Level'].copy()
-    avg_signal = sig_df['level'].mean() if not sig_df.empty else 0
-
+def _render_kpi_summary(engine):
     st.subheader("단말 상태 요약")
+    try:
+        kpi = get_session_kpi_with_optional_backend(
+            engine, source_file=st.session_state.get('current_file')
+        )
+    except Exception as e:
+        st.error(f"단말 상태 요약을 불러오지 못했습니다: {e}")
+        return
+
+    drop_count = kpi['call_drop_count']
+    oos_count = kpi['oos_count']
+
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("데이터 사용 상위 앱", f"{top_app_name}", f"{top_app_mb} MB")
-    col2.metric("평균 신호 수신 강도", f"Level {avg_signal:.1f}")
-    col3.metric("Call 성공률", f"{success_rate}%", delta=f"{drop_count} 건 실패", delta_color="inverse" if drop_count > 0 else "normal")
+    col1.metric("데이터 사용 상위 앱", kpi['top_app_name'], f"{kpi['top_app_mb']:,.2f} MB")
+    col2.metric("평균 신호 수신 강도", f"Level {kpi['avg_signal_level']:.1f}")
+    col3.metric("Call 성공률", f"{kpi['call_success_rate']}%", delta=f"{drop_count} 건 실패", delta_color="inverse" if drop_count > 0 else "normal")
     col4.metric("OOS 발생 횟수", f"{oos_count} 회", delta="망 이탈 감지" if oos_count > 0 else "안정", delta_color="inverse" if oos_count > 0 else "normal")
 
 def _render_knowledge_base_table(df):
@@ -253,47 +237,29 @@ def _render_ai_integrated_report(engine, df):
     if not st.button("현재 세션 리포트 생성", width="stretch"):
         return
 
+    actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
+
     with st.spinner("관련 이벤트와 지표를 정리하는 중입니다..."):
-        actual_file_name = df['source_file'].iloc[0] if not df.empty and 'source_file' in df.columns else "Unknown"
-        current_base = st.session_state.current_file.replace("_payload.json", "")
-        health_kpi_json = get_health_kpi_with_optional_backend(current_base)
-        combined_query = f"""
-        [입력 데이터]
-        {health_kpi_json}
+        report = generate_session_report_with_optional_backend(
+            engine,
+            st.session_state.current_file.replace("_payload.json", ""),
+            current_file=actual_file_name,
+        )
 
-        [지시사항]
-        제공된 데이터와 검색된 로그를 기반으로 단말 상태를 진단하여 다음 항목만 작성하십시오.
+    st.success("리포트 생성이 완료되었습니다.")
 
-        1. 핵심 원인 (Root Cause):
-           - '9_ril_sip_correlation' 항목에 문제가 확인되면 이를 최상단에 가장 먼저 명시하십시오.
-        2. 주요 이상 징후 요약:
-           - 입력 데이터 내 부문별 에러나 특이사항을 사실대로 요약하십시오.
+    report_thinking = report.get("thinking", "")
+    if report_thinking:
+        with st.expander("처리 과정", expanded=False):
+            st.markdown(f"```text\n{report_thinking}\n```")
 
-        * 규칙: 데이터에 없는 수치나 원인을 임의로 추측하거나 지어내지 마십시오.
-        """
+    _render_copyable_report(report.get("answer", ""))
 
-        raw_result = ask_with_optional_backend(engine, combined_query, current_file=actual_file_name)
-
-        if isinstance(raw_result, (tuple, list)):
-            report_answer = raw_result[0]
-            report_thinking = raw_result[3] if len(raw_result) > 3 else ""
-        else:
-            report_answer = raw_result
-            report_thinking = ""
-
-        st.success("리포트 생성이 완료되었습니다.")
-
-        if report_thinking:
-            with st.expander("처리 과정", expanded=False):
-                st.markdown(f"```text\n{report_thinking}\n```")
-
-        _render_copyable_report(report_answer)
-
-        all_db_data = get_metadata_with_optional_backend(engine, source_file=actual_file_name)
-        if all_db_data and all_db_data.get('ids'):
-            st.session_state.last_ids = all_db_data['ids']
-            st.session_state.last_metas = all_db_data['metadatas']
-            st.toast("리포트 결과가 임시 저장되었습니다.")
+    all_db_data = get_metadata_with_optional_backend(engine, source_file=actual_file_name)
+    if all_db_data and all_db_data.get('ids'):
+        st.session_state.last_ids = all_db_data['ids']
+        st.session_state.last_metas = all_db_data['metadatas']
+        st.toast("리포트 결과가 임시 저장되었습니다.")
 
 def _render_copyable_report(report_answer):
     safe_report = report_answer.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("\n", "\\n")

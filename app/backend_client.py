@@ -168,6 +168,103 @@ def get_health_kpi_with_optional_backend(base_name: str) -> str:
     return get_device_health_kpi(base_name)
 
 
+def get_session_kpi_via_backend(source_file: Optional[str] = None) -> Dict[str, Any]:
+    import requests
+
+    params = {"source_file": source_file} if source_file else {}
+    response = requests.get(
+        f"{get_backend_api_url()}/dashboard/kpi",
+        params=params,
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_session_kpi_with_optional_backend(engine, source_file: Optional[str] = None) -> Dict[str, Any]:
+    """Headline device-state numbers for one analyzed session."""
+    if is_backend_api_enabled():
+        return get_session_kpi_via_backend(source_file)
+
+    from core.dashboard_kpi import compute_session_kpi
+
+    data = get_metadata_with_optional_backend(engine, source_file=source_file)
+    return compute_session_kpi(data.get("metadatas", []))
+
+
+def get_satellite_overview_via_backend(base_name: str) -> Dict[str, Any]:
+    import requests
+    from urllib.parse import quote
+
+    response = requests.get(
+        f"{get_backend_api_url()}/satellite/{quote(base_name, safe='')}",
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_satellite_overview_with_optional_backend(base_name: str) -> Dict[str, Any]:
+    """Satellite artifacts plus the detected constellation, in one call."""
+    if is_backend_api_enabled():
+        return get_satellite_overview_via_backend(base_name)
+
+    from agent_toolkit.satellite_tools import load_satellite_overview
+
+    return load_satellite_overview(base_name)
+
+
+def _generate_report_via_backend(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    import requests
+
+    response = requests.post(
+        f"{get_backend_api_url()}/reports/{kind}",
+        json=payload,
+        timeout=float(os.getenv("BACKEND_API_TIMEOUT", "300")),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def generate_session_report_with_optional_backend(
+    engine,
+    base_name: str,
+    current_file: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Current-session diagnostic report."""
+    if is_backend_api_enabled():
+        return _generate_report_via_backend(
+            "session",
+            {"base_name": base_name, "current_file": current_file},
+        )
+    if engine is None:
+        raise RuntimeError("Local RAG engine is not available.")
+
+    from core.reports import generate_session_report
+
+    return generate_session_report(engine, base_name, current_file=current_file)
+
+
+def generate_satellite_report_with_optional_backend(
+    engine,
+    base_name: str,
+    sat_type: str,
+    current_file: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Satellite (NTN) report for the given constellation."""
+    if is_backend_api_enabled():
+        return _generate_report_via_backend(
+            "satellite",
+            {"base_name": base_name, "sat_type": sat_type, "current_file": current_file},
+        )
+    if engine is None:
+        raise RuntimeError("Local RAG engine is not available.")
+
+    from core.reports import generate_satellite_report
+
+    return generate_satellite_report(engine, base_name, sat_type, current_file=current_file)
+
+
 def get_knowledge_via_backend() -> Dict[str, Any]:
     import requests
 
