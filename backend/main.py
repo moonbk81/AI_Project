@@ -16,6 +16,7 @@ import uuid
 
 from fastapi import File, Form, UploadFile, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from rag.llm_provider import get_default_llm_model, get_llm_provider, get_llm_runtime_label
@@ -232,8 +233,32 @@ app = FastAPI(title="AI Project RAG Backend")
 
 # OpenAI-compatible chat endpoint, so Open WebUI can use this RAG as a model.
 from backend.openai_api import router as openai_router  # noqa: E402  (needs `app`)
+from backend.charts_api import router as charts_router  # noqa: E402
 
 app.include_router(openai_router)
+app.include_router(charts_router)
+
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+@app.get("/vendor/plotly.min.js", include_in_schema=False)
+def plotly_bundle():
+    """Serve the plotly.js that ships with the installed plotly package.
+
+    Keeps the browser frontend working without reaching a CDN.
+    """
+    import plotly
+    from fastapi.responses import FileResponse
+
+    bundle = os.path.join(os.path.dirname(plotly.__file__), "package_data", "plotly.min.js")
+    if not os.path.exists(bundle):
+        raise HTTPException(status_code=404, detail="plotly.min.js not found")
+    return FileResponse(bundle, media_type="application/javascript")
+
+
+# Browser frontend spike: the same chart contracts, drawn outside Streamlit.
+app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
 # Exception handler for detailed validation errors
 from fastapi.exceptions import RequestValidationError

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그 분석 대시보드 (spike)</title>
+<script src="/vendor/plotly.min.js"></script>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --plane:          #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+    --series-2:       #eb6834;
+    --series-3:       #1baf7a;
+    --series-4:       #eda100;
+    --seq-250:        #86b6ef;
+    --seq-350:        #5598e7;
+    --seq-450:        #2a78d6;
+    --seq-550:        #1c5cab;
+    --status-good:    #0ca30c;
+    --status-critical:#d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --plane:          #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --series-4:       #c98500;
+      --seq-250:        #184f95;
+      --seq-350:        #256abf;
+      --seq-450:        #3987e5;
+      --seq-550:        #6da7ec;
+      --status-good:    #0ca30c;
+      --status-critical:#d03b3b;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --plane:          #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-4:       #c98500;
+    --seq-250:        #184f95;
+    --seq-350:        #256abf;
+    --seq-450:        #3987e5;
+    --seq-550:        #6da7ec;
+    --status-good:    #0ca30c;
+    --status-critical:#d03b3b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--plane);
+    color: var(--text-primary);
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 20px 28px; border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .spike-tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+    color: var(--text-secondary); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 9px;
+  }
+  .grow { flex: 1; }
+  select, button {
+    font: inherit; font-size: 13px; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 11px; cursor: pointer;
+  }
+  select { max-width: 380px; }
+  button:hover { border-color: var(--baseline); }
+
+  main { padding: 24px 28px 56px; }
+
+  .kpi-row {
+    display: grid; gap: 12px; margin-bottom: 24px;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .tile-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .tile-value { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+  .tile-unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+  .tile-note { font-size: 12px; margin-top: 5px; color: var(--text-muted); }
+  .tile-note.good { color: var(--status-good); }
+  .tile-note.critical { color: var(--status-critical); }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px 12px;
+  }
+  .card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .card-sub { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; }
+  .card-head button { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+  .plot { width: 100%; height: 300px; }
+  .empty {
+    display: flex; align-items: center; justify-content: center; height: 300px;
+    color: var(--text-muted); font-size: 13px; text-align: center; padding: 0 24px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td {
+    text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  th { color: var(--text-secondary); font-weight: 600; }
+  td { color: var(--text-primary); }
+  .table-wrap { max-height: 300px; overflow: auto; }
+  .hidden { display: none; }
+</style>
+</head>
+<body class="viz-root">
+<header>
+  <h1>로그 분석 대시보드</h1>
+  <span class="spike-tag">SPIKE</span>
+  <select id="file" aria-label="분석 대상 파일"></select>
+  <span class="grow"></span>
+  <button id="theme" type="button">테마</button>
+</header>
+
+<main>
+  <div class="kpi-row" id="kpis"></div>
+  <div class="grid" id="cards"></div>
+</main>
+
+<script>
+const CARDS = [
+  { id: "service-state",  title: "망 등록 상태 전이",    sub: "Voice / Data 등록 상태가 바뀐 시점만" },
+  { id: "signal-level",   title: "RAT별 신호 세기",      sub: "Signal level 추이" },
+  { id: "data-usage",     title: "앱별 데이터 사용량",   sub: "셀룰러 누적 사용량 상위 10개" },
+  { id: "dns-errors",     title: "패키지별 DNS 오류",    sub: "성공(0/SUCCESS)을 제외한 응답 코드" },
+];
+
+// The builders' own status values, translated once. Same contract the Streamlit
+// UI reads — this page never decides "is there anything to draw".
+const EMPTY_TEXT = {
+  unavailable: "이 세션에는 로그 메타데이터가 없습니다.",
+  no_data: "해당 데이터가 없습니다.",
+  no_events: "OOS 이벤트가 없습니다 — 서비스가 유지되었습니다.",
+  no_changes: "표시할 상태 변화가 없습니다.",
+  no_errors: "DNS 실패/차단 기록이 없습니다 (정상).",
+  no_calls: "통화 세션 로그가 없습니다.",
+  unparsable_time: "시간 형식을 해석할 수 없어 시계열을 만들지 못했습니다.",
+};
+
+const token = (name) => getComputedStyle(document.body).getPropertyValue(name).trim();
+const seriesColors = () => [token("--series-1"), token("--series-2"), token("--series-3"), token("--series-4")];
+
+function baseLayout(extra) {
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: 'system-ui, -apple-system, "Segoe UI", sans-serif', size: 12, color: token("--text-muted") },
+    margin: { l: 64, r: 24, t: 8, b: 44 },
+    xaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "" },
+    yaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "" },
+    hoverlabel: {
+      bgcolor: token("--surface-1"), bordercolor: token("--border"),
+      font: { color: token("--text-primary"), size: 12 },
+    },
+    legend: { orientation: "h", y: 1.14, x: 0, font: { color: token("--text-secondary") } },
+    showlegend: false,
+  };
+  return Object.assign(layout, extra || {});
+}
+
+const PLOT_CONFIG = { displayModeBar: false, responsive: true };
+
+// A line's own last point carries its name, so identity never rests on color.
+function endLabels(traces) {
+  return traces
+    .filter((trace) => trace.x.length)
+    .map((trace) => ({
+      x: trace.x[trace.x.length - 1],
+      y: trace.y[trace.y.length - 1],
+      text: trace.name,
+      showarrow: false,
+      xanchor: "left",
+      xshift: 10,
+      font: { size: 11, color: token("--text-secondary") },
+    }));
+}
+
+function groupBy(rows, keyOf) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return groups;
+}
+
+// ---------------------------------------------------------------- renderers
+
+const RENDER = {
+  "service-state"(series) {
+    const groups = groupBy(series.points, (p) => `${p.Slot ?? p.slot} · ${p.conn_type}`);
+    const colors = seriesColors();
+    const traces = [...groups.entries()].map(([name, points], index) => ({
+      type: "scatter", mode: "lines+markers", name,
+      x: points.map((p) => p.time_dt), y: points.map((p) => p.state),
+      line: { shape: "hv", width: 2, color: colors[index % colors.length] },
+      marker: { size: 8, color: colors[index % colors.length], line: { width: 2, color: token("--surface-1") } },
+      hovertemplate: "<b>%{y}</b><br>%{x}<extra>" + name + "</extra>",
+    }));
+
+    const layout = baseLayout({
+      showlegend: traces.length > 1,
+      hovermode: "x unified",
+      margin: { l: 132, r: 92, t: 8, b: 44 },
+      yaxis: {
+        gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "",
+        type: "category", categoryorder: "array", categoryarray: series.state_order,
+      },
+      annotations: endLabels(traces),
+    });
+    return { traces, layout, table: {
+      columns: ["시각", "슬롯", "유형", "상태", "원인"],
+      rows: series.points.map((p) => [p.time, p.Slot ?? p.slot, p.conn_type, p.state, p.cause]),
+    } };
+  },
+
+  "signal-level"(series) {
+    const groups = groupBy(series.points, (p) => p.rat || "Unknown");
+    const colors = seriesColors();
+    const traces = [...groups.entries()].map(([name, points], index) => ({
+      type: "scatter", mode: "lines+markers", name,
+      x: points.map((p) => p.time), y: points.map((p) => p.level),
+      line: { shape: "hv", width: 2, color: colors[index % colors.length] },
+      marker: { size: 8, color: colors[index % colors.length], line: { width: 2, color: token("--surface-1") } },
+      hovertemplate: "level <b>%{y}</b><br>%{x}<extra>" + name + "</extra>",
+    }));
+
+    const layout = baseLayout({
+      showlegend: traces.length > 1,
+      hovermode: "x unified",
+      margin: { l: 56, r: 76, t: 8, b: 60 },
+      xaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "", tickangle: -35, nticks: 8 },
+      yaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "", title: { text: "level", font: { size: 11 } } },
+      annotations: endLabels(traces),
+    });
+    return { traces, layout, table: {
+      columns: ["시각", "RAT", "슬롯", "level"],
+      rows: series.points.map((p) => [p.time, p.rat, p.slot, p.level]),
+    } };
+  },
+
+  "data-usage"(series) {
+    // Magnitude, one hue: the ramp carries "more", not identity.
+    const rows = [...series.app_totals].sort((a, b) => a.total_mb - b.total_mb);
+    const ramp = [token("--seq-250"), token("--seq-350"), token("--seq-450"), token("--seq-550")];
+    const max = Math.max(...rows.map((r) => r.total_mb), 1);
+
+    const traces = [{
+      type: "bar", orientation: "h",
+      x: rows.map((r) => r.total_mb),
+      y: rows.map((r) => r.app_name),
+      marker: {
+        color: rows.map((r) => ramp[Math.min(ramp.length - 1, Math.floor((r.total_mb / max) * ramp.length))]),
+        cornerradius: 4,
+        line: { width: 2, color: token("--surface-1") },
+      },
+      text: rows.map((r) => `${r.total_mb.toFixed(1)} MB`),
+      textposition: "outside",
+      textfont: { color: token("--text-secondary"), size: 11 },
+      cliponaxis: false,
+      hovertemplate: "<b>%{x:.1f} MB</b><extra>%{y}</extra>",
+    }];
+
+    const layout = baseLayout({
+      bargap: 0.45,
+      margin: { l: 168, r: 88, t: 8, b: 44 },
+      xaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "", title: { text: "MB", font: { size: 11 } } },
+      yaxis: { gridcolor: "rgba(0,0,0,0)", linecolor: token("--baseline"), zeroline: false, ticks: "", automargin: true },
+    });
+    return { traces, layout, table: {
+      columns: ["앱", "사용량(MB)"],
+      rows: [...rows].reverse().map((r) => [r.app_name, r.total_mb]),
+    } };
+  },
+
+  "dns-errors"(series) {
+    const codes = [...new Set(series.counts.map((row) => row.return_code))].slice(0, 4);
+    const apps = [...new Set(series.counts.map((row) => row.app_name))];
+    const colors = seriesColors();
+
+    const traces = codes.map((code, index) => ({
+      type: "bar", name: String(code),
+      x: apps,
+      y: apps.map((app) => {
+        const hit = series.counts.find((row) => row.app_name === app && row.return_code === code);
+        return hit ? hit.count : 0;
+      }),
+      marker: { color: colors[index % colors.length], cornerradius: 4, line: { width: 2, color: token("--surface-1") } },
+      hovertemplate: "<b>%{y}건</b><br>%{x}<extra>" + String(code) + "</extra>",
+    }));
+
+    const layout = baseLayout({
+      // The series names are the error codes themselves, so even one of them
+      // needs the legend — the title cannot name it.
+      barmode: "stack", bargap: 0.45, showlegend: true,
+      margin: { l: 56, r: 24, t: 8, b: 96 },
+      xaxis: { gridcolor: "rgba(0,0,0,0)", linecolor: token("--baseline"), zeroline: false, ticks: "", tickangle: -30, automargin: true },
+      yaxis: { gridcolor: token("--grid"), linecolor: token("--baseline"), zeroline: false, ticks: "", title: { text: "건수", font: { size: 11 } } },
+    });
+    return { traces, layout, table: {
+      columns: ["패키지", "응답 코드", "건수"],
+      rows: series.counts.map((row) => [row.app_name, row.return_code, row.count]),
+    } };
+  },
+};
+
+// -------------------------------------------------------------------- shell
+
+function tile(label, value, unit, note, noteClass) {
+  const wrap = document.createElement("div");
+  wrap.className = "tile";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "tile-label";
+  labelEl.textContent = label;
+
+  const valueEl = document.createElement("div");
+  valueEl.className = "tile-value";
+  valueEl.textContent = value;
+  if (unit) {
+    const unitEl = document.createElement("span");
+    unitEl.className = "tile-unit";
+    unitEl.textContent = unit;
+    valueEl.appendChild(unitEl);
+  }
+
+  wrap.append(labelEl, valueEl);
+  if (note) {
+    const noteEl = document.createElement("div");
+    noteEl.className = "tile-note" + (noteClass ? " " + noteClass : "");
+    noteEl.textContent = note;
+    wrap.appendChild(noteEl);
+  }
+  return wrap;
+}
+
+function renderTable(host, table) {
+  host.replaceChildren();
+  const el = document.createElement("table");
+  const head = el.createTHead().insertRow();
+  for (const column of table.columns) {
+    const th = document.createElement("th");
+    th.textContent = column;
+    head.appendChild(th);
+  }
+  const body = el.createTBody();
+  for (const row of table.rows.slice(0, 300)) {
+    const tr = body.insertRow();
+    for (const cell of row) tr.insertCell().textContent = cell === null || cell === undefined ? "-" : cell;
+  }
+  host.appendChild(el);
+}
+
+function buildCards() {
+  const host = document.getElementById("cards");
+  host.replaceChildren();
+
+  for (const card of CARDS) {
+    const section = document.createElement("section");
+    section.className = "card";
+
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const title = document.createElement("h2");
+    title.textContent = card.title;
+    const spacer = document.createElement("span");
+    spacer.className = "grow";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = "표";
+    head.append(title, spacer, toggle);
+
+    const sub = document.createElement("p");
+    sub.className = "card-sub";
+    sub.textContent = card.sub;
+
+    const plot = document.createElement("div");
+    plot.className = "plot";
+    plot.id = "plot-" + card.id;
+
+    const tableWrap = document.createElement("div");
+    tableWrap.className = "table-wrap hidden";
+
+    toggle.addEventListener("click", () => {
+      const showTable = tableWrap.classList.contains("hidden");
+      tableWrap.classList.toggle("hidden", !showTable);
+      plot.classList.toggle("hidden", showTable);
+      toggle.textContent = showTable ? "차트" : "표";
+    });
+
+    section.append(head, sub, plot, tableWrap);
+    host.appendChild(section);
+    card.nodes = { plot, tableWrap, toggle };
+  }
+}
+
+function showEmpty(card, status) {
+  const message = EMPTY_TEXT[status] || `표시할 데이터가 없습니다 (${status}).`;
+  card.nodes.plot.replaceChildren();
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  empty.textContent = message;
+  card.nodes.plot.appendChild(empty);
+  card.nodes.toggle.classList.add("hidden");
+}
+
+async function loadKpis(sourceFile) {
+  const host = document.getElementById("kpis");
+  host.replaceChildren();
+  const kpi = await fetch("/dashboard/kpi?source_file=" + encodeURIComponent(sourceFile)).then((r) => r.json());
+
+  const dropped = kpi.call_drop_count > 0;
+  host.append(
+    tile("통화 성공률", kpi.call_success_rate.toFixed(1), "%", dropped ? `실패/드롭 ${kpi.call_drop_count}건` : "실패 없음",
+         dropped ? "critical" : "good"),
+    tile("OOS 이벤트", kpi.oos_count, "", kpi.oos_count > 0 ? "권외 전환 감지" : "서비스 유지",
+         kpi.oos_count > 0 ? "critical" : "good"),
+    tile("평균 신호 레벨", kpi.avg_signal_level.toFixed(1), "", "0(최악) ~ 4(최상)"),
+    tile("최다 사용 앱", kpi.top_app_name, "", `${kpi.top_app_mb.toFixed(1)} MB`),
+  );
+}
+
+async function loadCard(card, sourceFile) {
+  card.nodes.toggle.classList.remove("hidden");
+  const payload = await fetch(`/charts/${card.id}?source_file=${encodeURIComponent(sourceFile)}`).then((r) => r.json());
+  const series = payload.series;
+
+  if (series.status !== "ok") {
+    showEmpty(card, series.status);
+    return;
+  }
+
+  const { traces, layout, table } = RENDER[card.id](series);
+  card.nodes.plot.classList.remove("hidden");
+  Plotly.react(card.nodes.plot, traces, layout, PLOT_CONFIG);
+  renderTable(card.nodes.tableWrap, table);
+}
+
+async function load(sourceFile) {
+  await Promise.all([
+    loadKpis(sourceFile).catch((error) => console.error("kpi", error)),
+    ...CARDS.map((card) => loadCard(card, sourceFile).catch((error) => {
+      console.error(card.id, error);
+      showEmpty(card, "load_failed");
+    })),
+  ]);
+}
+
+async function boot() {
+  buildCards();
+
+  const select = document.getElementById("file");
+  const { files } = await fetch("/files").then((r) => r.json());
+
+  if (!files.length) {
+    select.replaceChildren(new Option("적재된 로그가 없습니다", ""));
+    return;
+  }
+  select.replaceChildren(...files.map((file) => new Option(file, file)));
+  select.addEventListener("change", () => load(select.value));
+
+  await load(files[0]);
+}
+
+document.getElementById("theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme === "dark"
+    || (!root.dataset.theme && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  root.dataset.theme = dark ? "light" : "dark";
+  const select = document.getElementById("file");
+  if (select.value) load(select.value);   // re-render marks against the new surface
+});
+
+boot();
+</script>
+</body>
+</html>
