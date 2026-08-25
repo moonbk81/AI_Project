@@ -5,7 +5,7 @@ from app.backend_client import ask_with_optional_backend, get_health_kpi_with_op
 from app.chat_panel import render_chat_history
 from core.config import QUICK_PROMPTS
 from plm.prompts import build_defect_analysis_query
-from ui.common import parse_raw_logs
+from core.references import build_reference_blocks
 
 
 def _get_last_assistant_message():
@@ -15,33 +15,29 @@ def _get_last_assistant_message():
     return None
 
 def _build_reference_text(metas):
+    """Render the retrieved log rows as the markdown the chat history shows."""
     ref_text = ""
-    for i, meta in enumerate(metas):
-        known_solution = meta.get('known_solution')
-        solution_badge = " [과거 해결 사례 포함]" if known_solution else ""
-        ref_text += f"### 자료 {i+1} (Time: {meta.get('time', 'N/A')}, Slot: {meta.get('slot', 'N/A')}){solution_badge}\n"
+    for block in build_reference_blocks(metas):
+        solution_badge = " [과거 해결 사례 포함]" if block.known_solution else ""
+        ref_text += f"### 자료 {block.index} (Time: {block.time}, Slot: {block.slot}){solution_badge}\n"
 
-        if known_solution:
-            ref_text += f"> **분석 기록:** {known_solution}\n\n"
+        if block.known_solution:
+            ref_text += f"> **분석 기록:** {block.known_solution}\n\n"
 
-        raw_data = meta.get('raw_logs', meta.get('raw_context', meta.get('raw_stack', '[]')))
-        raw_logs = parse_raw_logs(raw_data)
-        if raw_logs:
+        if block.raw_logs:
             ref_text += "```text\n"
-            for log in raw_logs[:10]:
+            for log in block.raw_logs:
                 ref_text += f"{log}\n"
-            if len(raw_logs) > 10:
-                ref_text += f"... (생략됨, 총 {len(raw_logs)} 라인) ...\n"
+            if block.truncated:
+                ref_text += f"... (생략됨, 총 {block.raw_log_total} 라인) ...\n"
             ref_text += "```\n"
 
-        raw_req = meta.get('raw_request')
-        raw_resp = meta.get('raw_response')
-        if raw_req or raw_resp:
+        if block.raw_request or block.raw_response:
             ref_text += "```text\n"
-            if raw_req:
-                ref_text += f"[REQ]  {raw_req}\n"
-            if raw_resp:
-                ref_text += f"[RESP] {raw_resp}\n"
+            if block.raw_request:
+                ref_text += f"[REQ]  {block.raw_request}\n"
+            if block.raw_response:
+                ref_text += f"[RESP] {block.raw_response}\n"
             ref_text += "```\n"
 
         ref_text += "---\n"

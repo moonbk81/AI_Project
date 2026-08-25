@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import os
 import shutil
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 import uuid
@@ -35,6 +36,9 @@ class AskResponse(BaseModel):
     ids: List[str]
     metas: List[Dict[str, Any]]
     thinking: str = ""
+    # The retrieved rows, already shaped into the blocks a reader checks the
+    # answer against, so every UI renders the same references.
+    references: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class FilesResponse(BaseModel):
@@ -411,18 +415,32 @@ def health() -> Dict[str, Any]:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest) -> AskResponse:
+    from dataclasses import asdict
+
+    from core.references import build_reference_blocks
+
+    # A caller that does not track the device KPI should not have to: it is
+    # derived from the same file the question is about.
+    health_kpi = req.health_kpi
+    if health_kpi is None and req.current_file:
+        try:
+            health_kpi = _health_kpi_for(req.current_file)
+        except Exception as e:
+            print(f"[ASK] health KPI unavailable: {e}", file=sys.stderr)
+
     answer, ids, metas, thinking = get_engine().ask(
         req.question,
         current_file=req.current_file,
         chat_history=req.chat_history,
         top_k=req.top_k,
-        health_kpi=req.health_kpi,
+        health_kpi=health_kpi,
     )
     return AskResponse(
         answer=answer,
         ids=ids,
         metas=metas,
         thinking=thinking or "",
+        references=[asdict(block) for block in build_reference_blocks(metas)],
     )
 
 
@@ -472,6 +490,14 @@ def result_json(base_name: str, artifact: str):
 
     with open(path, "r", encoding="utf-8") as f:
         return JSONResponse(content=json.load(f))
+
+
+def _health_kpi_for(current_file: str) -> str:
+    """KPI JSON for the analyzed file a question is about."""
+    from agent_toolkit.kpi_tools import get_device_health_kpi
+
+    base = os.path.basename(current_file).replace("_payload.json", "")
+    return get_device_health_kpi(base) if base else ""
 
 
 @app.get("/health-kpi/{base_name}", response_model=HealthKpiResponse)

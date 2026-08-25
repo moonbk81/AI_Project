@@ -6,6 +6,7 @@ import { renderDashboard } from "./views/dashboard.js";
 import { renderBoot } from "./views/boot.js";
 import { renderInternet } from "./views/internet.js";
 import { renderSatellite } from "./views/satellite.js";
+import { renderChat } from "./views/chat.js";
 import { renderFiles } from "./views/files.js";
 
 const VIEWS = [
@@ -13,6 +14,7 @@ const VIEWS = [
   { id: "boot", label: "부팅", render: renderBoot, needsFile: true },
   { id: "internet", label: "인터넷 품질", render: renderInternet, needsFile: true },
   { id: "satellite", label: "위성", render: renderSatellite, needsFile: true },
+  { id: "chat", label: "채팅", render: renderChat, needsFile: true },
   { id: "files", label: "파일 · 분석", render: renderFiles, needsFile: false },
 ];
 
@@ -21,6 +23,9 @@ const state = {
   sourceFile: null,
   files: [],
   leaveHandlers: [],
+  // Conversations, kept per file so switching views (or files and back) does
+  // not throw away what was asked.
+  chats: new Map(),
 };
 
 const nodes = {};
@@ -86,6 +91,11 @@ function rerender() {
   }
 
   const ctx = {
+    get chat() {
+      const key = state.sourceFile || "";
+      if (!state.chats.has(key)) state.chats.set(key, []);
+      return state.chats.get(key);
+    },
     setSourceFile(file) {
       state.sourceFile = file;
       drawFilePicker();

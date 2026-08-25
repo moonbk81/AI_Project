@@ -12,6 +12,18 @@ export const api = {
 
   kpi: (sourceFile) => get("/dashboard/kpi", { source_file: sourceFile }),
 
+  // The backend fills in the device KPI from the same file, so the caller
+  // only sends the question and the recent turns.
+  async ask(question, sourceFile, chatHistory) {
+    const response = await fetch("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, current_file: sourceFile, chat_history: chatHistory }),
+    });
+    if (!response.ok) throw new Error(`질의 실패 (${response.status})`);
+    return response.json();
+  },
+
   // Returns the builder's contract; `status` says whether there is anything to draw.
   chart: (name, sourceFile) =>
     get(`/charts/${name}`, { source_file: sourceFile }).then((body) => body.series),

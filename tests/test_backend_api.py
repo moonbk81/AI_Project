@@ -138,12 +138,15 @@ def test_ask_endpoint_uses_engine_contract(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert {key: body[key] for key in ("answer", "ids", "metas", "thinking")} == {
         "answer": "answer: why did signal drop?",
         "ids": ["doc-1"],
         "metas": [{"source_file": "radio.log"}],
         "thinking": "thinking",
     }
+    # Every UI gets the retrieved rows already shaped into reference blocks.
+    assert [block["index"] for block in body["references"]] == [1]
 
 
 def test_files_and_metadata_endpoints(client):
