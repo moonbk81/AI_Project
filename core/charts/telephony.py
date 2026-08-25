@@ -12,20 +12,12 @@ headers), so they stay exactly as rendered rather than being normalised.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import datetime
 import re
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-
-def _log_year(year: Optional[int]) -> int:
-    """Log timestamps carry no year; callers pass one to stay deterministic."""
-    return year if year is not None else datetime.datetime.now().year
-
-
-def _has_columns(df: Any) -> bool:
-    return df is not None and hasattr(df, "columns")
+from .common import has_columns as _has_columns, log_year as _log_year
 
 # Y-axis ordering for the registration timeline: worst state at the bottom, so a
 # line dropping downwards reads as service degrading.
