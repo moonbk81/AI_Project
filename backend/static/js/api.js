@@ -25,6 +25,8 @@ export const api = {
 
   files: () => get("/files").then((body) => body.files || []),
 
+  quickPrompts: () => get("/quick-prompts").then((body) => body.prompts || {}),
+
   kpi: (sourceFile) => get("/dashboard/kpi", { source_file: sourceFile }),
 
   // The backend fills in the device KPI from the same file, so the caller

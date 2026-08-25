@@ -162,6 +162,15 @@ def test_files_and_metadata_endpoints(client):
     }
 
 
+def test_quick_prompts_endpoint_uses_config(client):
+    response = client.get("/quick-prompts")
+
+    assert response.status_code == 200
+    prompts = response.json()["prompts"]
+    assert prompts["call_drop"].strip() == "통화 끊김(Call Drop) 발생 원인을 상세히 분석해 줘."
+    assert prompts["internet_stall_analysis"].strip() == "인터넷 멈춤(Data Stall) 현상의 근본 원인을 분석해 줘."
+
+
 def test_knowledge_endpoints(client, fake_engine):
     list_response = client.get("/knowledge")
     save_response = client.post(

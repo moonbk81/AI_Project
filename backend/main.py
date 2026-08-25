@@ -45,6 +45,10 @@ class FilesResponse(BaseModel):
     files: List[str]
 
 
+class QuickPromptsResponse(BaseModel):
+    prompts: Dict[str, str]
+
+
 class ResetResponse(BaseModel):
     success: bool
 
@@ -588,6 +592,13 @@ def ask(req: AskRequest) -> AskResponse:
 @app.get("/files", response_model=FilesResponse)
 def files() -> FilesResponse:
     return FilesResponse(files=get_engine().get_all_files())
+
+
+@app.get("/quick-prompts", response_model=QuickPromptsResponse)
+def quick_prompts() -> QuickPromptsResponse:
+    from core.config import QUICK_PROMPTS
+
+    return QuickPromptsResponse(prompts={key: str(value or "") for key, value in QUICK_PROMPTS.items()})
 
 
 @app.post("/db/reset", response_model=ResetResponse)

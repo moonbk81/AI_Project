@@ -9,13 +9,13 @@ import { el } from "../viz.js";
 const HISTORY_TURNS = 5;
 
 const QUICK_PROMPTS = [
-  "통화 끊김 확인",
-  "데이터 연결 확인",
-  "배터리·Crash 확인",
-  "망 등록/OOS 확인",
-  "Signal Level 확인",
-  "VoLTE/SIP 확인",
-  "인터넷 지연 확인",
+  { key: "call_drop", label: "통화 끊김 확인" },
+  { key: "data_network_issue", label: "데이터 연결 확인" },
+  { key: "battery_crash", label: "배터리·Crash 확인" },
+  { key: "network_oos", label: "망 등록/OOS 확인" },
+  { key: "antenna_level_analysis", label: "Signal Level 확인" },
+  { key: "volte_sip_analysis", label: "VoLTE/SIP 확인" },
+  { key: "internet_stall_analysis", label: "인터넷 지연 확인" },
 ];
 
 const EXAMPLES = [
@@ -266,10 +266,12 @@ export async function renderChat(mount, sourceFile, ctx) {
     }
   };
 
+  const configuredPrompts = await api.quickPrompts().catch(() => ({}));
+
   for (const prompt of QUICK_PROMPTS) {
-    const button = el("button", null, prompt);
+    const button = el("button", null, prompt.label);
     button.type = "button";
-    button.addEventListener("click", () => ask(prompt));
+    button.addEventListener("click", () => ask(configuredPrompts[prompt.key] || prompt.label));
     quick.append(button);
   }
 
