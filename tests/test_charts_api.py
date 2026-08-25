@@ -162,3 +162,11 @@ def test_the_session_frame_is_reused_across_a_dashboard_of_charts(client, monkey
         client.get(f"/charts/{name}", params={"source_file": "radio.log"})
 
     assert scans == ["radio.log"]  # one scan for the whole dashboard
+
+
+def test_the_favicon_is_served_so_every_page_stops_404ing(client):
+    """Browsers ask for /favicon.ico on any page, /docs included."""
+    response = client.get("/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")

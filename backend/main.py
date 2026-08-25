@@ -297,6 +297,14 @@ app.include_router(charts_router)
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Browsers ask for this on every page, including /docs."""
+    from fastapi.responses import FileResponse
+
+    return FileResponse(os.path.join(_STATIC_DIR, "favicon.svg"), media_type="image/svg+xml")
+
+
 @app.get("/vendor/plotly.min.js", include_in_schema=False)
 def plotly_bundle():
     """Serve the plotly.js that ships with the installed plotly package.
