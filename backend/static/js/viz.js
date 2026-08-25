@@ -261,6 +261,7 @@ export function card(title, subtitle) {
     },
     /** A card whose content is a table (or any node) rather than a plot. */
     content(node) {
+      plotHost.classList.add("content-host");
       plotHost.replaceChildren(node);
       toggle.classList.add("hidden");
     },

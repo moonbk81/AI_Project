@@ -307,7 +307,7 @@ export async function renderBoot(mount, sourceFile) {
   const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
     // Log dumps need the whole row; charts sit side by side.
-    if (spec.wide) panel.section.classList.add("wide");
+    if (spec.wide) panel.section.classList.add("wide", "event-card");
     band.grid.append(panel.section);
     return { spec, panel };
   });
