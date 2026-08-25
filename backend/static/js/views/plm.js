@@ -48,9 +48,9 @@ function select(options, labels) {
   return node;
 }
 
-function radioRow(name, options, onChange) {
+function radioRow(name, options, onChange, initial) {
   const wrap = el("div", "quick");
-  let current = options[0];
+  let current = options.includes(initial) ? initial : options[0];
   const buttons = options.map((option) => {
     const button = el("button", option === current ? "chip active" : "chip", option);
     button.type = "button";
@@ -74,7 +74,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   wrap.append(grid);
   mount.append(wrap);
 
-  const state = { division: "25", defects: [], selected: null, analysis: null };
+  const state = ctx.plmState;
 
   // ------------------------------------------------------------ 로컬 테스트
   // 사내망 밖에서는 PLM 에 닿지 않는다. 이 모드에서는 백엔드가 샘플로 답하고
@@ -103,7 +103,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
       drawMode(next.enabled);
       state.defects = [];
       state.selected = null;
+      state.analysis = null;
+      state.searchNote = "";
       drawResults();
+      clearSelectionViews();
     } catch (error) {
       modeNote.textContent = String(error.message || error);
     } finally {
@@ -115,11 +118,18 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   // ------------------------------------------------------------------ 검색
   const search = panel("결함 검색", "담당 그룹이나 Knox ID 로 찾습니다.");
-  const status = radioRow("status", STATUSES);
-  const method = radioRow("method", ["그룹", "사용자 ID"], () => drawTarget());
+  const status = radioRow("status", STATUSES, (value) => {
+    state.status = value;
+  }, state.status);
+  const method = radioRow("method", ["그룹", "사용자 ID"], (value) => {
+    state.method = value;
+    drawTarget();
+  }, state.method);
 
   const divisionPicker = select(Object.keys(DIVISIONS));
+  divisionPicker.value = state.divisionName || "Mobile";
   divisionPicker.addEventListener("change", async () => {
+    state.divisionName = divisionPicker.value;
     state.division = DIVISIONS[divisionPicker.value];
     await loadGroups();
     drawTarget();
@@ -128,9 +138,14 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const targetHost = el("div");
   const groupPicker = select([]);
   const userInput = input("예: bongki.moon");
+  userInput.value = state.user || "";
+  userInput.addEventListener("input", () => {
+    state.user = userInput.value;
+  });
   const searchButton = el("button", "primary", "검색");
   searchButton.type = "button";
   const searchNote = el("p", "card-note");
+  searchNote.textContent = state.searchNote || "";
 
   const drawTarget = () => {
     targetHost.replaceChildren(
@@ -148,10 +163,15 @@ export async function renderPlm(mount, sourceFile, ctx) {
         return;
       }
       for (const key of keys) groupPicker.append(new Option(groups[key], key));
+      groupPicker.value = keys.includes(state.group) ? state.group : keys[0];
+      state.group = groupPicker.value;
     } catch (error) {
       groupPicker.append(new Option("그룹을 불러오지 못했습니다", ""));
     }
   };
+  groupPicker.addEventListener("change", () => {
+    state.group = groupPicker.value;
+  });
 
   search.body.append(
     field("Division", divisionPicker),
@@ -177,7 +197,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
     const list = el("div", "stack");
     for (const defect of state.defects) {
       const row = el("div", "row");
-      const name = el("span", "row-name" + (defect === state.selected ? " active" : ""),
+      const isSelected = defect.defectCode === state.selected?.defectCode;
+      const name = el("span", "row-name" + (isSelected ? " active" : ""),
                       `${defect.defectCode} · ${defect.plmTitle || ""}`.slice(0, 110));
       const meta = el("span", "row-meta", `${defect.plmStatus || "-"} · ${defect.mainOwnerName || "-"}`);
 
@@ -378,11 +399,44 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const analysisHost = el("div", "stack");
   analysis.body.append(analysisHost);
 
+  function clearSelectionViews() {
+    detailHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    attachmentHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    analysisHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    ctx.setActiveDefect(null);
+  }
+
   const drawAnalysis = (defect) => {
     analysisHost.replaceChildren();
     const run = el("button", "primary", "분석 컨텍스트 생성");
     run.type = "button";
     const output = el("div", "stack");
+
+    const renderContext = (context) => {
+      output.replaceChildren(table(
+        ["항목", "내용"],
+        Object.entries(context).map(([key, value]) => [key, String(value ?? "-").slice(0, 400)]),
+      ));
+
+      const toComment = el("button", null, "이 내용을 코멘트 초안으로");
+      toComment.type = "button";
+      toComment.addEventListener("click", () => {
+        commentBody.value = [
+          "🤖 AI 분석 결과",
+          "",
+          "**문제점:**",
+          context.problem || "N/A",
+          "",
+          "**근본 원인:**",
+          context.root_cause || "N/A",
+          "",
+          "**해결 방안:**",
+          context.solution || "N/A",
+        ].join("\n");
+        commentBody.focus?.();
+      });
+      output.append(toComment);
+    };
 
     run.addEventListener("click", async () => {
       run.disabled = true;
@@ -394,29 +448,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
           return;
         }
         state.analysis = body.context;
-        output.replaceChildren(table(
-          ["항목", "내용"],
-          Object.entries(body.context).map(([key, value]) => [key, String(value ?? "-").slice(0, 400)]),
-        ));
-
-        const toComment = el("button", null, "이 내용을 코멘트 초안으로");
-        toComment.type = "button";
-        toComment.addEventListener("click", () => {
-          commentBody.value = [
-            "🤖 AI 분석 결과",
-            "",
-            "**문제점:**",
-            body.context.problem || "N/A",
-            "",
-            "**근본 원인:**",
-            body.context.root_cause || "N/A",
-            "",
-            "**해결 방안:**",
-            body.context.solution || "N/A",
-          ].join("\n");
-          commentBody.focus?.();
-        });
-        output.append(toComment);
+        renderContext(body.context);
       } catch (error) {
         output.replaceChildren(el("p", "card-note", String(error.message || error)));
       } finally {
@@ -425,6 +457,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
     });
 
     analysisHost.append(run, output);
+    if (state.analysis) renderContext(state.analysis);
   };
 
   // -------------------------------------------------------------- 코멘트
@@ -459,6 +492,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   // ------------------------------------------------------------------ 배선
   const selectDefect = async (defect) => {
+    if (state.selected?.defectCode !== defect.defectCode) state.analysis = null;
     state.selected = defect;
     // The chat registers its answers against whichever defect is open here.
     ctx.setActiveDefect({
@@ -480,7 +514,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
         : userInput.value.trim();
 
       if (!ownerId) {
-        searchNote.textContent = "검색할 그룹이나 Knox ID 를 지정하세요.";
+        state.searchNote = "검색할 그룹이나 Knox ID 를 지정하세요.";
+        searchNote.textContent = state.searchNote;
         return;
       }
 
@@ -491,12 +526,14 @@ export async function renderPlm(mount, sourceFile, ctx) {
       });
       state.defects = body.defects || [];
       state.selected = null;
-      searchNote.textContent = body.success
+      state.searchNote = body.success
         ? `${fmt.count(body.defects?.length || 0)}건` + (body.truncated ? ` (전체 ${body.total_codes}건 중 일부)` : "")
         : body.message || "검색 실패";
+      searchNote.textContent = state.searchNote;
       drawResults();
     } catch (error) {
-      searchNote.textContent = String(error.message || error);
+      state.searchNote = String(error.message || error);
+      searchNote.textContent = state.searchNote;
     } finally {
       searchButton.disabled = false;
     }
@@ -505,11 +542,14 @@ export async function renderPlm(mount, sourceFile, ctx) {
   grid.append(search.section, results.section, detail.section, attachments.section,
               analysis.section, comment.section);
 
-  detailHost.append(el("div", "empty", "결함을 선택하세요."));
-  attachmentHost.append(el("div", "empty", "결함을 선택하세요."));
-  analysisHost.append(el("div", "empty", "결함을 선택하세요."));
-
   await loadGroups();
   drawTarget();
   drawResults();
+  if (state.selected) {
+    await selectDefect(state.selected);
+  } else {
+    detailHost.append(el("div", "empty", "결함을 선택하세요."));
+    attachmentHost.append(el("div", "empty", "결함을 선택하세요."));
+    analysisHost.append(el("div", "empty", "결함을 선택하세요."));
+  }
 }

@@ -32,6 +32,8 @@ const state = {
   chats: new Map(),
   // The PLM defect the chat can register its answer against.
   activeDefect: null,
+  // Search results and the selected PLM defect should survive view switches.
+  plmState: null,
 };
 
 const nodes = {};
@@ -118,6 +120,23 @@ function rerender() {
     },
     get activeDefect() {
       return state.activeDefect;
+    },
+    get plmState() {
+      if (!state.plmState) {
+        state.plmState = {
+          division: "25",
+          divisionName: "Mobile",
+          status: "Open",
+          method: "그룹",
+          group: "",
+          user: "",
+          defects: [],
+          selected: null,
+          analysis: null,
+          searchNote: "",
+        };
+      }
+      return state.plmState;
     },
     setActiveDefect(defect) {
       state.activeDefect = defect;
