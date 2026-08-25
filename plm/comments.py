@@ -7,7 +7,8 @@ Streamlit and FastAPI.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Tuple
 
 _CHAT_COMMENT_HEADER = "💬 **AI Chat 분석 결과"
 _ANALYSIS_COMMENT_HEADER = "🤖 AI 분석 결과"
@@ -45,28 +46,72 @@ def format_analysis_as_comment(context: Dict[str, Any]) -> str:
     )
 
 
+_BOLD = re.compile(r"\*\*(.+?)\*\*", re.S)
+
+
+def render_comment_for_plm(comment: str) -> Tuple[str, bool]:
+    """Prepare comment text for PLM, and say whether it needs editor mode.
+
+    PLM collapses a comment into a single line unless it is sent as markup, so
+    an analysis written over several lines arrives as one run-on paragraph.
+    Line breaks therefore become `<br>` and the markdown bold this tool writes
+    becomes `<b>`.
+
+    Returns `(text, needs_editor)`. A plain one-liner is returned untouched:
+    without tags there is nothing for editor mode to render, and escaping it
+    would only risk showing entities to the reader.
+    """
+    comment = comment or ""
+    if "\n" not in comment and "**" not in comment:
+        return comment, False
+
+    # Escape first: log excerpts and stack traces carry <, > and & of their own.
+    escaped = comment.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    marked_up = _BOLD.sub(r"<b>\1</b>", escaped)
+    return marked_up.replace("\r\n", "\n").replace("\n", "<br>"), True
+
+
 def build_comment_payload(
     division_code: str,
     defect_code: str,
     comment: str,
     create_user: str,
     system_code: str = "AI_ANALYSIS",
+    change_type: str = "S",
+    comment_id: str = "",
 ) -> Dict[str, Any]:
-    """Request body for submit_comment()."""
-    return {
+    """Request body for submit_comment(). `change_type` is S/M/D."""
+    text, needs_editor = render_comment_for_plm(comment)
+
+    payload = {
         "divisionCode": division_code,
         "systemCode": system_code,
         "defectCode": defect_code,
-        "defectComment": comment,
+        "defectComment": text,
         "createUser": create_user,
-        "changeType": "S",
+        "changeType": change_type,
         "docAttachedYn": "N",
     }
+    if needs_editor:
+        # Per the PLM API guide: tags only reach the screen in editor mode.
+        payload["isCommentEditorYn"] = "Y"
+    if comment_id:
+        payload["defectCommentId"] = comment_id
+    return payload
+
+
+# Comments this tool wrote sit on PLM in two shapes: markdown from before the
+# editor-mode switch, HTML after it. Strip both so one rule matches either.
+_MARKUP = re.compile(r"</?b>|<br\s*/?>|\*\*")
+
+
+def _without_markup(text: str) -> str:
+    return _MARKUP.sub("", text or "").lstrip()
 
 
 def is_ai_generated_comment(text: str) -> bool:
-    stripped = (text or "").lstrip()
-    return any(stripped.startswith(sig) for sig in _AI_COMMENT_SIGNATURES)
+    stripped = _without_markup(text)
+    return any(stripped.startswith(_without_markup(sig)) for sig in _AI_COMMENT_SIGNATURES)
 
 
 def is_excluded_comment_user(history_user: str) -> bool:

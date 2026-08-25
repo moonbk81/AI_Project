@@ -40,7 +40,7 @@ from plm.plm_rag_integration import (
 )
 from core.log_archive import extract_file, list_zip_contents
 from plm import log_pipeline
-from plm.comments import format_analysis_as_comment
+from plm.comments import build_comment_payload, format_analysis_as_comment
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
 from plm.plm_api_client import PLMAPIException
 logger = logging.getLogger(__name__)
@@ -1533,18 +1533,15 @@ def render_plm_comment():
                 division_code = "25" if division == "Mobile" else "26"
                 change_map = {"Save": "S", "Modify": "M", "Delete": "D"}
 
-                request_payload = {
-                    "divisionCode": division_code,
-                    "systemCode": system_code,
-                    "defectCode": defect_code,
-                    "defectComment": comment,
-                    "createUser": create_user,
-                    "changeType": change_map[change_type],
-                    "docAttachedYn": "N",
-                }
-
-                if change_type in ["Modify", "Delete"] and comment_id:
-                    request_payload["defectCommentId"] = comment_id
+                request_payload = build_comment_payload(
+                    division_code=division_code,
+                    defect_code=defect_code,
+                    comment=comment,
+                    create_user=create_user,
+                    system_code=system_code,
+                    change_type=change_map[change_type],
+                    comment_id=comment_id if change_type in ["Modify", "Delete"] else "",
+                )
 
                 if _is_plm_local_test_mode():
                     st.success("✅ Local test completed. Comment was not submitted to PLM.")

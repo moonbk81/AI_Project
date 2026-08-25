@@ -2,6 +2,8 @@ from plm.comments import (
     _AI_COMMENT_SIGNATURES,
     build_comment_payload,
     format_analysis_as_comment,
+    is_ai_generated_comment,
+    render_comment_for_plm,
 )
 from plm.prompts import build_defect_analysis_query
 
@@ -97,3 +99,65 @@ def test_comment_payload_shape():
         "changeType": "S",
         "docAttachedYn": "N",
     }
+
+
+# ----------------------------------------------- comment rendering for PLM
+
+
+def test_multi_line_comments_are_sent_as_markup():
+    """PLM collapses a plain comment into one line unless it carries tags."""
+    text, needs_editor = render_comment_for_plm("첫 줄\n둘째 줄")
+
+    assert text == "첫 줄<br>둘째 줄"
+    assert needs_editor is True
+
+
+def test_bold_survives_as_a_tag():
+    text, _ = render_comment_for_plm("**문제점:**\n데이터 끊김")
+
+    assert text == "<b>문제점:</b><br>데이터 끊김"
+
+
+def test_log_excerpts_do_not_become_markup():
+    text, _ = render_comment_for_plm("오류: <null> & timeout\n재현됨")
+
+    assert text == "오류: &lt;null&gt; &amp; timeout<br>재현됨"
+
+
+def test_a_plain_one_liner_is_left_exactly_as_typed():
+    text, needs_editor = render_comment_for_plm("재현 안 됨 (a<b)")
+
+    assert text == "재현 안 됨 (a<b)"
+    assert needs_editor is False
+
+
+def test_editor_mode_is_requested_only_when_there_are_tags():
+    multiline = build_comment_payload(division_code="25", defect_code="D-1", comment="a\nb", create_user="knox")
+    plain = build_comment_payload(division_code="25", defect_code="D-1", comment="a", create_user="knox")
+
+    assert multiline["isCommentEditorYn"] == "Y"
+    assert "isCommentEditorYn" not in plain
+
+
+def test_modify_and_delete_carry_the_comment_id():
+    payload = build_comment_payload(
+        division_code="25",
+        defect_code="D-1",
+        comment="수정본",
+        create_user="knox",
+        change_type="M",
+        comment_id="01YJK98RTtPMWL1000",
+    )
+
+    assert payload["changeType"] == "M"
+    assert payload["defectCommentId"] == "01YJK98RTtPMWL1000"
+
+
+def test_our_own_comments_are_recognised_in_either_shape():
+    """A comment we posted must not come back as developer input."""
+    markdown = format_analysis_as_comment({"from_chat": True, "answer": "본문"})
+    html, _ = render_comment_for_plm(markdown)
+
+    assert is_ai_generated_comment(markdown)
+    assert is_ai_generated_comment(html)
+    assert not is_ai_generated_comment("실제 개발자가 남긴 코멘트")
