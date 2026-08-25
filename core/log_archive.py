@@ -35,9 +35,6 @@ LOG_PATTERNS = [
 NESTED_ARCHIVE_MAX_DEPTH = 3
 MAX_TOTAL_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 
-# Kept under the old name: callers and docs still say "nested ZIP".
-NESTED_ZIP_MAX_DEPTH = NESTED_ARCHIVE_MAX_DEPTH
-
 ARCHIVE_SUFFIXES = (".zip", ".7z")
 
 ZIP = "zip"
