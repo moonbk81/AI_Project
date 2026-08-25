@@ -15,6 +15,7 @@ from app.backend_client import (
     is_backend_api_enabled,
     reset_db_with_optional_backend,
 )
+from app.pending_logs import clear_pending_logs, drop_pending_log, pending_logs
 from rag.llm_provider import get_llm_provider
 from ui.plm_ui import render_plm_sidebar_stats
 
@@ -175,8 +176,7 @@ def _render_backend_analysis_status() -> bool:
         st.session_state.current_file = job.get("current_file")
         # Don't clear messages - preserve chat history in the Log Analysis tab
         # Messages should only be cleared when switching files (laline 273)
-        st.session_state.plm_selected_from_zip = None
-        st.session_state.plm_pending_logs = []
+        clear_pending_logs()
         _invalidate_ingested_files_cache()
         _clear_backend_analysis_job()
         st.toast("Backend 분석 완료")
@@ -302,12 +302,41 @@ def _render_file_session_manager(engine, reset_analysis_context):
             time.sleep(1)
             st.rerun()
 
+def _render_analysis_queue(queued_logs, locked: bool) -> None:
+    """List the queued log files, each with a way to drop it again.
+
+    Queuing a defect's attachments is one click, so the queue fills up with
+    files the user never meant to analyze. Without a remove button the only way
+    out is to run the analysis anyway.
+    """
+    if not queued_logs:
+        return
+
+    st.info(f"📥 PLM 추출 로그 {len(queued_logs)}개 분석 대기 중")
+
+    for index, log in enumerate(queued_logs):
+        name_col, drop_col = st.columns([5, 1])
+        name_col.caption(f"{log['filename']} ({len(log['content']) / 1024:.1f} KB)")
+        if drop_col.button(
+            "✕",
+            key=f"drop_pending_log_{index}_{log['filename']}",
+            help="대기열에서 제거",
+            disabled=locked,
+        ):
+            drop_pending_log(index)
+            st.rerun()
+
+    if st.button("대기열 비우기", key="clear_pending_logs", width="stretch", disabled=locked):
+        clear_pending_logs()
+        st.rerun()
+
+
 def _render_pipeline_controls(engine, run_analysis_pipeline):
     st.divider()
     st.subheader("자동 분석 파이프라인")
 
     # PLM에서 추출되어 분석 대기 중인 로그 파일
-    pending_logs = st.session_state.get('plm_pending_logs', [])
+    queued_logs = pending_logs()
 
     # 1. 실행 상태를 관리할 세션 변수 초기화
     if "is_running" not in st.session_state:
@@ -334,10 +363,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
     if plm_selected_file:
         st.success(f"✅ PLM 파일 준비됨: `{plm_selected_file['filename']}`")
 
-    # Show PLM extracted logs waiting for analysis
-    if pending_logs:
-        names = ", ".join(log['filename'] for log in pending_logs)
-        st.info(f"📥 PLM 추출 로그 {len(pending_logs)}개 분석 대기 중\n\n{names}")
+    _render_analysis_queue(queued_logs, locked=st.session_state.is_running or backend_job_running)
 
     # 2. 버튼 클릭 즉시 상태를 '실행 중'으로 변경하는 콜백 함수
     def set_running():
@@ -371,7 +397,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
             files_to_analyze.append(plm_file)
 
         # Create file-like objects from PLM extracted logs
-        for log in pending_logs:
+        for log in queued_logs:
             log_file = SimpleNamespace()
             log_file.name = log['filename']
             log_file.getbuffer = lambda content=log['content']: content
@@ -399,8 +425,7 @@ def _render_pipeline_controls(engine, run_analysis_pipeline):
             run_analysis_pipeline(files_to_analyze, False, "", "", engine)
             _invalidate_ingested_files_cache()
             # Clear PLM selected file and extracted logs after analysis
-            st.session_state.plm_selected_from_zip = None
-            st.session_state.plm_pending_logs = []
+            clear_pending_logs()
         finally:
             # 4. 분석이 끝나거나 에러가 나더라도 무조건 상태를 해제하고 새로고침
             st.session_state.is_running = False

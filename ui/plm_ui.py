@@ -16,6 +16,12 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from app.pending_logs import (
+    SESSION_KEY as PENDING_LOGS_KEY,
+    add_pending_log,
+    clear_pending_logs,
+    pending_logs,
+)
 from app.backend_client import (
     is_backend_api_enabled,
     plm_analyze_with_optional_backend,
@@ -38,27 +44,6 @@ from plm.comments import format_analysis_as_comment
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
 from plm.plm_api_client import PLMAPIException
 logger = logging.getLogger(__name__)
-
-
-def add_pending_log(filename: str, content: bytes) -> bool:
-    """Register an extracted log file for the unified analysis pipeline.
-
-    The sidebar pipeline consumes ``st.session_state.plm_pending_logs``
-    directly, so no intermediate queue/status tracking is needed.
-    """
-    try:
-        if 'plm_pending_logs' not in st.session_state:
-            st.session_state.plm_pending_logs = []
-
-        st.session_state.plm_pending_logs.append({
-            'filename': filename,
-            'content': content,
-        })
-        logger.info(f"Registered {filename} for analysis (size: {len(content)} bytes)")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to register pending log: {e}")
-        return False
 
 
 def _queue_attachment_logs(filename: str, content: bytes) -> None:
@@ -215,7 +200,7 @@ def _initialize_plm_session():
         'plm_zip_file_data': None,
         'plm_zip_file_list': {},
         'plm_selected_from_zip': None,
-        'plm_pending_logs': [],
+        PENDING_LOGS_KEY: [],
         'plm_active_defect_code': None,
         'plm_active_division': None,
         'plm_current_analysis_result': None,
@@ -698,7 +683,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         logger.info(f"Row selected: {defect_code} (index {selected_index})")
         if division_code:
             # Logs from the previously selected defect must not leak into this one.
-            st.session_state.plm_pending_logs = []
+            clear_pending_logs()
             # Queue the download/extract so it runs after the details have rendered.
             st.session_state.plm_pending_auto_load = {
                 'defect': selected_defect,
@@ -2121,10 +2106,10 @@ def render_plm_section():
         st.info("PLM 로컬 테스트 모드가 활성화되어 있습니다. 샘플 defect로 UI를 검증합니다.")
 
     # 추출된 로그가 대기 중이면 알려주되, 시작은 사용자가 sidebar 버튼으로 한다.
-    pending_logs = st.session_state.get('plm_pending_logs') or []
-    if pending_logs:
+    queued_logs = pending_logs()
+    if queued_logs:
         st.info(
-            f"📥 LOG 파일 {len(pending_logs)}개가 분석 대기 중입니다. "
+            f"📥 LOG 파일 {len(queued_logs)}개가 분석 대기 중입니다. "
             "Sidebar의 **분석 및 DB 적재 시작** 을 누르면 시작합니다."
         )
 
