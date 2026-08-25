@@ -282,3 +282,6 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 .check input { cursor: pointer; }
 
 .mode-row { margin-bottom: 12px; background: var(--surface-1); }
+
+.msg.assistant .fold .text-input { max-width: 260px; }
+.msg.assistant .fold button { margin-top: 8px; }

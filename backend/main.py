@@ -905,19 +905,34 @@ def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
     from plm.comments import build_comment_payload
     from plm.service import submit_comment
 
+    from plm.comments import format_analysis_as_comment
+
     payload = req.payload
     if payload is None:
         form = req.form or {}
-        if not str(form.get("comment") or "").strip():
+
+        # A chat answer is registered under this tool's own header, which is
+        # also how those comments are recognised again later.
+        answer = str(form.get("answer") or "").strip()
+        comment = format_analysis_as_comment({"from_chat": True, "answer": answer}) if answer else form.get("comment")
+
+        if not str(comment or "").strip():
             raise HTTPException(status_code=400, detail="코멘트 내용이 비어 있습니다.")
+        if not str(form.get("create_user") or "").strip():
+            raise HTTPException(status_code=400, detail="작성자 Knox ID 는 필수입니다.")
+
         payload = build_comment_payload(
             division_code=form.get("division_code", "25"),
             defect_code=form.get("defect_code", ""),
-            comment=form["comment"],
-            create_user=form.get("create_user", ""),
+            comment=comment,
+            create_user=form["create_user"],
+            system_code=form.get("system_code", "AI_ANALYSIS"),
         )
 
-    return PlmCommentResponse(**submit_comment(payload))
+    result = submit_comment(payload)
+    # Hand back what was registered, so a UI can show it rather than guess.
+    result.setdefault("result", {})["defectComment"] = payload.get("defectComment", "")
+    return PlmCommentResponse(**result)
 
 
 @app.post("/plm/defects/register", response_model=PlmDefectRegisterResponse)

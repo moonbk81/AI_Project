@@ -389,7 +389,11 @@ def test_plm_comment_and_analyze_endpoints(client, monkeypatch):
     )
 
     assert comment_response.status_code == 200
-    assert comment_response.json() == {"success": True, "message": "ok", "result": {"commentId": "c-1"}}
+    comment_body = comment_response.json()
+    assert comment_body["success"] is True and comment_body["message"] == "ok"
+    assert comment_body["result"]["commentId"] == "c-1"
+    # The response echoes the body that was registered, so a UI can show it.
+    assert comment_body["result"]["defectComment"] == "analysis"
     assert analyze_response.status_code == 200
     assert analyze_response.json()["context"] == {"defect_code": "P260711-001", "problem": "Data stall"}
 

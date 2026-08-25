@@ -61,7 +61,77 @@ function userBubble(text) {
   return wrap;
 }
 
-function assistantBubble(turn) {
+const KNOX_KEY = "knoxId";
+
+const rememberedKnoxId = () => {
+  try {
+    return localStorage.getItem(KNOX_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+};
+
+/**
+ * Register this answer on the PLM defect the PLM tab has open.
+ *
+ * The comment body is built server-side: it carries the header this tool uses
+ * to recognise its own comments later, so it must not be assembled here.
+ */
+function registerBlock(turn, ctx) {
+  const defect = ctx.activeDefect;
+  const fold = details("이 답변을 PLM 코멘트로 등록");
+
+  if (!defect?.code) {
+    fold.append(el("p", "card-note", "PLM 탭에서 결함을 먼저 선택하면 여기서 바로 등록할 수 있습니다."));
+    return fold;
+  }
+
+  const knox = el("input", "text-input");
+  knox.type = "text";
+  knox.placeholder = "Knox ID";
+  knox.value = rememberedKnoxId();
+
+  const submit = el("button", "primary", "PLM Comment 등록");
+  submit.type = "button";
+  const note = el("p", "card-note");
+
+  const preview = el("details", "fold");
+  preview.append(el("summary", null, "등록될 내용 미리보기"),
+                 el("p", "card-note", "맨 앞에 '💬 AI Chat 분석 결과' 머리말이 붙고, 줄바꿈은 PLM 화면에서도 유지됩니다."),
+                 el("pre", null, turn.answer));
+
+  submit.addEventListener("click", async () => {
+    submit.disabled = true;
+    note.textContent = "등록 중...";
+    try {
+      try {
+        localStorage.setItem(KNOX_KEY, knox.value.trim());
+      } catch (error) {
+        /* private mode */
+      }
+
+      const body = await api.plmSubmitAnswer({
+        division_code: defect.division,
+        defect_code: defect.code,
+        create_user: knox.value.trim(),
+        answer: turn.answer,
+      });
+      note.textContent = body.success ? `${defect.code} 에 등록했습니다. ${body.message || ""}`.trim()
+                                      : body.message || "등록 실패";
+      turn.registered = body.success;
+    } catch (error) {
+      note.textContent = String(error.message || error);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  fold.append(el("p", "card-note", `대상 결함: ${defect.code}${defect.title ? " · " + defect.title : ""}`),
+              preview, knox, submit, note);
+  return fold;
+}
+
+function assistantBubble(turn, ctx) {
   const wrap = el("div", "msg assistant");
 
   if (turn.references?.length) {
@@ -77,6 +147,7 @@ function assistantBubble(turn) {
   }
 
   wrap.append(setMarkdown(el("div", "msg-body answer"), turn.answer));
+  if (turn.answer) wrap.append(registerBlock(turn, ctx));
   return wrap;
 }
 
@@ -106,7 +177,7 @@ export async function renderChat(mount, sourceFile, ctx) {
     log.replaceChildren();
     for (const turn of turns) {
       log.append(userBubble(turn.question));
-      log.append(turn.pending ? pendingBubble(turn.question) : assistantBubble(turn));
+      log.append(turn.pending ? pendingBubble(turn.question) : assistantBubble(turn, ctx));
     }
     log.scrollTop = log.scrollHeight;
   };

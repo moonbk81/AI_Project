@@ -28,6 +28,8 @@ const state = {
   // Conversations, kept per file so switching views (or files and back) does
   // not throw away what was asked.
   chats: new Map(),
+  // The PLM defect the chat can register its answer against.
+  activeDefect: null,
 };
 
 const nodes = {};
@@ -102,6 +104,12 @@ function rerender() {
       state.sourceFile = file;
       drawFilePicker();
       rerender();
+    },
+    get activeDefect() {
+      return state.activeDefect;
+    },
+    setActiveDefect(defect) {
+      state.activeDefect = defect;
     },
     /** Hand a ready-made question to the chat view and go there. */
     startChat(question) {

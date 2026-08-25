@@ -79,6 +79,8 @@ export const api = {
   // The comment body is turned into PLM's markup server-side, so the caller
   // sends what the user typed.
   plmSubmitComment: (form) => post("/plm/comment", { form }),
+  /** Register a chat answer; the AI header is added server-side. */
+  plmSubmitAnswer: (form) => post("/plm/comment", { form }),
   plmRegisterDefect: (form) => post("/plm/defects/register", { form }),
 
   plmDefectUrl: (defectId) =>

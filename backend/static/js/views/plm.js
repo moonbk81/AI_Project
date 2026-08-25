@@ -460,6 +460,12 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // ------------------------------------------------------------------ 배선
   const selectDefect = async (defect) => {
     state.selected = defect;
+    // The chat registers its answers against whichever defect is open here.
+    ctx.setActiveDefect({
+      code: defect.defectCode,
+      division: state.division,
+      title: defect.plmTitle || "",
+    });
     drawResults();
     await Promise.all([drawDetail(defect), drawAttachments(defect)]);
     drawAnalysis(defect);

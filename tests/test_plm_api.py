@@ -290,3 +290,56 @@ def test_offline_comments_and_analysis_have_something_to_show(client, offline):
 
     assert len(comments) == 2
     assert context["title"].startswith("IMS registration")
+
+
+# ------------------------------------------- 채팅 답변을 코멘트로 등록
+
+
+def test_a_chat_answer_is_registered_under_this_tools_header(client, monkeypatch):
+    sent = {}
+    monkeypatch.setattr(
+        "plm.service.submit_comment", lambda payload: sent.update(payload) or {"success": True, "message": ""}
+    )
+
+    body = client.post(
+        "/plm/comment",
+        json={
+            "form": {
+                "division_code": "25",
+                "defect_code": "P-1",
+                "create_user": "knox",
+                "answer": "핸드오버 직후 재등록이 반복됩니다.\n- 타이머 미동기",
+            }
+        },
+    ).json()
+
+    assert body["success"] is True
+    # The header is what is_ai_generated_comment() looks for when these come back.
+    assert sent["defectComment"].startswith("💬 <b>AI Chat 분석 결과</b>")
+    assert "<br>- 타이머 미동기" in sent["defectComment"]
+    # The caller gets back exactly what was registered.
+    assert body["result"]["defectComment"] == sent["defectComment"]
+
+
+def test_an_answer_registered_this_way_is_recognised_as_ours_later(client, monkeypatch):
+    """Otherwise our own comments come back as 'developer input' next time."""
+    from plm.comments import is_ai_generated_comment
+
+    sent = {}
+    monkeypatch.setattr(
+        "plm.service.submit_comment", lambda payload: sent.update(payload) or {"success": True, "message": ""}
+    )
+
+    client.post(
+        "/plm/comment",
+        json={"form": {"defect_code": "P-1", "create_user": "knox", "answer": "분석 결과"}},
+    )
+
+    assert is_ai_generated_comment(sent["defectComment"])
+
+
+def test_registering_an_answer_without_a_knox_id_is_refused(client):
+    response = client.post("/plm/comment", json={"form": {"defect_code": "P-1", "answer": "분석 결과"}})
+
+    assert response.status_code == 400
+    assert "Knox ID" in response.json()["detail"]
