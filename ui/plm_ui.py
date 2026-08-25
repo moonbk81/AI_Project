@@ -12,8 +12,6 @@ from datetime import datetime
 import logging
 import sys
 import os
-import zipfile
-import io
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -34,10 +32,13 @@ from plm.plm_rag_integration import (
     create_plm_integration,
     PLMConfigManager
 )
+from core.log_archive import extract_file, list_zip_contents
+from plm import log_pipeline
 from plm.service import format_analysis_as_comment
+from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
 from plm.plm_api_client import DivisionCode, PLMAPIException
 from ui.plm_auto_download import (
-    LogFileExtractor,
+    add_pending_log,
     AutoDownloadManager,
     PLMAutoDownloadFlow
 )
@@ -224,104 +225,6 @@ def _get_plm_client():
     return st.session_state.plm_integration.client
 
 
-def _list_zip_contents(file_data: bytes) -> Dict[str, int]:
-    """
-    List ZIP file contents without extracting (memory efficient)
-    Only includes files in root directory (ignores subdirectories)
-
-    Args:
-        file_data: Binary data of ZIP file
-
-    Returns:
-        Dictionary with {filename: file_size_in_bytes}
-    """
-    try:
-        files_dict = {}
-        zip_buffer = io.BytesIO(file_data)
-
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-            for file_info in zip_ref.infolist():
-                # Skip directories and files in subdirectories
-                if file_info.is_dir():
-                    continue
-
-                filename = file_info.filename
-                # Only include root-level files (no "/" in name)
-                if '/' not in filename:
-                    files_dict[filename] = file_info.file_size
-
-        return files_dict
-
-    except zipfile.BadZipFile:
-        return {}
-    except Exception as e:
-        logger.error(f"Error listing ZIP: {e}")
-        return {}
-
-
-def _list_archive_contents_recursive(file_data: bytes, _depth: int = 0) -> Dict[str, int]:
-    """
-    List file names inside a ZIP, descending into nested ZIPs.
-
-    Used for diagnostics when no log file matched: the interesting names are
-    usually inside an inner archive, which _list_zip_contents() cannot see.
-
-    Returns:
-        {display_path: file_size_in_bytes}
-    """
-    if _depth > LogFileExtractor.NESTED_ZIP_MAX_DEPTH:
-        return {}
-
-    found: Dict[str, int] = {}
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_data), 'r') as zip_ref:
-            for info in zip_ref.infolist():
-                if info.is_dir():
-                    continue
-                name = info.filename
-                if name.lower().endswith('.zip'):
-                    try:
-                        inner = zip_ref.read(name)
-                    except Exception:
-                        found[f"{name} (읽기 실패)"] = info.file_size
-                        continue
-                    for sub, size in _list_archive_contents_recursive(inner, _depth + 1).items():
-                        found[f"{name}/{sub}"] = size
-                else:
-                    found[name] = info.file_size
-    except zipfile.BadZipFile:
-        return {}
-    except Exception as e:
-        logger.error(f"Error listing archive: {e}")
-        return {}
-
-    return found
-
-
-def _extract_file_from_zip(file_data: bytes, target_filename: str) -> Optional[bytes]:
-    """
-    Extract a single file from ZIP (called only when user selects a file)
-
-    Args:
-        file_data: Binary data of ZIP file
-        target_filename: Name of file to extract
-
-    Returns:
-        File content as bytes, or None if failed
-    """
-    try:
-        zip_buffer = io.BytesIO(file_data)
-
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-            if target_filename in zip_ref.namelist():
-                return zip_ref.read(target_filename)
-        return None
-
-    except Exception as e:
-        logger.error(f"Error extracting file from ZIP: {e}")
-        return None
-
-
 def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: str, selected_index: int = 0):
     """
     Automatically load files and start background processing when defect is selected
@@ -436,15 +339,60 @@ def _auto_load_and_process_defect_files(defect: Dict[str, Any], division_code: s
         logger.info(f"Auto-load cleanup for {defect_code}, total time: {time.time() - auto_start:.2f}s")
 
 
+# How many names of a non-matching archive are worth listing before it turns
+# into a wall of text.
+_ARCHIVE_PREVIEW_LIMIT = 15
+
+
+def _write_extraction_event(event) -> None:
+    """Render one pipeline event as a progress line."""
+    if event.kind == log_pipeline.NO_ZIP_ATTACHMENTS:
+        st.write("ℹ️ ZIP 파일이 없습니다")
+    elif event.kind == log_pipeline.ZIP_ATTACHMENTS_FOUND:
+        st.write(f"📦 {event.total}개 ZIP 파일 발견")
+    elif event.kind == log_pipeline.DOWNLOADING:
+        st.write(f"⬇️ [{event.index}/{event.total}] {event.title} 다운로드 중...")
+    elif event.kind == log_pipeline.DOWNLOAD_FAILED:
+        st.write(f"❌ {event.title} 다운로드 실패: {event.error}")
+    elif event.kind == log_pipeline.DOWNLOAD_EMPTY:
+        st.write(f"❌ {event.title} 데이터 없음")
+    elif event.kind == log_pipeline.EXTRACTING:
+        st.write(f"📂 {event.title}에서 LOG 파일 추출 중...")
+    elif event.kind == log_pipeline.LOGS_EXTRACTED:
+        st.write(f"✅ {event.count}개 LOG 파일 추출됨")
+    elif event.kind == log_pipeline.LOG_READY:
+        st.write(f"  ➕ {event.filename} → 분석 큐에 추가됨")
+    elif event.kind == log_pipeline.NO_LOGS_MATCHED:
+        _write_no_logs_matched(event)
+    elif event.kind == log_pipeline.ATTACHMENT_FAILED:
+        st.write(f"❌ {event.title} 처리 중 오류: {event.error}")
+
+
+def _write_no_logs_matched(event) -> None:
+    st.write(f"ℹ️ {event.title}에서 인식 가능한 LOG 파일을 찾지 못했습니다")
+    if not event.contents:
+        st.write("  ZIP 최상위에 파일이 없습니다 (중첩 ZIP 이거나 하위 폴더 구조)")
+        return
+
+    st.write(f"  ZIP 최상위 파일 {len(event.contents)}개:")
+    for name, size in list(event.contents.items())[:_ARCHIVE_PREVIEW_LIMIT]:
+        st.write(f"  · {name} ({size / 1024:.1f} KB)")
+    if len(event.contents) > _ARCHIVE_PREVIEW_LIMIT:
+        st.write(f"  · ... 외 {len(event.contents) - _ARCHIVE_PREVIEW_LIMIT}개")
+    st.caption(
+        "위 이름이 dumpstate 계열이 아니면 자동 인식 대상이 아닙니다. "
+        "'검색 및 파일' 탭의 ZIP 열기로 직접 선택할 수 있습니다."
+    )
+
+
 def _auto_download_and_extract_logs(defect_code: str, division_code: str, files: List[Dict[str, Any]], status=None) -> int:
-    """
-    Auto-download and extract LOG files from ZIP attachments
+    """Download the defect's ZIP attachments and queue the logs found inside.
 
     Args:
         defect_code: Defect code
         division_code: PLM division code
         files: List of attached files
-        status: Streamlit status object for progress updates (optional)
+        status: Streamlit status object; progress lines are written when set
 
     Returns:
         Total number of LOG files extracted and added to queue
@@ -452,9 +400,7 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
     if not files:
         return 0
 
-    # Find ZIP files
-    zip_files = [f for f in files if f.get('title', '').lower().endswith('.zip')]
-    if not zip_files:
+    if not log_pipeline.select_zip_attachments(files):
         if status:
             st.write("ℹ️ ZIP 파일이 없습니다")
         return 0
@@ -466,99 +412,23 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
             st.write("❌ PLM 클라이언트 연결 실패")
         return 0
 
-    if status:
-        st.write(f"📦 {len(zip_files)}개 ZIP 파일 발견")
+    def download(doc_id, title, file_id):
+        return plm_download_file_with_optional_backend(
+            client,
+            division_code=division_code,
+            doc_id=doc_id,
+            title=title,
+            file_id=file_id,
+        )
 
-    # Download each ZIP file and extract logs
     total_logs_found = 0
-    for idx, zip_file in enumerate(zip_files, 1):
-        try:
-            doc_id = zip_file.get('docId')
-            file_id = zip_file.get('fileId')
-            file_title = zip_file.get('title')
-
-            if not file_id or not file_title or not doc_id:
-                logger.warning(f"Skipping file (missing docId/fileId/title): {file_title}")
-                continue
-
-            if status:
-                st.write(f"⬇️ [{idx}/{len(zip_files)}] {file_title} 다운로드 중...")
-
-            logger.info(f"Auto-downloading {file_title} for {defect_code}")
-
-            # Download the file
-            response = plm_download_file_with_optional_backend(
-                client,
-                division_code=division_code,
-                doc_id=doc_id,
-                title=file_title,
-                file_id=file_id
-            )
-
-            if not response.get('success'):
-                error_msg = response.get('message', 'Unknown error')
-                if status:
-                    st.write(f"❌ {file_title} 다운로드 실패: {error_msg}")
-                logger.error(f"Failed to download {file_title}: {error_msg}")
-                continue
-
-            file_data = response.get('data')
-            if not file_data:
-                if status:
-                    st.write(f"❌ {file_title} 데이터 없음")
-                logger.error(f"No data returned for {file_title}")
-                continue
-
-            if status:
-                st.write(f"📂 {file_title}에서 LOG 파일 추출 중...")
-
-            # Extract LOG files from ZIP
-            logger.info(f"Extracting LOG files from {file_title}")
-            log_extractor = LogFileExtractor()
-            extracted_logs = log_extractor.extract_logs_from_zip(file_data)
-
-            if extracted_logs:
-                if status:
-                    st.write(f"✅ {len(extracted_logs)}개 LOG 파일 추출됨")
-                logger.info(f"Found {len(extracted_logs)} LOG file(s) in {file_title}")
-
-                # Add each log to analysis queue
-                for log_filename, log_content in extracted_logs.items():
-                    logger.info(f"Adding {log_filename} to analysis queue")
-                    from ui.plm_auto_download import add_pending_log
-                    add_pending_log(log_filename, log_content)
-                    if status:
-                        st.write(f"  ➕ {log_filename} → 분석 큐에 추가됨")
-                    total_logs_found += 1
-            else:
-                # 중첩 ZIP 은 추출기가 재귀로 들어가므로, 여기까지 왔다면 이름이
-                # LOG_PATTERNS(dumpstate 계열)와 맞지 않는 경우다. 어떤 파일이
-                # 있었는지 보여줘야 왜 못 잡았는지 알 수 있다.
-                contents = _list_archive_contents_recursive(file_data)
-                logger.info(
-                    "No LOG files matched in %s; archive root contains: %s",
-                    file_title,
-                    list(contents.keys()) or "(unreadable or empty)",
-                )
-                if status:
-                    st.write(f"ℹ️ {file_title}에서 인식 가능한 LOG 파일을 찾지 못했습니다")
-                    if contents:
-                        st.write(f"  ZIP 최상위 파일 {len(contents)}개:")
-                        for name, size in list(contents.items())[:15]:
-                            st.write(f"  · {name} ({size / 1024:.1f} KB)")
-                        if len(contents) > 15:
-                            st.write(f"  · ... 외 {len(contents) - 15}개")
-                        st.caption(
-                            "위 이름이 dumpstate 계열이 아니면 자동 인식 대상이 아닙니다. "
-                            "'검색 및 파일' 탭의 ZIP 열기로 직접 선택할 수 있습니다."
-                        )
-                    else:
-                        st.write("  ZIP 최상위에 파일이 없습니다 (중첩 ZIP 이거나 하위 폴더 구조)")
-
-        except Exception as e:
-            if status:
-                st.write(f"❌ {zip_file.get('title', 'unknown')} 처리 중 오류: {e}")
-            logger.error(f"Error processing {zip_file.get('title', 'unknown')}: {e}", exc_info=True)
+    for event in log_pipeline.extract_logs_from_attachments(files, download):
+        if event.kind == log_pipeline.LOG_READY:
+            logger.info(f"Adding {event.filename} to analysis queue")
+            add_pending_log(event.filename, event.content)
+            total_logs_found += 1
+        if status:
+            _write_extraction_event(event)
 
     if total_logs_found > 0 and status:
         st.write(f"\n🎯 총 {total_logs_found}개 LOG 파일이 분석 큐에 추가되었습니다")
@@ -700,95 +570,10 @@ def render_plm_search():
                 st.error(f"Error: {e}")
 
 
-def _get_plm_site_url(defect_id: str) -> str:
-    """
-    Generate PLM site URL for a defect
-
-    Args:
-        defect_id: Defect ID (e.g., 02FBN2PGBtPMWL1000)
-
-    Returns:
-        PLM site URL
-    """
-    # PLM site URL pattern
-    base_url = "http://splm.sec.samsung.net/wl/tqm/defect/defectreg/goDefectDetail.do"
-    # Construct URL with defectId
-    return f"{base_url}?isPopUp=Y&menuGubun=&defectId={defect_id}"
-
-
-def _render_defects_table(defects: List[Dict[str, Any]], division_code: str = "25"):
-    """Render defects in a table with clickable code links"""
-    cell_style = "border:1px solid var(--app-border); padding:8px; text-align:left;"
-    html = (
-        '<table style="width:100%; border-collapse:collapse;">'
-        '<thead><tr style="background-color:var(--app-soft-bg);">'
-        f'<th style="{cell_style}">Code</th>'
-        f'<th style="{cell_style}">Title</th>'
-        f'<th style="{cell_style}">Status</th>'
-        f'<th style="{cell_style}">Priority</th>'
-        f'<th style="{cell_style}">Owner</th>'
-        f'<th style="{cell_style}">Created</th>'
-        '</tr></thead><tbody>'
-    )
-
-    for defect in defects:
-        defect_code = defect.get('defectCode', '')
-        defect_id = defect.get('defectId', '')
-        title = defect.get('plmTitle', '')
-        if isinstance(title, str) and len(title) > 50:
-            title = title[:50] + "..."
-
-        created = defect.get('createDate', '')
-        if isinstance(created, str) and created:
-            created = created[:10]
-
-        plm_url = _get_plm_site_url(defect_id) if defect_id else "#"
-
-        html += (
-            "<tr>"
-            f'<td style="{cell_style}"><a href="{plm_url}" target="_blank" style="color:var(--app-primary); font-weight:700; text-decoration:none;">{defect_code}</a></td>'
-            f'<td style="{cell_style}">{title}</td>'
-            f'<td style="{cell_style}">{defect.get("plmStatus", "N/A")}</td>'
-            f'<td style="{cell_style}">{defect.get("plmPriority", "N/A")}</td>'
-            f'<td style="{cell_style}">{defect.get("mainOwnerName", "N/A")}</td>'
-            f'<td style="{cell_style}">{created}</td>'
-            "</tr>"
-        )
-
-    html += '</tbody></table>'
-    st.markdown(html, unsafe_allow_html=True)
-
-
 def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]], division_code: str) -> Optional[int]:
     """Render search results as a selectable table and return selected row index."""
-    table_data = []
-
-    for defect in defects:
-        defect_code = defect.get('defectCode', '')
-        defect_id = defect.get('defectId', '')
-        title = defect.get('plmTitle', '')
-        created = defect.get('createDate', '')
-
-        if isinstance(title, str) and len(title) > 80:
-            title = title[:80] + "..."
-        if isinstance(created, str) and created:
-            created = created[:10]
-
-        plm_url = _get_plm_site_url(defect_id) if defect_id else ""
-        if plm_url and defect_code:
-            plm_url = f"{plm_url}#{defect_code}"
-
-        table_data.append({
-            "Code": plm_url,
-            "Title": title,
-            "Status": defect.get("plmStatus", "N/A"),
-            "Priority": defect.get("plmPriority", "N/A"),
-            "Owner": defect.get("mainOwnerName", "N/A"),
-            "Created": created,
-        })
-
     table_state = st.dataframe(
-        pd.DataFrame(table_data),
+        pd.DataFrame(build_defect_rows(defects)),
         width="stretch",
         hide_index=True,
         on_select="rerun",
@@ -828,34 +613,8 @@ def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]], d
 
 def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     """Render Quick Search results as a selectable table and return selected row index."""
-    table_data = []
-
-    for defect in defects:
-        defect_code = defect.get('defectCode', '')
-        defect_id = defect.get('defectId', '')
-        title = defect.get('plmTitle', '')
-        created = defect.get('createDate', '')
-
-        if isinstance(title, str) and len(title) > 80:
-            title = title[:80] + "..."
-        if isinstance(created, str) and created:
-            created = created[:10]
-
-        plm_url = _get_plm_site_url(defect_id) if defect_id else ""
-        if plm_url and defect_code:
-            plm_url = f"{plm_url}#{defect_code}"
-
-        table_data.append({
-            "Code": plm_url,
-            "Title": title,
-            "Status": defect.get("plmStatus", "N/A"),
-            "Priority": defect.get("plmPriority", "N/A"),
-            "Owner": defect.get("mainOwnerName", "N/A"),
-            "Created": created,
-        })
-
     table_state = st.dataframe(
-        pd.DataFrame(table_data),
+        pd.DataFrame(build_defect_rows(defects)),
         width="stretch",
         hide_index=True,
         on_select="rerun",
@@ -1453,17 +1212,11 @@ def render_plm_files():
             st.divider()
 
             # Show cached file list
-            table_data = []
-            for file in cached_files:
-                table_data.append({
-                    'File': file.get('title', 'N/A'),
-                    'Size': f"{file.get('fileSize', 0) / 1024:.2f} KB" if file.get('fileSize') else 'N/A',
-                    'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
-                    'ID': file.get('fileId')
-                })
-
-            df = pd.DataFrame(table_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(build_attachment_rows(cached_files, name_column='File', include_id=True)),
+                use_container_width=True,
+                hide_index=True,
+            )
 
             # Download section
             st.subheader("Download Files")
@@ -1572,7 +1325,7 @@ def render_plm_files():
                         with col3:
                             if is_zip:
                                 if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents"):
-                                    zip_file_list = _list_zip_contents(file_content)
+                                    zip_file_list = list_zip_contents(file_content)
                                     if zip_file_list:
                                         st.session_state.plm_zip_file_data = file_content
                                         st.session_state.plm_zip_file_list = zip_file_list
@@ -1592,15 +1345,11 @@ def render_plm_files():
                     )
 
                     # Create table of files
-                    zip_files = []
-                    for fname, fsize in st.session_state.plm_zip_file_list.items():
-                        zip_files.append({
-                            'File': fname,
-                            'Size': f"{fsize / 1024:.1f} KB"
-                        })
-
-                    df_zip = pd.DataFrame(zip_files)
-                    st.dataframe(df_zip, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(build_archive_rows(st.session_state.plm_zip_file_list)),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
                     # File selection for analysis
                     st.subheader("🔍 Select File for Analysis")
@@ -1619,7 +1368,7 @@ def render_plm_files():
                             if st.button("➕ Add to Analysis", key=f"add_to_analysis_{selected_file}"):
                                 with st.spinner(f"Extracting {selected_file}..."):
                                     # Extract only the selected file (lazy extraction)
-                                    file_content = _extract_file_from_zip(
+                                    file_content = extract_file(
                                         st.session_state.plm_zip_file_data,
                                         selected_file
                                     )
@@ -2039,16 +1788,11 @@ def _show_cached_results_in_fragment():
             if files:
                 st.caption(f"{len(files)} attached file(s)")
 
-                table_data = []
-                for file in files:
-                    table_data.append({
-                        'Filename': file.get('title', 'N/A'),
-                        'Size': f"{file.get('fileSize', 0) / 1024:.1f} KB" if file.get('fileSize') else 'N/A',
-                        'Created': file.get('createDate', '')[:10] if file.get('createDate') else '',
-                    })
-
-                df = pd.DataFrame(table_data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(build_attachment_rows(files)),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
                 st.markdown("**Download Files**")
                 for file in files:
