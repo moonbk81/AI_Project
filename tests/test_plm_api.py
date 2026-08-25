@@ -262,14 +262,14 @@ def test_offline_search_answers_from_samples(client, offline):
 
 def test_offline_attachments_can_still_be_extracted(offline):
     """The sample ZIP has to survive the real extraction pipeline."""
-    from core.log_archive import extract_logs_from_zip
+    from core.log_archive import extract_logs_from_archive
     from plm.service import download_attached_file, list_attached_files
 
     files = list_attached_files(division_code="25", defect_code="P260711-LOCAL01")["files"]
     archive = next(file for file in files if file["title"].endswith(".zip"))
     payload = download_attached_file(division_code="25", doc_id="d", title=archive["title"], file_id="f")
 
-    assert list(extract_logs_from_zip(payload["data"])) == ["dumpstate.log"]
+    assert list(extract_logs_from_archive(payload["data"])) == ["dumpstate.log"]
 
 
 def test_offline_writes_are_accepted_but_never_sent(client, offline):

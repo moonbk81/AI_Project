@@ -4,6 +4,9 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
 
+# PLM 첨부는 ZIP 또는 7z 로 온다 (7z 읽기용, 외부 바이너리 불필요)
+py7zr>=1.0
+
 # Data Processing & Visualization
 pandas>=2.1.0
 numpy>=1.24.0

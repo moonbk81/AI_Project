@@ -2,7 +2,7 @@ import io
 import zipfile
 
 from plm import log_pipeline
-from plm.log_pipeline import extract_logs_from_attachments, select_zip_attachments
+from plm.log_pipeline import extract_logs_from_attachments, select_archive_attachments
 
 
 def make_zip(entries):
@@ -40,14 +40,14 @@ def _kinds(events):
 def test_only_zip_attachments_are_opened():
     files = [{"title": "notes.txt"}, {"title": "logs.ZIP"}, {"title": None}]
 
-    assert [f["title"] for f in select_zip_attachments(files)] == ["logs.ZIP"]
-    assert select_zip_attachments(None) == []
+    assert [f["title"] for f in select_archive_attachments(files)] == ["logs.ZIP"]
+    assert select_archive_attachments(None) == []
 
 
 def test_defect_without_zip_attachments_stops_immediately():
     events = list(extract_logs_from_attachments([{"title": "notes.txt"}], _downloader({})))
 
-    assert _kinds(events) == [log_pipeline.NO_ZIP_ATTACHMENTS]
+    assert _kinds(events) == [log_pipeline.NO_ARCHIVE_ATTACHMENTS]
 
 
 def test_extracted_logs_are_yielded_with_their_content():
@@ -57,7 +57,7 @@ def test_extracted_logs_are_yielded_with_their_content():
     events = list(extract_logs_from_attachments(files, download))
 
     assert _kinds(events) == [
-        log_pipeline.ZIP_ATTACHMENTS_FOUND,
+        log_pipeline.ARCHIVE_ATTACHMENTS_FOUND,
         log_pipeline.DOWNLOADING,
         log_pipeline.EXTRACTING,
         log_pipeline.LOGS_EXTRACTED,

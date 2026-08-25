@@ -38,7 +38,7 @@ from plm.plm_rag_integration import (
     create_plm_integration,
     PLMConfigManager
 )
-from core.log_archive import extract_file, list_zip_contents
+from core.log_archive import extract_file, list_root_contents
 from plm import log_pipeline
 from plm import local_test as plm_local_test
 from plm.comments import build_comment_payload, format_analysis_as_comment
@@ -345,10 +345,10 @@ _ARCHIVE_PREVIEW_LIMIT = 15
 
 def _write_extraction_event(event) -> None:
     """Render one pipeline event as a progress line."""
-    if event.kind == log_pipeline.NO_ZIP_ATTACHMENTS:
-        st.write("ℹ️ ZIP 파일이 없습니다")
-    elif event.kind == log_pipeline.ZIP_ATTACHMENTS_FOUND:
-        st.write(f"📦 {event.total}개 ZIP 파일 발견")
+    if event.kind == log_pipeline.NO_ARCHIVE_ATTACHMENTS:
+        st.write("ℹ️ 압축 파일(ZIP/7z)이 없습니다")
+    elif event.kind == log_pipeline.ARCHIVE_ATTACHMENTS_FOUND:
+        st.write(f"📦 {event.total}개 압축 파일 발견")
     elif event.kind == log_pipeline.DOWNLOADING:
         st.write(f"⬇️ [{event.index}/{event.total}] {event.title} 다운로드 중...")
     elif event.kind == log_pipeline.DOWNLOAD_FAILED:
@@ -370,10 +370,10 @@ def _write_extraction_event(event) -> None:
 def _write_no_logs_matched(event) -> None:
     st.write(f"ℹ️ {event.title}에서 인식 가능한 LOG 파일을 찾지 못했습니다")
     if not event.contents:
-        st.write("  ZIP 최상위에 파일이 없습니다 (중첩 ZIP 이거나 하위 폴더 구조)")
+        st.write("  압축 파일에서 읽을 수 있는 파일이 없습니다")
         return
 
-    st.write(f"  ZIP 최상위 파일 {len(event.contents)}개:")
+    st.write(f"  압축 파일 안의 파일 {len(event.contents)}개:")
     for name, size in list(event.contents.items())[:_ARCHIVE_PREVIEW_LIMIT]:
         st.write(f"  · {name} ({size / 1024:.1f} KB)")
     if len(event.contents) > _ARCHIVE_PREVIEW_LIMIT:
@@ -399,9 +399,9 @@ def _auto_download_and_extract_logs(defect_code: str, division_code: str, files:
     if not files:
         return 0
 
-    if not log_pipeline.select_zip_attachments(files):
+    if not log_pipeline.select_archive_attachments(files):
         if status:
-            st.write("ℹ️ ZIP 파일이 없습니다")
+            st.write("ℹ️ 압축 파일(ZIP/7z)이 없습니다")
         return 0
 
     client = _get_plm_client()
@@ -1292,7 +1292,7 @@ def render_plm_files():
                         with col4:
                             if is_zip:
                                 if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents"):
-                                    zip_file_list = list_zip_contents(file_content)
+                                    zip_file_list = list_root_contents(file_content)
                                     if zip_file_list:
                                         st.session_state.plm_zip_file_data = file_content
                                         st.session_state.plm_zip_file_list = zip_file_list

@@ -293,7 +293,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   };
 
   // ------------------------------------------------------------------ 첨부
-  const attachments = panel("첨부 파일", "ZIP 안의 LOG 파일을 뽑아 바로 분석할 수 있습니다.");
+  const attachments = panel("첨부 파일", "압축 파일(ZIP/7z) 안의 LOG 파일을 뽑아 바로 분석할 수 있습니다.");
   const attachmentHost = el("div", "stack");
   attachments.body.append(attachmentHost);
 
