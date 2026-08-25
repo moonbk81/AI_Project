@@ -285,3 +285,11 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 
 .msg.assistant .fold .text-input { max-width: 260px; }
 .msg.assistant .fold button { margin-top: 8px; }
+
+.card.wide { grid-column: 1 / -1; }
+.alert {
+  border-left: 3px solid var(--status-critical); background: var(--plane);
+  border-radius: 6px; padding: 8px 12px; font-size: 13px;
+}
+.alert p { margin: 0; }
+.alert pre { margin: 0; white-space: pre-wrap; font-size: 12px; }

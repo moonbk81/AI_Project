@@ -43,53 +43,184 @@ function bootCard(series, panel) {
   }), frameTable(series.timeline));
 }
 
-function crashCard(series, panel) {
-  const blocks = [];
+// ------------------------------------------------- crash / ANR detail views
 
-  const push = (title, node) => {
-    blocks.push(el("h3", "sub-head", title));
-    blocks.push(node);
+const SUMMARY_LABELS = {
+  has_main_stack: "Main Stack",
+  has_lock_contention: "Lock Contention",
+  has_active_binder: "Binder Wait",
+  has_pre_anr_logcat: "Pre-Logcat",
+  has_cpu_hint: "CPU 단서",
+  has_system_server_hint: "System Server 단서",
+  has_io_hint: "I/O 단서",
+};
+
+function fold(summary, { open = false } = {}) {
+  const node = el("details", "fold");
+  if (open) node.open = true;
+  node.append(el("summary", null, summary));
+  return node;
+}
+
+/** A log dump behind a fold; the line count belongs in the summary. */
+function logFold(label, lines, { open = false } = {}) {
+  if (!lines || !lines.length) return null;
+  const node = fold(`${label} (${lines.length}줄)`, { open });
+  node.append(el("pre", null, lines.join("\n")));
+  return node;
+}
+
+function summaryChips(summary) {
+  const row = el("div", "quick");
+  for (const [key, label] of Object.entries(SUMMARY_LABELS)) {
+    row.append(el("span", "chip" + (summary[key] ? " active" : ""), label));
+  }
+  return row;
+}
+
+function anrEvent(anr) {
+  const node = fold(`[${anr.time}] ${anr.process} (PID ${anr.pid})`);
+  node.append(el("p", "card-note", `사유: ${anr.reason}`));
+
+  if (anr.summary) node.append(summaryChips(anr.summary));
+
+  // Main thread first: it is the thing that was stuck.
+  const main = logFold("Main thread callstack", anr.main_stack, { open: true });
+  if (main) node.append(main);
+
+  if (anr.lock_chain) {
+    const lock = el("div", "alert");
+    lock.append(el("p", null,
+      `Main thread 가 lock(${anr.lock_chain.lock_address}) 대기 중 — 점유 Thread TID ${anr.lock_chain.blocker_thread}`));
+    node.append(lock);
+
+    const blocker = logFold(`점유 Thread(TID ${anr.lock_chain.blocker_thread}) callstack`, anr.lock_chain.blocker_stack);
+    if (blocker) node.append(blocker);
+  }
+
+  if (anr.binder_transactions.length) {
+    node.append(el("h4", "sub-head", "대기 중인 Binder transaction"));
+    node.append(frameTable(anr.binder_transactions));
+  }
+
+  for (const [label, lines] of [
+    ["ANR 직전 Logcat", anr.pre_logcat],
+    ["CPU 관련 로그", anr.cpu_logs],
+    ["System server 관련 로그", anr.system_server_logs],
+    ["I/O 지연 의심 로그", anr.io_logs],
+  ]) {
+    const block = logFold(label, lines);
+    if (block) node.append(block);
+  }
+
+  return node;
+}
+
+function javaCrash(crash) {
+  const node = fold(`[${crash.time}] ${crash.process} — ${crash.crash_type}`);
+
+  if (crash.exception_info) {
+    const box = el("div", "alert");
+    box.append(el("pre", null, crash.exception_info));
+    node.append(box);
+  }
+  if (crash.top_method) node.append(el("p", "card-note", `주요 Method: ${crash.top_method}`));
+
+  if (crash.suspects_transaction_too_large) {
+    const warn = el("div", "alert");
+    warn.append(el("p", null,
+      "TransactionTooLargeException 의심: Intent 데이터가 Binder buffer 한계를 넘었을 가능성이 있습니다."));
+    node.append(warn);
+  }
+
+  const stack = logFold("Call stack", crash.call_stack, { open: true });
+  if (stack) node.append(stack);
+
+  for (const [label, lines] of [
+    ["Crash 직전 단서 로그", crash.pre_context],
+    ["주변 로그", crash.cross_context_logs],
+  ]) {
+    const block = logFold(label, lines);
+    if (block) node.append(block);
+  }
+
+  if (!crash.cross_context_logs.length && crash.trigger) {
+    const trigger = fold("Crash trigger 원문");
+    trigger.append(el("pre", null, crash.trigger));
+    node.append(trigger);
+  }
+
+  return node;
+}
+
+function nativeCrash(crash) {
+  const node = fold(`[${crash.time}] ${crash.process} — ${crash.signal}`);
+  node.append(el("p", "card-note", `Abort message: ${crash.abort_message}`));
+
+  if (crash.callstack.length) {
+    node.append(el("h4", "sub-head", "Native callstack"));
+    node.append(frameTable(crash.callstack));
+  }
+  const logs = logFold("주변 로그", crash.cross_context_logs);
+  if (logs) node.append(logs);
+
+  return node;
+}
+
+function eventListCard(events, render, emptyText) {
+  return (series, panel) => {
+    const items = events(series);
+    if (!items.length) {
+      panel.note(emptyText);
+      return;
+    }
+    const wrap = el("div", "stack");
+    for (const item of items) wrap.append(render(item));
+    panel.content(wrap);
   };
+}
 
-  if (series.system_kills.length) push(`시스템 강제 종료 ${series.system_kills.length}건`, frameTable(series.system_kills));
-  if (series.system_wtf.total) push(`시스템 이상 징후 ${series.system_wtf.total}건`, frameTable(series.system_wtf.by_process));
+function systemEventsCard(series, panel) {
+  const blocks = [];
+  const push = (title, node) => blocks.push(el("h3", "sub-head", title), node);
+
+  if (series.system_kills.length) {
+    push(`시스템 강제 종료(am_kill) ${series.system_kills.length}건`, frameTable(series.system_kills));
+  }
+  if (series.system_wtf.total) {
+    push(`시스템 이상 징후(am_wtf) ${series.system_wtf.total}건`, frameTable(series.system_wtf.by_process));
+    const recent = fold(`최근 ${series.system_wtf.recent_count}건 상세`);
+    recent.append(frameTable(series.system_wtf.recent));
+    blocks.push(recent);
+  }
 
   const binder = series.binder;
   if (binder.status === "ok") {
-    if (binder.spam.length) {
-      push(`Binder Oneway Spam ${binder.spam.length}건`,
-           table(["시각", "설명"], binder.spam.map((s) => [s.time, s.desc])));
+    for (const spam of binder.spam) {
+      const box = el("div", "alert");
+      box.append(el("p", null, `[${spam.time}] Binder Oneway Spam — ${spam.desc}`));
+      blocks.push(box);
+      const raw = fold("커널 로그 원문");
+      raw.append(el("pre", null, spam.raw));
+      blocks.push(raw);
     }
     if (binder.events.length) {
-      push(`Binder 지연 · 실패 ${binder.event_count}건` + (binder.truncated ? ` (최근 ${binder.display_cap}건 표시)` : ""),
+      const truncated = binder.event_count > binder.display_cap;
+      push(`Binder 지연 · 실패 ${binder.event_count}건` + (truncated ? ` (최근 ${binder.display_cap}건 표시)` : ""),
            frameTable(binder.events));
     }
-  }
-
-  if (series.native_crashes.length) {
-    push(`Native Crash ${series.native_crashes.length}건`,
-         table(["시각", "프로세스", "signal", "abort"],
-               series.native_crashes.map((c) => [c.time, c.process, c.signal, c.abort_message])));
-  }
-
-  if (series.anr_events.length) {
-    push(`ANR ${series.anr_events.length}건`,
-         table(["시각", "프로세스", "PID", "사유", "Lock 대기"],
-               series.anr_events.map((a) => [a.time, a.process, a.pid, a.reason,
-                                             a.lock_chain ? `TID ${a.lock_chain.blocker_thread}` : "-"])));
-  }
-
-  if (series.java_crashes.length) {
-    push(`Crash / FATAL ${series.java_crashes.length}건`,
-         table(["시각", "프로세스", "종류", "예외", "주요 Method"],
-               series.java_crashes.map((c) => [c.time, c.process, c.crash_type, c.exception_info, c.top_method])));
+    if (binder.signals.length || binder.checklist.length) {
+      const extra = fold("Binder 관련 추가 요약");
+      if (binder.signals.length) extra.append(frameTable(binder.signals));
+      for (const item of binder.checklist) extra.append(el("p", "card-note", `· ${item}`));
+      blocks.push(extra);
+    }
   }
 
   if (!blocks.length) {
-    panel.note("Crash, ANR, Binder 이벤트가 감지되지 않았습니다.");
+    panel.note("시스템 강제 종료나 Binder 이벤트가 없습니다.");
     return;
   }
-
   const wrap = el("div", "stack");
   wrap.append(...blocks);
   panel.content(wrap);
@@ -152,9 +283,21 @@ function nitzCard(series, panel) {
 
 const CARDS = [
   { chart: "boot", title: "부팅 지연 구간", sub: "가장 오래 걸린 이벤트", render: bootCard },
-  { chart: "crash", title: "Crash · ANR · Binder", sub: "부팅 과정에서 감지된 이벤트", render: crashCard },
-  { chart: "binder-proxy", title: "Binder Proxy 현황", sub: "인터페이스별 Proxy 객체 수", render: proxyCard },
   { chart: "nitz", title: "NITZ 타임존 변동", sub: "망이 알려준 시간대", render: nitzCard },
+  { chart: "binder-proxy", title: "Binder Proxy 현황", sub: "인터페이스별 Proxy 객체 수", render: proxyCard },
+  { chart: "crash", title: "시스템 이벤트", sub: "강제 종료 · 이상 징후 · Binder", render: systemEventsCard },
+  {
+    chart: "crash", title: "ANR", sub: "펼치면 callstack 과 직전 로그까지", wide: true,
+    render: eventListCard((series) => series.anr_events, anrEvent, "ANR 이벤트가 없습니다."),
+  },
+  {
+    chart: "crash", title: "Crash / FATAL EXCEPTION", sub: "펼치면 예외와 call stack 전체", wide: true,
+    render: eventListCard((series) => series.java_crashes, javaCrash, "Crash / FATAL 이벤트가 없습니다."),
+  },
+  {
+    chart: "crash", title: "Native Crash", sub: "signal 과 abort message", wide: true,
+    render: eventListCard((series) => series.native_crashes, nativeCrash, "Native crash 가 없습니다."),
+  },
 ];
 
 export async function renderBoot(mount, sourceFile) {
@@ -163,6 +306,8 @@ export async function renderBoot(mount, sourceFile) {
 
   const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
+    // Log dumps need the whole row; charts sit side by side.
+    if (spec.wide) panel.section.classList.add("wide");
     band.grid.append(panel.section);
     return { spec, panel };
   });
