@@ -372,10 +372,15 @@ export async function renderDashboard(mount, sourceFile) {
     .then((kpi) => band.wrap.insertBefore(kpiBand(kpi), band.grid))
     .catch(() => band.wrap.insertBefore(el("p", "card-note", "KPI 를 불러오지 못했습니다."), band.grid));
 
-  for (const spec of CARDS) {
+  // Every shell first: a chart drawn into a one-column grid freezes that
+  // width and then hangs over its neighbours once the grid reflows.
+  const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
     band.grid.append(panel.section);
+    return { spec, panel };
+  });
 
+  for (const { spec, panel } of panels) {
     api.chart(spec.chart, sourceFile)
       .then((series) => (series.status === "ok" ? spec.render(series, panel) : panel.empty(series.status)))
       .catch((error) => {

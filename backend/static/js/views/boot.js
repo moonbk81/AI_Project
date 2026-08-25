@@ -2,7 +2,7 @@
 
 import { api } from "../api.js";
 import {
-  axis, barTrace, baseLayout, card, el, fmt, frameTable, lineTrace, section,
+  axis, barTrace, baseLayout, card, drawPlot, el, fmt, frameTable, lineTrace, section,
   seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
 } from "../viz.js";
 
@@ -111,7 +111,7 @@ function proxyCard(series, panel) {
     wrap.append(plot);
 
     const rows = histogram.counts;
-    queueMicrotask(() => Plotly.react(plot, [barTrace("Proxy 객체", rows.map((r) => r.Count), rows.map((r) => r.Class),
+    queueMicrotask(() => drawPlot(plot, [barTrace("Proxy 객체", rows.map((r) => r.Count), rows.map((r) => r.Class),
       colors[index % colors.length], {
         orientation: "h",
         text: rows.map((r) => fmt.count(r.Count)),
@@ -123,7 +123,7 @@ function proxyCard(series, panel) {
         bargap: 0.45,
         margin: { l: 200, r: 80, t: 8, b: 44 },
         yaxis: axis({ gridcolor: "rgba(0,0,0,0)" }),
-      }), { displayModeBar: false, responsive: true }));
+      })));
   });
 
   panel.content(wrap);
@@ -161,10 +161,13 @@ export async function renderBoot(mount, sourceFile) {
   const band = section("부팅 시퀀스");
   mount.append(band.wrap);
 
-  for (const spec of CARDS) {
+  const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
     band.grid.append(panel.section);
+    return { spec, panel };
+  });
 
+  for (const { spec, panel } of panels) {
     api.chart(spec.chart, sourceFile)
       .then((series) => (series.status === "ok" ? spec.render(series, panel) : panel.empty(series.status)))
       .catch((error) => {

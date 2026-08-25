@@ -226,8 +226,12 @@ export async function renderPlm(mount, sourceFile, ctx) {
         if (!JOB_DONE.has(job.status)) {
           jobTimer = setTimeout(poll, JOB_POLL_MS);
         } else if (job.status === "done" && job.current_file) {
-          message.textContent = `${job.message} — '${job.current_file}' 을 분석 화면에서 볼 수 있습니다.`;
-          ctx.onFilesChanged();
+          // Make the freshly analyzed log the active one, but leave this view
+          // as it is — the search and the selected defect stay put.
+          const active = await ctx.filesChanged({ select: job.current_file });
+          message.textContent = active === job.current_file
+            ? `${job.message} — '${job.current_file}' 을 활성 파일로 설정했습니다. 대시보드에서 볼 수 있습니다.`
+            : `${job.message} — '${job.current_file}'`;
         }
       } catch (error) {
         message.textContent = String(error.message || error);

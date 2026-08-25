@@ -109,10 +109,13 @@ export async function renderSatellite(mount, sourceFile) {
         { chart: "sat-at", title: "통화 제어 시퀀스", sub: "AP ↔ RIL ↔ Modem", render: callFlowCard },
       ];
 
-  for (const spec of specs) {
+  const panels = specs.map((spec) => {
     const panel = card(spec.title, spec.sub);
     band.grid.append(panel.section);
+    return { spec, panel };
+  });
 
+  for (const { spec, panel } of panels) {
     api.chart(spec.chart, sourceFile)
       .then((series) => (series.status === "ok" ? spec.render(series, panel) : panel.empty(series.status)))
       .catch((error) => {

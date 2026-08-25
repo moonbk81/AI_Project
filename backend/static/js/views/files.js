@@ -144,34 +144,52 @@ export async function renderFiles(mount, sourceFile, ctx) {
   wrap.append(grid);
   mount.append(wrap);
 
-  const files = await api.files().catch(() => []);
-  wrap.insertBefore(tileRow([
-    tile("적재된 로그", fmt.count(files.length), "개"),
-    tile("보는 중", sourceFile || "-"),
-  ]), grid);
+  const tiles = el("div");
+  wrap.insertBefore(tiles, grid);
 
-  grid.append(ingestedCard(files, sourceFile, (file) => ctx.setSourceFile(file)));
-
+  const ingestedHost = el("div", "card-slot");
   const jobs = jobCard();
-  grid.append(uploadCard(() => refreshJobs()), jobs.panel);
+  const upload = uploadCard(() => pollJobs());
+  const danger = cardShell("위험 구역", "Vector DB 의 모든 적재 내용을 지웁니다. 되돌릴 수 없습니다.");
+  grid.append(ingestedHost, upload, jobs.panel, danger);
 
+  let active = sourceFile;
+
+  const drawIngested = async ({ select } = {}) => {
+    if (select !== undefined) active = await ctx.filesChanged({ select });
+    const files = await api.files().catch(() => []);
+
+    tiles.replaceChildren(tileRow([
+      tile("적재된 로그", fmt.count(files.length), "개"),
+      tile("보는 중", active || "-"),
+    ]));
+    ingestedHost.replaceChildren(ingestedCard(files, active, (file) => ctx.setSourceFile(file)));
+  };
+
+  // Finished jobs stay in the list, so only a job that completes while this
+  // screen is open should refresh anything. Without that check the first poll
+  // sees an old "done" job and refreshes forever.
+  const settled = new Set();
   let timer = null;
-  const refreshJobs = async () => {
+
+  const pollJobs = async () => {
     const running = await api.jobs().catch(() => []);
     jobs.draw(running.slice(0, 5));
 
-    const active = running.some((job) => !JOB_DONE.has(job.status));
+    for (const job of running) {
+      if (JOB_DONE.has(job.status) && !settled.has(job.job_id)) {
+        settled.add(job.job_id);
+        if (job.status === "done") await drawIngested({ select: job.current_file || undefined });
+      }
+    }
+
     clearTimeout(timer);
-    if (active) {
-      timer = setTimeout(refreshJobs, POLL_INTERVAL_MS);
-    } else if (running.some((job) => job.status === "done")) {
-      ctx.onFilesChanged();
+    if (running.some((job) => !JOB_DONE.has(job.status))) {
+      timer = setTimeout(pollJobs, POLL_INTERVAL_MS);
     }
   };
-  ctx.onLeave(() => clearTimeout(timer));
-  refreshJobs();
 
-  const danger = cardShell("위험 구역", "Vector DB 의 모든 적재 내용을 지웁니다. 되돌릴 수 없습니다.");
+  ctx.onLeave(() => clearTimeout(timer));
 
   const reset = el("button", "danger", "전체 DB 초기화");
   reset.type = "button";
@@ -183,7 +201,7 @@ export async function renderFiles(mount, sourceFile, ctx) {
     try {
       await api.resetDb();
       resetNote.textContent = "초기화했습니다.";
-      ctx.onFilesChanged();
+      await drawIngested({ select: null });
     } catch (error) {
       resetNote.textContent = String(error.message || error);
     } finally {
@@ -191,5 +209,11 @@ export async function renderFiles(mount, sourceFile, ctx) {
     }
   });
   danger.append(reset, resetNote);
-  grid.append(danger);
+
+  // Jobs already in the list at open time are history, not news.
+  const existing = await api.jobs().catch(() => []);
+  for (const job of existing) if (JOB_DONE.has(job.status)) settled.add(job.job_id);
+
+  await drawIngested();
+  pollJobs();
 }

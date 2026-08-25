@@ -103,10 +103,17 @@ function rerender() {
       drawFilePicker();
       rerender();
     },
-    async onFilesChanged() {
+    /**
+      * A job finished, or the database was reset: refresh the file list and
+      * optionally make one of them active — without redrawing the view. The
+      * caller is *inside* that view; redrawing it would throw away what the
+      * user is looking at (a PLM search, a half-filled form).
+      */
+    async filesChanged({ select } = {}) {
       await loadFiles();
+      if (select && state.files.includes(select)) state.sourceFile = select;
       drawFilePicker();
-      rerender();
+      return state.sourceFile;
     },
     onLeave(handler) {
       state.leaveHandlers.push(handler);

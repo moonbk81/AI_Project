@@ -274,3 +274,6 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 
 .plm-link { color: var(--series-1); font-weight: 600; font-size: 13px; text-decoration: none; }
 .plm-link:hover { text-decoration: underline; }
+
+/* A slot that redraws its card in place without becoming a grid item itself. */
+.card-slot { display: contents; }

@@ -14,6 +14,25 @@ export const sequentialRamp = () => ["--seq-250", "--seq-350", "--seq-450", "--s
 
 export const PLOT_CONFIG = { displayModeBar: false, responsive: true };
 
+/**
+ * Draw into a container and keep the drawing the container's size.
+ *
+ * Cards are appended one at a time, so the first card measures a grid that is
+ * still one column wide and plotly freezes that width — the chart then hangs
+ * out over its neighbours once the grid reflows. Plotly's own `responsive`
+ * only watches the window, so the container needs watching directly.
+ */
+export function drawPlot(node, traces, layout) {
+  node.replaceChildren();  // drop the loading placeholder plotly would keep
+  Plotly.react(node, traces, layout, PLOT_CONFIG);
+
+  if (!node._sizeWatcher && typeof ResizeObserver !== "undefined") {
+    node._sizeWatcher = new ResizeObserver(() => Plotly.Plots.resize(node));
+    node._sizeWatcher.observe(node);
+  }
+  return node;
+}
+
 // The builders' own status values, translated once for every view.
 const EMPTY_TEXT = {
   unavailable: "이 세션에는 로그 메타데이터가 없습니다.",
@@ -204,16 +223,16 @@ export function card(title, subtitle) {
   const body = el("div", "card-body");
   section.append(body);
 
-  const plot = el("div", "plot");
+  const plotHost = el("div", "plot");
   // Charts arrive one request at a time; an empty box reads as "broken".
-  plot.append(el("div", "empty", "불러오는 중..."));
+  plotHost.append(el("div", "empty", "불러오는 중..."));
   const tableHost = el("div", "hidden");
-  body.append(plot, tableHost);
+  body.append(plotHost, tableHost);
 
   toggle.addEventListener("click", () => {
     const showTable = tableHost.classList.contains("hidden");
     tableHost.classList.toggle("hidden", !showTable);
-    plot.classList.toggle("hidden", showTable);
+    plotHost.classList.toggle("hidden", showTable);
     toggle.textContent = showTable ? "차트" : "표";
   });
 
@@ -222,19 +241,19 @@ export function card(title, subtitle) {
     body,
     /** Extra content above the plot (KPI rows, notes, pickers). */
     prepend(node) {
-      body.insertBefore(node, plot);
+      body.insertBefore(node, plotHost);
     },
     empty(status) {
-      plot.replaceChildren(el("div", "empty", emptyText(status)));
+      plotHost.replaceChildren(el("div", "empty", emptyText(status)));
       toggle.classList.add("hidden");
     },
     note(text) {
-      plot.replaceChildren(el("div", "empty", text));
+      plotHost.replaceChildren(el("div", "empty", text));
       toggle.classList.add("hidden");
     },
     draw(traces, layout, tableView) {
-      plot.classList.remove("hidden");
-      Plotly.react(plot, traces, layout, PLOT_CONFIG);
+      plotHost.classList.remove("hidden");
+      drawPlot(plotHost, traces, layout);
       if (tableView) {
         tableHost.replaceChildren(tableView);
         toggle.classList.remove("hidden");
@@ -242,7 +261,7 @@ export function card(title, subtitle) {
     },
     /** A card whose content is a table (or any node) rather than a plot. */
     content(node) {
-      plot.replaceChildren(node);
+      plotHost.replaceChildren(node);
       toggle.classList.add("hidden");
     },
   };

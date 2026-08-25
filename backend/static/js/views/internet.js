@@ -178,9 +178,13 @@ export async function renderInternet(mount, sourceFile) {
     band.grid,
   );
 
-  for (const spec of CARDS) {
+  const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
     band.grid.append(panel.section);
+    return { spec, panel };
+  });
+
+  for (const { spec, panel } of panels) {
     try {
       spec.render(report, panel);
     } catch (error) {
