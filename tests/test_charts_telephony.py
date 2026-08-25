@@ -502,3 +502,28 @@ def test_nitz_maps_offsets_onto_the_nearest_known_region():
 def test_unparsable_nitz_history_is_treated_as_missing():
     assert build_nitz_timeline([]).status == "no_data"
     assert build_nitz_timeline([{"log_time": "nonsense", "timezone": "UTC+9시간", "nitz_raw": "x"}]).status == "no_data"
+
+
+def test_half_hour_timezones_keep_their_fraction():
+    """India sits on UTC+5.5; truncating to 5 moved the offset line by 30 minutes."""
+    timeline = build_nitz_timeline([_nitz(0, "UTC+5.5시간"), _nitz(20, "UTC+5.5시간")])
+
+    assert [point.offset for point in timeline.offsets] == [5.5, 5.5]
+    assert timeline.geo[0].offset_label == "UTC+5.5"
+    assert timeline.geo[0].region == "India (UTC+5.5)"
+
+
+def test_timeout_rows_leave_the_latency_cell_empty_not_nan():
+    overview = build_rilj_overview(
+        {
+            "rilj_transactions": {
+                "completed": [_completed(latency_ms=501, start_time="08-25 10:00:02.000")],
+                "timeouts": [{"time": "08-25 10:00:01.000", "command": "RIL_REQUEST_DIAL", "details": "d"}],
+                "unsol": [],
+            }
+        }
+    )
+
+    latency = overview.abnormal["Latency(ms)"]
+    assert str(latency.dtype) == "Int64"  # a float column would print "NaN"
+    assert latency.tolist()[1] == 501

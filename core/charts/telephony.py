@@ -622,6 +622,11 @@ def build_rilj_overview(report_data: Optional[Dict[str, Any]]) -> RiljOverview:
     abnormal = pd.DataFrame(
         _rilj_abnormal_rows(completed, timeouts), columns=_RILJ_ABNORMAL_COLUMNS
     )
+    # A timeout has no latency at all. Plain floats would print that gap as
+    # "NaN"; the nullable integer type renders it as an empty cell instead.
+    abnormal["Latency(ms)"] = (
+        pd.to_numeric(abnormal["Latency(ms)"], errors="coerce").round().astype("Int64")
+    )
     if not abnormal.empty:
         abnormal = abnormal.sort_values(by="Time")
 
@@ -920,9 +925,11 @@ def build_nitz_timeline(rows: Optional[List[Dict[str, Any]]]) -> NitzTimeline:
     if df.empty:
         return NitzTimeline(status="no_data")
 
-    # "UTC+9시간" -> 9.0. A half-hour offset keeps only its hour part, which is
-    # still close enough for the nearest-region lookup.
-    df["offset_num"] = df["timezone"].str.extract(r"UTC([+-]?\d+)").astype(float).fillna(0.0)
+    # "UTC+9시간" -> 9.0, "UTC+5.5시간" -> 5.5. India and friends sit on a
+    # half-hour offset, so the fractional part has to survive the parse.
+    df["offset_num"] = (
+        df["timezone"].str.extract(r"UTC([+-]?\d+(?:\.\d+)?)").astype(float).fillna(0.0)
+    )
 
     changed = df[df["timezone"] != df["timezone"].shift()].copy()
     if len(changed) > 1:

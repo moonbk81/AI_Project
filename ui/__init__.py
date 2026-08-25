@@ -9,7 +9,6 @@ so callers can import them from `ui` directly when convenient.
 from .crash_ui import render_binder_proxy_leaks, render_crash_analyzer
 from .network_ui import (
     render_data_usage_profiling,
-    render_data_usage_timeline,
     render_dns_analysis_chart,
     render_internet_stall_analyzer,
     render_network_timeseries_and_dns,
@@ -42,7 +41,6 @@ __all__ = [
     "render_crash_analyzer",
     "render_data_call_analyzer",
     "render_data_usage_profiling",
-    "render_data_usage_timeline",
     "render_dns_analysis_chart",
     "render_ims_sip_flow",
     "render_integrated_rf_call_timeline",

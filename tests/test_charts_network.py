@@ -4,7 +4,6 @@ from core.charts import (
     DNS_SPIKE_THRESHOLD_MS,
     INTERNET_STALL_LAYER_TABS,
     build_data_usage_profile,
-    build_data_usage_timeline,
     build_dns_error_breakdown,
     build_dns_health_warnings,
     build_dns_issue_summary,
@@ -214,19 +213,6 @@ def test_usage_timeline_states():
 def test_usage_profile_states():
     assert build_data_usage_profile(pd.DataFrame()).status == "unavailable"
     assert build_data_usage_profile(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
-
-
-def test_apps_that_reported_no_volume_stay_on_the_stack():
-    df = pd.DataFrame([_usage("YouTube", None), _usage("Chrome", 5)])
-
-    timeline = build_data_usage_timeline(df, year=2026)
-
-    assert timeline.status == "ok"
-    assert sorted(timeline.frame["total_mb"].tolist()) == [0.0, 5.0]
-
-
-def test_data_usage_timeline_without_rows():
-    assert build_data_usage_timeline(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
 
 
 # -------------------------------------------------------------- internet stall

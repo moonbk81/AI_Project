@@ -12,7 +12,6 @@ import streamlit as st
 from core.charts import (
     INTERNET_STALL_LAYER_TABS,
     build_data_usage_profile,
-    build_data_usage_timeline,
     build_dns_error_breakdown,
     build_dns_health_warnings,
     build_dns_issue_summary,
@@ -170,32 +169,6 @@ def render_data_usage_profiling(df):
     )
     fig_time.update_traces(marker_line_width=0)
     st.plotly_chart(fig_time, width="stretch")
-
-def render_data_usage_timeline(df):
-    """시간대별 앱 데이터 사용 추이를 시각화합니다."""
-    timeline = build_data_usage_timeline(df)
-    if timeline.status == "no_data":
-        return
-
-    st.markdown("##### 데이터 사용 타임라인")
-
-    fig = px.bar(
-        timeline.frame,
-        x='time_dt',
-        y='total_mb',
-        color='app_name',
-        title="시간대별 앱 데이터 사용량(MB)",
-        labels=USAGE_TIMELINE_LABELS,
-        barmode='stack'
-    )
-
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-    )
-
-    st.plotly_chart(fig, width="stretch")
 
 def _render_stall_kpi(kpi):
     st.markdown("### 1) 요약")

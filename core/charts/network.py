@@ -286,29 +286,6 @@ def build_data_usage_profile(
     )
 
 
-@dataclass(frozen=True)
-class DataUsageTimeline:
-    """Data volume per app over time. `status` is `"ok"` or `"no_data"`."""
-
-    status: str
-    frame: pd.DataFrame = field(default_factory=pd.DataFrame)
-
-
-def build_data_usage_timeline(
-    df: pd.DataFrame,
-    *,
-    year: Optional[int] = None,
-) -> DataUsageTimeline:
-    du_df = _slice(df, "Data_Usage")
-    if du_df.empty or "time" not in du_df.columns:
-        return DataUsageTimeline(status="no_data")
-
-    frame = with_parsed_times(du_df.copy(), "time", year=year)
-    # An app that reported no volume still belongs on the stack.
-    frame["total_mb"] = pd.to_numeric(frame["total_mb"], errors="coerce").fillna(0)
-    return DataUsageTimeline(status="ok", frame=frame)
-
-
 # -------------------------------------------------------------- internet stall
 
 

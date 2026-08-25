@@ -222,8 +222,6 @@ def _render_detail_sections(df):
     st.divider()
     ui.render_data_usage_profiling(df)
     st.divider()
-    ui.render_data_usage_timeline(df)
-    st.divider()
     ui.render_ims_sip_flow(current_base, data=ims_sip_data)
     st.divider()
 
