@@ -1,6 +1,6 @@
 import re
 from collections import deque
-from core.constants import RE_TIME, RE_TAG, TEL_PATTERNS, VALID_TAGS, COMMON_EXCLUDES, PS_EXCLUDE_TAGS, SST_FIELDS, NETWORK_EXCLUDE_TAGS
+from core.constants import RE_TIME, RE_TAG, TEL_PATTERNS, VALID_TAGS, SST_FIELDS, NETWORK_EXCLUDE_TAGS
 
 from parsers.base import BaseParser
 from parsers.call import ImsCallParser, CsCallStateMachine

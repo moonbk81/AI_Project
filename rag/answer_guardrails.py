@@ -5,11 +5,9 @@ but a small/local LLM may collapse to a short answer or ignore RCA/absence rules
 Keep this file domain-generic: no Golden TC IDs, no fixed test-only timestamps, and no hard-coded expected counts.
 """
 
-import ast
 import re
 
 from rag.query_classifiers import (
-    is_binder_proxy_count_query,
     is_call_drop_check_query,
     is_crash_absence_check,
     is_negative_binder_leak_check_query,

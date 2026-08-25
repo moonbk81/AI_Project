@@ -215,9 +215,9 @@ class DataUsageParser(BaseParser):
                     "uid": uid,
                     "app_name": app_name,
                     "rat": rat,
-                    "total_mb": round(total_bytes / (1024 * 1024), 2),
-                    "rx_mb": round(data["rx_bytes"] / (1024 * 1024), 2),
-                    "tx_mb": round(data["tx_bytes"] / (1024 * 1024), 2)
+                    "total_mb": total_mb,
+                    "rx_mb": rx_mb,
+                    "tx_mb": tx_mb
                 })
 
         return sorted(report_data, key=lambda x: (x["time"], -x["total_mb"]))
@@ -837,7 +837,6 @@ class NitzParser(BaseParser):
             if nitz_m:
                 log_time = date_m.group(1) if date_m else "Unknown"
 
-                nitz_time_str = nitz_m.group(1) # 예: 26/03/26,10:00:14
                 tz_str = nitz_m.group(2)        # 예: +04
                 dst_str = nitz_m.group(3)       # 예: 00
 
@@ -1034,7 +1033,7 @@ class BinderWarningParser(BaseParser):
                 sample_pattern = re.compile(r'binder_sample.*?\[(.*?),\s*(\d+),\s*(\d+),\s*([^,\]]+)')
                 m = sample_pattern.search(line_str)
                 if m:
-                    interface, code, duration_ms, pkg = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+                    interface, duration_ms, pkg = m.group(1), int(m.group(3)), m.group(4)
                     if duration_ms > 1000:
                         level = self._severity_label(duration_ms)
                         warnings.append({

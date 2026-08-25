@@ -84,7 +84,7 @@ def _vllm_chat(
 
     try:
         response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError:
         print(f"[DEBUG] vLLM API Error - Status: {response.status_code}", file=sys.stderr)
         print(f"[DEBUG] Response: {response.text}", file=sys.stderr)
         print(f"[DEBUG] Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}", file=sys.stderr)

@@ -1,7 +1,4 @@
 import re
-import os
-import json
-import argparse
 from collections import defaultdict
 from parsers.base import BaseParser
 

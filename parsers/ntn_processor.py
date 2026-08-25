@@ -24,7 +24,6 @@ class NtnProcessor(BaseParser):
         last_hysteresis_time = None # Hysteresis 도배 방지용
 
         for line in lines:
-            clean_line = self.clean_line(line)
 
             # 1. 위성 PLMN 매칭
             match_ntn_plmn = re.search(r'(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}).*?NtnCapabilityResolver:\s*Registered to satellite PLMN\s*(\d+)', line, re.IGNORECASE)

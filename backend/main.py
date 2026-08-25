@@ -232,7 +232,6 @@ app = FastAPI(title="AI Project RAG Backend")
 
 # Exception handler for detailed validation errors
 from fastapi.exceptions import RequestValidationError
-from starlette.responses import JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
@@ -247,7 +246,6 @@ async def validation_exception_handler(request, exc):
     )
 
 # Global exception handler for 500 errors
-from starlette.exceptions import HTTPException
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

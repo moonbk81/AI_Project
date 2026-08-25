@@ -3,8 +3,6 @@
 import json
 import re
 
-import numpy as np
-
 from rag.query_classifiers import (
     is_binder_proxy_count_query,
     is_binder_query,
