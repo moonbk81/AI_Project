@@ -1,6 +1,7 @@
 // 대시보드 — 세션 하나의 상태를 한 화면에.
 
-import { api } from "../api.js";
+import { api, baseName } from "../api.js";
+import { reportCard } from "../report.js";
 import {
   axis, barTrace, baseLayout, card, el, endLabels, fmt, frameTable, groupBy,
   lineTrace, section, seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
@@ -367,6 +368,12 @@ const CARDS = [
 export async function renderDashboard(mount, sourceFile) {
   const band = section("세션 요약");
   mount.append(band.wrap);
+
+  const report = card("종합 진단 리포트", "이 세션의 이벤트와 지표를 모아 LLM 이 정리합니다.");
+  report.section.classList.add("wide");
+  band.grid.append(report.section);
+  reportCard(report, "현재 세션 리포트 생성",
+             () => api.sessionReport(baseName(sourceFile), sourceFile));
 
   api.kpi(sourceFile)
     .then((kpi) => band.wrap.insertBefore(kpiBand(kpi), band.grid))

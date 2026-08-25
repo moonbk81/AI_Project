@@ -175,11 +175,16 @@ def test_knowledge_endpoints(client, fake_engine):
     )
 
     assert list_response.status_code == 200
-    assert list_response.json() == {
+    listed = list_response.json()
+    assert {key: listed[key] for key in ("ids", "documents", "metadatas")} == {
         "ids": ["kb-1"],
         "documents": ["known fix"],
         "metadatas": [{"severity": "High"}],
     }
+    # The rows also come back shaped into cases, with their filter values.
+    assert listed["cases"][0]["note"] == "known fix"
+    assert listed["cases"][0]["severity"] == "High"
+    assert listed["filters"]["severity"] == ["High"]
     assert save_response.status_code == 200
     assert save_response.json() == {"success": True}
     assert fake_engine.saved_knowledge == {
@@ -434,3 +439,36 @@ def test_plm_register_and_human_comments_endpoints(client, monkeypatch):
     assert register_response.json()["result"] == {"defectCode": "AI-1", "defectId": "id-1"}
     assert comments_response.status_code == 200
     assert comments_response.json()["comments"] == [{"comment": "please check modem logs", "commentId": "c-1"}]
+
+
+def test_a_case_can_be_filed_from_an_answers_retrieved_rows(client, fake_engine):
+    """The caller sends what it has — ids and metas — not PLM-shaped fields."""
+    response = client.post(
+        "/knowledge",
+        json={
+            "feedback": "Radio 펌웨어 업데이트 필요",
+            "severity": "Critical",
+            "category": "Call_Session",
+            "ids": ["doc-1", "doc-2"],
+            "metas": [
+                {"log_type": "Call_Session", "model_name": "SM-S921N", "radio": "R1"},
+                {"log_type": "Signal_Level"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    saved = fake_engine.saved_knowledge
+    # Only the rows of the chosen log type, and the build read off the metadata.
+    assert saved["target_ids"] == ["doc-1"]
+    assert saved["build_info"]["model_name"] == "SM-S921N"
+    assert saved["build_info"]["kernel"] == "Unknown"
+
+
+def test_a_case_with_no_matching_rows_is_refused(client):
+    response = client.post(
+        "/knowledge",
+        json={"feedback": "메모", "category": "OOS_Event", "ids": ["doc-1"], "metas": [{"log_type": "Call_Session"}]},
+    )
+
+    assert response.status_code == 400

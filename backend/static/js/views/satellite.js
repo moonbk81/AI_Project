@@ -1,6 +1,7 @@
 // 위성 — NTN(SpaceX) 정책 전이 또는 위성 모뎀(Tiantong) 제어 상태.
 
 import { api, baseName } from "../api.js";
+import { reportCard } from "../report.js";
 import {
   axis, baseLayout, card, el, fmt, frameTable, groupBy, lineTrace, section,
   seriesColors, table, tile, tileRow,
@@ -108,6 +109,12 @@ export async function renderSatellite(mount, sourceFile) {
         { chart: "sat-at", title: "위성 모뎀 제어 상태", sub: "등록 이력", render: satAtCard },
         { chart: "sat-at", title: "통화 제어 시퀀스", sub: "AP ↔ RIL ↔ Modem", render: callFlowCard },
       ];
+
+  const report = card(`${overview.sat_type} 위성망 리포트`, "위성 통신 구간을 LLM 이 정리합니다.");
+  report.section.classList.add("wide");
+  band.grid.append(report.section);
+  reportCard(report, `${overview.sat_type} 리포트 생성`,
+             () => api.satelliteReport(baseName(sourceFile), overview.sat_type, sourceFile));
 
   const panels = specs.map((spec) => {
     const panel = card(spec.title, spec.sub);

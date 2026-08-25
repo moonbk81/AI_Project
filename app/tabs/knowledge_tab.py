@@ -3,22 +3,12 @@ import pandas as pd
 import time
 
 from app.backend_client import get_knowledge_with_optional_backend, save_knowledge_with_optional_backend
+from core.knowledge import build_info, recommend_category, target_ids as ids_for_category
 
 def _recommend_knowledge_category(text, categories):
     """코멘트 내용을 분석하여 적절한 로그 카테고리를 추천합니다."""
-    mapping = {
-        "Call_Session": ["call", "드랍", "drop", "통화", "fail", "ims", "volte"],
-        "Battery_Drain_Report": ["배터리", "battery", "drain", "방전", "열", "thermal", "소모"],
-        "OOS_Event": ["oos", "이탈", "서비스", "service", "reg", "등록"],
-        "Signal_Level": ["신호", "signal", "안테나", "level", "수신"],
-        "Network_DNS_Issue": ["dns", "차단", "block", "인터넷", "지연", "latency"],
-        "Crash_Event": ["크래시", "crash", "죽었", "강제종료", "anr", "am_kill", "panic", "패닉"]
-    }
-    text_lower = text.lower()
-    for cat, keywords in mapping.items():
-        if any(kw in text_lower for kw in keywords):
-            return cat
-    return "Total_Report"
+    return recommend_category(text, categories)
+
 
 def render_knowledge_tab(engine):
     """사내 지식 베이스 메인 렌더링 함수"""
@@ -134,30 +124,11 @@ def _render_registration_ui(engine):
 
     if st.button("사례 등록", type="primary", use_container_width=True):
         if feedback.strip():
-            if target_type == "Total_Report":
-                target_ids = st.session_state.last_ids
-            else:
-                target_ids = [
-                    doc_id for doc_id, meta in zip(st.session_state.last_ids, st.session_state.last_metas)
-                    if meta and meta.get('log_type') == target_type
-                ]
+            target_ids = ids_for_category(target_type, st.session_state.last_ids, st.session_state.last_metas)
 
             if target_ids:
-                # 🚨 [수정] 현재 세션의 로그 메타데이터에서 단말 정보를 추출합니다.
-                base_meta = {}
-                for m in st.session_state.last_metas:
-                    if m:
-                        base_meta = m
-                        break
-
-                # RilRagChat 엔진이 요구하는 형식에 맞춰 build_info 딕셔너리 생성
-                build_info_dict = {
-                    "model_name": base_meta.get("model_name", "Unknown"),
-                    "hardware": base_meta.get("hardware", "Unknown"),
-                    "android_sdk": base_meta.get("android_sdk", "Unknown"),
-                    "radio": base_meta.get("radio", "Unknown"),
-                    "kernel": base_meta.get("kernel", "Unknown")
-                }
+                # 사례가 어떤 단말/빌드에서 나온 것인지 함께 기록한다.
+                build_info_dict = build_info(st.session_state.last_metas)
 
                 # save_knowledge 호출 시 build_info 파라미터로 묶어서 전달
                 success = save_knowledge_with_optional_backend(

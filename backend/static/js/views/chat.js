@@ -252,6 +252,10 @@ export async function renderChat(mount, sourceFile, ctx) {
         answer: body.answer,
         thinking: body.thinking,
         references: body.references,
+        // Kept so the answer can be filed as an analysis case later.
+        ids: body.ids,
+        metas: body.metas,
+        categories: ["Total_Report", ...new Set((body.metas || []).map((m) => m?.log_type).filter(Boolean))],
       });
     } catch (error) {
       console.error(error);

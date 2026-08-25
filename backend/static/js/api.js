@@ -45,6 +45,15 @@ export const api = {
 
   satelliteOverview: (baseName) => get(`/satellite/${encodeURIComponent(baseName)}`),
 
+  knowledge: () => get("/knowledge"),
+  saveKnowledge: (body) => post("/knowledge", body),
+  recommendCategory: (text, categories) => post("/knowledge/recommend-category", { text, categories }),
+
+  sessionReport: (baseName, currentFile) =>
+    post("/reports/session", { base_name: baseName, current_file: currentFile }),
+  satelliteReport: (baseName, satType, currentFile) =>
+    post("/reports/satellite", { base_name: baseName, sat_type: satType, current_file: currentFile }),
+
   jobs: () => get("/jobs").then((body) => body.jobs || []),
   job: (jobId) => get(`/jobs/${jobId}`),
 

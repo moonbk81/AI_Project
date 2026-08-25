@@ -7,6 +7,7 @@ import { renderBoot } from "./views/boot.js";
 import { renderInternet } from "./views/internet.js";
 import { renderSatellite } from "./views/satellite.js";
 import { renderChat } from "./views/chat.js";
+import { renderKnowledge } from "./views/knowledge.js";
 import { renderPlm } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
 
@@ -16,6 +17,7 @@ const VIEWS = [
   { id: "internet", label: "인터넷 품질", render: renderInternet, needsFile: true },
   { id: "satellite", label: "위성", render: renderSatellite, needsFile: true },
   { id: "chat", label: "채팅", render: renderChat, needsFile: true },
+  { id: "knowledge", label: "분석 사례", render: renderKnowledge, needsFile: false },
   { id: "plm", label: "PLM", render: renderPlm, needsFile: false },
   { id: "files", label: "파일 · 분석", render: renderFiles, needsFile: false },
 ];
@@ -104,6 +106,15 @@ function rerender() {
       state.sourceFile = file;
       drawFilePicker();
       rerender();
+    },
+    /** What the newest answer drew on — a case is filed against those rows. */
+    get lastRetrieval() {
+      for (const conversation of state.chats.values()) {
+        for (let index = conversation.length - 1; index >= 0; index -= 1) {
+          if (conversation[index].ids?.length) return conversation[index];
+        }
+      }
+      return null;
     },
     get activeDefect() {
       return state.activeDefect;

@@ -95,17 +95,32 @@ class ReportResponse(BaseModel):
     thinking: str = ""
 
 
+class KnowledgeCaseFilters(BaseModel):
+    model_name: List[str] = Field(default_factory=list)
+    hardware: List[str] = Field(default_factory=list)
+    android_sdk: List[str] = Field(default_factory=list)
+    severity: List[str] = Field(default_factory=list)
+
+
 class KnowledgeResponse(BaseModel):
     ids: List[str]
     documents: List[str]
     metadatas: List[Dict[str, Any]]
+    # The same rows shaped into cases, plus the values they can be filtered by.
+    cases: List[Dict[str, Any]] = Field(default_factory=list)
+    filters: "KnowledgeCaseFilters" = Field(default_factory=lambda: KnowledgeCaseFilters())
 
 
 class KnowledgeSaveRequest(BaseModel):
-    target_ids: List[str]
     feedback: str = Field(min_length=1)
     severity: str = "Normal"
+    # Either the rows to file the case against...
+    target_ids: List[str] = Field(default_factory=list)
     build_info: Optional[Dict[str, Any]] = None
+    # ...or an answer's retrieved rows, from which both are derived.
+    ids: List[str] = Field(default_factory=list)
+    metas: List[Dict[str, Any]] = Field(default_factory=list)
+    category: str = "Total_Report"
 
 
 class KnowledgeSaveResponse(BaseModel):
@@ -686,22 +701,57 @@ def satellite_report(req: SatelliteReportRequest) -> ReportResponse:
 
 @app.get("/knowledge", response_model=KnowledgeResponse)
 def knowledge() -> KnowledgeResponse:
-    data = get_engine().knowledge_collection.get()
+    from dataclasses import asdict
+
+    from core.knowledge import build_cases, build_filters
+
+    data = get_engine().knowledge_collection.get() or {}
+    cases = build_cases(data)
+
     return KnowledgeResponse(
-        ids=data.get("ids", []) if data else [],
-        documents=data.get("documents", []) if data else [],
-        metadatas=data.get("metadatas", []) if data else [],
+        ids=data.get("ids", []),
+        documents=data.get("documents", []),
+        metadatas=data.get("metadatas", []),
+        # Already shaped into cases, so every UI lists them the same way.
+        cases=[asdict(case) for case in cases],
+        filters=KnowledgeCaseFilters(**asdict(build_filters(cases))),
     )
+
+
+class KnowledgeCategoryRequest(BaseModel):
+    text: str = ""
+    categories: Optional[List[str]] = None
+
+
+class KnowledgeCategoryResponse(BaseModel):
+    category: str
+
+
+@app.post("/knowledge/recommend-category", response_model=KnowledgeCategoryResponse)
+def recommend_knowledge_category(req: KnowledgeCategoryRequest) -> KnowledgeCategoryResponse:
+    """Which log type a written-up case reads like it belongs to."""
+    from core.knowledge import recommend_category
+
+    return KnowledgeCategoryResponse(category=recommend_category(req.text, req.categories))
 
 
 @app.post("/knowledge", response_model=KnowledgeSaveResponse)
 def save_knowledge(req: KnowledgeSaveRequest) -> KnowledgeSaveResponse:
-    success = get_engine().save_knowledge(
-        req.target_ids,
-        req.feedback,
-        severity=req.severity,
-        build_info=req.build_info,
-    )
+    from core.knowledge import build_info as build_info_from_metas, target_ids as ids_for_category
+
+    # A caller that has an answer's retrieved rows should not also have to work
+    # out which of them the case covers, or dig the build out of their metadata.
+    ids = req.target_ids
+    info = req.build_info
+    if not ids and req.ids:
+        ids = ids_for_category(req.category or "Total_Report", req.ids, req.metas)
+    if info is None and req.metas:
+        info = build_info_from_metas(req.metas)
+
+    if not ids:
+        raise HTTPException(status_code=400, detail="사례로 묶을 로그가 없습니다.")
+
+    success = get_engine().save_knowledge(ids, req.feedback, severity=req.severity, build_info=info)
     return KnowledgeSaveResponse(success=bool(success))
 
 
