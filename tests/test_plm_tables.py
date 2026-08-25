@@ -79,3 +79,57 @@ def test_archive_rows_always_show_a_size():
     assert rows[0] == {"File": "dumpstate.log", "Size": "2.0 KB"}
     assert rows[1]["Size"] == "0.0 KB"  # a real, known, empty file
     assert build_archive_rows(None) == []
+
+
+# ------------------------------------------------------- defect registration
+
+
+def test_the_form_becomes_the_body_plm_expects():
+    from plm.registration import build_defect_payload
+
+    payload = build_defect_payload(
+        division_code="25",
+        title="통화 끊김",
+        content="핸드오버 중",
+        create_user="knox",
+        external_id_factory=lambda: "AI_FIXED",
+    )
+
+    assert payload["title"] == "통화 끊김"
+    assert payload["Content"] == "핸드오버 중"
+    # The person filing it is also the one it is assigned to.
+    assert payload["createUser"] == payload["inChargeUser"] == "knox"
+    assert payload["externalDefectId"] == "AI_FIXED"
+    # Fixed for everything this tool files.
+    assert (payload["refObjectType"], payload["defectCategory"], payload["occurPhase"]) == ("MFG", "SW", "DV")
+
+
+def test_optional_fields_left_blank_are_sent_as_nothing():
+    from plm.registration import build_defect_payload
+
+    payload = build_defect_payload(
+        division_code="25", title="t", content="c", create_user="k", external_id_factory=lambda: "X"
+    )
+
+    assert payload["reappearancePath"] is None
+    assert payload["forecastResult"] is None
+    assert payload["swVersion"] is None
+
+
+def test_a_supplied_external_id_is_kept():
+    from plm.registration import build_defect_payload
+
+    payload = build_defect_payload(
+        division_code="25", title="t", content="c", create_user="k", external_id="JIRA-1"
+    )
+
+    assert payload["externalDefectId"] == "JIRA-1"
+
+
+def test_the_form_says_what_it_still_needs():
+    from plm.registration import missing_required
+
+    assert missing_required("", "내용", "knox") == "제목"
+    assert missing_required("제목", "  ", "knox") == "문제 내용"
+    assert missing_required("제목", "내용", None) == "작성자 Knox ID"
+    assert missing_required("제목", "내용", "knox") is None

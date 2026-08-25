@@ -41,6 +41,7 @@ from plm.plm_rag_integration import (
 from core.log_archive import extract_file, list_zip_contents
 from plm import log_pipeline
 from plm.comments import build_comment_payload, format_analysis_as_comment
+from plm.registration import build_defect_payload
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
 from plm.plm_api_client import PLMAPIException
 logger = logging.getLogger(__name__)
@@ -1128,29 +1129,25 @@ def render_plm_register():
             try:
                 division_code = "25" if division == "Mobile" else "26"
 
-                payload = {
-                    "divisionCode": division_code,
-                    "systemCode": system_code,
-                    "changeType": change_type,
-                    "refObjectName": project_name,
-                    "refObjectType": "MFG",
-                    "externalDefectId": external_id or f"AI_{datetime.now().timestamp()}",
-                    "defectCategory": "SW",
-                    "createUser": create_user,
-                    "title": title,
-                    "inChargeUser": create_user,
-                    "Content": content,
-                    "importance": importance,
-                    "occurRateType": occur_rate,
-                    "occurPhase": "DV",
-                    "testUnit": test_unit,
-                    "testItem": test_item,
-                    "functionBlock": function_block,
-                    "detailFunctionclass": detail_function,
-                    "reappearancePath": reappearance if reappearance else None,
-                    "forecastResult": forecast if forecast else None,
-                    "swVersion": sw_version if sw_version else None,
-                }
+                payload = build_defect_payload(
+                    division_code=division_code,
+                    system_code=system_code,
+                    change_type=change_type,
+                    project_name=project_name,
+                    external_id=external_id,
+                    create_user=create_user,
+                    title=title,
+                    content=content,
+                    importance=importance,
+                    occur_rate=occur_rate,
+                    test_unit=test_unit,
+                    test_item=test_item,
+                    function_block=function_block,
+                    detail_function=detail_function,
+                    reappearance=reappearance,
+                    forecast=forecast,
+                    sw_version=sw_version,
+                )
 
                 with st.spinner("Registering defect..."):
                     client = _get_plm_client()

@@ -251,3 +251,26 @@ td { color: var(--text-primary); max-width: 420px; overflow: hidden; text-overfl
   border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px;
 }
 .chat-input:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+
+/* --------------------------------------------------------------------- PLM */
+
+.plm-grid { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field-label { font-size: 12px; color: var(--text-secondary); }
+.text-input {
+  font: inherit; font-size: 13px; width: 100%;
+  color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px;
+}
+textarea.text-input { resize: vertical; line-height: 1.5; }
+.text-input:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+
+.chip { border-radius: 999px; font-size: 12px; padding: 5px 12px; }
+.chip.active {
+  background: var(--series-1); border-color: var(--series-1);
+  color: #ffffff; font-weight: 600;
+}
+
+.plm-link { color: var(--series-1); font-weight: 600; font-size: 13px; text-decoration: none; }
+.plm-link:hover { text-decoration: underline; }

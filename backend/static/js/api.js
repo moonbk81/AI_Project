@@ -1,5 +1,18 @@
 // Every call the frontend makes to this project's backend.
 
+async function post(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || `${path} → ${response.status}`);
+  }
+  return response.json();
+}
+
 async function get(path, params) {
   const query = params ? "?" + new URLSearchParams(params).toString() : "";
   const response = await fetch(path + query);
@@ -39,6 +52,54 @@ export const api = {
     const response = await fetch("/jobs/analyze", { method: "POST", body: form });
     if (!response.ok) throw new Error(`분석 작업 생성 실패 (${response.status})`);
     return response.json();
+  },
+
+  // ------------------------------------------------------------------- PLM
+
+  plmGroups: (divisionCode) => get("/plm/groups", { division_code: divisionCode }),
+  plmGroupUsers: (groupKey) => get(`/plm/groups/${encodeURIComponent(groupKey)}/users`),
+
+  plmQuickSearch: (body) => post("/plm/quick-search", body),
+  plmDefectDetails: (divisionCode, defectCodes) =>
+    post("/plm/defects", { division_code: divisionCode, defect_codes: defectCodes }),
+  plmFiles: (divisionCode, defectCode) =>
+    post("/plm/files", { division_code: divisionCode, defect_code: defectCode }),
+  plmHumanComments: (divisionCode, defectCode) =>
+    post("/plm/defect-history/comments", { division_code: divisionCode, defect_code: defectCode }),
+  plmAnalyze: (divisionCode, defectCode) =>
+    post("/plm/analyze", { division_code: divisionCode, defect_code: defectCode }),
+  plmAnalyzeAttachments: (divisionCode, defectCode) =>
+    post("/plm/attachments/analyze", { division_code: divisionCode, defect_code: defectCode }),
+
+  // The comment body is turned into PLM's markup server-side, so the caller
+  // sends what the user typed.
+  plmSubmitComment: (form) => post("/plm/comment", { form }),
+  plmRegisterDefect: (form) => post("/plm/defects/register", { form }),
+
+  plmDefectUrl: (defectId) =>
+    `http://splm.sec.samsung.net/wl/tqm/defect/defectreg/goDefectDetail.do?isPopUp=Y&menuGubun=&defectId=${encodeURIComponent(defectId || "")}`,
+
+  /** Fetch an attachment and hand it to the browser's downloader. */
+  async plmDownload(divisionCode, file) {
+    const response = await fetch("/plm/files/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        division_code: divisionCode,
+        doc_id: file.docId,
+        title: file.title,
+        file_id: file.fileId,
+      }),
+    });
+    if (!response.ok) throw new Error(`다운로드 실패 (${response.status})`);
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = response.headers.get("X-Filename") || file.title || "attachment";
+    link.click();
+    URL.revokeObjectURL(url);
   },
 
   async resetDb() {

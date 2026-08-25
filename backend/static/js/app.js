@@ -7,6 +7,7 @@ import { renderBoot } from "./views/boot.js";
 import { renderInternet } from "./views/internet.js";
 import { renderSatellite } from "./views/satellite.js";
 import { renderChat } from "./views/chat.js";
+import { renderPlm } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
 
 const VIEWS = [
@@ -15,6 +16,7 @@ const VIEWS = [
   { id: "internet", label: "인터넷 품질", render: renderInternet, needsFile: true },
   { id: "satellite", label: "위성", render: renderSatellite, needsFile: true },
   { id: "chat", label: "채팅", render: renderChat, needsFile: true },
+  { id: "plm", label: "PLM", render: renderPlm, needsFile: false },
   { id: "files", label: "파일 · 분석", render: renderFiles, needsFile: false },
 ];
 

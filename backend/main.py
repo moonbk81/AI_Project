@@ -181,8 +181,25 @@ class PlmFileDownloadRequest(BaseModel):
     file_id: str = Field(min_length=1)
 
 
+class PlmGroupsResponse(BaseModel):
+    # group key -> display name, as configured in plm/plm_config.yaml
+    groups: Dict[str, str] = Field(default_factory=dict)
+
+
+class PlmGroupUsersResponse(BaseModel):
+    group: str
+    users: List[str] = Field(default_factory=list)
+
+
+class PlmAttachmentAnalyzeRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+
+
 class PlmCommentRequest(BaseModel):
-    payload: Dict[str, Any]
+    # Either the finished PLM body, or what the user typed.
+    payload: Optional[Dict[str, Any]] = None
+    form: Optional[Dict[str, Any]] = None
 
 
 class PlmCommentResponse(BaseModel):
@@ -192,7 +209,10 @@ class PlmCommentResponse(BaseModel):
 
 
 class PlmDefectRegisterRequest(BaseModel):
-    payload: Dict[str, Any]
+    # Either the finished PLM body, or the form fields to build it from — a
+    # caller should not have to know the API's field names.
+    payload: Optional[Dict[str, Any]] = None
+    form: Optional[Dict[str, Any]] = None
 
 
 class PlmDefectRegisterResponse(BaseModel):
@@ -384,6 +404,83 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
         clear_frame_cache()
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="분석 실패")
+
+
+def _run_plm_attachment_job(job_id: str, division_code: str, defect_code: str):
+    """Fetch a defect's ZIP attachments, pull the logs out, then analyze them.
+
+    The Streamlit tab did the download and extraction in the browser process
+    and left the files in session state. Here the whole thing is one job, so a
+    browser only has to poll for progress.
+    """
+    from plm import log_pipeline
+    from plm.service import download_attached_file, list_attached_files
+
+    try:
+        _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=2)
+
+        listing = list_attached_files(division_code=division_code, defect_code=defect_code)
+        if not listing.get("success"):
+            raise RuntimeError(listing.get("message") or "첨부 파일 목록 조회 실패")
+
+        def download(doc_id, title, file_id):
+            return download_attached_file(
+                division_code=division_code, doc_id=doc_id, title=title, file_id=file_id
+            )
+
+        upload_dir = os.path.join("./temp_logs", "plm_attachments", job_id)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        file_paths: List[str] = []
+        for event in log_pipeline.extract_logs_from_attachments(listing.get("files", []), download):
+            if event.kind == log_pipeline.DOWNLOADING:
+                _set_job(
+                    job_id,
+                    message=f"[{event.index}/{event.total}] {event.title} 내려받는 중...",
+                    progress=2 + int(8 * event.index / max(1, event.total)),
+                )
+            elif event.kind == log_pipeline.EXTRACTING:
+                _set_job(job_id, message=f"{event.title} 에서 LOG 파일 추출 중...")
+            elif event.kind == log_pipeline.LOG_READY:
+                path = os.path.join(upload_dir, os.path.basename(event.filename))
+                with open(path, "wb") as handle:
+                    handle.write(event.content)
+                file_paths.append(path)
+                _set_job(job_id, message=f"{event.filename} 추출 완료")
+
+        if not file_paths:
+            _set_job(
+                job_id,
+                status="done",
+                progress=100,
+                message="첨부에서 분석 가능한 LOG 파일을 찾지 못했습니다.",
+            )
+            return
+
+        _set_job(job_id, message=f"{len(file_paths)}개 LOG 파일 분석 시작", progress=10)
+        _run_analyze_job(job_id, file_paths, False, "", "")
+
+    except Exception as e:
+        _set_job(job_id, status="error", error=str(e), message="첨부 로그 분석 실패")
+
+
+def _new_job(message: str) -> str:
+    job_id = uuid.uuid4().hex
+    now = datetime.now().isoformat(timespec="seconds")
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "progress": 0,
+            "message": message,
+            "current_file": None,
+            "report_path": None,
+            "payload_path": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+    return job_id
 
 
 def _reset_artifact_dirs():
@@ -601,7 +698,7 @@ async def create_analyze_job(
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
-    job_id = uuid.uuid4().hex
+    job_id = _new_job("작업 대기 중")
     upload_dir = os.path.join("./temp_logs", "backend_uploads", job_id)
     os.makedirs(upload_dir, exist_ok=True)
     file_paths: List[str] = []
@@ -613,21 +710,6 @@ async def create_analyze_job(
         with open(path, "wb") as f:
             f.write(content)
         file_paths.append(path)
-
-    now = datetime.now().isoformat(timespec="seconds")
-    with _jobs_lock:
-        _jobs[job_id] = {
-            "job_id": job_id,
-            "status": "pending",
-            "progress": 0,
-            "message": "작업 대기 중",
-            "current_file": None,
-            "report_path": None,
-            "payload_path": None,
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-        }
 
     _executor.submit(_run_analyze_job, job_id, file_paths, use_slice, start_t, end_t)
     return AnalyzeJobResponse(job_id=job_id)
@@ -710,18 +792,63 @@ def plm_file_download(req: PlmFileDownloadRequest):
     )
 
 
+@app.get("/plm/groups", response_model=PlmGroupsResponse)
+def plm_groups(division_code: str = "25") -> PlmGroupsResponse:
+    """Search groups configured for a division, for the search form."""
+    from plm.plm_rag_integration import PLMConfigManager
+
+    return PlmGroupsResponse(groups=PLMConfigManager().get_groups_by_division(division_code))
+
+
+@app.get("/plm/groups/{group_key}/users", response_model=PlmGroupUsersResponse)
+def plm_group_users(group_key: str) -> PlmGroupUsersResponse:
+    from plm.plm_rag_integration import PLMConfigManager
+
+    return PlmGroupUsersResponse(group=group_key, users=PLMConfigManager().get_users_for_search(group_key))
+
+
+@app.post("/plm/attachments/analyze", response_model=AnalyzeJobResponse)
+def plm_attachment_analyze(req: PlmAttachmentAnalyzeRequest) -> AnalyzeJobResponse:
+    """Download a defect's attachments, extract the logs and analyze them."""
+    job_id = _new_job("PLM 첨부 처리 대기 중")
+    _executor.submit(_run_plm_attachment_job, job_id, req.division_code, req.defect_code)
+    return AnalyzeJobResponse(job_id=job_id)
+
+
 @app.post("/plm/comment", response_model=PlmCommentResponse)
 def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
+    from plm.comments import build_comment_payload
     from plm.service import submit_comment
 
-    return PlmCommentResponse(**submit_comment(req.payload))
+    payload = req.payload
+    if payload is None:
+        form = req.form or {}
+        if not str(form.get("comment") or "").strip():
+            raise HTTPException(status_code=400, detail="코멘트 내용이 비어 있습니다.")
+        payload = build_comment_payload(
+            division_code=form.get("division_code", "25"),
+            defect_code=form.get("defect_code", ""),
+            comment=form["comment"],
+            create_user=form.get("create_user", ""),
+        )
+
+    return PlmCommentResponse(**submit_comment(payload))
 
 
 @app.post("/plm/defects/register", response_model=PlmDefectRegisterResponse)
 def plm_defect_register(req: PlmDefectRegisterRequest) -> PlmDefectRegisterResponse:
+    from plm.registration import build_defect_payload, missing_required
     from plm.service import register_defect
 
-    return PlmDefectRegisterResponse(**register_defect(req.payload))
+    payload = req.payload
+    if payload is None:
+        form = req.form or {}
+        missing = missing_required(form.get("title"), form.get("content"), form.get("create_user"))
+        if missing:
+            raise HTTPException(status_code=400, detail=f"{missing} 은(는) 필수입니다.")
+        payload = build_defect_payload(**form)
+
+    return PlmDefectRegisterResponse(**register_defect(payload))
 
 
 @app.post("/plm/defect-history/comments", response_model=PlmHumanCommentsResponse)
