@@ -133,6 +133,39 @@ macOS에서는 아래 스크립트로 backend와 Streamlit 터미널 2개를 한
 
 DGX vLLM을 사용할 때는 `RAG_LLM_PROVIDER`, `RAG_LLM_BASE_URL`, `RAG_LLM_MODEL`, `RAG_LLM_API_KEY`를 지정한 상태로 실행하면 backend 터미널에 전달됩니다.
 
+### Open WebUI 등 OpenAI 호환 클라이언트에서 쓰기
+
+backend는 OpenAI Chat Completions 규격을 그대로 흉내내는 엔드포인트를 함께
+제공합니다. 이 RAG를 "모델 하나"로 취급하는 채팅 클라이언트에 붙일 수 있습니다.
+
+```
+GET  /v1/models
+POST /v1/chat/completions
+```
+
+어떤 로그에 대한 질문인지는 **모델 이름**이 정합니다. 모델 목록에 적재된 파일이
+그대로 나오므로, 클라이언트의 모델 선택기가 파일 선택기 역할을 합니다.
+
+| 모델 | 질의 대상 |
+|---|---|
+| `ril-rag` | 적재된 전체 로그 |
+| `ril-rag:<파일명>` | 그 파일만 |
+
+Open WebUI에 연결하려면 *Settings → Connections* 에서 OpenAI 호환 연결을 추가하고
+Base URL 에 `http://<backend-host>:8080/v1` 을 넣습니다. API 키는 검사하지
+않으므로 아무 값이나 됩니다.
+
+알아둘 점:
+
+- 답변은 한 번에 생성되므로, `stream: true` 로 요청해도 완성된 답이 한 덩어리로
+  전달됩니다(토큰 단위 타이핑 효과는 없음).
+- 엔진이 내놓는 추론 과정은 `<think>` 블록으로 감싸 보냅니다. Open WebUI는 이걸
+  접히는 "Thinking" 영역으로 렌더링합니다.
+- 이 엔드포인트는 나머지 API와 마찬가지로 **인증이 없습니다.** 사내망 밖에
+  노출하지 마십시오.
+- 대시보드/PLM 탭 같은 화면은 채팅 규격으로 표현할 수 없으므로 Streamlit UI에
+  그대로 남습니다.
+
 기존처럼 Streamlit 프로세스 안에서 로컬 `RilRagChat`을 직접 호출하려면 `USE_BACKEND_API=0`으로 실행합니다.
 
 Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.

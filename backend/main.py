@@ -230,6 +230,11 @@ class PlmRefineDescriptionResponse(BaseModel):
 
 app = FastAPI(title="AI Project RAG Backend")
 
+# OpenAI-compatible chat endpoint, so Open WebUI can use this RAG as a model.
+from backend.openai_api import router as openai_router  # noqa: E402  (needs `app`)
+
+app.include_router(openai_router)
+
 # Exception handler for detailed validation errors
 from fastapi.exceptions import RequestValidationError
 
