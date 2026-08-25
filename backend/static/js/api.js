@@ -68,6 +68,8 @@ export const api = {
     post("/plm/defect-history/comments", { division_code: divisionCode, defect_code: defectCode }),
   plmAnalyze: (divisionCode, defectCode) =>
     post("/plm/analyze", { division_code: divisionCode, defect_code: defectCode }),
+  plmAnalysisQuery: (divisionCode, defectCode, comments) =>
+    post("/plm/analysis-query", { division_code: divisionCode, defect_code: defectCode, comments }),
   plmAnalyzeAttachments: (divisionCode, defectCode) =>
     post("/plm/attachments/analyze", { division_code: divisionCode, defect_code: defectCode }),
 

@@ -103,6 +103,14 @@ function rerender() {
       drawFilePicker();
       rerender();
     },
+    /** Hand a ready-made question to the chat view and go there. */
+    startChat(question) {
+      const conversation = this.chat;
+      conversation.push({ question, pending: true, autoSend: true });
+      state.view = "chat";
+      drawNav();
+      rerender();
+    },
     /**
       * A job finished, or the database was reset: refresh the file list and
       * optionally make one of them active — without redrawing the view. The

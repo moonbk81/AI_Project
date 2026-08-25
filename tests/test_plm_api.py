@@ -172,3 +172,54 @@ def test_the_endpoint_answers_with_a_job_to_poll(client, monkeypatch):
 
     assert len(body["job_id"]) == 32
     assert backend_main._get_job(body["job_id"])["status"] == "pending"
+
+
+# ------------------------------------------------------- chat analysis query
+
+
+def test_the_analysis_query_carries_the_refined_problem_and_picked_comments(client, monkeypatch):
+    monkeypatch.setattr(
+        "plm.service.get_defect_details",
+        lambda **kwargs: {
+            "success": True,
+            "defects": [
+                {
+                    "defectCode": "P-1",
+                    "plmTitle": "통화 끊김",
+                    "content": "아주 길고 장황한 원본 설명",
+                    "reason": "핸드오버 실패",
+                    "plmStatus": "Open",
+                    "mainOwnerName": "moon",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr("plm.service.refine_problem_description", lambda content: "핸드오버 중 통화 끊김")
+
+    body = client.post(
+        "/plm/analysis-query",
+        json={
+            "division_code": "25",
+            "defect_code": "P-1",
+            "comments": [{"user": "kim", "date": "08-01", "text": "재현됨"}],
+        },
+    ).json()
+
+    assert body["success"] is True
+    assert body["refined_content"] == "핸드오버 중 통화 끊김"
+    assert body["original_content"] == "아주 길고 장황한 원본 설명"
+    # The question asks about the refined text, names the defect, and includes
+    # the comment the user ticked.
+    assert "핸드오버 중 통화 끊김" in body["query"]
+    assert "P-1" in body["query"] and "통화 끊김" in body["query"]
+    assert "재현됨" in body["query"] and "개발자 코멘트" in body["query"]
+
+
+def test_a_defect_that_cannot_be_read_reports_why(client, monkeypatch):
+    monkeypatch.setattr(
+        "plm.service.get_defect_details", lambda **kwargs: {"success": False, "message": "권한 없음", "defects": []}
+    )
+
+    body = client.post("/plm/analysis-query", json={"defect_code": "P-1"}).json()
+
+    assert body["success"] is False and body["message"] == "권한 없음"

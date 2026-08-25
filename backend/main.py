@@ -191,6 +191,23 @@ class PlmGroupUsersResponse(BaseModel):
     users: List[str] = Field(default_factory=list)
 
 
+class PlmAnalysisQueryRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+    # Developer comments the user ticked on the detail screen.
+    comments: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PlmAnalysisQueryResponse(BaseModel):
+    success: bool
+    message: str = ""
+    # The chat question, ready to send.
+    query: str = ""
+    defect_title: str = ""
+    refined_content: str = ""
+    original_content: str = ""
+
+
 class PlmAttachmentAnalyzeRequest(BaseModel):
     division_code: str = "25"
     defect_code: str = Field(min_length=1)
@@ -805,6 +822,46 @@ def plm_group_users(group_key: str) -> PlmGroupUsersResponse:
     from plm.plm_rag_integration import PLMConfigManager
 
     return PlmGroupUsersResponse(group=group_key, users=PLMConfigManager().get_users_for_search(group_key))
+
+
+@app.post("/plm/analysis-query", response_model=PlmAnalysisQueryResponse)
+def plm_analysis_query(req: PlmAnalysisQueryRequest) -> PlmAnalysisQueryResponse:
+    """Build the chat question that asks for a root cause of this defect.
+
+    The problem description is refined by the LLM first — PLM content is long
+    and written for a tracker, not for retrieval.
+    """
+    from plm.prompts import build_defect_analysis_query
+    from plm.service import get_defect_details, refine_problem_description
+
+    details = get_defect_details(division_code=req.division_code, defect_codes=[req.defect_code])
+    if not details.get("success") or not details.get("defects"):
+        return PlmAnalysisQueryResponse(
+            success=False, message=details.get("message") or "결함 정보를 찾지 못했습니다."
+        )
+
+    defect = details["defects"][0]
+    original = defect.get("content") or ""
+    refined = refine_problem_description(original)
+
+    problem = {
+        "content": refined,
+        "defect_code": defect.get("defectCode"),
+        "defect_title": defect.get("plmTitle", ""),
+        "reason": defect.get("reason", ""),
+        "countermeasure": defect.get("countermeasure", ""),
+        "status": defect.get("plmStatus", ""),
+        "priority": defect.get("plmPriority", ""),
+        "owner": defect.get("mainOwnerName", ""),
+    }
+
+    return PlmAnalysisQueryResponse(
+        success=True,
+        query=build_defect_analysis_query(problem, comments=req.comments),
+        defect_title=problem["defect_title"],
+        refined_content=refined,
+        original_content=original,
+    )
 
 
 @app.post("/plm/attachments/analyze", response_model=AnalyzeJobResponse)

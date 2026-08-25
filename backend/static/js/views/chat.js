@@ -111,6 +111,10 @@ export async function renderChat(mount, sourceFile, ctx) {
     log.scrollTop = log.scrollHeight;
   };
 
+  // A question handed over from another view (a PLM defect, say) is already
+  // in the conversation, waiting to be sent.
+  const handedOver = turns.find((turn) => turn.autoSend);
+
   const quick = el("div", "quick");
   const form = el("form", "chat-form");
   const input = el("input", "chat-input");
@@ -128,10 +132,11 @@ export async function renderChat(mount, sourceFile, ctx) {
     for (const button of quick.children) button.disabled = value;
   };
 
-  const ask = async (question) => {
+  const ask = async (question, existing) => {
     if (!question.trim() || busy) return;
-    const turn = { question, pending: true };
-    turns.push(turn);
+    const turn = existing || { question, pending: true };
+    if (!existing) turns.push(turn);
+    delete turn.autoSend;
     redraw();
     setBusy(true);
 
@@ -177,4 +182,6 @@ export async function renderChat(mount, sourceFile, ctx) {
   wrap.append(quick, form);
   redraw();
   input.focus?.();
+
+  if (handedOver) ask(handedOver.question, handedOver);
 }

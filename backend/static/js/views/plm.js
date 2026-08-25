@@ -186,18 +186,73 @@ export async function renderPlm(mount, sourceFile, ctx) {
       detailHost.append(fold);
     }
 
+    // Comments are ticked to say "analyze this one too", so the fold starts open.
     const humanComments = comments.comments || [];
+    const picked = new Set(humanComments.map((_, index) => index));
+
     if (humanComments.length) {
       const fold = el("details", "fold");
-      fold.append(el("summary", null, `개발자 코멘트 ${humanComments.length}건`));
-      for (const comment of humanComments) {
+      fold.open = true;
+      fold.append(el("summary", null, `개발자 코멘트 ${humanComments.length}건`),
+                  el("p", "card-note", "분석에 함께 넘길 코멘트를 고르세요. (AI 가 남긴 코멘트는 이미 제외돼 있습니다)"));
+
+      humanComments.forEach((comment, index) => {
         const block = el("div", "reference");
-        block.append(el("h4", null, `${comment.historyUser || "-"} · ${comment.historyDate || "-"}`),
-                     el("pre", null, comment.comment));
+        const label = el("label", "check");
+        const box = el("input");
+        box.type = "checkbox";
+        box.checked = true;
+        box.addEventListener("change", () => (box.checked ? picked.add(index) : picked.delete(index)));
+
+        label.append(box, el("span", null, `${comment.historyUser || "-"} · ${comment.historyDate || "-"}`));
+        block.append(label, el("pre", null, comment.comment));
         fold.append(block);
-      }
+      });
       detailHost.append(fold);
     }
+
+    // ---- 채팅으로 분석
+    const analyzeNote = el("p", "card-note");
+    const toChat = el("button", "primary", "🚀 채팅으로 분석");
+    toChat.type = "button";
+    toChat.addEventListener("click", async () => {
+      toChat.disabled = true;
+      analyzeNote.textContent = "문제 내용을 정리하는 중입니다...";
+      try {
+        const body = await api.plmAnalysisQuery(
+          state.division,
+          full.defectCode,
+          humanComments
+            .filter((_, index) => picked.has(index))
+            .map((comment) => ({
+              user: comment.historyUser || "",
+              date: comment.historyDate || "",
+              text: comment.comment || "",
+            })),
+        );
+
+        if (!body.success) {
+          analyzeNote.textContent = body.message || "분석 질의를 만들지 못했습니다.";
+          return;
+        }
+        // The refined text is what actually gets asked; show the original too.
+        if (body.original_content && body.original_content !== body.refined_content) {
+          const fold = el("details", "fold");
+          fold.append(el("summary", null, "정제된 문제 내용 / 원본"),
+                      el("pre", null, body.refined_content),
+                      el("h4", null, "원본"),
+                      el("pre", null, body.original_content));
+          detailHost.append(fold);
+        }
+        ctx.startChat(body.query);
+      } catch (error) {
+        analyzeNote.textContent = String(error.message || error);
+      } finally {
+        toChat.disabled = false;
+      }
+    });
+
+    detailHost.append(toChat, analyzeNote);
   };
 
   // ------------------------------------------------------------------ 첨부
