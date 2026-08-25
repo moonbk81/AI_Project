@@ -52,6 +52,37 @@ class LogExtractionEvent:
     contents: Dict[str, int] = field(default_factory=dict)
 
 
+# What a single downloaded attachment turned out to be.
+NOT_AN_ARCHIVE = "not_an_archive"
+LOGS_FOUND = "logs_found"
+NO_LOGS_IN_ARCHIVE = "no_logs_in_archive"
+
+
+@dataclass(frozen=True)
+class AttachmentOutcome:
+    """Result of looking inside one downloaded attachment.
+
+    `kind` is `"logs_found"` (the caller queues `logs` for analysis),
+    `"no_logs_in_archive"` or `"not_an_archive"` — for the latter two there is
+    nothing this project can analyze, so the file is only worth handing back to
+    the user.
+    """
+
+    kind: str
+    logs: Dict[str, bytes] = field(default_factory=dict)
+
+
+def inspect_attachment(filename: str, content: bytes) -> AttachmentOutcome:
+    """Decide what an attachment is worth doing with."""
+    if not str(filename).lower().endswith(ZIP_SUFFIX):
+        return AttachmentOutcome(NOT_AN_ARCHIVE)
+
+    logs = extract_logs_from_zip(content)
+    if not logs:
+        return AttachmentOutcome(NO_LOGS_IN_ARCHIVE)
+    return AttachmentOutcome(LOGS_FOUND, logs=logs)
+
+
 def select_zip_attachments(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """Attachments worth opening: only ZIPs can hold a device log."""
     return [f for f in (files or []) if str(f.get("title", "")).lower().endswith(ZIP_SUFFIX)]

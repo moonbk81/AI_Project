@@ -37,13 +37,56 @@ from plm import log_pipeline
 from plm.service import format_analysis_as_comment
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
 from plm.plm_api_client import DivisionCode, PLMAPIException
-from ui.plm_auto_download import (
-    add_pending_log,
-    AutoDownloadManager,
-    PLMAutoDownloadFlow
-)
-
 logger = logging.getLogger(__name__)
+
+
+def add_pending_log(filename: str, content: bytes) -> bool:
+    """Register an extracted log file for the unified analysis pipeline.
+
+    The sidebar pipeline consumes ``st.session_state.plm_pending_logs``
+    directly, so no intermediate queue/status tracking is needed.
+    """
+    try:
+        if 'plm_pending_logs' not in st.session_state:
+            st.session_state.plm_pending_logs = []
+
+        st.session_state.plm_pending_logs.append({
+            'filename': filename,
+            'content': content,
+        })
+        logger.info(f"Registered {filename} for analysis (size: {len(content)} bytes)")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to register pending log: {e}")
+        return False
+
+
+def _queue_attachment_logs(filename: str, content: bytes) -> None:
+    """Queue the logs of one downloaded attachment and report what happened."""
+    outcome = log_pipeline.inspect_attachment(filename, content)
+
+    if outcome.kind == log_pipeline.NOT_AN_ARCHIVE:
+        st.info(f"{filename}은 ZIP 이 아니라 추출할 LOG 파일이 없습니다. 다운로드 버튼으로 내려받으세요.")
+        return
+
+    if outcome.kind == log_pipeline.NO_LOGS_IN_ARCHIVE:
+        st.warning(f"{filename} 안에서 인식 가능한 LOG 파일을 찾지 못했습니다.")
+        return
+
+    queued = _queue_extracted_logs(outcome)
+    st.success(f"{queued}개 LOG 파일을 분석 대기열에 추가했습니다 - Sidebar 에서 분석을 시작하세요")
+    for log_name in outcome.logs:
+        st.caption(f"  • {log_name}")
+    st.rerun()
+
+
+def _queue_extracted_logs(outcome) -> int:
+    """Put every log of a `LOGS_FOUND` outcome into the analysis queue."""
+    queued = 0
+    for filename, content in outcome.logs.items():
+        if add_pending_log(filename, content):
+            queued += 1
+    return queued
 
 
 def _is_plm_local_test_mode() -> bool:
@@ -1271,10 +1314,8 @@ def render_plm_files():
                 st.subheader("💾 Downloaded Files - Auto Processing")
                 st.info(
                     f"📥 **{len(st.session_state.plm_download_data)} file(s) ready**\n\n"
-                    f"**Auto-processing enabled:**\n"
-                    f"• Non-ZIP files → Auto-saved to Downloads folder\n"
-                    f"• ZIP files → Auto-extract log files\n"
-                    f"• Log files → Auto-added to analysis pipeline"
+                    f"• ZIP 파일 → LOG 파일을 뽑아 분석 대기열에 추가\n"
+                    f"• 그 외 파일 → 다운로드 버튼으로 내려받기"
                 )
 
                 for file_id, (file_content, file_name) in st.session_state.plm_download_data.items():
@@ -1282,47 +1323,30 @@ def render_plm_files():
                         file_size_kb = len(file_content) / 1024
                         is_zip = file_name.lower().endswith('.zip')
 
-                        col1, col2, col3 = st.columns([2, 1, 1])
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                         with col1:
                             st.text(f"📄 {file_name} ({file_size_kb:.1f} KB)")
 
-                        # Auto-download button
                         with col2:
                             if st.button(
-                                "⬇️ Auto-Download",
+                                "➕ 분석 대기열",
                                 key=f"auto_download_{file_id}",
-                                help="Auto-save to Downloads folder and process"
+                                help="ZIP 안의 LOG 파일을 분석 대기열에 추가합니다"
                             ):
                                 with st.spinner(f"Processing {file_name}..."):
-                                    result = PLMAutoDownloadFlow.process_downloaded_file(
-                                        filename=file_name,
-                                        file_content=file_content,
-                                        source_defect=st.session_state.get('plm_selected_defect_code'),
-                                        auto_save=True,
-                                        auto_extract_logs=True
-                                    )
+                                    _queue_attachment_logs(file_name, file_content)
 
-                                    # Show processing results
-                                    if result['success']:
-                                        st.success(f"✅ Processing completed")
-                                        for msg in result['messages']:
-                                            st.info(msg)
-
-                                        # Show extracted logs if any
-                                        if result['extracted_logs']:
-                                            st.success(f"📋 Extracted {len(result['extracted_logs'])} log file(s)")
-                                            for log_name in result['extracted_logs']:
-                                                st.caption(f"  • {log_name}")
-
-                                            # Trigger auto-analysis if logs were extracted
-                                            st.rerun()
-                                    else:
-                                        st.warning(f"⚠️ Processing had issues")
-                                        for msg in result['messages']:
-                                            st.warning(msg)
+                        with col3:
+                            st.download_button(
+                                "⬇️ 다운로드",
+                                data=file_content,
+                                file_name=file_name,
+                                key=f"save_{file_id}",
+                                help="파일을 브라우저로 내려받습니다",
+                            )
 
                         # If ZIP file, add button to open and view contents
-                        with col3:
+                        with col4:
                             if is_zip:
                                 if st.button("📂 Open", key=f"open_zip_{file_id}", help="List ZIP contents"):
                                     zip_file_list = list_zip_contents(file_content)
@@ -1856,7 +1880,8 @@ def _show_cached_results_in_fragment():
 
                     # Show auto-save status and analysis queue info
                     st.caption(
-                        "Process saves non-ZIP files to Downloads, extracts ZIP files, and sends log files straight to the analysis pipeline."
+                        "'분석 대기열'은 ZIP 안의 LOG 파일을 뽑아 분석 파이프라인으로 보냅니다. "
+                        "원본 파일이 필요하면 '다운로드'로 내려받으세요."
                     )
 
                     for file_id, file_info in st.session_state.plm_quick_search_downloads.items():
@@ -1870,55 +1895,22 @@ def _show_cached_results_in_fragment():
                             st.caption(f"{file_size_kb:.1f} KB")
 
                         with col2:
-                            # Auto-download button
                             if st.button(
-                                "Process",
+                                "분석 대기열",
                                 key=f"auto_download_{file_id}",
-                                help="Auto-save to Downloads folder and process"
+                                help="ZIP 안의 LOG 파일을 분석 대기열에 추가합니다"
                             ):
                                 with st.spinner(f"Processing {filename}..."):
-                                    result = PLMAutoDownloadFlow.process_downloaded_file(
-                                        filename=filename,
-                                        file_content=content,
-                                        source_defect=defect_code,
-                                        auto_save=True,
-                                        auto_extract_logs=True
-                                    )
-
-                                    # Show processing results
-                                    if result['success']:
-                                        st.success("Processing completed successfully")
-                                        for msg in result['messages']:
-                                            st.write(msg)
-
-                                        # Show extracted logs if any
-                                        if result['extracted_logs']:
-                                            with st.expander(f"Extracted {len(result['extracted_logs'])} log file(s)", expanded=True):
-                                                for log_name in result['extracted_logs']:
-                                                    st.write(log_name)
-
-                                        # Trigger auto-analysis if logs were extracted
-                                        if result['extracted_logs']:
-                                            st.rerun()
-                                    else:
-                                        st.error("Processing encountered issues")
-                                        for msg in result['messages']:
-                                            st.write(msg)
+                                    _queue_attachment_logs(filename, content)
 
                         with col3:
-                            # Direct save button (for users who prefer manual control)
-                            if st.button(
-                                "Save",
+                            st.download_button(
+                                "다운로드",
+                                data=content,
+                                file_name=filename,
                                 key=f"manual_save_{file_id}",
-                                help="Manually save to Downloads"
-                            ):
-                                success, path_or_error = AutoDownloadManager.save_to_downloads(
-                                    filename, content
-                                )
-                                if success:
-                                    st.success(f"Saved to: {path_or_error}")
-                                else:
-                                    st.error(f"Failed: {path_or_error}")
+                                help="파일을 브라우저로 내려받습니다",
+                            )
 
                 # Clear button
                 if st.button("Refresh File List", key=f"reload_files_{defect_code}"):

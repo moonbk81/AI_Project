@@ -120,3 +120,28 @@ def test_downloader_returning_nothing_is_treated_as_a_failure():
     events = list(extract_logs_from_attachments(files, lambda **kwargs: None))
 
     assert _kinds(events)[-1] == log_pipeline.DOWNLOAD_FAILED
+
+
+# ------------------------------------------------- one downloaded attachment
+
+
+def test_a_zip_holding_logs_is_worth_analyzing():
+    outcome = log_pipeline.inspect_attachment("attachment.zip", LOG_ZIP)
+
+    assert outcome.kind == log_pipeline.LOGS_FOUND
+    assert outcome.logs == {"dumpstate.log": b"log body"}
+
+
+def test_a_zip_without_logs_has_nothing_to_analyze():
+    outcome = log_pipeline.inspect_attachment("attachment.ZIP", NO_LOG_ZIP)
+
+    assert outcome.kind == log_pipeline.NO_LOGS_IN_ARCHIVE
+    assert outcome.logs == {}
+
+
+def test_a_plain_file_is_not_opened_at_all():
+    assert log_pipeline.inspect_attachment("report.txt", b"anything").kind == log_pipeline.NOT_AN_ARCHIVE
+
+
+def test_a_damaged_archive_reports_no_logs_rather_than_raising():
+    assert log_pipeline.inspect_attachment("broken.zip", b"not a zip").kind == log_pipeline.NO_LOGS_IN_ARCHIVE

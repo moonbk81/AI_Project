@@ -1,5 +1,9 @@
 # PLM 자동 다운로드 & Log 추출 파이프라인 - 구현 완료 보고서
 
+> **이 문서는 2026-07-10 시점의 기록입니다.** 이후 구조가 바뀌어서 여기 나오는
+> `LogAnalysisPipeline`, `AutoDownloadManager`, `ui/plm_auto_download.py` 는
+> 더 이상 존재하지 않습니다. 현재 동작은 `PLM_AUTO_DOWNLOAD_GUIDE.md` 를 보세요.
+
 ## 📋 개요
 
 PLM 결함 관리 시스템에서 다운로드한 파일들을 자동으로 처리하는 엔드-투-엔드 파이프라인을 구현했습니다.
