@@ -21,6 +21,8 @@ async function get(path, params) {
 }
 
 export const api = {
+  health: () => get("/health"),
+
   files: () => get("/files").then((body) => body.files || []),
 
   kpi: (sourceFile) => get("/dashboard/kpi", { source_file: sourceFile }),

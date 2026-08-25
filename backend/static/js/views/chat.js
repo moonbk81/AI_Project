@@ -157,9 +157,35 @@ function pendingBubble(question) {
   return wrap;
 }
 
+/** Which model the answers come from — the chat is a conversation with it. */
+function modelLine() {
+  const line = el("p", "model-line", "모델 확인 중...");
+
+  api.health()
+    .then((health) => {
+      line.replaceChildren();
+      line.append(el("span", "chip active", health.model || "unknown"));
+
+      // "vLLM/OpenAI-compatible - model @ http://host/api/v1" → provider, host
+      const runtime = String(health.runtime || "");
+      const provider = runtime.split(" - ")[0] || health.provider || "";
+      const endpoint = runtime.includes("@") ? runtime.split("@").pop().trim() : "";
+
+      line.append(el("span", "model-meta", [provider, endpoint].filter(Boolean).join(" · ")));
+      if (health.engine_status && health.engine_status !== "loaded") {
+        line.append(el("span", "model-meta", `검색 엔진: ${health.engine_status}`));
+      }
+    })
+    .catch(() => {
+      line.textContent = "모델 정보를 불러오지 못했습니다.";
+    });
+
+  return line;
+}
+
 export async function renderChat(mount, sourceFile, ctx) {
   const wrap = el("section", "band chat");
-  wrap.append(el("h2", "band-title", `채팅 · ${sourceFile}`));
+  wrap.append(el("h2", "band-title", `채팅 · ${sourceFile}`), modelLine());
   mount.append(wrap);
 
   const guide = details("질문 예시");
