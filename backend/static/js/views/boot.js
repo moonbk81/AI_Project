@@ -3,7 +3,7 @@
 import { api } from "../api.js";
 import {
   axis, barTrace, baseLayout, card, drawPlot, el, fmt, frameTable, lineTrace, section,
-  seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
+  seriesColors, sequentialRamp, stepColor, table, tile, tileRow, token,
 } from "../viz.js";
 
 function bootCard(series, panel) {
@@ -260,6 +260,40 @@ function proxyCard(series, panel) {
   panel.content(wrap);
 }
 
+const NITZ_ZONE_NAMES = new Map([
+  [9, "Asia/Seoul · Asia/Tokyo"],
+  [8, "Asia/Shanghai · Asia/Singapore"],
+  [7, "Asia/Bangkok"],
+  [5.5, "Asia/Kolkata"],
+  [4, "Asia/Dubai"],
+  [3, "Europe/Moscow"],
+  [2, "Europe/Paris"],
+  [1, "Europe/London"],
+  [0, "Etc/UTC"],
+  [-4, "America/Sao_Paulo"],
+  [-5, "America/New_York"],
+  [-8, "America/Los_Angeles"],
+  [-10, "Pacific/Honolulu"],
+]);
+
+function nitzOffsetValue(point) {
+  const match = String(point.offset_label || "").match(/^UTC([+-]?\d+(?:\.\d+)?)$/);
+  return match ? Number(match[1]) : Number.NaN;
+}
+
+function nitzZoneName(point) {
+  return NITZ_ZONE_NAMES.get(nitzOffsetValue(point)) || point.region || point.offset_label;
+}
+
+function nitzRegionRows(geo) {
+  return (geo || []).map((point) => [
+    point.offset_label,
+    nitzZoneName(point),
+    point.region,
+    `${fmt.count(point.count)}회`,
+  ]);
+}
+
 function nitzCard(series, panel) {
   const kpi = series.kpi;
   const stability = { unstable: "불안정 (핑퐁)", long_stay: "장기 체류", stable: "안정" }[kpi.stability];
@@ -271,14 +305,71 @@ function nitzCard(series, panel) {
   ]));
 
   const colors = seriesColors();
-  panel.draw([lineTrace("UTC 오프셋", series.offsets.map((p) => p.log_time_dt),
-                        series.offsets.map((p) => p.offset), colors[2], {
-    line: { width: 2, shape: "hv", color: colors[2] },
-    hovertemplate: "UTC%{y:+g}<br>%{x}<extra></extra>",
-  })], baseLayout({
-    margin: { l: 64, r: 24, t: 8, b: 44 },
-    yaxis: axis({ title: { text: "UTC 오프셋", font: { size: 11 } } }),
-  }), frameTable(series.changes));
+  const wrap = el("div", "nitz-grid");
+  const timeline = el("div");
+  const mapPane = el("div");
+  const timelinePlot = el("div", "plot");
+  const mapPlot = el("div", "plot nitz-map");
+  timeline.append(el("h3", "sub-head", "UTC 오프셋 변화"), timelinePlot);
+  mapPane.append(el("h3", "sub-head", "타임존 기반 예상 지역"));
+
+  if ((series.geo || []).length) {
+    mapPane.append(mapPlot);
+  } else {
+    mapPane.append(el("div", "empty compact", "표시할 지도 좌표가 없습니다."));
+  }
+  mapPane.append(table(["오프셋", "대표 TZ", "예상 지역", "수신"], nitzRegionRows(series.geo), 20));
+  wrap.append(timeline, mapPane);
+
+  if ((series.changes || []).length) {
+    const changes = fold("NITZ 변경 상세");
+    changes.append(frameTable(series.changes));
+    wrap.append(changes);
+  }
+
+  panel.content(wrap);
+
+  queueMicrotask(() => drawPlot(timelinePlot, [lineTrace("UTC 오프셋", series.offsets.map((p) => p.log_time_dt),
+    series.offsets.map((p) => p.offset), colors[2], {
+      line: { width: 2, shape: "hv", color: colors[2] },
+      hovertemplate: "UTC%{y:+g}<br>%{x}<extra></extra>",
+    })], baseLayout({
+      margin: { l: 64, r: 24, t: 8, b: 44 },
+      yaxis: axis({ title: { text: "UTC 오프셋", font: { size: 11 } } }),
+    })));
+
+  if ((series.geo || []).length) {
+    queueMicrotask(() => drawPlot(mapPlot, [{
+      type: "scattergeo",
+      mode: "markers+text",
+      lat: series.geo.map((point) => point.lat),
+      lon: series.geo.map((point) => point.lon),
+      text: series.geo.map(nitzZoneName),
+      textposition: "top center",
+      customdata: series.geo.map((point) => [point.offset_label, point.region, point.count]),
+      marker: {
+        size: series.geo.map((point) => Math.min(30, 10 + Number(point.count || 0) * 5)),
+        color: colors[0],
+        opacity: 0.86,
+        line: { width: 2, color: token("--surface-1") },
+      },
+      hovertemplate: "<b>%{text}</b><br>%{customdata[0]}<br>%{customdata[1]}<br>%{customdata[2]}회<extra></extra>",
+    }], baseLayout({
+      height: 300,
+      margin: { l: 6, r: 6, t: 4, b: 4 },
+      geo: {
+        projection: { type: "natural earth" },
+        showland: true,
+        landcolor: token("--plane"),
+        showocean: true,
+        oceancolor: "rgba(42,120,214,0.08)",
+        showcountries: true,
+        countrycolor: token("--grid"),
+        coastlinecolor: token("--baseline"),
+        bgcolor: "rgba(0,0,0,0)",
+      },
+    })));
+  }
 }
 
 const CARDS = [

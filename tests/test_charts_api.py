@@ -99,12 +99,14 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     styles = client.get("/ui/styles.css")
     app = client.get("/ui/js/app.js")
     plm = client.get("/ui/js/views/plm.js")
+    boot = client.get("/ui/js/views/boot.js")
     bundle = client.get("/vendor/plotly.min.js")
 
     assert page.status_code == 200 and "로그 분석" in page.text
     assert styles.status_code == 200 and "--series-1" in styles.text
     assert app.status_code == 200 and "renderDashboard" in app.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
+    assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text
     # plotly.js ships with the installed package; the page must not need a CDN.
     assert bundle.status_code == 200 and len(bundle.content) > 100_000
 
