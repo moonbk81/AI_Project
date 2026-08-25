@@ -1,12 +1,6 @@
 import pandas as pd
 
-from core.charts import (
-    ICON_OFF,
-    ICON_ON_HYSTERESIS,
-    ICON_ON_REAL,
-    build_ntn_overview,
-    build_sat_at_overview,
-)
+from core.charts import ICON_OFF, ICON_ON_HYSTERESIS, ICON_ON_REAL, build_ntn_overview
 
 
 def _ntn_event(event_type, time, **overrides):
@@ -119,51 +113,3 @@ def test_missing_fields_show_up_as_dashes():
 
     assert overview.table["ntn_mode"].tolist() == ["-"]
     assert overview.ntn_status.data_policy == "N/A"
-
-
-# ------------------------------------------------- satellite AT (Tiantong) modem
-
-
-def test_sat_at_kpi_defaults_when_the_modem_reported_nothing():
-    kpi = build_sat_at_overview({}).kpi
-
-    assert (kpi.arfcn, kpi.reg_state) == ("N/A", "Unknown")
-    assert (kpi.calls_total, kpi.calls_failed, kpi.sms_tx_fail) == (0, 0, 0)
-    assert build_sat_at_overview(None).call_flow == []
-
-
-def test_sat_at_kpi_reads_the_metric_block():
-    kpi = build_sat_at_overview(
-        {"metrics": {"arfcn": 1234, "current_reg_state": "Registered (1)", "calls_total": 3, "calls_dropped_or_failed": 1}}
-    ).kpi
-
-    assert (kpi.arfcn, kpi.reg_state) == (1234, "Registered (1)")
-    assert (kpi.calls_total, kpi.calls_failed) == (3, 1)
-
-
-def test_call_flow_steps_are_classified_for_coloring():
-    overview = build_sat_at_overview(
-        {
-            "call_flow": [
-                {"time": "10:00:00", "src": 0, "dst": 1, "desc": "DIAL", "is_highlight": True},
-                {"time": "10:00:01", "src": 1, "dst": 2, "desc": "ATD"},
-                {"time": "10:00:02", "src": 2, "dst": 1, "desc": "+CEND: 1"},
-                {"time": "10:00:03", "src": 1, "dst": 2, "desc": "ERROR"},
-            ]
-        }
-    )
-
-    dial, atd, cend, error = overview.call_flow
-    assert (dial.involves_framework, dial.is_highlight, dial.is_error) == (True, True, False)
-    assert (atd.involves_framework, atd.is_highlight, atd.is_error) == (False, False, False)
-    assert cend.is_error is True  # a call that ended abnormally
-    assert error.is_error is True
-
-
-def test_registration_history_is_passed_through_as_a_frame():
-    overview = build_sat_at_overview(
-        {"registration_history": [{"time": "10:00:00", "status_str": "Searching", "raw": "+CREG: 2"}]}
-    )
-
-    assert overview.registration["status_str"].tolist() == ["Searching"]
-    assert overview.reg_state_order[-1] == "Registered (1)"

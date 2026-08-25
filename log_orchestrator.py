@@ -14,7 +14,6 @@ from parsers.network_ts_analyzer import NetworkTimeSeriesAnalyzer
 from parsers.ntn_processor import NtnProcessor
 from parsers.data_call_processor import DataCallProcessor
 from parsers.ims_sip_processor import ImsSipProcessor
-from parsers.sat_at_parser import SatAtProcessor
 from parsers.battery_thermal_analyzer import BatteryThermalAnalyzer
 from parsers.battery_thermal_analyzer import CpuUsageParser
 from parsers.internet_stall_parser import InternetStallParser
@@ -49,7 +48,6 @@ class LogOrchestrator:
         self.datacall_parser = DataCallProcessor(context_getter=self._get_surrounding_context_logs)
         self.internet_stall_parser = InternetStallParser()
         self.ims_sip_parser = ImsSipProcessor(context_getter=self._get_surrounding_context_logs)
-        self.sat_at_parser = SatAtProcessor(context_getter=self._get_surrounding_context_logs)
         self.native_crash_parser = NativeCrashParser(self._get_surrounding_context_logs)
         self.binder_parser = BinderWarningParser(self._get_surrounding_context_logs)
         self.rilj_parser = RiljParser()
@@ -161,7 +159,6 @@ class LogOrchestrator:
                     executor.submit(run_parser_with_key, 'system_properties', self.sys_prop_parser.analyze, lines): 'sysprop',
                     executor.submit(run_parser_with_key, 'build_info', self.build_info_parser.analyze, lines): 'build',
                     executor.submit(run_parser_with_key, 'ims_sip_data', self.ims_sip_parser.analyze, buckets['ims_sip']): 'ims_sip',
-                    executor.submit(run_parser_with_key, 'sat_at_data', self.sat_at_parser.analyze, buckets['sat_at']): 'sat_at',
                 }
 
                 # 결과 수집 (조건부 저장)
@@ -203,7 +200,6 @@ class LogOrchestrator:
                 executor.submit(self.ntn_processor.save_ui_report, "./result", self.base_name)
                 executor.submit(self.ims_sip_parser.save_ui_report, "./result", self.base_name)
                 executor.submit(self.datacall_parser.save_ui_report, "./result", self.base_name)
-                executor.submit(self.sat_at_parser.save_ui_report, "./result", self.base_name)
                 executor.submit(self.ntn_processor.build_and_save_payloads, "./payloads")
                 executor.submit(self.internet_stall_parser.save_ui_report, "./result", self.base_name, result['internet_stall'])
                 # 모든 작업 완료 대기

@@ -19,7 +19,6 @@ router_prompt: |
   - Radio_Power
   - Nitz_Time_Analysis
   - NTN_SpaceX
-  - Tiantong_Satellite
   - Data_Usage_Analysis
 
   반드시 아래 JSON 형식만 출력하라:
@@ -157,13 +156,6 @@ routing_map:
       - get_ntn_spacex_analytics
     log_types:
       - NTN_Policy
-      - Signal_Level
-  Tiantong_Satellite:
-    desc: "Tiantong, 티엔통, 천통, 위성 모뎀, AT Command, 위성 전화, 위성 통화, 위성 발신"
-    tools:
-      - get_tiantong_satellite_analytics
-    log_types:
-      - Satellite_AT_Command
       - Signal_Level
   Data_Usage_Analysis:
     desc: "데이터 사용량, 데이터 소모, 트래픽 폭주, 어떤 앱이 데이터 많이 썼는지, 백그라운드 데이터, 셀룰러 데이터 사용, 과금, 과도한 트래픽, 최근 데이터 사용 앱, 데이터 누가 썼어, data usage, rx_bytes, tx_bytes"
@@ -421,26 +413,6 @@ log_guidelines:
 # 5. 위성 통신(NTN) 분석 프롬프트 템플릿
 # ==========================================
 satellite_prompts:
-  Tiantong: |
-    [위성 통신(Tiantong) 분석 지침]
-    15년 차 수석 엔지니어의 관점에서 아래 제공되는 Tiantong 위성 모뎀 제어(AT Command) 팩트와 검색 로그를 바탕으로 상태를 진단하십시오.
-
-    [🚨 Tiantong 위성 통신(rild3) 분석 특수 규칙 🚨]
-    1. [Legacy Modem OFF 원칙]: Tiantong 위성 모뎀이 On 상태(rild3, satellite_rilj 로그가 발생하는 시점)일 때는, 기존 단말의 Legacy Modem(Qualcomm/S.LSI)은 Power OFF 된 상태입니다.
-    2. [레거시 지표 무시]: 따라서 위성이 켜져 있는 해당 시간대에는 Data Stall, DNS Timeout, OOS 등 일반 네트워크 분석 지표를 절대 참조하지 마십시오. 해당 지표들은 모뎀이 꺼져 있어 발생하는 무의미한 노이즈입니다.
-    3. [AT Command 중심 분석]: 오직 'rild3' 로그 태그에서 확인되는 위성 모뎀과의 AT Command 송수신 이력 및 전용 신호 상태만으로 통화/연결 상태를 진단하십시오
-
-    [🚨 엄격한 도메인 분석 규칙 🚨]
-    1. [Call/SMS 정상 지원]: Tiantong 위성은 음성 통화(CS Call)와 SMS, 2.8K 데이터 서비스를 모두 지원합니다. 따라서 이 구간에서의 Call Drop이나 발신 실패는 정상 동작이 아니며, AT Command 로그나 신호(RSSI/SNR) 상태를 바탕으로 장애 원인을 분석해야 합니다.
-    2. [사용자 의도적 종료 판별]: 로그에 'SAT_SET_POWER, state: OFF' 또는 'AT+CFUN=0' (혹은 4)가 관찰된다면, 이는 모뎀 연결 불안정이 아니라 "사용자의 명시적인 조작(Pointing UI 등)에 의한 정상적인 위성 모뎀 전원 OFF"로 판정하십시오.
-    3. [AT Command 및 CMUX 분석]: 통화 연결이나 데이터 서비스 진입 중 발생한 장애는 AT+CGATT, PDP context 설정 등 모뎀과 AP 간의 AT Command 시퀀스 내 'ERROR' 응답을 핵심 원인(Root Cause)으로 삼으십시오.
-    4. [In-Service 구간 중심 평가]: 모뎀이 켜져 있는 동안의 'call_drops_and_fails'와 'sms_tx_fails' 수치를 최우선으로 확인하여, 해당 위성 연결 세션이 성공적이었는지 평가하십시오.
-
-    [✍️ 답변 스타일 및 톤앤매너 (매우 중요) 🚨]
-    1. 단순한 속성-값 나열식 요약을 절대 금지합니다. (예: "위성 모뎀 상태: is_intentional_power_off: true" -> 이런 기계적인 출력 금지)
-    2. 마치 수석 엔지니어가 경영진에게 브리핑하듯, 자연스럽고 전문가다운 서술형 문장으로 작성하십시오.
-    3. 제공된 JSON의 수치나 영문 상태값은 문장 안에 자연스럽게 녹여서 해설하십시오. (예: "단말의 등록 이력을 보면 HOME 망에 안정적으로 진입한 이후, 사용자의 명시적인 조작에 의해 정상적으로 등록 해제되었습니다.")
-
   SpaceX: |
     [위성 통신 팩트 데이터]
     아래는 단말의 SpaceX(Direct-to-Cell) 등 비지상망(NTN) 로밍 및 상태 전이 이력 팩트입니다.

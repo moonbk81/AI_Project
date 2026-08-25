@@ -24,9 +24,6 @@ def get_domain_guidelines(query_lower: str, log_guidelines: dict, prompts: dict)
     if any(k in query_lower for k in ["spacex", "starlink", "ntn", "스페이스엑스"]):
         rule = prompts.get('SpaceX', "")
         if rule: guidelines.append(f"### [위성 통신 규칙 - SpaceX]\n{rule}")
-    elif any(k in query_lower for k in ["tiantong", "티엔통", "천통", "at command"]):
-        rule = prompts.get('Tiantong', "")
-        if rule: guidelines.append(f"### [위성 통신 규칙 - Tiantong]\n{rule}")
     else:
         base_p = prompts.get('base_persona', "")
         if base_p: guidelines.append(f"### [기본 분석 원칙]\n{base_p}")

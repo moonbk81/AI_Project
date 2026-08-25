@@ -238,13 +238,6 @@ def get_semantic_routing(query, routing_map, embed_model):
             selected_log_types = set(routing_map["NTN_SpaceX"].get("log_types", []))
         is_hard_matched = True
 
-    elif any(keyword in query_lower for keyword in ["tiantong", "티엔통", "천통", "at command", "위성 모뎀"]):
-        selected_intents = {"Tiantong_Satellite"}
-        if "Tiantong_Satellite" in routing_map:
-            selected_tools = set(routing_map["Tiantong_Satellite"].get("tools", []))
-            selected_log_types = set(routing_map["Tiantong_Satellite"].get("log_types", []))
-        is_hard_matched = True
-
     elif any(keyword in query_lower for keyword in [
         "nitz", "타임존", "timezone", "time zone", "시간대", "시간 변경",
         "시간 보정", "시간 동기화", "utc", "utc+", "utc offset", "offset",

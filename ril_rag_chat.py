@@ -30,7 +30,6 @@ from agent_toolkit import (
     get_ps_ims_call_analytics,
     get_radio_power_analytics,
     get_recent_data_usage_analytics,
-    get_tiantong_satellite_analytics,
     get_datacall_setup_analytics,
 )
 
@@ -101,7 +100,6 @@ class RilRagChat:
             "get_data_stall_and_recovery_analytics": get_data_stall_and_recovery_analytics,
             "get_internet_stall_analytics": get_internet_stall_analytics,
             "get_ntn_spacex_analytics": get_ntn_spacex_analytics,
-            "get_tiantong_satellite_analytics": get_tiantong_satellite_analytics,
             "get_recent_data_usage_analytics": get_recent_data_usage_analytics,
             "get_binder_warning_analytics": get_binder_warning_analytics,
             "get_datacall_setup_analytics": get_datacall_setup_analytics,
@@ -361,10 +359,6 @@ class RilRagChat:
             intents = ["Time_Context_Inference"]
             selected_tools = self.routing_map.get("Time_Context_Inference", {}).get("tools", ["get_ps_ims_call_analytics", "get_cs_call_analytics", "get_radio_power_analytics", "get_network_oos_analytics"])
             target_log_types = self.routing_map.get("Time_Context_Inference", {}).get("log_types", ["Call_Session", "Radio_Power_Event", "OOS_Event", "Device_Property_State"])
-
-        if "Tiantong_Satellite" in intents:
-            selected_tools = ["get_tiantong_satellite_analytics"]
-            target_log_types = ["Satellite_AT_Command"]
 
         # 1. DB 검색 (retrieval.py 내에서 is_datacall_failure_query에 의해 자동 확장됨)
         results = retrieve_and_rerank(

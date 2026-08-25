@@ -53,7 +53,7 @@ Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 
 - Java Crash / Native Crash / ANR
 - Battery drain / Thermal / CPU usage
 - Boot, Build Info, System Property, NITZ
-- NTN / SpaceX / Tiantong satellite log
+- NTN / SpaceX satellite log
 - Data usage
 
 ## 분석 파이프라인
@@ -233,7 +233,6 @@ AI_Project/
     battery_thermal_analyzer.py
     network_ts_analyzer.py
     ntn_processor.py
-    sat_at_parser.py
     system_property_parser.py
     call/
       ims_call_parser.py
@@ -310,7 +309,6 @@ AI_Project/
 - `Radio_Power`
 - `Nitz_Time_Analysis`
 - `NTN_SpaceX`
-- `Tiantong_Satellite`
 - `Data_Usage_Analysis`
 
 ### 모델 설정
@@ -365,7 +363,7 @@ streamlit run web_app.py
 - `로그 분석`: 질문/답변 및 참조 로그 확인
 - `통계 대시보드`: 분석 결과 기반 지표 확인
 - `부팅·Crash·ANR·NITZ`: 부팅, crash, ANR, NITZ 관련 분석
-- `위성 통신`: NTN/Tiantong/SpaceX 관련 분석
+- `위성 통신`: NTN/SpaceX 관련 분석
 - `인터넷 품질`: Internet Stall, DNS, validation 관련 분석
 - `지식 베이스`: 분석 사례 조회 및 등록
 

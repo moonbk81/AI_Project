@@ -18,9 +18,7 @@ def render_satellite_tab(engine):
     overview = get_satellite_overview_with_optional_backend(current_base)
     sat_type = overview.get("sat_type")
 
-    if sat_type == "Tiantong":
-        ui.render_sat_at_analyzer(current_base, data=overview.get("sat_at") or {})
-    elif sat_type == "SpaceX":
+    if sat_type == "SpaceX":
         ui.render_ntn_advanced_fw_analyzer(current_base, data=overview.get("ntn") or {})
     else:
         st.info("NTN 위성 통신 로그가 존재하지 않습니다.")

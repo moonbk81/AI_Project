@@ -15,7 +15,6 @@ class AnalysisBucketBuilder:
         'ntn',
         'datacall',
         'ims_sip',
-        'sat_at',
         'internet_stall',
         'nitz',
         'native_crash',
@@ -63,10 +62,6 @@ class AnalysisBucketBuilder:
         "SIP/2.0", "REGISTER sip:", "INVITE sip:", "BYE sip:", "CANCEL sip:",
         "P-CSCF", "ImsReasonInfo", "ImsPhoneConnection", "ImsCallSession",
         "createCallProfile", "onCallStarted", "onCallStartFailed",
-    ]
-    SAT_AT_KEYWORDS = [
-        "AT+", "AT^", "AT$", "> AT", "< AT",
-        "+CEREG", "+CREG", "+CGREG", "+COPS", "+CSQ",
     ]
     DATA_STALL_RECOVERY_KEYWORDS = [
         "data stall:", "data stall: start", "data stall: end", "data stall: in process",
@@ -194,9 +189,6 @@ class AnalysisBucketBuilder:
 
         if self._contains_any(line, self.IMS_SIP_KEYWORDS):
             self._add_context_window(buckets, 'ims_sip', lines, idx, window=5)
-
-        if self._contains_any(line, self.SAT_AT_KEYWORDS):
-            buckets['sat_at'].append(line)
 
         if self._contains_any(line, self.INTERNET_STALL_CONTEXT_KEYWORDS):
             self._add_context_window(buckets, 'internet_stall', lines, idx, window=10)

@@ -1,10 +1,9 @@
-// 위성 — NTN(SpaceX) 정책 전이 또는 위성 모뎀(Tiantong) 제어 상태.
+// 위성 — NTN(SpaceX) 로밍 정책과 상태 전이.
 
 import { api, baseName } from "../api.js";
 import { reportCard } from "../report.js";
 import {
-  axis, baseLayout, card, el, fmt, frameTable, groupBy, lineTrace, section,
-  seriesColors, table, tile, tileRow,
+  axis, baseLayout, card, el, frameTable, groupBy, section, seriesColors, tile, tileRow,
 } from "../viz.js";
 
 function ntnCard(series, panel) {
@@ -40,49 +39,6 @@ function ntnCard(series, panel) {
   }), frameTable(series.table));
 }
 
-function satAtCard(series, panel) {
-  const kpi = series.kpi;
-  panel.prepend(tileRow([
-    tile("위성 ARFCN", kpi.arfcn),
-    tile("등록 상태", kpi.reg_state),
-    tile("음성 통화", `${kpi.calls_total} / ${kpi.calls_failed}`, "", "전체 / 실패",
-         kpi.calls_failed ? "critical" : "good"),
-    tile("SMS", `${kpi.sms_rx} / ${kpi.sms_tx_success} / ${kpi.sms_tx_fail}`, "", "Rx / Tx 성공 / Tx 실패",
-         kpi.sms_tx_fail ? "critical" : "good"),
-  ]));
-
-  if (!series.registration.length) {
-    panel.note("위성망 등록 이력이 없습니다.");
-    return;
-  }
-
-  const colors = seriesColors();
-  panel.draw([lineTrace("등록 상태", series.registration.map((r) => r.time),
-                        series.registration.map((r) => r.status_str), colors[1], {
-    line: { width: 2, shape: "hv", color: colors[1] },
-    hovertemplate: "<b>%{y}</b><br>%{x}<extra></extra>",
-  })], baseLayout({
-    margin: { l: 152, r: 24, t: 8, b: 60 },
-    xaxis: axis({ tickangle: -35 }),
-    yaxis: axis({ type: "category", categoryorder: "array", categoryarray: series.reg_state_order }),
-  }), frameTable(series.registration));
-}
-
-function callFlowCard(series, panel) {
-  if (!series.call_flow.length) {
-    panel.note("통화 제어 시퀀스가 없습니다.");
-    return;
-  }
-  const actors = ["Android FW", "RIL Daemon", "Modem (CP)"];
-  panel.content(table(["시각", "구간", "메시지", "판정"],
-    series.call_flow.map((step) => [
-      step.time,
-      `${actors[step.src] ?? step.src} → ${actors[step.dst] ?? step.dst}`,
-      step.desc,
-      step.is_error ? "오류" : step.is_highlight ? "주요" : "",
-    ])));
-}
-
 export async function renderSatellite(mount, sourceFile) {
   const band = section("위성 통신");
   mount.append(band.wrap);
@@ -103,12 +59,7 @@ export async function renderSatellite(mount, sourceFile) {
 
   band.wrap.insertBefore(tileRow([tile("위성 종류", overview.sat_type)]), band.grid);
 
-  const specs = overview.sat_type === "SpaceX"
-    ? [{ chart: "ntn", title: "NTN 상태 전이", sub: "로밍 정책과 상태바 아이콘", render: ntnCard }]
-    : [
-        { chart: "sat-at", title: "위성 모뎀 제어 상태", sub: "등록 이력", render: satAtCard },
-        { chart: "sat-at", title: "통화 제어 시퀀스", sub: "AP ↔ RIL ↔ Modem", render: callFlowCard },
-      ];
+  const specs = [{ chart: "ntn", title: "NTN 상태 전이", sub: "로밍 정책과 상태바 아이콘", render: ntnCard }];
 
   const report = card(`${overview.sat_type} 위성망 리포트`, "위성 통신 구간을 LLM 이 정리합니다.");
   report.section.classList.add("wide");

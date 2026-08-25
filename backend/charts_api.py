@@ -37,7 +37,6 @@ from core.charts import (
     build_power_thermal_panel,
     build_rf_call_timeline,
     build_rilj_overview,
-    build_sat_at_overview,
     build_service_state_series,
     build_signal_level_series,
     build_sip_flow,
@@ -101,7 +100,6 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     "sip-flow": ChartSpec(build_sip_flow, source="ims_sip"),
     "internet-stall": ChartSpec(build_internet_stall_report, source="internet_stall"),
     "ntn": ChartSpec(build_ntn_overview, source="ntn"),
-    "sat-at": ChartSpec(build_sat_at_overview, source="sat_at"),
 }
 
 

@@ -14,7 +14,7 @@ from .network_ui import (
     render_network_timeseries_and_dns,
 )
 from .power_ui import render_battery_thermal_chart
-from .satellite_ui import render_ntn_advanced_fw_analyzer, render_sat_at_analyzer
+from .satellite_ui import render_ntn_advanced_fw_analyzer
 from .telephony_ui import (
     render_call_history_summary,
     render_data_call_analyzer,
@@ -49,7 +49,6 @@ __all__ = [
     "render_nitz_timeline",
     "render_ntn_advanced_fw_analyzer",
     "render_rilj_transactions",
-    "render_sat_at_analyzer",
     "render_service_state_timeline",
     "render_signal_level_timeline",
     "render_plm_section",

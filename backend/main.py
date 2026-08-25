@@ -75,7 +75,6 @@ class SatelliteOverviewResponse(BaseModel):
     base_name: str
     # None when the log carries no NTN traffic at all.
     sat_type: Optional[str] = None
-    sat_at: Dict[str, Any] = Field(default_factory=dict)
     ntn: Any = Field(default_factory=dict)
 
 
@@ -357,7 +356,6 @@ _RESULT_ARTIFACTS = {
     "datacall",
     "ims_sip",
     "ntn",
-    "sat_at",
     "internet_stall",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")

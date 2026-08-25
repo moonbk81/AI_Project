@@ -33,10 +33,10 @@ def test_session_report_splices_kpi_into_the_prompt():
 def test_satellite_report_unescapes_newlines():
     engine = FakeEngine(("첫줄\\n둘째줄", [], [], ""))
 
-    report = reports.generate_satellite_report(engine, "radio", "Tiantong")
+    report = reports.generate_satellite_report(engine, "radio", "SpaceX")
 
     assert report["answer"] == "첫줄\n둘째줄"
-    assert "Tiantong" in engine.asked[0][0]
+    assert "SpaceX" in engine.asked[0][0]
 
 
 def test_satellite_report_rejects_unknown_constellation():
@@ -55,19 +55,15 @@ def test_short_tuple_is_padded():
 
 
 @pytest.mark.parametrize(
-    "sat_at, ntn, expected",
+    "ntn, expected",
     [
-        ({"call_flow": [{"t": 1}]}, None, "Tiantong"),
-        ({"call_flow": []}, {}, None),
-        (None, {"policy": [1]}, "SpaceX"),
-        (None, [1, 2], "SpaceX"),
-        (None, {"policy": None}, None),
-        (None, [], None),
-        # Tiantong wins when a log somehow carries both.
-        ({"call_flow": [{"t": 1}]}, [1], "Tiantong"),
-        # A list where a dict was expected must not raise.
-        ([], {}, None),
+        ({"policy": [1]}, "SpaceX"),
+        ([1, 2], "SpaceX"),
+        ({"policy": None}, None),
+        ({}, None),
+        ([], None),
+        (None, None),
     ],
 )
-def test_detect_satellite_type(sat_at, ntn, expected):
-    assert detect_satellite_type(sat_at_data=sat_at, ntn_data=ntn) == expected
+def test_detect_satellite_type(ntn, expected):
+    assert detect_satellite_type(ntn_data=ntn) == expected
