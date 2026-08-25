@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from fastapi import File, Form, UploadFile, FastAPI, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -320,7 +320,13 @@ def plotly_bundle():
     return FileResponse(bundle, media_type="application/javascript")
 
 
-# Browser frontend spike: the same chart contracts, drawn outside Streamlit.
+@app.get("/", include_in_schema=False)
+def root():
+    """Open the built-in browser UI by default."""
+    return RedirectResponse(url="/ui/")
+
+
+# Browser frontend: the same chart contracts, drawn outside Streamlit.
 app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
 # Exception handler for detailed validation errors

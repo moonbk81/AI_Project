@@ -1,14 +1,14 @@
 # Android RIL RAG Dashboard
 
-Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 Local/Ollama 또는 vLLM 기반 LLM + RAG로 장애 원인을 분석하는 Streamlit 기반 로그 분석 콘솔입니다.
+Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 Local/Ollama 또는 vLLM 기반 LLM + RAG로 장애 원인을 분석하는 FastAPI 기반 로그 분석 콘솔입니다. 기본 UI는 backend가 직접 서빙하는 브라우저 UI입니다.
 
 이 프로젝트는 단순히 로그를 벡터 DB에 넣고 질의하는 구조가 아니라, `Parser -> Analysis Bucket -> Structured Event -> RAG Payload -> Retrieval/Rerank -> Guardrail -> LLM` 흐름으로 동작합니다. 목적은 통신 장애 RCA(Root Cause Analysis)를 로그 팩트 기반으로 생성하고, Local LLM의 환각을 줄이는 것입니다.
 
 ## 주요 기능
 
 - **통합 로그 분석 파이프라인**
-  - 다중 로그 업로드, 시간순 병합, 분석 리포트 생성, RAG payload 생성, ChromaDB 적재를 Streamlit UI에서 실행합니다.
-  - 진입점: `web_app.py`, `app/pipeline.py`, `log_orchestrator.py`, `prepare_rag_payload.py`
+  - 다중 로그 업로드, 시간순 병합, 분석 리포트 생성, RAG payload 생성, ChromaDB 적재를 FastAPI backend job으로 실행합니다.
+  - 진입점: `backend/main.py`, `core/analysis_pipeline.py`, `log_orchestrator.py`, `prepare_rag_payload.py`
 
 - **Android Telephony/RIL 도메인 파서**
   - Call Session, IMS/SIP, OOS, Radio Power, DataCall, DNS, Internet Stall, Crash/ANR, Native Crash, Binder, Battery/Thermal, NTN, Satellite AT 로그를 분석합니다.
@@ -103,29 +103,24 @@ Configured LLM Answer
 export RAG_LLM_PROVIDER=vllm
 export RAG_LLM_BASE_URL=http://10.253.68.95:3000/api/v1
 export RAG_LLM_MODEL=qwen72b
-export RAG_LLM_API_KEY=sk-db915daba7084878bbeaebf003a64cce
-streamlit run web_app.py
+export RAG_LLM_API_KEY=<your-api-key>
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
 ```
 
 vLLM 실행 시 `--served-model-name qwen2.5-72b-instruct`처럼 별도 이름을 지정했다면 `RAG_LLM_MODEL`도 동일하게 맞춥니다.
 
-## Backend API 실행
+## 실행
 
-기본 실행 경로는 FastAPI backend입니다. 채팅 질의, 적재 파일 목록 조회, DB 초기화, 로그 업로드/분석 job, PLM 연동은 backend에서 처리하고 Streamlit은 UI를 담당합니다. 별도 터미널에서 backend를 먼저 실행합니다.
+기본 실행 경로는 FastAPI backend입니다. 채팅 질의, 적재 파일 목록 조회, DB 초기화, 로그 업로드/분석 job, PLM 연동, 브라우저 UI 서빙을 모두 backend에서 처리합니다.
 
 ```bash
 conda activate ai
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
 ```
 
-그 다음 Streamlit을 실행합니다. `BACKEND_API_URL`을 지정하지 않으면 `http://localhost:8080`을 사용합니다.
+실행 후 브라우저에서 `http://localhost:8080/` 또는 `http://localhost:8080/ui/`를 엽니다. `/`는 자동으로 `/ui/`로 이동합니다.
 
-```bash
-conda activate ai
-streamlit run web_app.py
-```
-
-macOS에서는 아래 스크립트로 backend와 Streamlit 터미널 2개를 한 번에 띄울 수 있습니다.
+macOS/Linux에서는 아래 스크립트로 backend만 실행할 수 있습니다.
 
 ```bash
 ./scripts/start_backend_streamlit.command
@@ -150,8 +145,7 @@ curl -X POST localhost:8080/plm/local-test -H 'Content-Type: application/json' -
 ```
 
 샘플 첨부의 ZIP 에는 실제로 열리는 로그가 들어 있어서 "로그 추출해 분석"까지
-오프라인으로 확인할 수 있습니다. Streamlit 의 "PLM 로컬 테스트 모드" 체크박스도
-같은 스위치를 봅니다.
+오프라인으로 확인할 수 있습니다. 브라우저 UI 의 PLM 탭 상단 스위치도 같은 상태를 봅니다.
 
 ### Open WebUI 등 OpenAI 호환 클라이언트에서 쓰기
 
@@ -183,10 +177,9 @@ Base URL 에 `http://<backend-host>:8080/v1` 을 넣습니다. API 키는 검사
   접히는 "Thinking" 영역으로 렌더링합니다.
 - 이 엔드포인트는 나머지 API와 마찬가지로 **인증이 없습니다.** 사내망 밖에
   노출하지 마십시오.
-- 대시보드/PLM 탭 같은 화면은 채팅 규격으로 표현할 수 없으므로 Streamlit UI에
-  그대로 남습니다.
+- 대시보드/PLM 탭 같은 화면은 채팅 규격으로 표현할 수 없으므로 backend 브라우저 UI에서 사용합니다.
 
-기존처럼 Streamlit 프로세스 안에서 로컬 `RilRagChat`을 직접 호출하려면 `USE_BACKEND_API=0`으로 실행합니다.
+기존 Streamlit UI(`web_app.py`, `app/`, `ui/`)는 전환 전 구현을 참고하기 위해 남아 있지만 기본 실행 경로가 아닙니다.
 
 Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.
 
@@ -196,17 +189,17 @@ Backend 모드에서 `POST /db/reset`은 Vector DB와 backend의 `payloads/`, `r
 
 ```text
 AI_Project/
-  app/
-    pipeline.py
-    sidebar.py
-    chat_panel.py
-    tabs/
-      chat_tab.py
-      dashboard_tab.py
-      boot_tab.py
-      satellite_tab.py
-      internet_tab.py
-      knowledge_tab.py
+  backend/
+    main.py
+    charts_api.py
+    openai_api.py
+    static/
+      index.html
+      styles.css
+      js/
+        app.js
+        api.js
+        views/
   agent_toolkit/
     call_tools.py
     network_tools.py
@@ -320,7 +313,7 @@ AI_Project/
 - CPU/MPS: `gemma4:12b`
 - CUDA: `gemma3:4b`
 
-Streamlit 사이드바에서는 설치된 Ollama 모델 목록을 조회해 선택할 수 있습니다.
+실행 중인 모델과 provider 상태는 브라우저 UI의 채팅 화면과 `GET /health`에서 확인할 수 있습니다.
 
 ## 설치
 
@@ -343,7 +336,7 @@ pip install -r requirements-dev.txt
 
 오프라인 환경에서는 `bge-m3-offline/` 준비 여부를 확인해야 합니다.
 
-## 실행
+## 로컬 실행 예시
 
 Ollama 서버와 사용할 모델을 먼저 준비합니다.
 
@@ -352,13 +345,13 @@ ollama serve
 ollama pull gemma4:12b
 ```
 
-Streamlit 앱 실행:
+FastAPI backend 실행:
 
 ```bash
-streamlit run web_app.py
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
 ```
 
-앱에서 사용하는 주요 탭:
+브라우저에서 `http://localhost:8080/ui/`를 엽니다. 주요 화면:
 
 - `로그 분석`: 질문/답변 및 참조 로그 확인
 - `통계 대시보드`: 분석 결과 기반 지표 확인
