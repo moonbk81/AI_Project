@@ -1,10 +1,13 @@
 """Chart series over HTTP, for a browser frontend."""
 
+import json
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 import backend.main as backend_main
+import backend.charts_api as charts_api
 from backend.charts_api import jsonable
 
 
@@ -91,9 +94,71 @@ def test_asking_for_a_chart_that_does_not_exist(client):
     assert client.get("/charts/nope").status_code == 404
 
 
-def test_the_spike_page_and_its_plotly_bundle_are_served(client):
+def test_the_browser_ui_and_its_assets_are_served(client):
     page = client.get("/ui/")
+    styles = client.get("/ui/styles.css")
+    app = client.get("/ui/js/app.js")
     bundle = client.get("/vendor/plotly.min.js")
 
-    assert page.status_code == 200 and "로그 분석 대시보드" in page.text
+    assert page.status_code == 200 and "로그 분석" in page.text
+    assert styles.status_code == 200 and "--series-1" in styles.text
+    assert app.status_code == 200 and "renderDashboard" in app.text
+    # plotly.js ships with the installed package; the page must not need a CDN.
     assert bundle.status_code == 200 and len(bundle.content) > 100_000
+
+
+def test_artifact_backed_charts_read_the_analysis_result(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "result").mkdir()
+    (tmp_path / "result" / "radio_report.json").write_text(
+        json.dumps({"boot_stats": [{"Event": "RIL ready", "Time_ms": 4200, "Delta_ms": 900}]}),
+        encoding="utf-8",
+    )
+
+    body = client.get("/charts/boot", params={"source_file": "radio_payload.json"}).json()
+
+    assert body["series"]["status"] == "ok"
+    assert body["series"]["milestones"]["voice_ready_ms"] == 4200
+
+
+def test_a_missing_artifact_reads_as_no_data_rather_than_an_error(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    body = client.get("/charts/boot", params={"source_file": "never_analyzed_payload.json"}).json()
+
+    assert body["series"]["status"] == "no_events"
+
+
+def test_heavy_frames_are_projected_to_the_columns_the_chart_draws(client, monkeypatch):
+    usage = [
+        {
+            "source_file": "radio.log",
+            "log_type": "Data_Usage",
+            "app_name": "YouTube",
+            "total_mb": 12.5,
+            "rat": "LTE",
+            "time": "2026-08-25 10:00:00",
+            "rx_mb": 10.0,
+            "tx_mb": 2.5,
+            "uid": "10123",
+        }
+    ]
+    monkeypatch.setattr(backend_main, "_engine", FakeEngine(usage))
+    charts_api.clear_frame_cache()
+
+    timeline = client.get("/charts/data-usage", params={"source_file": "radio.log"}).json()["series"]["timeline"]
+
+    assert list(timeline[0]) == ["time_dt", "app_name", "total_mb"]
+
+
+def test_the_session_frame_is_reused_across_a_dashboard_of_charts(client, monkeypatch):
+    charts_api.clear_frame_cache()
+    scans = []
+
+    real_loader = charts_api._load_session_frame
+    monkeypatch.setattr(charts_api, "_load_session_frame", lambda source: (scans.append(source), real_loader(source))[1])
+
+    for name in ("service-state", "dns-errors", "call-history"):
+        client.get(f"/charts/{name}", params={"source_file": "radio.log"})
+
+    assert scans == ["radio.log"]  # one scan for the whole dashboard

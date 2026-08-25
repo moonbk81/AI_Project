@@ -15,6 +15,14 @@ going through an HTTP endpoint (see `plm/service.py` for the same rule): a
 Streamlit rerun must not pay a round trip to redraw a chart.
 """
 
+from .boot import (
+    DATA_READY_PATTERN,
+    SLOW_EVENT_LIMIT,
+    VOICE_READY_PATTERN,
+    BootMilestones,
+    BootSequence,
+    build_boot_sequence,
+)
 from .crash import (
     BINDER_EVENT_DISPLAY_CAP,
     BINDER_EVENT_TYPES,
@@ -116,6 +124,12 @@ from .telephony import (
 )
 
 __all__ = [
+    "DATA_READY_PATTERN",
+    "SLOW_EVENT_LIMIT",
+    "VOICE_READY_PATTERN",
+    "BootMilestones",
+    "BootSequence",
+    "build_boot_sequence",
     "BINDER_EVENT_DISPLAY_CAP",
     "BINDER_EVENT_TYPES",
     "BINDER_PROXY_LEAK_THRESHOLD",

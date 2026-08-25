@@ -373,6 +373,11 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
             report_path=result.report_path,
             payload_path=result.payload_path,
         )
+        # The session frames cached for the charts are stale the moment new
+        # rows land in Chroma.
+        from backend.charts_api import clear_frame_cache
+
+        clear_frame_cache()
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="분석 실패")
 
@@ -430,6 +435,9 @@ def files() -> FilesResponse:
 def reset_db() -> ResetResponse:
     success = bool(get_engine().reset_db())
     if success:
+        from backend.charts_api import clear_frame_cache
+
+        clear_frame_cache()
         _reset_artifact_dirs()
         with _jobs_lock:
             _jobs.clear()

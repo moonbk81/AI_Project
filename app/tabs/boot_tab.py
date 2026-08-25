@@ -1,9 +1,14 @@
-import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import ui
 from app.backend_client import get_result_json_with_optional_backend
+from core.charts import SLOW_EVENT_LIMIT, build_boot_sequence
+
+
+def _boot_ms(value):
+    """A milestone the log never reported has no number to show."""
+    return f"{value:,.0f} ms" if value is not None else "N/A"
 
 def render_boot_tab():
     st.subheader("부팅 시퀀스 분석")
@@ -20,87 +25,41 @@ def render_boot_tab():
         st.error(f"분석 결과 파일을 찾을 수 없습니다. ({base_name}_report.json)")
         return
 
-    boot_raw = report_data.get('boot_stats', [])
-    events = boot_raw.get('events', []) if isinstance(boot_raw, dict) else boot_raw
+    sequence = build_boot_sequence(report_data)
 
-    if events:
-        df_boot = pd.DataFrame(events)
-
+    if sequence.status == "no_events":
+        st.warning("부팅 이벤트 데이터가 없습니다.")
+    else:
         st.markdown("#### 부팅 주요 구간 요약")
 
+        milestones = sequence.milestones
         c1, c2, c3 = st.columns(3)
-
-        boot_complete = df_boot['Time_ms'].max() if 'Time_ms' in df_boot.columns else 0
-
-        voice_events = df_boot[
-            df_boot['Event'].str.contains('Voice|RIL|Telephony', case=False, na=False)
-        ] if 'Event' in df_boot.columns else pd.DataFrame()
-
-        voice_ready = voice_events['Time_ms'].max() if not voice_events.empty else "N/A"
-
-        data_events = df_boot[
-            df_boot['Event'].str.contains('Data|Network|Setup', case=False, na=False)
-        ] if 'Event' in df_boot.columns else pd.DataFrame()
-
-        data_ready = data_events['Time_ms'].max() if not data_events.empty else "N/A"
-
-        c1.metric(
-            "부팅 완료",
-            f"{boot_complete:,} ms" if boot_complete else "N/A"
-        )
-        c2.metric(
-            "Voice(RIL) 준비",
-            f"{voice_ready:,} ms" if isinstance(voice_ready, (int, float)) else voice_ready
-        )
-        c3.metric(
-            "Data(NW) 준비",
-            f"{data_ready:,} ms" if isinstance(data_ready, (int, float)) else data_ready
-        )
+        c1.metric("부팅 완료", _boot_ms(milestones.boot_complete_ms))
+        c2.metric("Voice(RIL) 준비", _boot_ms(milestones.voice_ready_ms))
+        c3.metric("Data(NW) 준비", _boot_ms(milestones.data_ready_ms))
 
         st.divider()
-        st.write("#### 부팅 지연 구간 Top 10")
+        st.write(f"#### 부팅 지연 구간 Top {SLOW_EVENT_LIMIT}")
 
-        if 'Delta_ms' in df_boot.columns:
-            df_slow = (
-                df_boot[df_boot['Delta_ms'] > 0]
-                .sort_values("Delta_ms", ascending=False)
-                .head(10)
-            )
-
-            if not df_slow.empty:
-                fig_boot = px.bar(
-                    df_slow,
-                    x='Delta_ms',
-                    y='Event',
-                    orientation='h',
-                    color='Delta_ms',
-                    color_continuous_scale='Reds',
-                    text='Delta_ms',
-                    title="부팅 지연 이벤트(ms)",
-                    labels={
-                        'Delta_ms': '지연(ms)',
-                        'Event': '이벤트'
-                    }
-                )
-
-                fig_boot.update_layout(
-                    yaxis={'categoryorder': 'total ascending'},
-                    height=450
-                )
-
-                st.plotly_chart(fig_boot, width="stretch")
-        else:
+        if not sequence.has_deltas:
             st.info("Delta_ms 데이터가 존재하지 않아 병목 차트를 렌더링할 수 없습니다.")
+        elif not sequence.slow_events.empty:
+            fig_boot = px.bar(
+                sequence.slow_events,
+                x='Delta_ms',
+                y='Event',
+                orientation='h',
+                color='Delta_ms',
+                color_continuous_scale='Reds',
+                text='Delta_ms',
+                title="부팅 지연 이벤트(ms)",
+                labels={'Delta_ms': '지연(ms)', 'Event': '이벤트'}
+            )
+            fig_boot.update_layout(yaxis={'categoryorder': 'total ascending'}, height=450)
+            st.plotly_chart(fig_boot, width="stretch")
 
         with st.expander("부팅 시퀀스 상세 타임라인"):
-            df_full = (
-                df_boot.sort_values("Time_ms")
-                if 'Time_ms' in df_boot.columns
-                else df_boot
-            )
-            st.dataframe(df_full, width="stretch")
-    else:
-        st.warning("부팅 이벤트 데이터가 없습니다.")
+            st.dataframe(sequence.timeline, width="stretch")
 
     st.divider()
     ui.render_crash_analyzer(report_data)
