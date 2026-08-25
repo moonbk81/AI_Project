@@ -12,16 +12,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from .common import has_columns, with_parsed_times
+from .common import has_columns, slice_log_type as _slice, with_parsed_times
 
 # A DNS answer that is neither of these is a failure or a block.
 DNS_SUCCESS_CODES = ("0", "SUCCESS")
-
-
-def _slice(df: pd.DataFrame, log_type: str) -> pd.DataFrame:
-    if not has_columns(df) or "log_type" not in df.columns:
-        return pd.DataFrame()
-    return df[df["log_type"] == log_type]
 
 
 # ------------------------------------------------------------------ DNS errors

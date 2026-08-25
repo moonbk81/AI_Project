@@ -17,6 +17,13 @@ def has_columns(df: Any) -> bool:
     return df is not None and hasattr(df, "columns")
 
 
+def slice_log_type(df: Any, log_type: str) -> pd.DataFrame:
+    """Rows of one log type, or an empty frame when the session has none."""
+    if not has_columns(df) or "log_type" not in df.columns:
+        return pd.DataFrame()
+    return df[df["log_type"] == log_type]
+
+
 def parse_log_times(values: pd.Series, *, year: Optional[int] = None) -> pd.Series:
     """Parse a timestamp column that mixes log time and full datetimes.
 
