@@ -40,6 +40,7 @@ from plm.plm_rag_integration import (
 )
 from core.log_archive import extract_file, list_zip_contents
 from plm import log_pipeline
+from plm import local_test as plm_local_test
 from plm.comments import build_comment_payload, format_analysis_as_comment
 from plm.registration import build_defect_payload
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
@@ -80,45 +81,8 @@ def _is_plm_local_test_mode() -> bool:
 
 
 def _get_plm_local_test_defects() -> List[Dict[str, Any]]:
-    """Return deterministic sample defects for offline PLM UI testing."""
-    return [
-        {
-            'defectCode': 'P260711-LOCAL01',
-            'defectId': 'LOCAL_DEFECT_001',
-            'plmTitle': 'IMS registration retry failure after network handover',
-            'plmStatus': 'Open',
-            'plmPriority': 'A',
-            'mainOwnerName': 'local.tester',
-            'createDate': '2026-07-11T09:15:00',
-            'content': 'After LTE to NR handover, IMS registration retries repeatedly and voice service is delayed.',
-            'reason': 'Local test root cause: retry timer and registration state are not synchronized after handover.',
-            'countermeasure': 'Local test solution: reset IMS registration state when handover completion is received.',
-        },
-        {
-            'defectCode': 'P260711-LOCAL02',
-            'defectId': 'LOCAL_DEFECT_002',
-            'plmTitle': 'Data stall observed after airplane mode toggle',
-            'plmStatus': 'Resolve',
-            'plmPriority': 'B',
-            'mainOwnerName': 'local.owner',
-            'createDate': '2026-07-10T16:42:00',
-            'content': 'Packet data appears connected, but DNS and TCP connection attempts time out after airplane mode toggle.',
-            'reason': 'Local test root cause: stale network capabilities remain cached after radio reset.',
-            'countermeasure': 'Local test solution: invalidate network capabilities and trigger reconnect.',
-        },
-        {
-            'defectCode': 'P260711-LOCAL03',
-            'defectId': 'LOCAL_DEFECT_003',
-            'plmTitle': 'Battery drain during repeated modem recovery',
-            'plmStatus': 'Close',
-            'plmPriority': 'C',
-            'mainOwnerName': 'local.review',
-            'createDate': '2026-07-09T11:05:00',
-            'content': 'Repeated modem recovery events keep radio components active and increase standby battery drain.',
-            'reason': 'Local test root cause: recovery retry interval is too short under persistent radio errors.',
-            'countermeasure': 'Local test solution: apply exponential backoff and stop retry after threshold.',
-        },
-    ]
+    """Sample defects for offline testing, shared with the API layer."""
+    return list(plm_local_test.SAMPLE_DEFECTS)
 
 
 def _apply_plm_local_test_data(force: bool = False):
@@ -141,11 +105,17 @@ def _apply_plm_local_test_data(force: bool = False):
 
 def _render_plm_local_test_controls():
     """Render global PLM local test controls."""
+    # The switch itself lives in plm/local_test.py so the browser UI and the
+    # API see the same mode; PLM_LOCAL_TEST seeds it.
+    if 'plm_local_test_mode' not in st.session_state:
+        st.session_state.plm_local_test_mode = plm_local_test.is_enabled()
+
     local_test = st.checkbox(
         "PLM 로컬 테스트 모드",
         key="plm_local_test_mode",
         help="사내 PLM 연결 없이 샘플 defect와 comment 등록 UI를 테스트합니다.",
     )
+    plm_local_test.set_enabled(local_test)
 
     if local_test:
         col1, col2 = st.columns([3, 1])

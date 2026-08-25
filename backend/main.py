@@ -809,6 +809,34 @@ def plm_file_download(req: PlmFileDownloadRequest):
     )
 
 
+class PlmLocalTestResponse(BaseModel):
+    enabled: bool
+    note: str = ""
+
+
+class PlmLocalTestRequest(BaseModel):
+    enabled: bool
+
+
+@app.get("/plm/local-test", response_model=PlmLocalTestResponse)
+def plm_local_test_state() -> PlmLocalTestResponse:
+    from plm import local_test
+
+    return PlmLocalTestResponse(enabled=local_test.is_enabled(), note=local_test.LOCAL_NOTE)
+
+
+@app.post("/plm/local-test", response_model=PlmLocalTestResponse)
+def plm_local_test_toggle(req: PlmLocalTestRequest) -> PlmLocalTestResponse:
+    """Answer PLM calls from samples instead of the company network.
+
+    Set PLM_LOCAL_TEST=1 to start this way; this endpoint flips it without a
+    restart, for the trip between the office and home.
+    """
+    from plm import local_test
+
+    return PlmLocalTestResponse(enabled=local_test.set_enabled(req.enabled), note=local_test.LOCAL_NOTE)
+
+
 @app.get("/plm/groups", response_model=PlmGroupsResponse)
 def plm_groups(division_code: str = "25") -> PlmGroupsResponse:
     """Search groups configured for a division, for the search form."""

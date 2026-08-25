@@ -133,6 +133,26 @@ macOS에서는 아래 스크립트로 backend와 Streamlit 터미널 2개를 한
 
 DGX vLLM을 사용할 때는 `RAG_LLM_PROVIDER`, `RAG_LLM_BASE_URL`, `RAG_LLM_MODEL`, `RAG_LLM_API_KEY`를 지정한 상태로 실행하면 backend 터미널에 전달됩니다.
 
+### PLM 로컬 테스트 모드 (사내망 밖에서 작업할 때)
+
+집에서는 사내 PLM 에 닿지 않아 PLM 화면이 전부 비어버립니다. 이 모드를 켜면
+backend 가 샘플 결함·첨부·코멘트로 답하고, 코멘트/결함 등록 같은 쓰기는
+**전송하지 않고** 성공한 것처럼 응답합니다.
+
+```bash
+PLM_LOCAL_TEST=1 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
+```
+
+재시작 없이 바꾸려면 브라우저 UI 의 PLM 탭 상단 스위치를 쓰거나:
+
+```bash
+curl -X POST localhost:8080/plm/local-test -H 'Content-Type: application/json' -d '{"enabled": true}'
+```
+
+샘플 첨부의 ZIP 에는 실제로 열리는 로그가 들어 있어서 "로그 추출해 분석"까지
+오프라인으로 확인할 수 있습니다. Streamlit 의 "PLM 로컬 테스트 모드" 체크박스도
+같은 스위치를 봅니다.
+
 ### Open WebUI 등 OpenAI 호환 클라이언트에서 쓰기
 
 backend는 OpenAI Chat Completions 규격을 그대로 흉내내는 엔드포인트를 함께

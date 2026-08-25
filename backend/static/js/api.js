@@ -56,6 +56,9 @@ export const api = {
 
   // ------------------------------------------------------------------- PLM
 
+  plmLocalTest: () => get("/plm/local-test"),
+  plmSetLocalTest: (enabled) => post("/plm/local-test", { enabled }),
+
   plmGroups: (divisionCode) => get("/plm/groups", { division_code: divisionCode }),
   plmGroupUsers: (groupKey) => get(`/plm/groups/${encodeURIComponent(groupKey)}/users`),
 

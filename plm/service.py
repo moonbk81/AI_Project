@@ -10,6 +10,7 @@ import logging
 from functools import lru_cache
 from typing import Any, Dict, List
 
+from plm import local_test
 from plm.comments import is_ai_generated_comment, is_excluded_comment_user
 from plm.plm_api_client import CommentRegistrationRequest, DefectRegistrationRequest
 from plm.plm_rag_integration import PLMDefectContextBuilder
@@ -52,6 +53,9 @@ def quick_search_defects(
     client=None,
 ) -> Dict[str, Any]:
     """Search PLM defects by owner/group and load defect detail rows."""
+    if local_test.is_enabled():
+        return local_test.quick_search(status=status, limit=limit)
+
     if client is None:
         client = get_plm_integration().client
 
@@ -116,6 +120,9 @@ def get_defect_details(
     client=None,
 ) -> Dict[str, Any]:
     """Load PLM defect detail rows by defect code or defect id."""
+    if local_test.is_enabled():
+        return local_test.defect_details(defect_codes)
+
     if client is None:
         client = get_plm_integration().client
 
@@ -142,6 +149,9 @@ def list_attached_files(
     client=None,
 ) -> Dict[str, Any]:
     """List files attached to a PLM defect."""
+    if local_test.is_enabled():
+        return local_test.attached_files(defect_code)
+
     if client is None:
         client = get_plm_integration().client
 
@@ -173,6 +183,9 @@ def download_attached_file(
     client=None,
 ) -> Dict[str, Any]:
     """Download one PLM attached file."""
+    if local_test.is_enabled():
+        return local_test.download_file(title)
+
     if client is None:
         client = get_plm_integration().client
 
@@ -206,6 +219,9 @@ def submit_comment(
     client=None,
 ) -> Dict[str, Any]:
     """Register, modify, or delete a PLM defect comment."""
+    if local_test.is_enabled():
+        return local_test.accept_write("Comment 등록")
+
     if client is None:
         client = get_plm_integration().client
 
@@ -229,6 +245,9 @@ def register_defect(
     client=None,
 ) -> Dict[str, Any]:
     """Register a new PLM defect."""
+    if local_test.is_enabled():
+        return local_test.accept_write("Defect 등록")
+
     if client is None:
         client = get_plm_integration().client
 
@@ -253,6 +272,9 @@ def get_human_comments(
     client=None,
 ) -> Dict[str, Any]:
     """Fetch developer-written comments for a defect history."""
+    if local_test.is_enabled():
+        return local_test.human_comments(defect_code)
+
     if client is None:
         client = get_plm_integration().client
 
@@ -292,6 +314,9 @@ def build_defect_analysis_context(
     integration=None,
 ) -> Dict[str, Any]:
     """Build PLM defect analysis context."""
+    if local_test.is_enabled():
+        return local_test.analysis_context(defect_code)
+
     if integration is None:
         integration = get_plm_integration()
 

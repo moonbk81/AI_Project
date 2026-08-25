@@ -76,6 +76,43 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   const state = { division: "25", defects: [], selected: null, analysis: null };
 
+  // ------------------------------------------------------------ 로컬 테스트
+  // 사내망 밖에서는 PLM 에 닿지 않는다. 이 모드에서는 백엔드가 샘플로 답하고
+  // 쓰기(코멘트·등록)는 전송되지 않는다.
+  const modeRow = el("div", "row mode-row");
+  const modeLabel = el("span", "row-name", "PLM 로컬 테스트 모드");
+  const modeNote = el("span", "row-meta", "");
+  const modeButton = el("button", null, "확인 중...");
+  modeButton.type = "button";
+  modeRow.append(modeLabel, el("span", "grow"), modeNote, modeButton);
+  wrap.insertBefore(modeRow, grid);
+
+  const drawMode = (enabled) => {
+    modeButton.textContent = enabled ? "켜짐 — 끄기" : "꺼짐 — 켜기";
+    modeButton.className = enabled ? "chip active" : "chip";
+    modeNote.textContent = enabled
+      ? "샘플 결함으로 동작합니다. PLM 에는 아무것도 전송되지 않습니다."
+      : "실제 사내 PLM 에 연결합니다.";
+  };
+
+  modeButton.addEventListener("click", async () => {
+    modeButton.disabled = true;
+    try {
+      const current = await api.plmLocalTest();
+      const next = await api.plmSetLocalTest(!current.enabled);
+      drawMode(next.enabled);
+      state.defects = [];
+      state.selected = null;
+      drawResults();
+    } catch (error) {
+      modeNote.textContent = String(error.message || error);
+    } finally {
+      modeButton.disabled = false;
+    }
+  });
+
+  api.plmLocalTest().then((body) => drawMode(body.enabled)).catch(() => drawMode(false));
+
   // ------------------------------------------------------------------ 검색
   const search = panel("결함 검색", "담당 그룹이나 Knox ID 로 찾습니다.");
   const status = radioRow("status", STATUSES);
@@ -420,51 +457,6 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   comment.body.append(field("내용", commentBody), field("작성자", commentUser), commentButton, commentNote);
 
-  // -------------------------------------------------------------- 결함 등록
-  const register = panel("새 결함 등록", "필수: 제목 · 문제 내용 · 작성자");
-  const regFields = {
-    title: input("한 줄 요약"),
-    content: textarea("문제 내용", 5),
-    create_user: input("Knox ID"),
-    importance: select(["A", "B", "C"]),
-    occur_rate: select(["Always", "Sometimes", "Once"]),
-    change_type: select(["DRAFT", "OPEN"]),
-    project_name: input("Galaxy S24", "Galaxy S24"),
-    sw_version: input("선택"),
-  };
-  const registerButton = el("button", "primary", "등록");
-  registerButton.type = "button";
-  const registerNote = el("p", "card-note");
-
-  registerButton.addEventListener("click", async () => {
-    registerButton.disabled = true;
-    registerNote.textContent = "등록 중...";
-    try {
-      const form = Object.fromEntries(Object.entries(regFields).map(([key, node]) => [key, node.value]));
-      const body = await api.plmRegisterDefect({ division_code: state.division, ...form });
-      registerNote.textContent = body.success
-        ? `등록했습니다: ${body.result?.defectCode || ""}`
-        : body.message || "등록 실패";
-    } catch (error) {
-      registerNote.textContent = String(error.message || error);
-    } finally {
-      registerButton.disabled = false;
-    }
-  });
-
-  register.body.append(
-    field("제목", regFields.title),
-    field("문제 내용", regFields.content),
-    field("작성자 Knox ID", regFields.create_user),
-    field("우선순위", regFields.importance),
-    field("재현 빈도", regFields.occur_rate),
-    field("등록 형태", regFields.change_type),
-    field("프로젝트", regFields.project_name),
-    field("S/W 버전", regFields.sw_version),
-    registerButton,
-    registerNote,
-  );
-
   // ------------------------------------------------------------------ 배선
   const selectDefect = async (defect) => {
     state.selected = defect;
@@ -505,7 +497,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   });
 
   grid.append(search.section, results.section, detail.section, attachments.section,
-              analysis.section, comment.section, register.section);
+              analysis.section, comment.section);
 
   detailHost.append(el("div", "empty", "결함을 선택하세요."));
   attachmentHost.append(el("div", "empty", "결함을 선택하세요."));

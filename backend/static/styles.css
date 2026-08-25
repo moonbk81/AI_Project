@@ -280,3 +280,5 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 
 .check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
 .check input { cursor: pointer; }
+
+.mode-row { margin-bottom: 12px; background: var(--surface-1); }

@@ -223,3 +223,70 @@ def test_a_defect_that_cannot_be_read_reports_why(client, monkeypatch):
     body = client.post("/plm/analysis-query", json={"defect_code": "P-1"}).json()
 
     assert body["success"] is False and body["message"] == "권한 없음"
+
+
+# --------------------------------------------------------- 로컬 테스트 모드
+
+
+@pytest.fixture()
+def offline():
+    """PLM 에 닿지 않는 환경을 흉내낸다."""
+    from plm import local_test
+
+    before = local_test.is_enabled()
+    local_test.set_enabled(True)
+    yield local_test
+    local_test.set_enabled(before)
+
+
+def test_the_mode_can_be_read_and_flipped_without_a_restart(client):
+    from plm import local_test
+
+    before = local_test.is_enabled()
+    try:
+        assert client.post("/plm/local-test", json={"enabled": True}).json()["enabled"] is True
+        assert client.get("/plm/local-test").json()["enabled"] is True
+        assert client.post("/plm/local-test", json={"enabled": False}).json()["enabled"] is False
+    finally:
+        local_test.set_enabled(before)
+
+
+def test_offline_search_answers_from_samples(client, offline):
+    body = client.post(
+        "/plm/quick-search", json={"division_code": "25", "main_owner_id": "anyone", "status": "open"}
+    ).json()
+
+    assert body["success"] is True
+    assert [defect["defectCode"] for defect in body["defects"]] == ["P260711-LOCAL01"]
+
+
+def test_offline_attachments_can_still_be_extracted(offline):
+    """The sample ZIP has to survive the real extraction pipeline."""
+    from core.log_archive import extract_logs_from_zip
+    from plm.service import download_attached_file, list_attached_files
+
+    files = list_attached_files(division_code="25", defect_code="P260711-LOCAL01")["files"]
+    archive = next(file for file in files if file["title"].endswith(".zip"))
+    payload = download_attached_file(division_code="25", doc_id="d", title=archive["title"], file_id="f")
+
+    assert list(extract_logs_from_zip(payload["data"])) == ["dumpstate.log"]
+
+
+def test_offline_writes_are_accepted_but_never_sent(client, offline):
+    body = client.post(
+        "/plm/comment",
+        json={"form": {"defect_code": "P260711-LOCAL01", "comment": "확인함", "create_user": "knox"}},
+    ).json()
+
+    assert body["success"] is True
+    assert "전송하지 않았습니다" in body["message"]
+
+
+def test_offline_comments_and_analysis_have_something_to_show(client, offline):
+    comments = client.post(
+        "/plm/defect-history/comments", json={"defect_code": "P260711-LOCAL01"}
+    ).json()["comments"]
+    context = client.post("/plm/analyze", json={"defect_code": "P260711-LOCAL01"}).json()["context"]
+
+    assert len(comments) == 2
+    assert context["title"].startswith("IMS registration")
