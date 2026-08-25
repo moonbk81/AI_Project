@@ -5,18 +5,14 @@ This module integrates PLM defect information with the RAG (Retrieval-Augmented 
 system to enrich AI analysis with resolution data and historical context.
 """
 
-import json
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 from dataclasses import dataclass, asdict
 import yaml
 import os
 
 from .plm_api_client import (
     PLMDefectAPIClient,
-    DivisionCode,
-    APIResponse,
     PLMAPIException
 )
 

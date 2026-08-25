@@ -11,8 +11,8 @@ import requests
 import json
 import re
 import sys
-from typing import Callable, Dict, List, Optional, Any, Union
-from dataclasses import dataclass, field, asdict
+from typing import Callable, Dict, List, Optional, Any
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 

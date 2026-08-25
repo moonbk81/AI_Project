@@ -1,4 +1,8 @@
-"""Small PLM service helpers shared by Streamlit and FastAPI."""
+"""PLM API 호출 계층 — Streamlit 과 FastAPI 가 함께 쓴다.
+
+텍스트 생성은 `plm/comments.py`(코멘트)와 `plm/prompts.py`(LLM 질의문)에
+있고, 여기 있는 함수는 그것들을 PLM/LLM 호출과 엮는 일만 한다.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +10,11 @@ import logging
 from functools import lru_cache
 from typing import Any, Dict, List
 
+from plm.comments import is_ai_generated_comment, is_excluded_comment_user
 from plm.plm_api_client import CommentRegistrationRequest, DefectRegistrationRequest
 from plm.plm_rag_integration import PLMDefectContextBuilder
 from plm.plm_rag_integration import create_plm_integration
+from plm.prompts import REFINE_MIN_CHARS, REFINE_SYSTEM_PROMPT, simplify_problem_description
 
 logger = logging.getLogger(__name__)
 
@@ -241,71 +247,6 @@ def register_defect(
     }
 
 
-_CHAT_COMMENT_HEADER = "💬 **AI Chat 분석 결과"
-_ANALYSIS_COMMENT_HEADER = "🤖 AI 분석 결과"
-
-# Prefixes of comments auto-registered by this tool, taken from the headers
-# format_analysis_as_comment() writes so the two cannot drift apart.
-_AI_COMMENT_SIGNATURES = (_CHAT_COMMENT_HEADER, _ANALYSIS_COMMENT_HEADER)
-
-# System/automated registrants whose comments are not developer input.
-_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development")
-
-
-def format_analysis_as_comment(context: Dict[str, Any]) -> str:
-    """Render an analysis result as PLM comment text.
-
-    `from_chat` selects the chat-answer shape; anything else is treated as the
-    problem/root_cause/solution triple the PLM analyze tab produces.
-    """
-    if context.get("from_chat"):
-        return f"{_CHAT_COMMENT_HEADER}**\n\n{context.get('answer', 'N/A')}"
-
-    return "\n".join(
-        [
-            _ANALYSIS_COMMENT_HEADER,
-            "",
-            "**문제점:**",
-            context.get("problem", "N/A"),
-            "",
-            "**근본 원인:**",
-            context.get("root_cause", "N/A"),
-            "",
-            "**해결 방안:**",
-            context.get("solution", "N/A"),
-        ]
-    )
-
-
-def build_comment_payload(
-    division_code: str,
-    defect_code: str,
-    comment: str,
-    create_user: str,
-    system_code: str = "AI_ANALYSIS",
-) -> Dict[str, Any]:
-    """Request body for submit_comment()."""
-    return {
-        "divisionCode": division_code,
-        "systemCode": system_code,
-        "defectCode": defect_code,
-        "defectComment": comment,
-        "createUser": create_user,
-        "changeType": "S",
-        "docAttachedYn": "N",
-    }
-
-
-def _is_ai_generated_comment(text: str) -> bool:
-    stripped = (text or "").lstrip()
-    return any(stripped.startswith(sig) for sig in _AI_COMMENT_SIGNATURES)
-
-
-def _is_excluded_comment_user(history_user: str) -> bool:
-    name = (history_user or "").lower()
-    return any(excluded in name for excluded in _EXCLUDED_COMMENT_USERS)
-
-
 def get_human_comments(
     division_code: str,
     defect_code: str,
@@ -328,10 +269,10 @@ def get_human_comments(
         for entry in arr.get("defectHistoryList", []) or []:
             if entry.get("historyType") != "C":
                 continue
-            if _is_excluded_comment_user(entry.get("historyUser", "")):
+            if is_excluded_comment_user(entry.get("historyUser", "")):
                 continue
             text = (entry.get("comment") or "").strip()
-            if not text or _is_ai_generated_comment(text):
+            if not text or is_ai_generated_comment(text):
                 continue
             comments.append(
                 {
@@ -363,96 +304,6 @@ def build_defect_analysis_context(
     }
 
 
-def format_comment_line(comment: Dict[str, Any]) -> str:
-    """One developer comment as a bullet, prefixed with author and date."""
-    header = " · ".join(x for x in [comment.get("user", ""), comment.get("date", "")] if x)
-    text = comment.get("text", "")
-    return f"- ({header}) {text}" if header else f"- {text}"
-
-
-_DEFECT_METADATA_LABELS = (
-    ("defect_code", "결함 코드"),
-    ("defect_title", "제목"),
-    ("status", "상태"),
-    ("priority", "우선순위"),
-    ("owner", "담당자"),
-)
-
-
-def build_defect_analysis_query(
-    problem: Dict[str, Any],
-    comments: List[Dict[str, Any]] | None = None,
-) -> str:
-    """Chat query that asks for a root cause analysis of a PLM defect.
-
-    `problem` is the defect payload the PLM tab hands to the chat tab; the
-    optional registered reason/countermeasure and developer comments are only
-    included when they carry text.
-    """
-    comments = comments or []
-
-    header_lines = [
-        f"**{label}:** {problem.get(key)}"
-        for key, label in _DEFECT_METADATA_LABELS
-        if problem.get(key)
-    ]
-
-    parts = [
-        "## PLM 결함 분석 요청",
-        "",
-        "\n".join(header_lines),
-        "",
-        "### 문제 내용",
-        problem.get("content", ""),
-    ]
-
-    reason = (problem.get("reason") or "").strip()
-    if reason:
-        parts.extend(["", "### 등록된 근본 원인", reason])
-
-    countermeasure = (problem.get("countermeasure") or "").strip()
-    if countermeasure:
-        parts.extend(["", "### 등록된 해결방안", countermeasure])
-
-    if comments:
-        rendered = "\n".join(format_comment_line(c) for c in comments)
-        parts.extend(["", "### 개발자 코멘트", f"\n\n{rendered}"])
-
-    considering = " 개발자 코멘트를 고려하여" if comments else ""
-    parts.extend(
-        [
-            "",
-            f"위 정보를 기반으로{considering} 문제의 원인을 분석하고 해결 방안을 제시해 주세요.",
-        ]
-    )
-
-    return "\n".join(parts)
-
-
-# Length below which refining is pointless — the text is already terse.
-_REFINE_MIN_CHARS = 200
-
-_REFINE_SYSTEM_PROMPT = """You are an expert at refining technical problem descriptions for intent recognition.
-Your task is to extract and refine the essential information while preserving critical intent signals.
-
-Rules:
-1. Preserve the specific symptom/behavior (e.g., "intermittent data drops", "call fails", "battery drain")
-2. Preserve affected component/app/feature names (these are intent signals)
-3. Preserve specific conditions when they occur (e.g., "during handover", "when using app X")
-4. Remove redundant details and unnecessary explanations
-5. Extract and include key technical details (error codes, version info, network info if present)
-6. Make it concise but complete (aim for 2-3 sentences max)
-7. Use bullet points only for multiple distinct issues
-8. Return ONLY the refined description, no additional text or explanation"""
-
-
-def simplify_problem_description(problem_content: str) -> str:
-    """Dependency-free fallback: keep the first few meaningful lines."""
-    lines = (problem_content or "").split("\n")
-    meaningful = [line.strip() for line in lines if len(line.strip()) > 10]
-    return "\n".join(meaningful[:3]) if meaningful else problem_content
-
-
 def refine_problem_description(problem_content: str, model: str = "") -> str:
     """LLM-refine a PLM problem description for downstream intent recognition.
 
@@ -461,7 +312,7 @@ def refine_problem_description(problem_content: str, model: str = "") -> str:
     """
     if not problem_content or not problem_content.strip():
         return problem_content
-    if len(problem_content) < _REFINE_MIN_CHARS:
+    if len(problem_content) < REFINE_MIN_CHARS:
         return problem_content
 
     try:
@@ -470,7 +321,7 @@ def refine_problem_description(problem_content: str, model: str = "") -> str:
         response = chat(
             model=model,
             messages=[
-                {"role": "system", "content": _REFINE_SYSTEM_PROMPT},
+                {"role": "system", "content": REFINE_SYSTEM_PROMPT},
                 {
                     "role": "user",
                     "content": f"Please refine this problem description:\n\n{problem_content}",

@@ -4,7 +4,7 @@ import streamlit as st
 from app.backend_client import ask_with_optional_backend, get_health_kpi_with_optional_backend
 from app.chat_panel import render_chat_history
 from core.config import QUICK_PROMPTS
-from plm.service import build_defect_analysis_query
+from plm.prompts import build_defect_analysis_query
 from ui.common import parse_raw_logs
 
 
@@ -159,7 +159,7 @@ def _render_chat_answer(engine, prompt):
 def _render_plm_comment_registration(last_answer: str, active_defect: str):
     """Render PLM comment registration controls for the latest chat answer."""
     from app.backend_client import plm_submit_comment_with_optional_backend
-    from plm.service import build_comment_payload, format_analysis_as_comment
+    from plm.comments import build_comment_payload, format_analysis_as_comment
 
     st.divider()
     st.caption(f"활성 결함: `{active_defect}`")

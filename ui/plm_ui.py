@@ -34,9 +34,9 @@ from plm.plm_rag_integration import (
 )
 from core.log_archive import extract_file, list_zip_contents
 from plm import log_pipeline
-from plm.service import format_analysis_as_comment
+from plm.comments import format_analysis_as_comment
 from plm.tables import build_archive_rows, build_attachment_rows, build_defect_rows
-from plm.plm_api_client import DivisionCode, PLMAPIException
+from plm.plm_api_client import PLMAPIException
 logger = logging.getLogger(__name__)
 
 
@@ -502,7 +502,7 @@ def render_plm_search():
 
             st.divider()
             st.write("**Select a defect to view details:**")
-            selected_index = _render_selectable_defects_table_for_search(st.session_state.plm_search_results, st.session_state.plm_search_division)
+            selected_index = _render_selectable_defects_table_for_search(st.session_state.plm_search_results)
 
             # Show details for selected defect
             if selected_index is not None and 0 <= selected_index < len(st.session_state.plm_search_results):
@@ -590,7 +590,7 @@ def render_plm_search():
                         # Use selectable table for search results
                         st.divider()
                         st.write("**Select a defect to view details:**")
-                        selected_index = _render_selectable_defects_table_for_search(defects, division_code)
+                        selected_index = _render_selectable_defects_table_for_search(defects)
 
                         # Show details for selected defect
                         if selected_index is not None and 0 <= selected_index < len(defects):
@@ -613,15 +613,19 @@ def render_plm_search():
                 st.error(f"Error: {e}")
 
 
-def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]], division_code: str) -> Optional[int]:
-    """Render search results as a selectable table and return selected row index."""
-    table_state = st.dataframe(
+def _render_defects_table(defects: List[Dict[str, Any]], key: str):
+    """Draw the selectable defect table and hand back Streamlit's selection state.
+
+    The two search tabs show the same table but react to a click differently,
+    so only the widget itself is shared.
+    """
+    return st.dataframe(
         pd.DataFrame(build_defect_rows(defects)),
         width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
-        key="search_results_table",
+        key=key,
         column_config={
             "Code": st.column_config.LinkColumn(
                 "Code",
@@ -637,53 +641,41 @@ def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]], d
         },
     )
 
-    # Handle single-row selection for search results
-    selected_rows = table_state.selection.rows if table_state and table_state.selection else []
 
+def _selected_rows(table_state) -> List[int]:
+    return list(table_state.selection.rows) if table_state and table_state.selection else []
+
+
+def _clamped_index(index: int, defects: List[Dict[str, Any]]) -> int:
+    """A stored row index goes stale as soon as a new search returns fewer rows."""
+    return index if 0 <= index < len(defects) else 0
+
+
+def _render_selectable_defects_table_for_search(defects: List[Dict[str, Any]]) -> Optional[int]:
+    """Render search results as a selectable table and return selected row index."""
+    table_state = _render_defects_table(defects, key="search_results_table")
+
+    selected_rows = _selected_rows(table_state)
     if selected_rows:
-        selected_index = selected_rows[0]
-        if selected_index >= len(defects):
-            selected_index = 0
+        selected_index = _clamped_index(selected_rows[0], defects)
         st.session_state.plm_search_selected_index = selected_index
         return selected_index
 
-    selected_index = st.session_state.get('plm_search_selected_index', 0)
-    if selected_index >= len(defects):
-        selected_index = 0
-        st.session_state.plm_search_selected_index = selected_index
+    selected_index = _clamped_index(st.session_state.get('plm_search_selected_index', 0), defects)
+    st.session_state.plm_search_selected_index = selected_index
     return selected_index
 
 
 def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
     """Render Quick Search results as a selectable table and return selected row index."""
-    table_state = st.dataframe(
-        pd.DataFrame(build_defect_rows(defects)),
-        width="stretch",
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="quick_search_results_table",
-        column_config={
-            "Code": st.column_config.LinkColumn(
-                "Code",
-                display_text=r"#([^#]+)$",
-                help="Open this defect in PLM",
-                width="medium",
-            ),
-            "Title": st.column_config.TextColumn("Title", width="large"),
-            "Status": st.column_config.TextColumn("Status", width="small"),
-            "Priority": st.column_config.TextColumn("Priority", width="small"),
-            "Owner": st.column_config.TextColumn("Owner", width="medium"),
-            "Created": st.column_config.TextColumn("Created", width="small"),
-        },
-    )
+    table_state = _render_defects_table(defects, key="quick_search_results_table")
 
     if not defects:
         return 0
 
     # single-row mode: Streamlit itself clears the previous row when a new one is
     # picked, so `rows` holds at most one index.
-    selected_rows = list(table_state.selection.rows) if table_state and table_state.selection else []
+    selected_rows = _selected_rows(table_state)
     prev_selected_rows = st.session_state.get('plm_quick_search_prev_selected_rows', [])
     division_code = st.session_state.get('plm_quick_search_division')
 
@@ -696,8 +688,7 @@ def _render_selectable_defects_table(defects: List[Dict[str, Any]]) -> int:
         selected_index = st.session_state.get('plm_quick_search_selected_index', 0)
         selection_source = "default"
 
-    if not 0 <= selected_index < len(defects):
-        selected_index = 0
+    selected_index = _clamped_index(selected_index, defects)
 
     selected_defect = defects[selected_index]
     defect_code = selected_defect.get('defectCode')
@@ -1474,7 +1465,6 @@ def render_plm_comment():
     st.subheader("💬 Add Comment")
 
     # Check if navigating from analysis tab
-    navigate_to_comment = st.session_state.get('navigate_to_comment_tab', False)
     analysis_result = st.session_state.get('plm_current_analysis_result')
 
     # Use active defect from analysis or search tab
@@ -1610,9 +1600,7 @@ def _research_with_same_conditions():
     status = st.session_state.get('plm_quick_search_status', '')
     division_code = st.session_state.get('plm_quick_search_division', '25')
 
-    # Extract search_id and search_method from label
     search_id = None
-    search_method = "Group"
 
     if search_label and "Group" in search_label:
         # Extract from "Group (15 users)" format
@@ -1637,7 +1625,6 @@ def _research_with_same_conditions():
     elif search_label and "User:" in search_label:
         # Extract from "User: bongki.moon" format
         search_id = search_label.replace("User: ", "").strip()
-        search_method = "User ID"
 
     if not search_id or not status:
         st.error("Cannot re-search: Missing search conditions")

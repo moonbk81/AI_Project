@@ -1,9 +1,9 @@
-from plm.service import (
+from plm.comments import (
     _AI_COMMENT_SIGNATURES,
     build_comment_payload,
-    build_defect_analysis_query,
     format_analysis_as_comment,
 )
+from plm.prompts import build_defect_analysis_query
 
 
 def test_defect_query_includes_only_populated_sections():

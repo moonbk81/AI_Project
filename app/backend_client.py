@@ -738,7 +738,7 @@ def plm_refine_description_with_optional_backend(content: str, model: str = "") 
             logger.warning(
                 "Backend refine-description failed (%s); falling back to line extraction", e
             )
-            from plm.service import simplify_problem_description
+            from plm.prompts import simplify_problem_description
 
             return simplify_problem_description(content)
 
