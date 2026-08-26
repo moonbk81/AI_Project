@@ -2,11 +2,19 @@
    `system-ui` the stack resolved to SF Pro on a Mac but to Noto Sans CJK JP on
    Linux, and the negative letter-spacing below was eyeballed against SF Pro.
 
-   The woff2 itself is not in the repo (too large to commit here) — until it is
-   dropped into this directory the fallback chain runs, which is why that chain
-   lists Latin faces before Korean ones: measured in Chrome on Linux, the whole
-   string otherwise renders in the CJK face. `font-display: swap` means a missing
-   file costs nothing but the fallback. */
+   macOS is deliberately left on its own fonts: `-apple-system` and
+   `"Apple SD Gothic Neo"` sit ahead of Pretendard, and both are only resolvable
+   there, so a Mac keeps SF Pro + Apple SD Gothic Neo while Linux and Windows
+   fall through to Pretendard. Measured in Chrome on Linux, the unresolvable
+   Apple names are skipped and the stack lands on Pretendard exactly.
+
+   Latin faces are listed before Korean ones in the tail: measured the same way,
+   `"Segoe UI"` alone gets substituted to the CJK face on Linux and drags the
+   Latin text in with it.
+
+   The woff2 itself is not in the repo (too large to push from here) and gets
+   added separately. `font-display: swap` means its absence costs nothing but
+   the fallback. */
 @font-face {
   font-family: "Pretendard Variable";
   src: url("/ui/fonts/PretendardVariable.woff2") format("woff2-variations");
@@ -95,9 +103,9 @@
 
 body {
   margin: 0;
-  font-family: "Pretendard Variable", -apple-system, BlinkMacSystemFont,
-    "Segoe UI", "Liberation Sans", Arial,
-    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Pretendard Variable", "Segoe UI", "Liberation Sans", Arial,
+    "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: var(--plane);
@@ -262,7 +270,7 @@ td { color: var(--text-primary); max-width: 420px; overflow: hidden; text-overfl
 .answer ul { margin: 0 0 10px; padding-left: 20px; }
 .answer li { margin-bottom: 4px; }
 .answer code {
-  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo,
+  font-family: SFMono-Regular, Menlo, "JetBrains Mono Variable", ui-monospace,
     "Liberation Mono", "Noto Sans Mono CJK KR", monospace;
   font-size: 12px;
   background: var(--plane); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;

@@ -69,7 +69,7 @@ export function baseLayout(extra) {
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
       font: {
-        family: '"Pretendard Variable", -apple-system, "Segoe UI", "Liberation Sans", Arial, "Malgun Gothic", "Noto Sans CJK KR", sans-serif',
+        family: '-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard Variable", "Segoe UI", "Liberation Sans", Arial, "Malgun Gothic", "Noto Sans CJK KR", sans-serif',
         size: 12,
         color: token("--text-muted"),
       },
