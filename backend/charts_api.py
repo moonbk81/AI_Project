@@ -1,7 +1,7 @@
 """Chart series over HTTP.
 
-The Streamlit UI imports `core.charts` directly — a rerun must not pay a round
-trip. A browser frontend cannot, so the same builders are exposed here.
+An in-process caller imports `core.charts` directly. A browser frontend
+cannot, so the same builders are exposed here.
 
 What comes back is the builder's contract as JSON: a `status` saying whether
 there is anything to draw, plus the series itself. It is deliberately not a

@@ -120,10 +120,10 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
 
 실행 후 브라우저에서 `http://localhost:8080/` 또는 `http://localhost:8080/ui/`를 엽니다. `/`는 자동으로 `/ui/`로 이동합니다.
 
-macOS/Linux에서는 아래 스크립트로 backend만 실행할 수 있습니다.
+macOS/Linux에서는 아래 스크립트로 실행할 수 있습니다.
 
 ```bash
-./scripts/start_backend_streamlit.command
+./scripts/start_backend.command
 ```
 
 DGX vLLM을 사용할 때는 `RAG_LLM_PROVIDER`, `RAG_LLM_BASE_URL`, `RAG_LLM_MODEL`, `RAG_LLM_API_KEY`를 지정한 상태로 실행하면 backend 터미널에 전달됩니다.
@@ -179,7 +179,6 @@ Base URL 에 `http://<backend-host>:8080/v1` 을 넣습니다. API 키는 검사
   노출하지 마십시오.
 - 대시보드/PLM 탭 같은 화면은 채팅 규격으로 표현할 수 없으므로 backend 브라우저 UI에서 사용합니다.
 
-기존 Streamlit UI(`web_app.py`, `app/`, `ui/`)는 전환 전 구현을 참고하기 위해 남아 있지만 기본 실행 경로가 아닙니다.
 
 Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.
 
@@ -253,13 +252,6 @@ AI_Project/
     device_builder.py
   rca/
     structured_event_renderer.py
-  ui/
-    common.py
-    telephony_ui.py
-    network_ui.py
-    crash_ui.py
-    power_ui.py
-    satellite_ui.py
   tests/
     test_semantic_routing.py
     test_semantic_routing_fuzzy.py
@@ -267,9 +259,9 @@ AI_Project/
     routing_fuzzy_cases.json
     routing_score_logger.py
   scripts/
+    start_backend.command
     benchmark_models.py
     bechmark_models.md
-  web_app.py
   ril_rag_chat.py
   log_orchestrator.py
   prepare_rag_payload.py

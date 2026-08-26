@@ -229,7 +229,6 @@ payloads/
 result/
 temp_logs/
 chroma_db/
-.streamlit/
 test_reports/
 bge-m3-offline/
 benchmark_results/
@@ -244,7 +243,7 @@ csv/rag_golden_eval_details_output.yaml
 *.xlsx
 *.bundle
 
-# 따옴표 없는 pip 명령이 만드는 리다이렉트 사고 파일 (예: pip install streamlit>=1.32.0)
+# 따옴표 없는 pip 명령이 만드는 리다이렉트 사고 파일 (예: pip install uvicorn>=0.27.0)
 =*
 # 임시 스크린샷
 /screenshot*.png

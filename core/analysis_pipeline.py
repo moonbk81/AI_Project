@@ -1,9 +1,9 @@
 """Log analysis pipeline, free of any UI framework dependency.
 
-This module is shared by the FastAPI backend (``backend/main.py``) and the
-Streamlit legacy path (``app/pipeline.py``). It must never import streamlit:
-the backend imports it, and pulling Streamlit into the API process was the
-layering inversion this module exists to remove.
+The FastAPI backend (``backend/main.py``) drives this module. It stays free of
+any UI import on purpose: this is where the layering inversion that pulled a
+UI framework into the API process was cut out, and the split is worth keeping
+even now that the only front end is the browser UI served from ``backend/``.
 """
 
 from dataclasses import dataclass

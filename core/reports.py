@@ -1,6 +1,6 @@
 """Diagnostic report queries and generation.
 
-The Streamlit tabs used to own the report prompt text and drive the
+The UI tabs used to own the report prompt text and drive the
 "fetch health KPI -> build prompt -> engine.ask()" sequence themselves. Keeping
 it here means the prompt ships with the backend that answers it, and the UI is
 left with a single call whose result it only has to render.

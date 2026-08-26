@@ -3,8 +3,8 @@
 Attachments arrive as ZIP or 7z, often nested inside one another, so the
 format is decided per archive from its magic bytes rather than its name.
 
-Pure functions over archive bytes, shared by the Streamlit UI and the backend.
-Nothing here touches Streamlit, the filesystem or the network.
+Pure functions over archive bytes. Nothing here touches a web framework, the
+filesystem or the network.
 """
 
 from __future__ import annotations

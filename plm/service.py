@@ -1,4 +1,4 @@
-"""PLM API 호출 계층 — Streamlit 과 FastAPI 가 함께 쓴다.
+"""PLM API 호출 계층 — FastAPI 라우트가 쓴다.
 
 텍스트 생성은 `plm/comments.py`(코멘트)와 `plm/prompts.py`(LLM 질의문)에
 있고, 여기 있는 함수는 그것들을 PLM/LLM 호출과 엮는 일만 한다.
@@ -333,7 +333,7 @@ def refine_problem_description(problem_content: str, model: str = "") -> str:
     """LLM-refine a PLM problem description for downstream intent recognition.
 
     Degrades to simplify_problem_description() when the LLM call fails, matching
-    the behavior this had while it lived in the Streamlit layer.
+    the behavior this had while it lived in the UI layer.
     """
     if not problem_content or not problem_content.strip():
         return problem_content

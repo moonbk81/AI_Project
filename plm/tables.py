@@ -4,7 +4,7 @@ The same defect and attachment dictionaries are shown in several places, each
 of which used to cut titles, trim dates and format sizes on its own. Those
 rules live here instead, so the tables agree with each other.
 
-Shared by Streamlit and FastAPI; nothing here imports either.
+Called from the FastAPI routes; nothing here imports a web framework.
 """
 
 from __future__ import annotations

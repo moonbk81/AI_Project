@@ -1,7 +1,7 @@
 """Boot sequence chart series.
 
-Built from the parser report. Nothing here imports Streamlit or plotly — see
-`core/charts/__init__.py` for the split.
+Built from the parser report. Nothing here imports a web framework or plotly —
+see `core/charts/__init__.py` for the split.
 """
 
 from __future__ import annotations

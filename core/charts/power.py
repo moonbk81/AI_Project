@@ -1,6 +1,6 @@
 """Power and thermal chart series.
 
-Built from the Chroma metadata frame. Nothing here imports Streamlit or
+Built from the Chroma metadata frame. Nothing here imports a web framework or
 plotly — see `core/charts/__init__.py` for the split.
 """
 

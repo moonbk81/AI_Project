@@ -4,7 +4,7 @@ The walk itself lives here so it can be tested without a browser: the caller
 supplies a `download` callable and consumes the events this yields, deciding
 how (or whether) to show progress.
 
-Shared by Streamlit and FastAPI; nothing here imports either.
+Called from the FastAPI routes; nothing here imports a web framework.
 """
 
 from __future__ import annotations

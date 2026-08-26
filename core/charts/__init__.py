@@ -1,7 +1,7 @@
 """Chart data layer.
 
-Every chart drawn by `ui/*.py` gets its series built here instead of inside the
-Streamlit render function. A builder answers two questions the UI must not:
+Every chart gets its series built here instead of inside the code that draws
+it. A builder answers two questions the UI must not:
 
 * *what should be drawn* — aggregation, state mapping, transition compression,
   time-series ordering; and
@@ -10,9 +10,10 @@ Streamlit render function. A builder answers two questions the UI must not:
 
 The UI keeps only plotly styling: colors, labels, heights, hover templates.
 
-Builders are pure functions, so `ui/*.py` imports them directly rather than
-going through an HTTP endpoint (see `plm/service.py` for the same rule): a
-Streamlit rerun must not pay a round trip to redraw a chart.
+Builders are pure functions, so an in-process caller imports them directly
+rather than going through an HTTP endpoint (see `plm/service.py` for the same
+rule). `backend/charts_api.py` exposes them over HTTP for the browser, which
+has no other way in.
 """
 
 from .boot import (

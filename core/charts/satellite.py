@@ -1,7 +1,7 @@
 """Satellite (SpaceX NTN) chart series.
 
-Built from the parser artifacts the satellite tab fetches. Nothing here imports
-Streamlit or plotly — see `core/charts/__init__.py` for the split.
+Built from the parser artifacts the satellite view fetches. Nothing here
+imports a web framework or plotly — see `core/charts/__init__.py` for the split.
 """
 
 from __future__ import annotations

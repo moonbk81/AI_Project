@@ -4,8 +4,7 @@ import { api } from "../api.js";
 import { setMarkdown } from "../markdown.js";
 import { el } from "../viz.js";
 
-// The engine gets the tail of the conversation as context, matching what the
-// Streamlit tab sends.
+// The engine gets the tail of the conversation as context.
 const HISTORY_TURNS = 5;
 
 const QUICK_PROMPTS = [

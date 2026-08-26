@@ -1,8 +1,8 @@
 """The log excerpts an answer stands on.
 
 Retrieval hands back Chroma metadata rows; this turns them into the reference
-blocks a reader checks the answer against. Pure functions, shared by Streamlit,
-the browser UI and the API.
+blocks a reader checks the answer against. Pure functions, shared by the
+browser UI and the API.
 """
 
 from __future__ import annotations

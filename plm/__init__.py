@@ -6,11 +6,12 @@ Comprehensive Python client and integration tools for Samsung PLM Defect REST AP
 Main Components:
 - plm_api_client: Core API client with 20+ methods
 - plm_rag_integration: RAG integration and document management
-- service: PLM operations shared by the FastAPI backend and the Streamlit UI
+- service: PLM operations the FastAPI backend routes call into
 - plm_config.yaml: Configuration management
 
-The Streamlit UI lives in ui/plm_ui.py (render_plm_section); the former
-plm_dashboard module was superseded by it and has been removed.
+The UI is the PLM view of the browser front end
+(backend/static/js/views/plm.js), which talks to the /plm/* routes in
+backend/main.py.
 
 Quick Start:
     from plm.plm_api_client import PLMDefectAPIClient

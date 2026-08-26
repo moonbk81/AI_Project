@@ -5,9 +5,9 @@ touches it goes blank. With this mode on, the service layer answers from the
 samples below instead — the UI flows stay exercisable and nothing is ever
 written to a real defect.
 
-The switch lives here rather than in a UI so that Streamlit, the browser and
-any other caller all see the same thing. It starts from `PLM_LOCAL_TEST` and
-can be flipped at runtime.
+The switch lives here rather than in a UI so that the browser view and any
+other caller all see the same thing. It starts from `PLM_LOCAL_TEST` and can
+be flipped at runtime.
 """
 
 from __future__ import annotations

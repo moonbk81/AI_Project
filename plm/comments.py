@@ -1,8 +1,8 @@
 """PLM 코멘트 텍스트 규칙.
 
 What this tool writes into a defect comment, and how to tell those
-auto-written comments back apart from developer input. Pure text; shared by
-Streamlit and FastAPI.
+auto-written comments back apart from developer input. Pure text; no web
+framework involved.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 """Network chart series: DNS, data usage and internet-stall analysis.
 
 Built from the Chroma metadata frame and the internet-stall report. Nothing
-here imports Streamlit or plotly — see `core/charts/__init__.py` for the split.
+here imports a web framework or plotly — see `core/charts/__init__.py` for the
+split.
 """
 
 from __future__ import annotations

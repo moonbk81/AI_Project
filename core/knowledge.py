@@ -4,7 +4,7 @@ A case is written from a chat answer's retrieved rows, so the device the log
 came from and the log types involved are read back out of that metadata rather
 than typed in again.
 
-Pure functions, shared by Streamlit, the browser UI and the API.
+Pure functions, shared by the browser UI and the API.
 """
 
 from __future__ import annotations

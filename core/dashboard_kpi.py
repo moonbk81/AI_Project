@@ -1,7 +1,7 @@
 """Current-session KPI summary derived from Chroma metadata.
 
 This used to be computed inside the dashboard tab's render function, which meant
-the four headline numbers were defined by Streamlit code and could not be
+the four headline numbers were defined by render code and could not be
 checked without a browser.
 """
 

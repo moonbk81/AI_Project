@@ -4,7 +4,7 @@ The form a person sees and the payload the API takes are not the same shape:
 several fields are fixed for everything this tool files, and one is generated
 when left blank. That mapping lives here rather than in a UI.
 
-Shared by Streamlit and FastAPI; nothing here imports either.
+Called from the FastAPI routes; nothing here imports a web framework.
 """
 
 from __future__ import annotations

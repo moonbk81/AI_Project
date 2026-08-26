@@ -1,7 +1,7 @@
 """Telephony chart series.
 
 Built from the Chroma metadata frame and the parser report the dashboard
-already holds. Nothing here imports Streamlit or plotly — see
+already holds. Nothing here imports a web framework or plotly — see
 `core/charts/__init__.py` for the split.
 
 Where a builder exposes a `to_frame()` or a `table`, its column names are the

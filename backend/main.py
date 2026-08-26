@@ -62,7 +62,7 @@ class HealthKpiResponse(BaseModel):
     base_name: str
     # get_device_health_kpi() returns a JSON *string* that callers splice into an
     # LLM prompt verbatim. Passing it through untouched keeps the prompt text
-    # byte-identical to the previous in-Streamlit call.
+    # byte-identical to what the in-process caller used to build.
     kpi_json: str
 
 
@@ -330,7 +330,7 @@ def root():
     return RedirectResponse(url="/ui/")
 
 
-# Browser frontend: the same chart contracts, drawn outside Streamlit.
+# Browser frontend: the chart contracts from core/charts, drawn client side.
 app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
 # Exception handler for detailed validation errors
@@ -457,9 +457,9 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
 def _run_plm_attachment_job(job_id: str, division_code: str, defect_code: str):
     """Fetch a defect's ZIP attachments, pull the logs out, then analyze them.
 
-    The Streamlit tab did the download and extraction in the browser process
-    and left the files in session state. Here the whole thing is one job, so a
-    browser only has to poll for progress.
+    This used to run in the UI process and leave the files in session state.
+    Here the whole thing is one job, so a browser only has to poll for
+    progress.
     """
     from plm import log_pipeline
     from plm.service import download_attached_file, list_attached_files
@@ -659,7 +659,7 @@ def health_kpi(base_name: str) -> HealthKpiResponse:
     Note: get_device_health_kpi() reports a missing report by returning
     {"error": ...} as its JSON string rather than raising, and callers splice
     that straight into the prompt. We preserve that instead of returning 404,
-    so moving this off the Streamlit host does not change behavior.
+    so serving this over HTTP instead of in process does not change behavior.
     """
     from agent_toolkit.kpi_tools import get_device_health_kpi
 

@@ -1,7 +1,7 @@
 """Crash / ANR / Binder views.
 
-Built from the parser report. Nothing here imports Streamlit or plotly — see
-`core/charts/__init__.py` for the split. The nested log dumps stay as plain
+Built from the parser report. Nothing here imports a web framework or plotly —
+see `core/charts/__init__.py` for the split. The nested log dumps stay as plain
 lists of strings; only the truncation each view applies is decided here.
 """
 

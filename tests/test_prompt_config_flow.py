@@ -47,7 +47,7 @@ def make_engine(monkeypatch):
     return engine
 
 
-def test_load_config_reads_yaml_sections_without_streamlit():
+def test_load_config_reads_yaml_sections():
     engine = RilRagChat.__new__(RilRagChat)
     engine._load_config()
 

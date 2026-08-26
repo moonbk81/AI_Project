@@ -1,6 +1,6 @@
 """ChromaDB access helpers, free of any UI framework dependency.
 
-Shared by the FastAPI backend (``GET /metadata``) and the Streamlit legacy path.
+Called from the FastAPI backend (``GET /metadata``).
 """
 
 

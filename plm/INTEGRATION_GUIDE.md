@@ -89,25 +89,17 @@ for doc in rag_docs:
 
 ### 2. Dashboard Integration
 
-Add PLM section to Streamlit dashboard:
+Nothing to wire up: `backend/main.py` serves both the `/plm/*` routes and the
+browser UI that calls them.
 
-```python
-# In your main app.py or streamlit app
-import streamlit as st
-from ui.plm_ui import (
-    render_plm_section,
-    render_plm_sidebar_stats,
-)
-
-# Initialize
-initialize_session_state()
-
-# Render PLM section
-render_plm_section()
-
-# Add stats to sidebar
-render_plm_stats_sidebar()
+```bash
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
+# open http://localhost:8080/ui/ and pick PLM
 ```
+
+The view is `backend/static/js/views/plm.js`. It reaches the API through the
+wrappers in `backend/static/js/api.js` -- add a wrapper there rather than
+calling `fetch` from the view.
 
 ### 3. AI Analysis Enhancement
 
@@ -147,7 +139,7 @@ plm/
 ├── plm_api_example.py            # Usage examples
 ├── plm_config.yaml               # Configuration file
 ├── plm_rag_integration.py        # RAG integration module
-├── service.py                    # Shared by FastAPI backend and Streamlit UI
+├── service.py                    # Shared by the FastAPI backend routes
 ├── PLM_API_README.md             # API documentation
 ├── INTEGRATION_GUIDE.md          # This file
 └── LICENSE                       # License info
@@ -329,21 +321,13 @@ for doc in batch_context['documents']:
 
 ### Example 3: Dashboard Integration
 
-```python
-# In your Streamlit app
-import streamlit as st
-from ui.plm_ui import render_plm_section
+The PLM view degrades on its own when the corporate PLM host is unreachable --
+`GET /plm/local-test` reports whether the backend is answering from samples
+instead, and `POST /plm/local-test` toggles it.
 
-st.set_page_config(layout="wide")
-
-# Initialize PLM
-initialize_session_state()
-
-# Render PLM section
-if st.session_state.get('plm_available'):
-    render_plm_section()
-else:
-    st.warning("PLM not configured")
+```bash
+curl -s localhost:8080/plm/local-test
+curl -s -X POST localhost:8080/plm/local-test -H 'content-type: application/json' -d '{"enabled": true}'
 ```
 
 ### Example 4: Register Defect from AI Analysis
@@ -492,5 +476,5 @@ For issues or questions:
 - **v1.0.0** (2024-07): Initial release
   - Core API client with 20+ methods
   - RAG integration
-  - Streamlit dashboard
+  - Dashboard
   - Full documentation

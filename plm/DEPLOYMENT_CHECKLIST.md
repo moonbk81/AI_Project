@@ -79,20 +79,18 @@
   print(f"Converted {len(docs)} documents")
   ```
 
-### ✅ Dashboard Integration (if using Streamlit)
-- [ ] Import dashboard components
-  ```python
-  from ui.plm_ui import render_plm_section
-  ```
-- [ ] Add to main app
-  ```python
-  initialize_session_state()
-  render_plm_section()
-  ```
-- [ ] Test dashboard rendering
+### ✅ Dashboard Integration
+- [ ] Confirm the PLM endpoints answer
   ```bash
-  streamlit run app.py --logger.level=debug
+  curl -s localhost:8080/plm/groups
+  curl -s localhost:8080/plm/local-test
   ```
+- [ ] Open the PLM view in the browser UI
+  ```
+  http://localhost:8080/ui/   →  PLM
+  ```
+  The view lives in `backend/static/js/views/plm.js` and talks to the
+  `/plm/*` routes in `backend/main.py`; there is no separate UI process.
 
 ### ✅ AI Analysis Integration (if applicable)
 - [ ] Create context builder
@@ -121,7 +119,7 @@
   ```
 - [ ] Test dashboard components
   ```bash
-  python -c "from ui.plm_ui import render_plm_section; print('✓ Import successful')"
+  curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ui/js/views/plm.js
   ```
 
 ### ✅ Integration Tests
@@ -137,7 +135,7 @@
   assert len(docs) > 0
   assert docs[0].content is not None
   ```
-- [ ] Test dashboard rendering (manual Streamlit test)
+- [ ] Test dashboard rendering (manual browser UI test)
 
 ### ✅ Error Handling Tests
 - [ ] Invalid defect code
@@ -301,14 +299,13 @@ If issues occur:
 
 ## Quick Reference
 
-### Enable PLM in Streamlit App
-```python
-# In app.py or main streamlit file
-import streamlit as st
-from ui.plm_ui import render_plm_section
-
-render_plm_section()   # session state is initialized inside
+### Reach PLM from the browser UI
+```bash
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
+# then open http://localhost:8080/ui/ and pick PLM
 ```
+No wiring step: `backend/main.py` mounts the UI and serves the `/plm/*`
+routes the PLM view calls.
 
 ### Enable PLM in RAG System
 ```python

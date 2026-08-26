@@ -248,7 +248,7 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
     print(f"   - 생성용 RAG 모델: {rag_model}")
     print(f"   - 평가용 Judge 모델: {judge_model}")
 
-    # RAG 시스템 부팅 (web_app.py와 완전히 동일한 인스턴스 초기화 구조)
+    # RAG 시스템 부팅 (backend/main.py 와 동일한 인스턴스 초기화 구조)
     rag_system = RilRagChat(db_path="./chroma_db", model_name=rag_model)
 
     # =====================================================================
@@ -269,7 +269,7 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
             base_name = os.path.splitext(os.path.basename(raw_log_path))[0]
             report_path = f"./result/{base_name}_report.json"
 
-            # 🚨 [웹 싱크 매칭 1] web_app.py 214줄 규칙에 따라 {base_name}_payload.json 으로 타겟팅
+            # 🚨 [웹 싱크 매칭 1] core/analysis_pipeline.py 의 규칙에 따라 {base_name}_payload.json 으로 타겟팅
             payload_name = f"{base_name}_payload.json"
             payload_path = os.path.join("./payloads", payload_name)
 

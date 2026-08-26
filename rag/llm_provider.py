@@ -17,7 +17,7 @@ def get_llm_provider() -> str:
 
 
 def get_default_llm_model(fallback_model: str) -> str:
-    """Allow deployment environments to override the Streamlit default model."""
+    """Allow deployment environments to override the configured default model."""
     return os.getenv("RAG_LLM_MODEL", "").strip() or fallback_model
 
 
