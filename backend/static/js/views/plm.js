@@ -75,6 +75,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   mount.append(wrap);
 
   const state = ctx.plmState;
+  if (!state.cache) state.cache = {};
 
   // ------------------------------------------------------------ 로컬 테스트
   // 사내망 밖에서는 PLM 에 닿지 않는다. 이 모드에서는 백엔드가 샘플로 답하고
@@ -197,7 +198,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
     const list = el("div", "stack");
     for (const defect of state.defects) {
       const row = el("div", "row");
-      const isSelected = defect.defectCode === state.selected?.defectCode;
+      const isSelected = Boolean(state.selected)
+                        && defect.defectCode === state.selected.defectCode;
       const name = el("span", "row-name" + (isSelected ? " active" : ""),
                       `${defect.defectCode} · ${defect.plmTitle || ""}`.slice(0, 110));
       const meta = el("span", "row-meta", `${defect.plmStatus || "-"} · ${defect.mainOwnerName || "-"}`);
@@ -217,13 +219,38 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const detailHost = el("div", "stack");
   detail.body.append(detailHost);
 
+  const cacheKey = (defect) => `${state.division}:${defect.defectCode}`;
+
+  /** Failures are deliberately left uncached so the next visit retries. */
+  const loadDetail = async (defect) => {
+    const key = cacheKey(defect);
+    if (state.cache[key]?.detail) return state.cache[key].detail;
+
+    const [details, comments] = await Promise.all([
+      api.plmDefectDetails(state.division, [defect.defectCode]).catch(() => null),
+      api.plmHumanComments(state.division, defect.defectCode).catch(() => null),
+    ]);
+    const entry = {
+      details: details || { defects: [] },
+      comments: comments || { comments: [] },
+    };
+    if (details && comments) state.cache[key] = { ...state.cache[key], detail: entry };
+    return entry;
+  };
+
+  const loadAttachments = async (defect) => {
+    const key = cacheKey(defect);
+    if (state.cache[key]?.files) return state.cache[key].files;
+
+    const listing = await api.plmFiles(state.division, defect.defectCode).catch(() => null);
+    if (listing) state.cache[key] = { ...state.cache[key], files: listing };
+    return listing || { files: [] };
+  };
+
   const drawDetail = async (defect) => {
     detailHost.replaceChildren(el("div", "empty", "불러오는 중..."));
 
-    const [details, comments] = await Promise.all([
-      api.plmDefectDetails(state.division, [defect.defectCode]).catch(() => ({ defects: [] })),
-      api.plmHumanComments(state.division, defect.defectCode).catch(() => ({ comments: [] })),
-    ]);
+    const { details, comments } = await loadDetail(defect);
     const full = details.defects?.[0] || defect;
 
     detailHost.replaceChildren();
@@ -355,7 +382,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   const drawAttachments = async (defect) => {
     attachmentHost.replaceChildren(el("div", "empty", "불러오는 중..."));
-    const listing = await api.plmFiles(state.division, defect.defectCode).catch(() => ({ files: [] }));
+    const listing = await loadAttachments(defect);
     const files = listing.files || [];
 
     attachmentHost.replaceChildren();
@@ -480,7 +507,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
         create_user: commentUser.value,
       });
       commentNote.textContent = body.success ? "등록했습니다." : body.message || "등록 실패";
-      if (body.success) commentBody.value = "";
+      if (body.success) {
+        commentBody.value = "";
+        ctx.invalidateDefect(state.division, state.selected.defectCode);
+      }
     } catch (error) {
       commentNote.textContent = String(error.message || error);
     } finally {
@@ -526,6 +556,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
       });
       state.defects = body.defects || [];
       state.selected = null;
+      state.analysis = null;
+      // Without this the previous defect stays on screen and, worse, stays in
+      // ctx.activeDefect — the chat would file its answer against it.
+      clearSelectionViews();
       state.searchNote = body.success
         ? `${fmt.count(body.defects?.length || 0)}건` + (body.truncated ? ` (전체 ${body.total_codes}건 중 일부)` : "")
         : body.message || "검색 실패";

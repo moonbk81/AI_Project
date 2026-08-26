@@ -134,12 +134,21 @@ function rerender() {
           selected: null,
           analysis: null,
           searchNote: "",
+          // PLM responses keyed by `division:defectCode`. Re-entering the view
+          // restores the selection, so without this every rerender() — a theme
+          // toggle, a file-picker change — refires three calls at the PLM API.
+          cache: {},
         };
       }
       return state.plmState;
     },
     setActiveDefect(defect) {
       state.activeDefect = defect;
+    },
+    /** Drop a defect's cached detail after writing to it — filing a comment
+     *  changes the comment list the cache is holding. */
+    invalidateDefect(division, code) {
+      if (state.plmState) delete state.plmState.cache[`${division}:${code}`];
     },
     /** Hand a ready-made question to the chat view and go there. */
     startChat(question) {

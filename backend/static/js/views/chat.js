@@ -119,6 +119,7 @@ function registerBlock(turn, ctx) {
       note.textContent = body.success ? `${defect.code} 에 등록했습니다. ${body.message || ""}`.trim()
                                       : body.message || "등록 실패";
       turn.registered = body.success;
+      if (body.success) ctx.invalidateDefect(defect.division, defect.code);
     } catch (error) {
       note.textContent = String(error.message || error);
     } finally {
@@ -266,12 +267,20 @@ export async function renderChat(mount, sourceFile, ctx) {
     }
   };
 
-  const configuredPrompts = await api.quickPrompts().catch(() => ({}));
+  // Not awaited: the chat log, the input box and a handed-over question must
+  // not wait on /quick-prompts. Until it lands, a button asks its own label.
+  let configuredPrompts = {};
+  const promptsLoaded = api.quickPrompts()
+    .then((body) => { configuredPrompts = body || {}; })
+    .catch(() => {});
 
   for (const prompt of QUICK_PROMPTS) {
     const button = el("button", null, prompt.label);
     button.type = "button";
-    button.addEventListener("click", () => ask(configuredPrompts[prompt.key] || prompt.label));
+    button.addEventListener("click", async () => {
+      await promptsLoaded;
+      ask(configuredPrompts[prompt.key] || prompt.label);
+    });
     quick.append(button);
   }
 
