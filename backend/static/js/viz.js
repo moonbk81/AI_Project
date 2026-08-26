@@ -14,6 +14,23 @@ export const sequentialRamp = () => ["--seq-250", "--seq-350", "--seq-450", "--s
 
 export const PLOT_CONFIG = { displayModeBar: false, responsive: true };
 
+let plotlyReady = null;
+
+export function ensurePlotly() {
+  if (window.Plotly) return Promise.resolve(window.Plotly);
+  if (plotlyReady) return plotlyReady;
+
+  plotlyReady = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/vendor/plotly.min.js";
+    script.async = true;
+    script.onload = () => resolve(window.Plotly);
+    script.onerror = () => reject(new Error("Plotly 로딩 실패"));
+    document.head.append(script);
+  });
+  return plotlyReady;
+}
+
 /**
  * Draw into a container and keep the drawing the container's size.
  *
@@ -23,13 +40,19 @@ export const PLOT_CONFIG = { displayModeBar: false, responsive: true };
  * only watches the window, so the container needs watching directly.
  */
 export function drawPlot(node, traces, layout) {
-  node.replaceChildren();  // drop the loading placeholder plotly would keep
-  Plotly.react(node, traces, layout, PLOT_CONFIG);
+  ensurePlotly()
+    .then((Plotly) => {
+      node.replaceChildren();  // drop the loading placeholder plotly would keep
+      Plotly.react(node, traces, layout, PLOT_CONFIG);
 
-  if (!node._sizeWatcher && typeof ResizeObserver !== "undefined") {
-    node._sizeWatcher = new ResizeObserver(() => Plotly.Plots.resize(node));
-    node._sizeWatcher.observe(node);
-  }
+      if (!node._sizeWatcher && typeof ResizeObserver !== "undefined") {
+        node._sizeWatcher = new ResizeObserver(() => Plotly.Plots.resize(node));
+        node._sizeWatcher.observe(node);
+      }
+    })
+    .catch((error) => {
+      node.replaceChildren(el("div", "empty", String(error.message || error)));
+    });
   return node;
 }
 

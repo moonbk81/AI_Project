@@ -222,7 +222,9 @@ async function boot() {
     new Promise((resolve) => setTimeout(resolve, 1500)),
   ]);
   fontsSettled.then(() => {
-    document.querySelectorAll(".js-plotly-plot").forEach((plot) => Plotly.Plots.resize(plot));
+    if (window.Plotly) {
+      document.querySelectorAll(".js-plotly-plot").forEach((plot) => Plotly.Plots.resize(plot));
+    }
   });
 }
 

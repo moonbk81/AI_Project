@@ -98,14 +98,17 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     page = client.get("/ui/")
     styles = client.get("/ui/styles.css")
     app = client.get("/ui/js/app.js")
+    viz = client.get("/ui/js/viz.js")
     plm = client.get("/ui/js/views/plm.js")
     boot = client.get("/ui/js/views/boot.js")
     bundle = client.get("/vendor/plotly.min.js")
 
     assert page.status_code == 200 and "로그 분석" in page.text
+    assert "/vendor/plotly.min.js" not in page.text
     assert styles.status_code == 200 and "--series-1" in styles.text
     assert app.status_code == 200 and "renderDashboard" in app.text
     assert "await Promise.all([loadFiles(), fontsSettled])" not in app.text
+    assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
     assert "existingJob?.job_id" in plm.text and "display_message" in plm.text
