@@ -105,9 +105,12 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert page.status_code == 200 and "로그 분석" in page.text
     assert styles.status_code == 200 and "--series-1" in styles.text
     assert app.status_code == 200 and "renderDashboard" in app.text
+    assert "await Promise.all([loadFiles(), fontsSettled])" not in app.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
     assert "existingJob?.job_id" in plm.text and "display_message" in plm.text
+    assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
+    assert "field(\"Division\"" not in plm.text
     assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text
     # plotly.js ships with the installed package; the page must not need a CDN.
     assert bundle.status_code == 200 and len(bundle.content) > 100_000

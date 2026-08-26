@@ -4,8 +4,9 @@ import { api } from "../api.js";
 import { el, field, fmt, panel, table } from "../viz.js";
 import { createDefectCache, defectCacheKey } from "./plm_data.js";
 
-const DIVISIONS = { Mobile: "25", Network: "26" };
+const MOBILE_DIVISION = "25";
 const STATUSES = ["Open", "Resolve", "Close"];
+const SEARCH_METHODS = ["그룹", "사용자 ID", "PLM 번호"];
 const JOB_POLL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
 
@@ -57,6 +58,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
   mount.append(wrap);
 
   const state = ctx.plmState;
+  state.division = MOBILE_DIVISION;
+  state.divisionName = "Mobile";
   if (!state.cache) state.cache = {};
   if (!state.attachmentJobs) state.attachmentJobs = {};
   const cache = createDefectCache(api, state.cache);
@@ -103,24 +106,16 @@ export async function renderPlm(mount, sourceFile, ctx) {
   api.plmLocalTest().then((body) => drawMode(body.enabled)).catch(() => drawMode(false));
 
   // ------------------------------------------------------------------ 검색
-  const search = panel("결함 검색", "담당 그룹이나 Knox ID 로 찾습니다.");
+  const search = panel("결함 검색", "담당 그룹, Knox ID, PLM 번호로 찾습니다.");
   const status = radioRow("status", STATUSES, (value) => {
     state.status = value;
   }, state.status);
-  const method = radioRow("method", ["그룹", "사용자 ID"], (value) => {
+  const method = radioRow("method", SEARCH_METHODS, (value) => {
     state.method = value;
     drawTarget();
   }, state.method);
 
-  const divisionPicker = select(Object.keys(DIVISIONS));
-  divisionPicker.value = state.divisionName || "Mobile";
-  divisionPicker.addEventListener("change", async () => {
-    state.divisionName = divisionPicker.value;
-    state.division = DIVISIONS[divisionPicker.value];
-    await loadGroups();
-    drawTarget();
-  });
-
+  const statusHost = el("div");
   const targetHost = el("div");
   const groupPicker = select([]);
   const userInput = input("예: bongki.moon");
@@ -128,15 +123,27 @@ export async function renderPlm(mount, sourceFile, ctx) {
   userInput.addEventListener("input", () => {
     state.user = userInput.value;
   });
+  const defectInput = input("예: P260711-LOCAL01");
+  defectInput.value = state.defectCode || "";
+  defectInput.addEventListener("input", () => {
+    state.defectCode = defectInput.value;
+  });
   const searchButton = el("button", "primary", "검색");
   searchButton.type = "button";
   const searchNote = el("p", "card-note");
   searchNote.textContent = state.searchNote || "";
 
   const drawTarget = () => {
-    targetHost.replaceChildren(
-      method.value === "그룹" ? field("그룹", groupPicker) : field("Knox ID", userInput),
-    );
+    statusHost.replaceChildren();
+    if (method.value !== "PLM 번호") statusHost.append(field("상태", status.wrap));
+
+    if (method.value === "그룹") {
+      targetHost.replaceChildren(field("그룹", groupPicker));
+    } else if (method.value === "사용자 ID") {
+      targetHost.replaceChildren(field("Knox ID", userInput));
+    } else {
+      targetHost.replaceChildren(field("PLM 번호", defectInput));
+    }
   };
 
   const loadGroups = async () => {
@@ -160,9 +167,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
   });
 
   search.body.append(
-    field("Division", divisionPicker),
-    field("상태", status.wrap),
     field("검색 방식", method.wrap),
+    statusHost,
     targetHost,
     searchButton,
     searchNote,
@@ -529,25 +535,40 @@ export async function renderPlm(mount, sourceFile, ctx) {
     drawAnalysis(defect);
   };
 
+  const searchByDefectCode = async () => {
+    const defectCodes = defectInput.value
+      .split(/[,\s]+/)
+      .map((code) => code.trim())
+      .filter(Boolean);
+
+    state.defectCode = defectInput.value;
+    if (!defectCodes.length) {
+      return { success: false, message: "PLM 번호를 입력하세요.", defects: [] };
+    }
+    return api.plmDefectDetails(state.division, defectCodes);
+  };
+
+  const searchByOwner = async () => {
+    const ownerId = method.value === "그룹"
+      ? (await api.plmGroupUsers(groupPicker.value)).users.join(",")
+      : userInput.value.trim();
+
+    if (!ownerId) {
+      return { success: false, message: "검색할 그룹이나 Knox ID 를 지정하세요.", defects: [] };
+    }
+
+    return api.plmQuickSearch({
+      division_code: state.division,
+      main_owner_id: ownerId,
+      status: status.value.toLowerCase(),
+    });
+  };
+
   searchButton.addEventListener("click", async () => {
     searchButton.disabled = true;
     searchNote.textContent = "검색 중...";
     try {
-      const ownerId = method.value === "그룹"
-        ? (await api.plmGroupUsers(groupPicker.value)).users.join(",")
-        : userInput.value.trim();
-
-      if (!ownerId) {
-        state.searchNote = "검색할 그룹이나 Knox ID 를 지정하세요.";
-        searchNote.textContent = state.searchNote;
-        return;
-      }
-
-      const body = await api.plmQuickSearch({
-        division_code: state.division,
-        main_owner_id: ownerId,
-        status: status.value.toLowerCase(),
-      });
+      const body = method.value === "PLM 번호" ? await searchByDefectCode() : await searchByOwner();
       state.defects = body.defects || [];
       state.selected = null;
       state.analysis = null;

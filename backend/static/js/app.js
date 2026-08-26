@@ -131,6 +131,7 @@ function rerender() {
           method: "그룹",
           group: "",
           user: "",
+          defectCode: "",
           defects: [],
           selected: null,
           analysis: null,
@@ -209,19 +210,20 @@ async function boot() {
   });
 
   drawNav();
-  // Plotly measures tick and legend text at draw time, so let the webfont settle
-  // first — otherwise the first chart is laid out against the fallback metrics,
-  // and nothing redraws it later (the ResizeObserver in viz.js only fires on
-  // container resize, which a font swap does not cause). Capped, because
-  // fonts.ready has no timeout of its own and a stalled request would otherwise
-  // hold the whole UI blank.
+  await loadFiles();
+  drawFilePicker();
+  rerender();
+
+  // Plotly measures tick and legend text at draw time. If a webfont swaps in
+  // after the first render, nudge the already-drawn plots without holding the
+  // whole UI blank on first load.
   const fontsSettled = Promise.race([
     document.fonts?.ready ?? Promise.resolve(),
     new Promise((resolve) => setTimeout(resolve, 1500)),
   ]);
-  await Promise.all([loadFiles(), fontsSettled]);
-  drawFilePicker();
-  rerender();
+  fontsSettled.then(() => {
+    document.querySelectorAll(".js-plotly-plot").forEach((plot) => Plotly.Plots.resize(plot));
+  });
 }
 
 boot();
