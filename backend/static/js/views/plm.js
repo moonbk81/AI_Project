@@ -2,7 +2,7 @@
 
 import { api } from "../api.js";
 import { el, field, fmt, panel, table } from "../viz.js";
-import { createDefectCache } from "./plm_data.js";
+import { createDefectCache, defectCacheKey } from "./plm_data.js";
 
 const DIVISIONS = { Mobile: "25", Network: "26" };
 const STATUSES = ["Open", "Resolve", "Close"];
@@ -58,6 +58,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   const state = ctx.plmState;
   if (!state.cache) state.cache = {};
+  if (!state.attachmentJobs) state.attachmentJobs = {};
   const cache = createDefectCache(api, state.cache);
 
   // ------------------------------------------------------------ 로컬 테스트
@@ -88,6 +89,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
       state.defects = [];
       state.selected = null;
       state.analysis = null;
+      state.attachmentJobs = {};
       state.searchNote = "";
       drawResults();
       clearSelectionViews();
@@ -300,36 +302,67 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const attachmentHost = el("div", "stack");
   attachments.body.append(attachmentHost);
 
-  let jobTimer = null;
-  ctx.onLeave(() => clearTimeout(jobTimer));
+  const jobTimers = new Set();
+  ctx.onLeave(() => {
+    for (const timer of jobTimers) clearTimeout(timer);
+    jobTimers.clear();
+  });
 
-  const followJob = (jobId, progressHost) => {
+  const attachmentJobKey = (defect) => defectCacheKey(state.division, defect.defectCode);
+
+  const drawJobProgress = (job, progressHost) => {
     const bar = el("div", "bar");
     const fill = el("div", "bar-fill");
+    fill.style.width = `${Math.max(2, job.progress || 0)}%`;
+    fill.classList.toggle("done", job.status === "done");
+    fill.classList.toggle("error", job.status === "error");
     bar.append(fill);
-    const message = el("p", "card-note", "시작하는 중...");
+    const message = el("p", "card-note", job.display_message || job.error || job.message || job.status || "시작하는 중...");
     progressHost.replaceChildren(message, bar);
+    return { fill, message };
+  };
+
+  const followJob = (jobId, progressHost, defect, analyzeButton) => {
+    const key = attachmentJobKey(defect);
+    const stored = state.attachmentJobs[key] || {};
+    state.attachmentJobs[key] = {
+      ...stored,
+      job_id: jobId,
+      division: state.division,
+      defect_code: defect.defectCode,
+    };
+
+    const { fill, message } = drawJobProgress(state.attachmentJobs[key], progressHost);
+    if (analyzeButton) analyzeButton.disabled = !JOB_DONE.has(state.attachmentJobs[key].status);
 
     const poll = async () => {
       try {
         const job = await api.job(jobId);
-        message.textContent = job.error || job.message || job.status;
+        state.attachmentJobs[key] = { ...state.attachmentJobs[key], ...job };
+        message.textContent = state.attachmentJobs[key].display_message || job.error || job.message || job.status;
         fill.style.width = `${Math.max(2, job.progress || 0)}%`;
         fill.classList.toggle("done", job.status === "done");
         fill.classList.toggle("error", job.status === "error");
+        if (analyzeButton) analyzeButton.disabled = !JOB_DONE.has(job.status);
 
         if (!JOB_DONE.has(job.status)) {
-          jobTimer = setTimeout(poll, JOB_POLL_MS);
-        } else if (job.status === "done" && job.current_file) {
+          const timer = setTimeout(poll, JOB_POLL_MS);
+          jobTimers.add(timer);
+        } else if (job.status === "done" && job.current_file && !state.attachmentJobs[key].activated) {
           // Make the freshly analyzed log the active one, but leave this view
           // as it is — the search and the selected defect stay put.
           const active = await ctx.filesChanged({ select: job.current_file });
           message.textContent = active === job.current_file
             ? `${job.message} — '${job.current_file}' 을 활성 파일로 설정했습니다. 대시보드에서 볼 수 있습니다.`
             : `${job.message} — '${job.current_file}'`;
+          state.attachmentJobs[key].display_message = message.textContent;
+          state.attachmentJobs[key].activated = true;
         }
       } catch (error) {
         message.textContent = String(error.message || error);
+        state.attachmentJobs[key] = { ...state.attachmentJobs[key], status: "error", error: message.textContent };
+        fill.classList.add("error");
+        if (analyzeButton) analyzeButton.disabled = false;
       }
     };
     poll();
@@ -366,14 +399,16 @@ export async function renderPlm(mount, sourceFile, ctx) {
       analyze.disabled = true;
       try {
         const { job_id: jobId } = await api.plmAnalyzeAttachments(state.division, defect.defectCode);
-        followJob(jobId, progressHost);
+        followJob(jobId, progressHost, defect, analyze);
       } catch (error) {
         progressHost.replaceChildren(el("p", "card-note", String(error.message || error)));
-      } finally {
         analyze.disabled = false;
       }
     });
     attachmentHost.append(analyze, progressHost);
+
+    const existingJob = state.attachmentJobs[attachmentJobKey(defect)];
+    if (existingJob?.job_id) followJob(existingJob.job_id, progressHost, defect, analyze);
   };
 
   // -------------------------------------------------------------- AI 분석

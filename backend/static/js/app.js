@@ -135,6 +135,7 @@ function rerender() {
           selected: null,
           analysis: null,
           searchNote: "",
+          attachmentJobs: {},
           // PLM responses keyed by `division:defectCode`. Re-entering the view
           // restores the selection, so without this every rerender() — a theme
           // toggle, a file-picker change — refires three calls at the PLM API.
