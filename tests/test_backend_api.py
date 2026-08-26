@@ -162,6 +162,49 @@ def test_files_and_metadata_endpoints(client):
     }
 
 
+def test_files_endpoint_does_not_wake_the_full_rag_engine(monkeypatch):
+    class FakeCollection:
+        def get(self, **kwargs):
+            return {"ids": ["1"], "metadatas": [{"source_file": "fast.log"}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_or_create_collection(self, name):
+            assert name == "ril_logs"
+            return FakeCollection()
+
+    fake_chromadb = type("FakeChromaDb", (), {"PersistentClient": FakeClient})
+    fake_config = type("FakeConfig", (), {"Settings": lambda **kwargs: kwargs})
+
+    monkeypatch.setattr(backend_main, "_engine", None)
+    monkeypatch.setitem(sys.modules, "chromadb", fake_chromadb)
+    monkeypatch.setitem(sys.modules, "chromadb.config", fake_config)
+    monkeypatch.setattr(backend_main, "get_engine", lambda: pytest.fail("full engine should stay cold"))
+
+    response = TestClient(backend_main.app).get("/files")
+
+    assert response.status_code == 200
+    assert response.json() == {"files": ["fast.log"]}
+    assert backend_main._engine is None
+
+
+def test_dashboard_kpi_does_not_wake_the_full_rag_engine(monkeypatch):
+    class FakeCollection:
+        def get(self, **kwargs):
+            return {"ids": ["1"], "metadatas": [{"source_file": "fast.log", "log_type": "Call_Session", "status": "SUCCESS"}]}
+
+    monkeypatch.setattr(backend_main, "_engine", None)
+    monkeypatch.setattr(backend_main, "_metadata_collection", lambda: FakeCollection())
+    monkeypatch.setattr(backend_main, "get_engine", lambda: pytest.fail("full engine should stay cold"))
+
+    response = TestClient(backend_main.app).get("/dashboard/kpi", params={"source_file": "fast.log"})
+
+    assert response.status_code == 200
+    assert backend_main._engine is None
+
+
 def test_quick_prompts_endpoint_uses_config(client):
     response = client.get("/quick-prompts")
 

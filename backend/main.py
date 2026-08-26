@@ -301,6 +301,13 @@ app.include_router(charts_router)
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
+class UiStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     """Browsers ask for this on every page, including /docs."""
@@ -331,7 +338,7 @@ def root():
 
 
 # Browser frontend: the chart contracts from core/charts, drawn client side.
-app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="ui")
+app.mount("/ui", UiStaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
 # Exception handler for detailed validation errors
 from fastapi.exceptions import RequestValidationError
@@ -397,6 +404,33 @@ def _get_engine_status() -> str:
     if _engine_lock.locked():
         return "initializing"
     return "not_loaded"
+
+
+def _metadata_collection():
+    if _engine is not None:
+        return _engine.collection
+
+    import chromadb
+    from chromadb.config import Settings
+
+    client = chromadb.PersistentClient(
+        path=_CHROMA_DB_PATH,
+        settings=Settings(anonymized_telemetry=False),
+    )
+    return client.get_or_create_collection(name="ril_logs")
+
+
+def _list_files_without_loading_engine() -> List[str]:
+    if _engine is not None:
+        return _engine.get_all_files()
+
+    try:
+        from rag.ingest import get_all_files as get_all_ingested_files
+
+        return get_all_ingested_files(_metadata_collection())
+    except Exception as exc:
+        print(f"[FILES] lightweight listing failed: {exc}", file=sys.stderr)
+        return []
 
 
 def _set_job(job_id: str, **updates):
@@ -591,7 +625,7 @@ def ask(req: AskRequest) -> AskResponse:
 
 @app.get("/files", response_model=FilesResponse)
 def files() -> FilesResponse:
-    return FilesResponse(files=get_engine().get_all_files())
+    return FilesResponse(files=_list_files_without_loading_engine())
 
 
 @app.get("/quick-prompts", response_model=QuickPromptsResponse)
@@ -677,7 +711,7 @@ def dashboard_kpi(source_file: Optional[str] = None) -> SessionKpiResponse:
     from core.dashboard_kpi import compute_session_kpi
 
     where = {"source_file": source_file} if source_file else None
-    data = get_collection_metadatas_batched(get_engine().collection, batch_size=500, where=where)
+    data = get_collection_metadatas_batched(_metadata_collection(), batch_size=500, where=where)
     return SessionKpiResponse(**compute_session_kpi(data.get("metadatas", [])))
 
 

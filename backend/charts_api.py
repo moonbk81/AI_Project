@@ -139,11 +139,11 @@ _frame_cache_lock = threading.Lock()
 
 
 def _load_session_frame(source_file: Optional[str]) -> pd.DataFrame:
-    from backend.main import get_engine
+    from backend.main import _metadata_collection
     from core.chroma_helpers import get_collection_metadatas_batched
 
     where = {"source_file": source_file} if source_file else None
-    data = get_collection_metadatas_batched(get_engine().collection, batch_size=500, where=where)
+    data = get_collection_metadatas_batched(_metadata_collection(), batch_size=500, where=where)
     rows = [row for row in data.get("metadatas", []) if row]
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 

@@ -90,6 +90,18 @@ def test_the_status_travels_so_the_frontend_need_not_guess(client):
     assert body["series"]["points"] == []
 
 
+def test_metadata_charts_do_not_wake_the_full_rag_engine(monkeypatch):
+    monkeypatch.setattr(backend_main, "_engine", None)
+    monkeypatch.setattr(backend_main, "_metadata_collection", lambda: FakeCollection(ROWS))
+    monkeypatch.setattr(backend_main, "get_engine", lambda: pytest.fail("full engine should stay cold"))
+    charts_api.clear_frame_cache()
+
+    body = TestClient(backend_main.app).get("/charts/service-state", params={"source_file": "radio.log"}).json()
+
+    assert body["series"]["status"] == "ok"
+    assert backend_main._engine is None
+
+
 def test_asking_for_a_chart_that_does_not_exist(client):
     assert client.get("/charts/nope").status_code == 404
 
@@ -106,6 +118,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert page.status_code == 200 and "로그 분석" in page.text
     assert "/vendor/plotly.min.js" not in page.text
     assert styles.status_code == 200 and "--series-1" in styles.text
+    assert app.headers["cache-control"] == "no-store"
     assert app.status_code == 200 and "renderDashboard" in app.text
     assert "await Promise.all([loadFiles(), fontsSettled])" not in app.text
     assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
