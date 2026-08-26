@@ -1,28 +1,10 @@
 // 지식 베이스 — 기록된 분석 사례를 찾아보고, 방금 받은 답변을 사례로 남긴다.
 
 import { api } from "../api.js";
-import { el, fmt, tile, tileRow } from "../viz.js";
+import { el, field, fmt, panel, tile, tileRow } from "../viz.js";
 
 const SEVERITIES = ["Critical", "Major", "Minor", "Info"];
 const ANY = "전체";
-
-function panel(title, subtitle) {
-  const section = el("section", "card");
-  const head = el("div", "card-head");
-  head.append(el("h2", null, title), el("span", "grow"));
-  section.append(head);
-  if (subtitle) section.append(el("p", "card-sub", subtitle));
-
-  const body = el("div", "stack");
-  section.append(body);
-  return { section, body };
-}
-
-function field(label, control) {
-  const wrap = el("label", "field");
-  wrap.append(el("span", "field-label", label), control);
-  return wrap;
-}
 
 function picker(values) {
   const node = el("select");

@@ -255,9 +255,13 @@ AI_Project/
   tests/
     test_semantic_routing.py
     test_semantic_routing_fuzzy.py
+    test_frontend_js.py
     routing_test_cases.json
     routing_fuzzy_cases.json
     routing_score_logger.py
+    js/
+      plm_data.test.mjs
+      module_links.test.mjs
   scripts/
     start_backend.command
     benchmark_models.py
@@ -389,10 +393,16 @@ python run_golden_eval.py \
 
 ## 테스트
 
-Backend client 단위 테스트:
+전체:
 
 ```bash
-conda run -n ai python -m pytest tests/test_backend_api.py tests/test_backend_client.py
+pytest tests/
+```
+
+Backend API 단위 테스트:
+
+```bash
+pytest tests/test_backend_api.py
 ```
 
 Semantic routing 테스트:
@@ -402,10 +412,21 @@ pytest tests/test_semantic_routing.py
 pytest tests/test_semantic_routing_fuzzy.py
 ```
 
+브라우저 UI(JavaScript) 테스트. node 의 기본 러너를 쓰므로 npm 설치가 필요 없고,
+`pytest tests/` 에도 `tests/test_frontend_js.py` 를 통해 포함됩니다.
+
+```bash
+node --test tests/js/*.test.mjs
+```
+
 주의:
 
 - `RilRagChat()` 초기화 과정에서 ChromaDB와 embedding model을 로드하므로 테스트가 무겁습니다.
+  GPU 메모리를 쓰는데, backend 를 띄워둔 상태로 돌리면 서로 밀려 CUDA OOM 이 납니다.
+  그럴 때는 `CUDA_VISIBLE_DEVICES="" pytest tests/` 로 CPU 에서 돌리십시오.
 - `tests/routing_score_logger.py`가 `test_reports/` 아래에 라우팅 점수 로그를 남길 수 있습니다.
+- 디렉터리를 넘기는 `node --test tests/js` 형태는 node 가 경로를 모듈로 해석해 실패합니다.
+  위처럼 글롭으로 파일을 지정하십시오.
 
 ## 주요 산출물
 

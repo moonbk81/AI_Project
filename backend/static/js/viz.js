@@ -268,6 +268,30 @@ export function card(title, subtitle) {
   };
 }
 
+/**
+ * A card with no plot: title, optional subtitle, then a `stack` body to append
+ * into. `card()` above is the chart flavour — it owns a plot host and a table
+ * toggle, which a form or a listing has no use for.
+ */
+export function panel(title, subtitle) {
+  const section = el("section", "card");
+  const head = el("div", "card-head");
+  head.append(el("h2", null, title), el("span", "grow"));
+  section.append(head);
+  if (subtitle) section.append(el("p", "card-sub", subtitle));
+
+  const body = el("div", "stack");
+  section.append(body);
+  return { section, body, head };
+}
+
+/** A labelled control, for the forms inside a `panel()`. */
+export function field(label, control) {
+  const wrap = el("label", "field");
+  wrap.append(el("span", "field-label", label), control);
+  return wrap;
+}
+
 export function section(title) {
   const wrap = el("section", "band");
   wrap.append(el("h2", "band-title", title));

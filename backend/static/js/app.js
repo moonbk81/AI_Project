@@ -10,6 +10,7 @@ import { renderChat } from "./views/chat.js";
 import { renderKnowledge } from "./views/knowledge.js";
 import { renderPlm } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
+import { defectCacheKey } from "./views/plm_data.js";
 
 const VIEWS = [
   { id: "dashboard", label: "대시보드", render: renderDashboard, needsFile: true },
@@ -146,9 +147,10 @@ function rerender() {
       state.activeDefect = defect;
     },
     /** Drop a defect's cached detail after writing to it — filing a comment
-     *  changes the comment list the cache is holding. */
+     *  changes the comment list the cache is holding. Shares the key helper
+     *  with the cache itself so the two cannot drift apart. */
     invalidateDefect(division, code) {
-      if (state.plmState) delete state.plmState.cache[`${division}:${code}`];
+      if (state.plmState) delete state.plmState.cache[defectCacheKey(division, code)];
     },
     /** Hand a ready-made question to the chat view and go there. */
     startChat(question) {

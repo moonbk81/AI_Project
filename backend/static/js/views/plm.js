@@ -1,31 +1,13 @@
 // PLM — 결함을 찾아 첨부 로그를 분석하고, 결과를 코멘트로 남긴다.
 
 import { api } from "../api.js";
-import { setMarkdown } from "../markdown.js";
-import { el, fmt, table } from "../viz.js";
+import { el, field, fmt, panel, table } from "../viz.js";
+import { createDefectCache } from "./plm_data.js";
 
 const DIVISIONS = { Mobile: "25", Network: "26" };
 const STATUSES = ["Open", "Resolve", "Close"];
 const JOB_POLL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
-
-function panel(title, subtitle) {
-  const section = el("section", "card");
-  const head = el("div", "card-head");
-  head.append(el("h2", null, title), el("span", "grow"));
-  section.append(head);
-  if (subtitle) section.append(el("p", "card-sub", subtitle));
-
-  const body = el("div", "stack");
-  section.append(body);
-  return { section, body, head };
-}
-
-function field(label, control) {
-  const wrap = el("label", "field");
-  wrap.append(el("span", "field-label", label), control);
-  return wrap;
-}
 
 function input(placeholder, value = "") {
   const node = el("input", "text-input");
@@ -76,6 +58,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   const state = ctx.plmState;
   if (!state.cache) state.cache = {};
+  const cache = createDefectCache(api, state.cache);
 
   // ------------------------------------------------------------ 로컬 테스트
   // 사내망 밖에서는 PLM 에 닿지 않는다. 이 모드에서는 백엔드가 샘플로 답하고
@@ -219,38 +202,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const detailHost = el("div", "stack");
   detail.body.append(detailHost);
 
-  const cacheKey = (defect) => `${state.division}:${defect.defectCode}`;
-
-  /** Failures are deliberately left uncached so the next visit retries. */
-  const loadDetail = async (defect) => {
-    const key = cacheKey(defect);
-    if (state.cache[key]?.detail) return state.cache[key].detail;
-
-    const [details, comments] = await Promise.all([
-      api.plmDefectDetails(state.division, [defect.defectCode]).catch(() => null),
-      api.plmHumanComments(state.division, defect.defectCode).catch(() => null),
-    ]);
-    const entry = {
-      details: details || { defects: [] },
-      comments: comments || { comments: [] },
-    };
-    if (details && comments) state.cache[key] = { ...state.cache[key], detail: entry };
-    return entry;
-  };
-
-  const loadAttachments = async (defect) => {
-    const key = cacheKey(defect);
-    if (state.cache[key]?.files) return state.cache[key].files;
-
-    const listing = await api.plmFiles(state.division, defect.defectCode).catch(() => null);
-    if (listing) state.cache[key] = { ...state.cache[key], files: listing };
-    return listing || { files: [] };
-  };
-
   const drawDetail = async (defect) => {
     detailHost.replaceChildren(el("div", "empty", "불러오는 중..."));
 
-    const { details, comments } = await loadDetail(defect);
+    const { details, comments } = await cache.detail(state.division, defect);
     const full = details.defects?.[0] || defect;
 
     detailHost.replaceChildren();
@@ -382,7 +337,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
   const drawAttachments = async (defect) => {
     attachmentHost.replaceChildren(el("div", "empty", "불러오는 중..."));
-    const listing = await loadAttachments(defect);
+    const listing = await cache.attachments(state.division, defect);
     const files = listing.files || [];
 
     attachmentHost.replaceChildren();
@@ -425,13 +380,6 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const analysis = panel("AI 분석", "결함 내용을 정리해 코멘트 초안을 만듭니다.");
   const analysisHost = el("div", "stack");
   analysis.body.append(analysisHost);
-
-  function clearSelectionViews() {
-    detailHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
-    attachmentHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
-    analysisHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
-    ctx.setActiveDefect(null);
-  }
 
   const drawAnalysis = (defect) => {
     analysisHost.replaceChildren();
@@ -509,7 +457,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
       commentNote.textContent = body.success ? "등록했습니다." : body.message || "등록 실패";
       if (body.success) {
         commentBody.value = "";
-        ctx.invalidateDefect(state.division, state.selected.defectCode);
+        cache.invalidate(state.division, state.selected.defectCode);
       }
     } catch (error) {
       commentNote.textContent = String(error.message || error);
@@ -521,6 +469,17 @@ export async function renderPlm(mount, sourceFile, ctx) {
   comment.body.append(field("내용", commentBody), field("작성자", commentUser), commentButton, commentNote);
 
   // ------------------------------------------------------------------ 배선
+
+  /** Reaches into all three selection panels, so it belongs to the wiring
+   *  rather than to any one of them. Clearing ctx.activeDefect is the part
+   *  that matters most: the chat files its answers against it. */
+  function clearSelectionViews() {
+    detailHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    attachmentHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    analysisHost.replaceChildren(el("div", "empty", "결함을 선택하세요."));
+    ctx.setActiveDefect(null);
+  }
+
   const selectDefect = async (defect) => {
     if (state.selected?.defectCode !== defect.defectCode) state.analysis = null;
     state.selected = defect;
