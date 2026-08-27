@@ -247,6 +247,17 @@ class RilRagChat:
             gc.collect()
         print(f"\nVector DB 업데이트 완료! (총 {total_docs}개 조각 추가됨)")
 
+    @staticmethod
+    def _parse_tool_fact(raw_fact):
+        """도구 반환값에서 구조를 꺼낸다. dict 가 아니면 빈 dict."""
+        if isinstance(raw_fact, dict):
+            return raw_fact
+        try:
+            parsed = json.loads(raw_fact)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
     def _get_domain_specific_guideline(self, query, intents, retrieved_log_types):
         query_lower = query.lower()
         log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
@@ -400,13 +411,32 @@ class RilRagChat:
         past_knowledge_context = self._get_past_knowledge_context(search_query, top_k=2)
 
         # 2. 팩트 데이터 추출
+        #
+        # 도구들은 json.dumps 로 만든 JSON 문자열을 돌려준다. 프롬프트에 넣을 문자열과
+        # 별도로 구조를 그대로 보관해 둔다. 예전에는 프롬프트용으로 합치고 정제까지 끝낸
+        # 문자열을 다시 json.loads 하려 했는데, 그 문자열은 "[도구명 분석 팩트]:" 로
+        # 시작하므로 조건이 성립할 수 없었다. 그래서 _temp_tool_facts 는 항상 비어 있었고
+        # SYSTEM_WTF 발생 횟수 통계 주입이 한 번도 실행되지 않았다.
         tool_facts_list = []
+        structured_tool_facts = {}
         if current_base != "Unknown" and selected_tools:
             for tool_name in selected_tools:
                 tool_fn = self.tool_registry.get(tool_name)
-                if tool_fn:
-                    try: tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{tool_fn(current_base)}")
-                    except Exception as e: print(f"Tool 실행 에러 ({tool_name}): {e}")
+                if not tool_fn:
+                    continue
+                try:
+                    raw_fact = tool_fn(current_base)
+                except Exception as e:
+                    print(f"Tool 실행 에러 ({tool_name}): {e}")
+                    continue
+
+                tool_facts_list.append(f"[{tool_name} 분석 팩트]:\n{raw_fact}")
+                for key, value in self._parse_tool_fact(raw_fact).items():
+                    # 빈 값이 앞 도구가 채운 값을 덮지 않게 한다. 여러 도구가 status
+                    # 같은 흔한 키를 함께 쓴다.
+                    if value in (None, {}, [], ""):
+                        continue
+                    structured_tool_facts[key] = value
 
         tool_facts = "\n\n".join(tool_facts_list) if tool_facts_list else "매칭된 도구 분석 결과가 없습니다."
         tool_facts = self._clean_log_payload(tool_facts)
@@ -414,8 +444,8 @@ class RilRagChat:
         if past_knowledge_context:
             tool_facts = f"{past_knowledge_context}\n\n{tool_facts}"
 
-        # 💡 [핵심] JSON 데이터 임시 보관 (prompt_template 주입용)
-        self._temp_tool_facts = json.loads(tool_facts) if tool_facts.startswith('{') else {}
+        # 💡 [핵심] 구조화된 도구 결과 임시 보관 (prompt_template 주입용)
+        self._temp_tool_facts = structured_tool_facts
 
         if health_kpi:
             sanitized_kpi = self._clean_log_payload(health_kpi)
