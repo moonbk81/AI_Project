@@ -116,7 +116,8 @@ class TestKeywordScorerHandlesKorean:
         tokens = extract_query_tokens("통화가 갑자기 끊긴 원인 알려줘")
         assert "call" in tokens
         assert "drop" in tokens or "disconnect" in tokens
-        assert "cause" in tokens
+        # "원인"/"알려줘" 는 의도어라 근거 토큰에서 빠진다.
+        assert "cause" not in tokens
 
     def test_korean_query_separates_relevant_from_noise(self):
         relevant = "### [type: call_session]\n- end_reason: call drop\n- callfailcause: 49"
@@ -286,3 +287,178 @@ class TestHnswMismatchIsVisible:
         assert col.modified == [
             {"configuration": {"hnsw": {"ef_search": HNSW_CONFIG["ef_search"]}}}
         ]
+
+
+class _FakeCollection:
+    """log_type 별로 문서를 갖고 있는 최소한의 Chroma 흉내.
+
+    where 의 log_type / $in 조건과 n_results 만 해석한다.
+    """
+
+    def __init__(self, rows):
+        # rows: [(id, document, metadata, distance), ...] 거리 오름차순
+        self.rows = rows
+        self.queries = []
+
+    def query(self, query_embeddings=None, n_results=10, where=None):
+        self.queries.append(where)
+        wanted = self._wanted_types(where)
+        picked = [
+            r for r in self.rows
+            if wanted is None or str(r[2].get("log_type")) in wanted
+        ][:n_results]
+        return {
+            "ids": [[r[0] for r in picked]],
+            "documents": [[r[1] for r in picked]],
+            "metadatas": [[r[2] for r in picked]],
+            "distances": [[r[3] for r in picked]],
+        }
+
+    @staticmethod
+    def _wanted_types(where):
+        if not where:
+            return None
+        conditions = where.get("$and", [where])
+        for condition in conditions:
+            log_type = condition.get("log_type")
+            if isinstance(log_type, str):
+                return {log_type}
+            if isinstance(log_type, dict) and "$in" in log_type:
+                return set(log_type["$in"])
+        return None
+
+
+class _FakeEmbedder:
+    def encode(self, text, **kwargs):
+        import numpy as np
+
+        return np.zeros(3, dtype="float32")
+
+
+def _rows():
+    return [
+        ("thermal-1", "[관련 증상] 발열 뜨거움\n기기 온도 기록: 41.2도",
+         {"log_type": "Thermal_Stat", "sensor": "skin"}, 0.70),
+        ("nitz-1", "[관련 증상] 시간 자동 설정\nlog_time: 03-25",
+         {"log_type": "Nitz_Time_Event", "timezone": "UTC+9"}, 0.95),
+        ("usage-1", "[관련 증상] 데이터 사용량\npkg com.example",
+         {"log_type": "Data_Usage", "pkg": "com.example"}, 1.30),
+    ]
+
+
+class TestSoftLogTypeFilter:
+    """라우팅 오판이 리콜 0 으로 이어지지 않게 한다."""
+
+    def test_wrong_routing_still_surfaces_the_right_document(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        col = _FakeCollection(_rows())
+        results = retrieve_and_rerank(
+            collection=col,
+            embed_model=_FakeEmbedder(),
+            search_query="발열이 심한데 원인 찾아줘",
+            top_k=3,
+            target_log_types=["Nitz_Time_Event"],  # 오판
+        )
+
+        assert "thermal-1" in results["ids"][0], "좁힌 유형 밖의 정답이 후보에서 사라졌다"
+        # 좁힌 검색과 좁히지 않은 검색이 각각 한 번씩 나가야 한다.
+        assert len(col.queries) == 2
+        assert col.queries[0] is not None
+        assert col.queries[1] is None
+
+    def test_no_second_query_without_routing(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        col = _FakeCollection(_rows())
+        retrieve_and_rerank(
+            collection=col,
+            embed_model=_FakeEmbedder(),
+            search_query="발열이 심한데",
+            top_k=3,
+            target_log_types=None,
+        )
+        assert len(col.queries) == 1
+
+    def test_routed_type_gets_a_finite_preference(self):
+        from rag.retrieval import ROUTED_LOG_TYPE_BONUS
+
+        # 가점이 키워드 항(최대 0.6)을 넘어서면 예전의 하드 필터와 다를 바 없다.
+        assert 0 < ROUTED_LOG_TYPE_BONUS < 0.6
+
+    def test_caller_log_type_list_is_not_mutated(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        # config.yaml 의 routing_map 리스트가 그대로 넘어오므로 사본을 써야 한다.
+        shared = ["Call_Session"]
+        retrieve_and_rerank(
+            collection=_FakeCollection(_rows()),
+            embed_model=_FakeEmbedder(),
+            search_query="데이터 호 연결 실패 사유",  # datacall 확장이 걸리는 질의
+            top_k=3,
+            target_log_types=shared,
+        )
+        assert shared == ["Call_Session"]
+
+
+class TestWeakEvidenceIsFlagged:
+    """근거가 멀면 '없다' 고 말할 경로를 만든다."""
+
+    def test_close_evidence_is_not_weak(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        results = retrieve_and_rerank(
+            collection=_FakeCollection(_rows()),
+            embed_model=_FakeEmbedder(),
+            search_query="발열이 심한데",
+            top_k=3,
+        )
+        assert results["evidence_is_weak"] is False
+        assert results["best_distance"] == 0.70
+
+    def test_far_evidence_is_weak(self):
+        from rag.retrieval import WEAK_EVIDENCE_DISTANCE, retrieve_and_rerank
+
+        far = [(i, d, m, WEAK_EVIDENCE_DISTANCE + 0.2) for i, d, m, _ in _rows()]
+        results = retrieve_and_rerank(
+            collection=_FakeCollection(far),
+            embed_model=_FakeEmbedder(),
+            search_query="김치찌개 맛있게 끓이는 법",
+            top_k=3,
+        )
+        assert results["evidence_is_weak"] is True
+
+    def test_distances_line_up_with_the_returned_documents(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        results = retrieve_and_rerank(
+            collection=_FakeCollection(_rows()),
+            embed_model=_FakeEmbedder(),
+            search_query="발열이 심한데",
+            top_k=2,
+        )
+        assert len(results["distances"][0]) == len(results["documents"][0]) == 2
+
+
+class TestKeywordScoreIgnoresSchema:
+    """metadata 의 키 이름이 순위를 정하지 못하게 한다."""
+
+    def test_intent_words_are_not_evidence_terms(self):
+        from rag.keyword_match import extract_query_tokens
+
+        tokens = extract_query_tokens("앱이 죽은 근본 원인이 뭐야")
+        assert "cause" not in tokens, "'원인' 은 의도어라 근거 토큰이 되면 안 된다"
+        assert "원인" not in tokens
+        assert "kill" in tokens or "crash" in tokens
+
+    def test_one_rare_token_cannot_decide_alone(self):
+        from rag.keyword_match import build_keyword_scorer
+
+        # 두 토큰 중 흔한 것만 가진 문서와, 희귀한 것만 가진 문서.
+        common = ["crash log here"] * 14
+        rare_holder = "sigsegv only here"
+        texts = common + [rare_holder, "unrelated text"]
+        scorer = build_keyword_scorer("crash sigsegv", texts)
+
+        # 희귀 토큰 하나가 점수를 독점하면 흔한 토큰 보유 문서가 0 에 가까워진다.
+        assert scorer(common[0]) > 0.2

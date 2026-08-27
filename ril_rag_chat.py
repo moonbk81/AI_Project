@@ -42,7 +42,7 @@ from rag.chroma_utils import (
 from rag.routing import extract_json_object, get_hybrid_routing, get_llm_routing, get_semantic_routing
 from rag.llm_client import call_llm
 from rag.collection_config import COLLECTION_CONFIGURATION, ensure_hnsw_settings
-from rag.retrieval import build_where_filter, retrieve_and_rerank
+from rag.retrieval import WEAK_EVIDENCE_DISTANCE, build_where_filter, retrieve_and_rerank
 from rag.ingest import (
     ingest_file as ingest_payload_file,
     get_all_files as get_all_ingested_files,
@@ -444,6 +444,23 @@ class RilRagChat:
             )
             tool_facts = f"{guardrail_injection}\n\n{tool_facts}"
             print("[RAG_INFO] 가드레일 확정 답변을 LLM 프롬프트 최우선 순위로 주입했습니다.")
+
+        # 5-1. 근거 부족 경고
+        # 검색은 관련도와 무관하게 언제나 top_k 개를 돌려준다. 그래서 로그에 답이 없는
+        # 질문에도 그럴듯한 문서가 프롬프트에 실려, 모델이 없는 원인을 만들어 낼 압력이
+        # 상시로 걸려 있었다. 가장 가까운 문서조차 기준보다 멀면 그 사실을 명시한다.
+        if results.get("evidence_is_weak") and not guardrail_answer:
+            best_distance = results.get("best_distance")
+            tool_facts = (
+                "🚨 [근거 부족 - 반드시 먼저 밝힐 것]:\n"
+                f"검색된 로그 중 질문과 충분히 가까운 것이 없습니다 "
+                f"(최근접 거리 {best_distance:.2f}, 판단 기준 {WEAK_EVIDENCE_DISTANCE:.2f}).\n"
+                "아래 [검색된 관련 로그]는 참고용이며 이 질문의 근거로 보기 어렵습니다. "
+                "로그에서 확인되지 않는 원인·수치·시각을 추측해서 쓰지 말고, "
+                "이 로그에서는 확인되지 않는다는 점을 먼저 말한 뒤 "
+                "무엇을 더 봐야 하는지만 제시하십시오.\n\n"
+            ) + tool_facts
+            print(f"[RAG_INFO] 근거 부족: 최근접 거리 {best_distance:.3f} > 기준 {WEAK_EVIDENCE_DISTANCE:.2f}")
 
         # 6. 시스템 프롬프트 빌드 및 디버깅 로그 저장
         system_prompt = build_rag_prompt(self.system_role_prompt, domain_guidelines, tool_facts, formatted_logs)

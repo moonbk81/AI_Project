@@ -80,9 +80,6 @@ _SYNONYMS = {
     "에러": ("error", "fail"),
     "오류": ("error", "fail"),
     "장애": ("fail", "error", "oos"),
-    "원인": ("cause",),
-    "이유": ("cause",),
-    "사유": ("cause", "reason"),
     "지연": ("latency", "delay", "slow"),
     "느": ("latency", "delay", "slow"),
     "전원": ("radio_power", "power"),
@@ -90,6 +87,16 @@ _SYNONYMS = {
     "도메인": ("dns",),
     "시간": ("time",),
     "시각": ("time",),
+}
+
+
+# 질문의 의도를 나타내는 말. 어떤 로그가 답인지는 가리지 못한다.
+# "원인" 을 cause 로 넓혀 두었더니, root_cause 텍스트를 가진 문서가 RCA 성격의
+# 모든 질의에서 만점을 받아 정작 벡터 최근접 문서를 밀어냈다. 의도어는 뺀다.
+_INTENT_STOPWORDS = {
+    "원인", "이유", "사유", "근본", "뭐야", "무엇", "무슨", "어떻게", "어떤", "언제",
+    "어디", "얼마", "알려줘", "알려", "해줘", "해줄", "확인", "분석", "상세", "정확",
+    "있는지", "있어", "있나", "없나", "그래", "왜냐", "관련", "대해", "대한", "부탁",
 }
 
 
@@ -117,13 +124,23 @@ def extract_query_tokens(search_query: str) -> set:
         if keyword in query_lower:
             tokens.update(expansions)
 
-    return {token for token in tokens if len(token) >= 2}
+    return {
+        token for token in tokens
+        if len(token) >= 2 and token not in _INTENT_STOPWORDS
+    }
 
 
 def _idf(document_frequency: int, candidate_count: int) -> float:
-    """BM25 계열 IDF. 후보 전체에 깔린 토큰은 0 에 가까워진다."""
-    return math.log(
-        1 + (candidate_count - document_frequency + 0.5) / (document_frequency + 0.5)
+    """BM25 계열 IDF. 후보 전체에 깔린 토큰은 0 에 가까워진다.
+
+    제곱근을 씌워 동적 범위를 좁힌다. 후보가 16~32개뿐이라 날 IDF 로는 1건짜리
+    토큰이 14건짜리 토큰의 15배까지 벌어지고, 그러면 희귀 토큰 하나의 유무가
+    순위를 혼자 결정해 버린다.
+    """
+    return math.sqrt(
+        math.log(
+            1 + (candidate_count - document_frequency + 0.5) / (document_frequency + 0.5)
+        )
     )
 
 
