@@ -716,3 +716,68 @@ class TestYearBoundary:
 
         assert written == 1
         assert "inside" in sliced.read_text(encoding="utf-8")
+
+
+class TestBinderLeakDocumentKeepsItsSourceEvent:
+    """요약 문서가 근거 이벤트의 이름을 지우지 않게 한다.
+
+    config.yaml 의 도메인 규칙은 "BINDER_PROXY_HISTOGRAM 에서 추출된 max_count 를
+    가장 정확한 팩트로 간주하라" 처럼 원본 이벤트 이름으로 지시한다. 빌더가 type 을
+    BINDER_PROXY_LEAK_SUMMARY 로 바꿔 쓰면서 그 이름이 payload 어디에도 남지 않아,
+    프롬프트가 가리키는 근거를 검색으로도 인용으로도 찾을 수 없었다.
+    """
+
+    def _payloads(self):
+        from rag_builders.binder_builder import build_binder_payloads
+
+        report = {
+            "binder_warnings": [
+                {
+                    "time": "06-01 15:13:17.312",
+                    "type": "BINDER_PROXY_HISTOGRAM",
+                    "max_count": 7262,
+                    "desc": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개)",
+                }
+            ]
+        }
+        return build_binder_payloads(report, "binder_leak_am_kill_report.json")
+
+    def test_source_event_name_survives_into_the_document(self):
+        payloads = self._payloads()
+        leak_docs = [
+            p for p in payloads
+            if (p["metadata"] or {}).get("type") == "BINDER_PROXY_LEAK_SUMMARY"
+        ]
+        assert leak_docs, "누수 요약 문서가 만들어지지 않았다"
+
+        document = leak_docs[0]["document"]
+        metadata = leak_docs[0]["metadata"]
+
+        assert metadata["source_type"] == "BINDER_PROXY_HISTOGRAM"
+        assert "BINDER_PROXY_HISTOGRAM" in document
+        # 기존 소비자(structured_event_renderer 등)가 보는 type 은 그대로 둔다.
+        assert metadata["type"] == "BINDER_PROXY_LEAK_SUMMARY"
+
+    def test_the_numbers_the_rules_ask_for_are_still_there(self):
+        leak_docs = [
+            p for p in self._payloads()
+            if (p["metadata"] or {}).get("type") == "BINDER_PROXY_LEAK_SUMMARY"
+        ]
+        metadata = leak_docs[0]["metadata"]
+
+        assert metadata["max_proxy_count"] == 7262
+        assert metadata["leaked_descriptor"] == "android.content.IIntentReceiver"
+
+    def test_evidence_lookup_now_finds_the_label(self):
+        """측정 도구가 TC-022 의 근거를 찾을 수 있어야 한다."""
+        from rag.recall_eval import index_evidence
+
+        payloads = self._payloads()
+        entries = [
+            (str(i), p["document"], p["metadata"]) for i, p in enumerate(payloads)
+        ]
+        found = index_evidence(["BINDER_PROXY_HISTOGRAM", "IIntentReceiver", "7262개"], entries)
+
+        assert found["BINDER_PROXY_HISTOGRAM"], "골든셋이 요구하는 라벨을 찾지 못했다"
+        assert found["IIntentReceiver"]
+        assert found["7262개"]

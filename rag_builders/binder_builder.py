@@ -160,11 +160,20 @@ def build_binder_payloads(report_data, input_file):
         desc = bw.get("desc") or bw.get("raw") or bw.get("raw_info") or ""
         leaked_descriptor = extract_leaked_descriptor(desc)
 
+        # 원본 이벤트 타입을 남긴다. 이 문서는 히스토그램을 요약한 것이라
+        # type 을 BINDER_PROXY_LEAK_SUMMARY 로 쓰는데, 그러면 payload 어디에도
+        # BINDER_PROXY_HISTOGRAM 이라는 이름이 남지 않는다. config.yaml 의 도메인
+        # 규칙은 "BINDER_PROXY_HISTOGRAM 에서 추출된 max_count 를 가장 정확한
+        # 팩트로 간주하라" 처럼 그 이름으로 지시하므로, 이름이 사라지면 LLM 이
+        # 따를 근거가 검색에도 프롬프트에도 없다.
+        source_type = bw.get("type") or "BINDER_PROXY_HISTOGRAM"
+
         meta = {
             "source_file": source_file_name(input_file),
             "log_type": "Binder_Warning",
             "time": bw.get("time", "Unknown"),
             "type": "BINDER_PROXY_LEAK_SUMMARY",
+            "source_type": source_type,
             "leaked_descriptor": leaked_descriptor,
             "max_proxy_count": max_count,
             "raw_info": desc,
@@ -172,6 +181,7 @@ def build_binder_payloads(report_data, input_file):
 
         text_content = (
             f"심각한 바인더 프록시 객체 누수 감지. "
+            f"근거 이벤트: {source_type}. "
             f"누수 객체: {leaked_descriptor}, 최대 누수 개수: {max_count}개. "
             f"상세: {desc}"
         )
