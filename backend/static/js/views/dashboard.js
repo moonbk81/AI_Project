@@ -373,7 +373,8 @@ export async function renderDashboard(mount, sourceFile) {
   report.section.classList.add("wide");
   band.grid.append(report.section);
   reportCard(report, "현재 세션 리포트 생성",
-             () => api.sessionReport(baseName(sourceFile), sourceFile));
+             () => api.sessionReport(baseName(sourceFile), sourceFile),
+             `session:${sourceFile}`);
 
   api.kpi(sourceFile)
     .then((kpi) => band.wrap.insertBefore(kpiBand(kpi), band.grid))

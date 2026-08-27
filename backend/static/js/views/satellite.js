@@ -65,7 +65,8 @@ export async function renderSatellite(mount, sourceFile) {
   report.section.classList.add("wide");
   band.grid.append(report.section);
   reportCard(report, `${overview.sat_type} 리포트 생성`,
-             () => api.satelliteReport(baseName(sourceFile), overview.sat_type, sourceFile));
+             () => api.satelliteReport(baseName(sourceFile), overview.sat_type, sourceFile),
+             `satellite:${sourceFile}:${overview.sat_type}`);
 
   const panels = specs.map((spec) => {
     const panel = card(spec.title, spec.sub);

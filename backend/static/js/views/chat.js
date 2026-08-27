@@ -229,7 +229,7 @@ export async function renderChat(mount, sourceFile, ctx) {
     for (const button of quick.children) button.disabled = value;
   };
 
-  const ask = async (question, existing) => {
+  const ask = (question, existing) => {
     if (!question.trim() || busy) return;
     const turn = existing || { question, pending: true };
     if (!existing) turns.push(turn);
@@ -237,6 +237,13 @@ export async function renderChat(mount, sourceFile, ctx) {
     redraw();
     setBusy(true);
 
+    // 답을 기다리는 동안 다른 탭에 다녀오면 이 화면은 버려지고 새로 그려진다.
+    // 진행 중인 요청을 turn 에 달아 두어야 새 화면이 다시 붙을 수 있다.
+    turn.inflight = run(turn, question);
+    return turn.inflight;
+  };
+
+  const run = async (turn, question) => {
     try {
       const history = turns
         .slice(0, -1)
@@ -261,6 +268,7 @@ export async function renderChat(mount, sourceFile, ctx) {
       console.error(error);
       Object.assign(turn, { pending: false, answer: `답변을 받지 못했습니다: ${error.message || error}` });
     } finally {
+      delete turn.inflight;
       setBusy(false);
       redraw();
     }
@@ -293,6 +301,17 @@ export async function renderChat(mount, sourceFile, ctx) {
   wrap.append(quick, form);
   redraw();
   input.focus?.();
+
+  // 다른 탭에 다녀온 사이에 답이 오고 있었다면, 그 요청이 끝나는 대로 이 화면을
+  // 갱신한다. 답 자체는 대화에 그대로 남으므로 다시 물을 필요는 없다.
+  const waiting = turns.find((turn) => turn.pending && turn.inflight);
+  if (waiting) {
+    setBusy(true);
+    waiting.inflight.finally(() => {
+      setBusy(false);
+      redraw();
+    });
+  }
 
   if (handedOver) ask(handedOver.question, handedOver);
 }
