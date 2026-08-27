@@ -217,7 +217,8 @@ function rerender() {
           division: "25",
           divisionName: "Mobile",
           status: "Open",
-          method: "그룹",
+          // 로그인한 사람의 결함부터 보여 주는 것이 기본. 다른 방식은 옆 칸에 있다.
+          method: "내 문제",
           group: "",
           user: "",
           defectCode: "",

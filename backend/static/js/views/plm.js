@@ -6,7 +6,8 @@ import { createDefectCache, defectCacheKey } from "./plm_data.js";
 
 const MOBILE_DIVISION = "25";
 const STATUSES = ["Open", "Resolve", "Close"];
-const SEARCH_METHODS = ["그룹", "사용자 ID", "PLM 번호"];
+// "내 문제" 는 로그인한 Knox ID 로 바로 찾는다 — 가장 자주 하는 검색이라 맨 앞.
+const SEARCH_METHODS = ["내 문제", "그룹", "사용자 ID", "PLM 번호"];
 const JOB_POLL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
 // core/log_archive.py 의 ARCHIVE_SUFFIXES 와 같은 목록. 로그는 압축 첨부 안에만
@@ -153,7 +154,12 @@ export async function renderPlm(mount, sourceFile, ctx) {
     statusHost.replaceChildren();
     if (method.value !== "PLM 번호") statusHost.append(field("상태", status.wrap));
 
-    if (method.value === "그룹") {
+    if (method.value === "내 문제") {
+      const knox = rememberedKnoxId();
+      targetHost.replaceChildren(el("p", "card-note", knox
+        ? `${knox} 이(가) 담당인 결함을 찾습니다.`
+        : "로그인한 Knox ID 가 없습니다. 다른 검색 방식을 쓰세요."));
+    } else if (method.value === "그룹") {
       targetHost.replaceChildren(field("그룹", groupPicker));
     } else if (method.value === "사용자 ID") {
       targetHost.replaceChildren(field("Knox ID", userInput));
@@ -803,10 +809,16 @@ export async function renderPlm(mount, sourceFile, ctx) {
     return api.plmDefectDetails(state.division, defectCodes);
   };
 
+  const ownerToSearch = async () => {
+    if (method.value === "내 문제") return rememberedKnoxId();
+    if (method.value === "그룹") {
+      return (await api.plmGroupUsers(groupPicker.value)).users.join(",");
+    }
+    return userInput.value.trim();
+  };
+
   const searchByOwner = async () => {
-    const ownerId = method.value === "그룹"
-      ? (await api.plmGroupUsers(groupPicker.value)).users.join(",")
-      : userInput.value.trim();
+    const ownerId = await ownerToSearch();
 
     if (!ownerId) {
       return { success: false, message: "검색할 그룹이나 Knox ID 를 지정하세요.", defects: [] };
