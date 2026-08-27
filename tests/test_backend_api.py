@@ -84,7 +84,9 @@ def fake_executor():
 def client(monkeypatch, tmp_path, fake_engine, fake_executor):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(backend_main, "_engine", fake_engine)
+    # 잡은 실행기 둘로 나뉜다: 앞단(내려받기 등)과 분석 본체.
     monkeypatch.setattr(backend_main, "_executor", fake_executor)
+    monkeypatch.setattr(backend_main, "_analysis_executor", fake_executor)
     with backend_main._jobs_lock:
         backend_main._jobs.clear()
     return TestClient(backend_main.app)

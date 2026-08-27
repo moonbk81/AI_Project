@@ -37,7 +37,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, current_file: sourceFile, chat_history: chatHistory }),
     });
-    if (!response.ok) throw new Error(`질의 실패 (${response.status})`);
+    if (!response.ok) {
+      // 서버가 이유를 적어 보내면(자리가 없다는 안내 등) 그대로 보여 준다.
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || `질의 실패 (${response.status})`);
+    }
     return response.json();
   },
 

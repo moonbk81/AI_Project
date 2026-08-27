@@ -2,11 +2,22 @@
 
 Start with:
     uvicorn backend.main:app --host 0.0.0.0 --port 8080
+
+한 서버를 여럿이 함께 쓰므로 동시 실행은 환경 변수로 조절한다. 프로세스를
+늘리는 것(--workers)은 답이 아니다: 잡 목록이 프로세스 안 dict 이고 워커마다
+임베딩 모델을 따로 GPU 에 올린다.
+
+    JOB_WORKERS=4           첨부 내려받기·압축 해제 등 앞단 (기본 4)
+    ANALYSIS_WORKERS=2      업로드 분석 잡을 받아 두는 자리 (기본 2)
+    ANALYSIS_CONCURRENCY=1  실제로 GPU 를 쓰는 분석 본체 (기본 1)
+    ASK_CONCURRENCY=2       동시에 처리할 질문 수 (기본 2)
+    ASK_WAIT_SECONDS=180    질문이 자리를 기다리는 한도. 넘으면 503.
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime
 import logging
 import os
@@ -21,6 +32,7 @@ from fastapi import File, Form, UploadFile, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from rag.llm_provider import get_default_llm_model, get_llm_provider, get_llm_runtime_label
 
@@ -400,7 +412,76 @@ _engine = None
 _engine_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
-_executor = ThreadPoolExecutor(max_workers=1)
+
+# 여러 사람이 한 서버를 함께 쓴다. 잡을 한 줄로 세우면 남이 건 10분짜리 분석
+# 뒤에서 첨부 목록 훑기조차 시작을 못 한다. 그래서 앞단(내려받기·압축 해제)은
+# 나란히 돌리고, GPU 를 쓰는 분석 본체만 아래 슬롯으로 한 번에 하나씩 통과시킨다.
+_executor = ThreadPoolExecutor(max_workers=int(os.getenv("JOB_WORKERS", "4")))
+_analysis_executor = ThreadPoolExecutor(max_workers=int(os.getenv("ANALYSIS_WORKERS", "2")))
+
+# GPU 는 하나뿐이라 임베딩·분석이 겹치면 OOM 이 난다.
+_ANALYSIS_SLOT = threading.Semaphore(int(os.getenv("ANALYSIS_CONCURRENCY", "1")))
+_analysis_queue = 0
+_analysis_queue_lock = threading.Lock()
+
+# 질문도 마찬가지다. 동시에 들어온 만큼 임베딩이 떠서 카드가 못 견딘다.
+_ASK_SLOT = threading.Semaphore(int(os.getenv("ASK_CONCURRENCY", "2")))
+_ASK_WAIT_SECONDS = float(os.getenv("ASK_WAIT_SECONDS", "180"))
+_ask_queue = 0
+_ask_queue_lock = threading.Lock()
+
+
+@contextmanager
+def _analysis_slot(job_id: str):
+    """분석 본체를 한 번에 하나만 통과시킨다.
+
+    기다리는 동안 잡 메시지를 바꿔 준다. 아무 말 없이 멈춰 있으면 사용자는
+    서버가 죽은 줄 안다.
+    """
+    global _analysis_queue
+
+    with _analysis_queue_lock:
+        _analysis_queue += 1
+        ahead = _analysis_queue - 1
+
+    try:
+        if not _ANALYSIS_SLOT.acquire(blocking=False):
+            _set_job(
+                job_id,
+                status="running",
+                message=f"다른 분석이 끝나기를 기다리는 중 (앞에 {ahead}개)",
+            )
+            _ANALYSIS_SLOT.acquire()
+        try:
+            yield
+        finally:
+            _ANALYSIS_SLOT.release()
+    finally:
+        with _analysis_queue_lock:
+            _analysis_queue -= 1
+
+
+@contextmanager
+def _ask_slot():
+    """질문 동시 실행 수를 묶는다. 자리가 안 나면 기다리다 503 으로 돌려보낸다."""
+    global _ask_queue
+
+    with _ask_queue_lock:
+        _ask_queue += 1
+    try:
+        if not _ASK_SLOT.acquire(timeout=_ASK_WAIT_SECONDS):
+            raise HTTPException(
+                status_code=503,
+                detail="지금 질문이 몰려 있습니다. 잠시 후 다시 시도해 주세요.",
+            )
+        try:
+            yield
+        finally:
+            _ASK_SLOT.release()
+    finally:
+        with _ask_queue_lock:
+            _ask_queue -= 1
+
 _RESULT_ARTIFACTS = {
     "report",
     "datacall",
@@ -409,6 +490,7 @@ _RESULT_ARTIFACTS = {
     "internet_stall",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 _CHROMA_DB_PATH = "./chroma_db"
 
 
@@ -487,14 +569,15 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
 
     try:
         _set_job(job_id, status="running", message="분석 작업을 시작합니다.", progress=0)
-        result = run_analysis_core(
-            file_paths,
-            use_slice=use_slice,
-            start_t=start_t,
-            end_t=end_t,
-            ai_engine=get_engine(),
-            progress_callback=progress,
-        )
+        with _analysis_slot(job_id):
+            result = run_analysis_core(
+                file_paths,
+                use_slice=use_slice,
+                start_t=start_t,
+                end_t=end_t,
+                ai_engine=get_engine(),
+                progress_callback=progress,
+            )
         _set_job(
             job_id,
             status="done",
@@ -825,6 +908,9 @@ def health() -> Dict[str, Any]:
         "chroma_db_path": _CHROMA_DB_PATH,
         "artifact_dirs": {folder: os.path.exists(folder) for folder in _ARTIFACT_DIRS},
         "active_jobs": active_jobs,
+        # 여럿이 함께 쓸 때 "느리다" 의 정체는 대개 이 대기열이다.
+        "analysis_queue": _analysis_queue,
+        "ask_queue": _ask_queue,
         "supported_artifacts": sorted(_RESULT_ARTIFACTS),
     }
 
@@ -844,13 +930,14 @@ def ask(req: AskRequest) -> AskResponse:
         except Exception as e:
             print(f"[ASK] health KPI unavailable: {e}", file=sys.stderr)
 
-    answer, ids, metas, thinking = get_engine().ask(
-        req.question,
-        current_file=req.current_file,
-        chat_history=req.chat_history,
-        top_k=req.top_k,
-        health_kpi=health_kpi,
-    )
+    with _ask_slot():
+        answer, ids, metas, thinking = get_engine().ask(
+            req.question,
+            current_file=req.current_file,
+            chat_history=req.chat_history,
+            top_k=req.top_k,
+            health_kpi=health_kpi,
+        )
     return AskResponse(
         answer=answer,
         ids=ids,
@@ -1067,12 +1154,17 @@ async def create_analyze_job(
     for uploaded in files:
         safe_name = os.path.basename(uploaded.filename or "uploaded.log")
         path = os.path.join(upload_dir, safe_name)
-        content = await uploaded.read()
-        with open(path, "wb") as f:
-            f.write(content)
+        # 로그는 수백 MB 씩 한다. 통째로 읽어 올리면 그 파일만큼 메모리를 먹고,
+        # 동기 write 가 이벤트 루프를 잡고 있는 동안 다른 사람 요청이 전부 멈춘다.
+        with open(path, "wb") as handle:
+            while True:
+                chunk = await uploaded.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                await run_in_threadpool(handle.write, chunk)
         file_paths.append(path)
 
-    _executor.submit(_run_analyze_job, job_id, file_paths, use_slice, start_t, end_t)
+    _analysis_executor.submit(_run_analyze_job, job_id, file_paths, use_slice, start_t, end_t)
     return AnalyzeJobResponse(job_id=job_id)
 
 
