@@ -131,6 +131,52 @@ def test_attachment_logs_are_extracted_then_handed_to_the_analyzer(monkeypatch, 
     assert open(analyzed["paths"][0], "rb").read() == b"log body"
 
 
+def test_only_the_picked_attachments_are_downloaded(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {
+            "success": True,
+            "files": [
+                {"title": "first.zip", "docId": "D", "fileId": "F1"},
+                {"title": "second.zip", "docId": "D", "fileId": "F2"},
+            ],
+        },
+    )
+
+    downloaded = []
+
+    def download(**kwargs):
+        downloaded.append(kwargs["file_id"])
+        return {"success": True, "data": make_zip({"dumpstate.log": b"log body"})}
+
+    monkeypatch.setattr("plm.service.download_attached_file", download)
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: None)
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_attachment_job(job_id, "25", "D-1", ["F2"])
+
+    assert downloaded == ["F2"]
+
+
+def test_a_picked_attachment_that_is_gone_lands_on_the_job(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {"success": True, "files": [{"title": "a.zip", "docId": "D", "fileId": "F1"}]},
+    )
+    monkeypatch.setattr(
+        "plm.service.download_attached_file", lambda **kwargs: pytest.fail("내려받으면 안 된다")
+    )
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_attachment_job(job_id, "25", "D-1", ["사라진-파일"])
+
+    job = backend_main._get_job(job_id)
+    assert job["status"] == "error" and "찾지 못했습니다" in job["error"]
+
+
 def test_an_attachment_without_logs_finishes_without_an_analysis(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 

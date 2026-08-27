@@ -86,8 +86,13 @@ export const api = {
     post("/plm/analyze", { division_code: divisionCode, defect_code: defectCode }),
   plmAnalysisQuery: (divisionCode, defectCode, comments) =>
     post("/plm/analysis-query", { division_code: divisionCode, defect_code: defectCode, comments }),
-  plmAnalyzeAttachments: (divisionCode, defectCode) =>
-    post("/plm/attachments/analyze", { division_code: divisionCode, defect_code: defectCode }),
+  /** `fileIds` picks the attachments to open; omit it to take every archive. */
+  plmAnalyzeAttachments: (divisionCode, defectCode, fileIds) =>
+    post("/plm/attachments/analyze", {
+      division_code: divisionCode,
+      defect_code: defectCode,
+      file_ids: fileIds && fileIds.length ? fileIds : null,
+    }),
 
   // The comment body is turned into PLM's markup server-side, so the caller
   // sends what the user typed.

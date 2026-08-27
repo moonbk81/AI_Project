@@ -229,6 +229,9 @@ class PlmAnalysisQueryResponse(BaseModel):
 class PlmAttachmentAnalyzeRequest(BaseModel):
     division_code: str = "25"
     defect_code: str = Field(min_length=1)
+    # Only these attachments are downloaded. Empty/None means every archive
+    # attachment, which is what the button did before the picker existed.
+    file_ids: Optional[List[str]] = None
 
 
 class PlmCommentRequest(BaseModel):
@@ -488,12 +491,20 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
         _set_job(job_id, status="error", error=str(e), message="분석 실패")
 
 
-def _run_plm_attachment_job(job_id: str, division_code: str, defect_code: str):
+def _run_plm_attachment_job(
+    job_id: str,
+    division_code: str,
+    defect_code: str,
+    file_ids: Optional[List[str]] = None,
+):
     """Fetch a defect's ZIP attachments, pull the logs out, then analyze them.
 
     This used to run in the UI process and leave the files in session state.
     Here the whole thing is one job, so a browser only has to poll for
     progress.
+
+    `file_ids` narrows the work to the attachments the user ticked; downloading
+    every archive on a defect that carries several is what made this slow.
     """
     from plm import log_pipeline
     from plm.service import download_attached_file, list_attached_files
@@ -505,6 +516,13 @@ def _run_plm_attachment_job(job_id: str, division_code: str, defect_code: str):
         if not listing.get("success"):
             raise RuntimeError(listing.get("message") or "첨부 파일 목록 조회 실패")
 
+        files = listing.get("files") or []
+        if file_ids:
+            wanted = {str(file_id) for file_id in file_ids}
+            files = [f for f in files if str(f.get("fileId")) in wanted]
+            if not files:
+                raise RuntimeError("선택한 첨부 파일을 목록에서 찾지 못했습니다.")
+
         def download(doc_id, title, file_id):
             return download_attached_file(
                 division_code=division_code, doc_id=doc_id, title=title, file_id=file_id
@@ -514,7 +532,7 @@ def _run_plm_attachment_job(job_id: str, division_code: str, defect_code: str):
         os.makedirs(upload_dir, exist_ok=True)
 
         file_paths: List[str] = []
-        for event in log_pipeline.extract_logs_from_attachments(listing.get("files", []), download):
+        for event in log_pipeline.extract_logs_from_attachments(files, download):
             if event.kind == log_pipeline.DOWNLOADING:
                 _set_job(
                     job_id,
@@ -1003,7 +1021,9 @@ def plm_analysis_query(req: PlmAnalysisQueryRequest) -> PlmAnalysisQueryResponse
 def plm_attachment_analyze(req: PlmAttachmentAnalyzeRequest) -> AnalyzeJobResponse:
     """Download a defect's attachments, extract the logs and analyze them."""
     job_id = _new_job("PLM 첨부 처리 대기 중")
-    _executor.submit(_run_plm_attachment_job, job_id, req.division_code, req.defect_code)
+    _executor.submit(
+        _run_plm_attachment_job, job_id, req.division_code, req.defect_code, req.file_ids
+    )
     return AnalyzeJobResponse(job_id=job_id)
 
 
