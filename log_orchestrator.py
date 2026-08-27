@@ -88,10 +88,15 @@ class LogOrchestrator:
         return cross_context_logs[-max_lines:] if len(cross_context_logs) > max_lines else cross_context_logs
 
     def _add_context_window(self, buckets, bucket_name, lines, idx, window=80):
-        """이벤트성 로그는 핵심 라인 주변 context를 함께 포함합니다."""
+        """이벤트성 로그는 핵심 라인 주변 context를 함께 포함합니다.
+
+        버킷에는 라인 문자열이 아니라 원본 줄 번호를 넣습니다. 겹치는 window 가
+        같은 줄을 여러 번 담아도 집합이 한 번으로 모아주고, 로그에 실제로 여러 번
+        찍힌 같은 문자열은 줄 번호가 달라 각각 살아남습니다.
+        """
         start = max(0, idx - window)
         end = min(len(lines), idx + window + 1)
-        buckets[bucket_name].extend(lines[start:end])
+        buckets[bucket_name].update(range(start, end))
 
     def run_batch(self, output_path):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""

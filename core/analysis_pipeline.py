@@ -28,9 +28,21 @@ class AnalysisPipelineResult:
 
 
 def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
+    """``start_time_str`` ~ ``end_time_str`` 구간만 뽑아 씁니다.
+
+    로그 타임스탬프에는 연도가 없어 "MM-DD HH:MM:SS" 문자열로 비교합니다. 시작이
+    종료보다 크면 사용자가 연말을 넘는 구간을 지정한 것이므로(12-31 23:00 ~
+    01-01 01:00) 비교를 뒤집습니다.
+
+    종료 시각을 지나면 즉시 break 하던 최적화는 제거했습니다. dumpstate 는 섹션을
+    이어 붙여 시간이 되돌아가는 지점이 있고, 병합 로그는 더합니다. 그런 줄 하나가
+    나오면 남은 파일 전체가 조용히 잘려나갔습니다.
+    """
     pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2})')
     written_lines = 0
     is_in_range = False
+
+    crosses_year = bool(start_time_str) and bool(end_time_str) and start_time_str > end_time_str
 
     with open(input_path, 'r', encoding='utf-8', errors='ignore') as fin, \
          open(output_path, 'w', encoding='utf-8') as fout:
@@ -38,12 +50,10 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
             match = pattern.search(line)
             if match:
                 current_time = match.group(1)
-                if start_time_str <= current_time <= end_time_str:
-                    is_in_range = True
-                elif current_time > end_time_str:
-                    break
+                if crosses_year:
+                    is_in_range = current_time >= start_time_str or current_time <= end_time_str
                 else:
-                    is_in_range = False
+                    is_in_range = start_time_str <= current_time <= end_time_str
 
             if is_in_range:
                 fout.write(line)
@@ -62,22 +72,40 @@ def merge_log_files(file_paths, output_path):
     원본 순서를 그대로 유지한다.
     """
     time_pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})')
-    all_lines = []
 
+    # 타임스탬프에 연도가 없어서 "MM-DD" 문자열로 정렬하면 연말을 넘는 로그가
+    # 뒤집힌다(01-01 이 12-31 앞으로 간다). 12월과 1월이 함께 보이면 연말을 넘은
+    # 것으로 보고, 상반기를 다음 해로 취급한다. 단말 로그가 반년을 넘기지는 않는다.
+    months = set()
+    for fp in file_paths:
+        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                match = time_pattern.search(line)
+                if match:
+                    months.add(match.group(1)[:2])
+    crosses_year = "12" in months and "01" in months
+
+    def year_cycle(timestamp):
+        if not crosses_year:
+            return 0
+        return 1 if timestamp[:2] <= "06" else 0
+
+    all_lines = []
     for file_index, fp in enumerate(file_paths):
         # 첫 타임스탬프가 나오기 전의 머리말은 파일 맨 앞에 그대로 둔다.
-        last_key = "00-00 00:00:00.000"
+        last_cycle, last_key = 0, "00-00 00:00:00.000"
         with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
             for line_number, line in enumerate(f):
                 match = time_pattern.search(line)
                 if match:
                     last_key = match.group(1)
-                all_lines.append((last_key, file_index, line_number, line))
+                    last_cycle = year_cycle(last_key)
+                all_lines.append((last_cycle, last_key, file_index, line_number, line))
 
-    all_lines.sort(key=lambda x: (x[0], x[1], x[2]))
+    all_lines.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        for _, _, _, line in all_lines:
+        for *_, line in all_lines:
             f.write(line)
 
 

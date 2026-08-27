@@ -557,3 +557,162 @@ class TestRecallEvalGroundTruth:
         assert ann_recall(["a", "b", "c", "d"], ["a", "b", "x", "y"]) == 0.5
         assert ann_recall(["a"], ["a"]) == 1.0
         assert ann_recall([], ["a"]) is None
+
+
+class TestBucketsKeepEveryOccurrence:
+    """버킷이 같은 문자열을 접어버려 발생 횟수를 잃지 않게 한다.
+
+    예전에는 라인 문자열로 중복을 지웠다. 그러면 window 가 겹쳐 생긴 중복과, 로그에
+    실제로 여러 번 찍힌 같은 줄을 구분할 수 없다. 실측으로 request_failed 로그에서
+    528줄(9%), binder_leak 로그에서 10,166줄(9%, binder 버킷만 5,544줄)이 사라졌다.
+    """
+
+    def _build(self, lines):
+        from log_orchestrator import LogOrchestrator
+
+        # 실제 배선을 그대로 쓴다. __init__ 은 파일을 읽지 않는다.
+        orchestrator = LogOrchestrator("dummy.log")
+        return orchestrator.bucket_builder.build(lines)
+
+    def test_repeated_identical_lines_all_survive(self):
+        line = "01-01 00:00:01.000 SatelliteController: NTN signal lost\n"
+        lines = [line, "01-01 00:00:02.000 Foo: unrelated\n", line, line]
+
+        buckets = self._build(lines)
+
+        assert len(buckets["ntn"]) == 3, "같은 문자열이 세 번 찍혔으면 세 번 남아야 한다"
+
+    def test_overlapping_windows_include_each_line_once(self):
+        lines = [f"01-01 00:00:{i:02d}.000 Foo: filler\n" for i in range(40)]
+        lines[10] = "01-01 00:00:10.000 DEBUG: Fatal signal 11 (SIGSEGV)\n"
+        lines[12] = "01-01 00:00:12.000 DEBUG: Fatal signal 11 (SIGSEGV)\n"
+
+        buckets = self._build(lines)
+
+        # window=80 이라 두 앵커의 문맥이 전체를 덮는다. 겹쳐도 한 번씩만.
+        assert len(buckets["crash"]) == len(lines)
+        assert len(set(map(id, buckets["crash"]))) == len(lines)
+
+    def test_bucket_keeps_original_line_order(self):
+        lines = [
+            "01-01 00:00:03.000 SatelliteController: NTN c\n",
+            "01-01 00:00:01.000 SatelliteController: NTN a\n",
+            "01-01 00:00:02.000 SatelliteController: NTN b\n",
+        ]
+
+        buckets = self._build(lines)
+
+        assert buckets["ntn"] == lines, "원본에 적힌 순서를 그대로 유지해야 한다"
+
+    def test_context_window_lines_are_not_duplicated_across_buckets(self):
+        """datacall 과 internet_stall 은 같은 앵커에서 각자 window 를 뜬다."""
+        lines = [f"01-01 00:00:{i:02d}.000 Foo: filler\n" for i in range(30)]
+        lines[15] = "01-01 00:00:15.000 DcTracker: SetupDataCall failed\n"
+
+        buckets = self._build(lines)
+
+        # filler 는 초가 달라 전부 서로 다른 문자열이다. 중복이 있으면 window 가
+        # 같은 줄을 두 번 담았다는 뜻이다.
+        assert len(buckets["datacall"]) == len(set(buckets["datacall"]))
+        assert lines[15] in buckets["datacall"]
+        assert lines[15] in buckets["internet_stall"]
+
+
+class TestYearBoundary:
+    """연도가 없는 "MM-DD" 타임스탬프가 연말에 뒤집히지 않게 한다."""
+
+    def test_merge_puts_january_after_december(self, tmp_path):
+        log = tmp_path / "a.log"
+        log.write_text(
+            "01-01 00:00:05.000 I Foo: new year\n"
+            "12-31 23:59:58.000 I Foo: old year\n",
+            encoding="utf-8",
+        )
+        merged = tmp_path / "m.log"
+
+        merge_log_files([str(log)], str(merged))
+        lines = merged.read_text(encoding="utf-8").splitlines()
+
+        assert "old year" in lines[0], "12-31 이 01-01 보다 앞에 와야 한다"
+        assert "new year" in lines[1]
+
+    def test_merge_without_rollover_is_unchanged(self, tmp_path):
+        log = tmp_path / "a.log"
+        log.write_text(
+            "03-26 10:00:02.000 I Foo: second\n"
+            "03-26 10:00:01.000 I Foo: first\n",
+            encoding="utf-8",
+        )
+        merged = tmp_path / "m.log"
+
+        merge_log_files([str(log)], str(merged))
+        lines = merged.read_text(encoding="utf-8").splitlines()
+
+        assert "first" in lines[0]
+        assert "second" in lines[1]
+
+    def test_slice_handles_a_range_that_crosses_new_year(self, tmp_path):
+        from core.analysis_pipeline import slice_log_by_time
+
+        source = tmp_path / "in.log"
+        source.write_text(
+            "12-31 22:00:00.000 I Foo: before\n"
+            "12-31 23:30:00.000 I Foo: inside old year\n"
+            "01-01 00:30:00.000 I Foo: inside new year\n"
+            "01-01 02:00:00.000 I Foo: after\n",
+            encoding="utf-8",
+        )
+        sliced = tmp_path / "out.log"
+
+        written = slice_log_by_time(
+            str(source), str(sliced), "12-31 23:00:00", "01-01 01:00:00"
+        )
+        text = sliced.read_text(encoding="utf-8")
+
+        assert written == 2
+        assert "inside old year" in text
+        assert "inside new year" in text
+        assert "before" not in text
+        assert "after" not in text
+
+    def test_slice_does_not_truncate_when_time_goes_backwards(self, tmp_path):
+        """dumpstate 는 섹션을 이어 붙여 시간이 되돌아간다. 예전엔 거기서 잘렸다."""
+        from core.analysis_pipeline import slice_log_by_time
+
+        source = tmp_path / "in.log"
+        source.write_text(
+            "03-26 10:00:00.000 I Foo: wanted 1\n"
+            "03-26 23:00:00.000 I Foo: out of range, past the end\n"
+            "03-26 10:00:05.000 I Foo: wanted 2\n",
+            encoding="utf-8",
+        )
+        sliced = tmp_path / "out.log"
+
+        written = slice_log_by_time(
+            str(source), str(sliced), "03-26 09:00:00", "03-26 11:00:00"
+        )
+        text = sliced.read_text(encoding="utf-8")
+
+        assert "wanted 1" in text
+        assert "wanted 2" in text, "되돌아가는 줄 뒤가 잘려나갔다"
+        assert "out of range" not in text
+        assert written == 2
+
+    def test_slice_normal_range_still_works(self, tmp_path):
+        from core.analysis_pipeline import slice_log_by_time
+
+        source = tmp_path / "in.log"
+        source.write_text(
+            "03-26 09:00:00.000 I Foo: before\n"
+            "03-26 10:00:00.000 I Foo: inside\n"
+            "03-26 12:00:00.000 I Foo: after\n",
+            encoding="utf-8",
+        )
+        sliced = tmp_path / "out.log"
+
+        written = slice_log_by_time(
+            str(source), str(sliced), "03-26 09:30:00", "03-26 11:00:00"
+        )
+
+        assert written == 1
+        assert "inside" in sliced.read_text(encoding="utf-8")

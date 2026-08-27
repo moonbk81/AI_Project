@@ -113,6 +113,11 @@ class AnalysisBucketBuilder:
         """
         parser마다 전체 dump를 반복 순회하지 않도록 1회 스캔으로 후보 라인 버킷을 만듭니다.
         call/oos parser는 상태 흐름 누락 위험이 있어 run_batch에서 계속 전체 lines를 사용합니다.
+
+        버킷은 수집 중에 원본 줄 번호를 담습니다. 예전에는 라인 문자열을 담고 마지막에
+        같은 문자열을 지웠는데, 그러면 window 가 겹쳐 생긴 중복과 로그에 실제로 여러 번
+        찍힌 같은 줄을 구분할 수 없어 발생 횟수가 줄어들었습니다. 줄 번호로 접으면
+        겹침은 한 번으로 모이고 진짜 반복은 각자 남습니다. 원본 순서도 그대로 됩니다.
         """
         buckets = self._new_buckets()
         state = {
@@ -120,37 +125,37 @@ class AnalysisBucketBuilder:
         }
 
         for idx, line in enumerate(lines):
-            self._collect_basic_buckets(buckets, line)
+            self._collect_basic_buckets(buckets, idx, line)
             self._collect_crash_anr_radio_buckets(buckets, lines, idx, line)
             self._collect_battery_thermal_buckets(buckets, lines, idx, line)
             self._collect_telephony_network_buckets(buckets, lines, idx, line)
             self._collect_native_crash_bucket(buckets, lines, idx, line)
             self._collect_binder_buckets(buckets, lines, idx, line, state)
-            self._collect_rilj_bucket(buckets, line)
+            self._collect_rilj_bucket(buckets, idx, line)
 
-        return self._dedupe_and_print(buckets)
+        return self._materialise_and_print(buckets, lines)
 
     def _new_buckets(self):
-        return {name: [] for name in self.BUCKET_NAMES}
+        return {name: set() for name in self.BUCKET_NAMES}
 
-    def _collect_basic_buckets(self, buckets, line):
+    def _collect_basic_buckets(self, buckets, idx, line):
         if line.startswith("!@Boot"):
-            buckets['boot'].append(line)
+            buckets['boot'].add(idx)
 
         if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line or "NetworkSignalStrengthHandler" in line:
-            buckets['signal'].append(line)
+            buckets['signal'].add(idx)
 
         if self._contains_any(line, self.BASIC_USAGE_KEYWORDS):
-            buckets['usage'].append(line)
+            buckets['usage'].add(idx)
 
         if "DNS Requested" in line:
-            buckets['dns'].append(line)
+            buckets['dns'].add(idx)
 
         if self._contains_any(line, self.NET_TS_KEYWORDS):
-            buckets['net_ts'].append(line)
+            buckets['net_ts'].add(idx)
 
         if "nitz_status" in line:
-            buckets['nitz'].append(line)
+            buckets['nitz'].add(idx)
 
     def _collect_crash_anr_radio_buckets(self, buckets, lines, idx, line):
         if self._contains_any(line, self.CRASH_KEYWORDS):
@@ -164,17 +169,17 @@ class AnalysisBucketBuilder:
 
     def _collect_battery_thermal_buckets(self, buckets, lines, idx, line):
         if self._contains_any(line, self.BATTERY_KEYWORDS):
-            buckets['battery'].append(line)
-            buckets['battery_thermal'].append(line)
+            buckets['battery'].add(idx)
+            buckets['battery_thermal'].add(idx)
 
         if self._contains_any(line, self.THERMAL_CONTEXT_KEYWORDS):
             self._add_context_window(buckets, 'battery_thermal', lines, idx, window=8)
         elif self._contains_any(line, self.THERMAL_LINE_KEYWORDS):
-            buckets['battery_thermal'].append(line)
+            buckets['battery_thermal'].add(idx)
 
     def _collect_telephony_network_buckets(self, buckets, lines, idx, line):
         if self._contains_any(line, self.NTN_KEYWORDS):
-            buckets['ntn'].append(line)
+            buckets['ntn'].add(idx)
 
         if self._contains_any(line, self.DATACALL_KEYWORDS):
             # DataCall failure cause strings such as NO CARRIER / User authentication failed
@@ -193,7 +198,7 @@ class AnalysisBucketBuilder:
         if self._contains_any(line, self.INTERNET_STALL_CONTEXT_KEYWORDS):
             self._add_context_window(buckets, 'internet_stall', lines, idx, window=10)
         elif self._contains_any(line, self.INTERNET_STALL_LINE_KEYWORDS):
-            buckets['internet_stall'].append(line)
+            buckets['internet_stall'].add(idx)
 
         if "score{" in line or "PrivateDns=" in line:
             self._add_context_window(buckets, 'dns', lines, idx, window=30)
@@ -209,7 +214,7 @@ class AnalysisBucketBuilder:
             state['in_proxy_histogram'] = True
 
         if state['in_proxy_histogram']:
-            buckets['binder'].append(line)
+            buckets['binder'].add(idx)
             if (
                 "critical dump took" in lower_line
                 or "binderproxydumphelper" in lower_line
@@ -218,7 +223,7 @@ class AnalysisBucketBuilder:
                 state['in_proxy_histogram'] = False
 
         if self._contains_any(line, self.BINDER_KEYWORDS):
-            buckets['binder'].append(line)
+            buckets['binder'].add(idx)
 
         # Binder context는 이벤트 주변의 제한된 문맥만 모읍니다.
         # context 라인을 binder_warnings에 넣으면 UI 상세 테이블이 수천 행으로 불어납니다.
@@ -232,29 +237,26 @@ class AnalysisBucketBuilder:
     def _collect_binder_context_window(self, buckets, lines, idx):
         start = max(0, idx - 20)
         end = min(len(lines), idx + 21)
-        for ctx_line in lines[start:end]:
-            if self._contains_any_lower(ctx_line, self.BINDER_CONTEXT_KEYWORDS):
-                buckets['binder_context'].append(ctx_line)
+        for ctx_idx in range(start, end):
+            if self._contains_any_lower(lines[ctx_idx], self.BINDER_CONTEXT_KEYWORDS):
+                buckets['binder_context'].add(ctx_idx)
 
-    def _collect_rilj_bucket(self, buckets, line):
+    def _collect_rilj_bucket(self, buckets, idx, line):
         if self.RILJ_TAG_REGEX.search(line):
-            buckets['rilj'].append(line)
+            buckets['rilj'].add(idx)
 
-    def _dedupe_and_print(self, buckets):
-        for name, bucket_lines in buckets.items():
-            seen = set()
-            deduped = []
-            for bucket_line in bucket_lines:
-                if bucket_line not in seen:
-                    seen.add(bucket_line)
-                    deduped.append(bucket_line)
-            buckets[name] = deduped
+    def _materialise_and_print(self, buckets, lines):
+        """줄 번호 집합을 원본 순서의 라인 목록으로 바꿉니다."""
+        materialised = {
+            name: [lines[idx] for idx in sorted(indices)]
+            for name, indices in buckets.items()
+        }
 
         print(
             "📊 [PreFilter] "
-            + ", ".join(f"{name}={len(bucket_lines)}" for name, bucket_lines in buckets.items())
+            + ", ".join(f"{name}={len(bucket_lines)}" for name, bucket_lines in materialised.items())
         )
-        return buckets
+        return materialised
 
     @staticmethod
     def _contains_any(line, keywords):
