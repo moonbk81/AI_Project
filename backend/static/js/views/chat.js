@@ -102,7 +102,7 @@ function registerBlock(turn, ctx) {
       const body = await api.plmSubmitAnswer({
         division_code: defect.division,
         defect_code: defect.code,
-        create_user: knox.value.trim(),
+        create_user: knox.value.trim() || rememberedKnoxId(),
         answer: turn.answer,
       });
       note.textContent = body.success ? `${defect.code} 에 등록했습니다. ${body.message || ""}`.trim()

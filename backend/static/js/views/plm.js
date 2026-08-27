@@ -1,6 +1,6 @@
 // PLM — 결함을 찾아 첨부 로그를 분석하고, 결과를 코멘트로 남긴다.
 
-import { api } from "../api.js";
+import { api, rememberedKnoxId } from "../api.js";
 import { el, field, fmt, panel, table } from "../viz.js";
 import { createDefectCache, defectCacheKey } from "./plm_data.js";
 
@@ -133,7 +133,9 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const targetHost = el("div");
   const groupPicker = select([]);
   const userInput = input("예: bongki.moon");
-  userInput.value = state.user || "";
+  // 자기 결함부터 찾는 경우가 대부분이라 로그인한 이름을 미리 넣어 둔다.
+  userInput.value = state.user || rememberedKnoxId();
+  state.user = userInput.value;
   userInput.addEventListener("input", () => {
     state.user = userInput.value;
   });
@@ -730,7 +732,9 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // -------------------------------------------------------------- 코멘트
   const comment = panel("코멘트 등록", "줄바꿈은 PLM 화면에서도 유지됩니다.");
   const commentBody = textarea("결함에 남길 내용", 8);
-  const commentUser = input("Knox ID");
+  // 로그인한 이름을 그대로 쓴다. 다른 이름으로 남길 일이 있을 수 있어 고칠 수는
+  // 있게 두되, 비워 두면 로그인한 이름으로 나간다.
+  const commentUser = input("Knox ID", rememberedKnoxId());
   const commentButton = el("button", "primary", "등록");
   commentButton.type = "button";
   const commentNote = el("p", "card-note");
@@ -744,7 +748,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         division_code: state.division,
         defect_code: state.selected.defectCode,
         comment: commentBody.value,
-        create_user: commentUser.value,
+        create_user: commentUser.value.trim() || rememberedKnoxId(),
       });
       commentNote.textContent = body.success ? "등록했습니다." : body.message || "등록 실패";
       if (body.success) {
