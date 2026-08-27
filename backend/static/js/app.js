@@ -56,6 +56,9 @@ function currentTheme() {
 
 function drawNav() {
   nodes.nav.replaceChildren();
+  // 로그인 전에는 화면 자체가 로그인 창이라 탭도 필요 없다.
+  if (!rememberedKnoxId()) return;
+
   for (const view of VIEWS) {
     const button = el("button", "nav-item" + (view.id === state.view ? " active" : ""), view.label);
     button.type = "button";
@@ -79,56 +82,33 @@ function drawUser() {
   const knox = rememberedKnoxId();
   nodes.user.replaceChildren();
 
-  if (!knox) {
-    const login = el("button", "chip", "로그인");
-    login.type = "button";
-    login.addEventListener("click", () => drawLoginForm());
-    nodes.user.append(login);
-    return;
-  }
+  // 로그인 전에는 본문이 통째로 로그인 창이므로 여기는 비워 둔다.
+  if (!knox) return;
 
   const name = el("span", "user-name", knox);
   const logout = el("button", null, "로그아웃");
   logout.type = "button";
   logout.addEventListener("click", () => {
     rememberKnoxId("");
+    // 다음 사람이 앞사람의 파일 목록을 이어받지 않게 비운다.
+    state.files = [];
+    state.sourceFile = null;
+    drawNav();
+    drawFilePicker();
     drawUser();
     rerender();
   });
   nodes.user.append(name, logout);
 }
 
-function drawLoginForm() {
-  nodes.user.replaceChildren();
-
-  const input = el("input", "text-input");
-  input.type = "text";
-  input.placeholder = "Knox ID";
-  input.value = rememberedKnoxId();
-
-  const done = el("button", "primary", "확인");
-  done.type = "button";
-
-  const finish = () => {
-    const value = input.value.trim();
-    if (!value) return;
-    rememberKnoxId(value);
-    drawUser();
-    rerender();
-  };
-
-  done.addEventListener("click", finish);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") finish();
-    if (event.key === "Escape") drawUser();
-  });
-
-  nodes.user.append(input, done);
-  input.focus();
-}
-
 function drawFilePicker() {
   nodes.file.replaceChildren();
+  if (!rememberedKnoxId()) {
+    nodes.file.append(new Option("로그인 후 표시됩니다", ""));
+    nodes.file.disabled = true;
+    return;
+  }
+
   if (!state.files.length) {
     nodes.file.append(new Option("적재된 로그 없음", ""));
     nodes.file.disabled = true;
@@ -137,6 +117,51 @@ function drawFilePicker() {
   nodes.file.disabled = false;
   for (const file of state.files) nodes.file.append(new Option(file, file));
   if (state.sourceFile) nodes.file.value = state.sourceFile;
+}
+
+/** 로그인 전 첫 화면. 이름을 받기 전에는 적재된 로그도 보여 주지 않는다. */
+function drawLoginGate() {
+  const wrap = el("section", "login-gate");
+  const card = el("div", "card login-card");
+
+  card.append(el("h2", null, "로그 분석 시작하기"));
+  card.append(el("p", "card-sub",
+    "Knox ID 를 적어 주세요. 비밀번호는 없습니다 — 올린 로그와 남긴 글에 붙는 이름표입니다."));
+
+  const input = el("input", "text-input");
+  input.type = "text";
+  input.placeholder = "예: bongki.moon";
+
+  const go = el("button", "primary", "시작하기");
+  go.type = "button";
+
+  const note = el("p", "card-note",
+    "이 이름으로 올린 로그를 구분하고, 다른 사람 것을 덮어쓰지 않게 합니다.");
+
+  const finish = async () => {
+    const value = input.value.trim();
+    if (!value) {
+      note.textContent = "Knox ID 를 입력해 주세요.";
+      return;
+    }
+    go.disabled = true;
+    rememberKnoxId(value);
+    await loadFiles();
+    drawNav();
+    drawFilePicker();
+    drawUser();
+    rerender();
+  };
+
+  go.addEventListener("click", finish);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") finish();
+  });
+
+  card.append(input, go, note);
+  wrap.append(card);
+  nodes.main.append(wrap);
+  input.focus();
 }
 
 function rerender() {
@@ -149,8 +174,14 @@ function rerender() {
   }
   state.leaveHandlers = [];
 
-  const view = VIEWS.find((entry) => entry.id === state.view) || VIEWS[0];
   nodes.main.replaceChildren();
+
+  if (!rememberedKnoxId()) {
+    drawLoginGate();
+    return;
+  }
+
+  const view = VIEWS.find((entry) => entry.id === state.view) || VIEWS[0];
 
   if (view.needsFile && !state.sourceFile) {
     nodes.main.append(el("p", "card-note", "적재된 로그가 없습니다. '파일 · 분석'에서 로그를 올려 분석하세요."));
@@ -270,7 +301,7 @@ async function boot() {
 
   drawNav();
   drawUser();
-  await loadFiles();
+  if (rememberedKnoxId()) await loadFiles();
   drawFilePicker();
   rerender();
 

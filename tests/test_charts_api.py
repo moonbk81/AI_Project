@@ -124,6 +124,9 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
+    # 로그인 전에는 첫 화면이 로그인 창이고, 파일 목록조차 부르지 않는다.
+    assert "drawLoginGate" in app.text
+    assert "if (rememberedKnoxId()) await loadFiles();" in app.text
     assert "scanned?.job_id" in plm.text and "display_message" in plm.text
     assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
     assert "field(\"Division\"" not in plm.text
