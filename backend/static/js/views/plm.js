@@ -13,6 +13,13 @@ const JOB_DONE = new Set(["done", "error"]);
 // 들어 있으므로, 고를 수 있는 첨부도 이것들뿐이다.
 const ARCHIVE_SUFFIXES = [".zip", ".7z"];
 
+const sizeText = (bytes) => {
+  const value = Number(bytes) || 0;
+  return value >= 1024 * 1024
+    ? `${(value / 1024 / 1024).toFixed(1)} MB`
+    : `${(value / 1024).toFixed(1)} KB`;
+};
+
 const isArchiveName = (name) =>
   ARCHIVE_SUFFIXES.some((suffix) => String(name || "").toLowerCase().endsWith(suffix));
 
@@ -68,6 +75,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   state.divisionName = "Mobile";
   if (!state.cache) state.cache = {};
   if (!state.attachmentJobs) state.attachmentJobs = {};
+  if (!state.attachmentPicks) state.attachmentPicks = {};
   const cache = createDefectCache(api, state.cache);
 
   // ------------------------------------------------------------ 로컬 테스트
@@ -312,7 +320,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // ------------------------------------------------------------------ 첨부
   const attachments = panel(
     "첨부 파일",
-    "선택한 압축 파일(ZIP/7z)만 내려받아 그 안의 LOG 파일을 뽑아 분석합니다.",
+    "고른 압축 파일(ZIP/7z)만 내려받아 안의 LOG 파일을 목록으로 보여 줍니다. 분석할 로그를 골라 주세요.",
   );
   const attachmentHost = el("div", "stack");
   attachments.body.append(attachmentHost);
@@ -323,7 +331,23 @@ export async function renderPlm(mount, sourceFile, ctx) {
     jobTimers.clear();
   });
 
-  const attachmentJobKey = (defect) => defectCacheKey(state.division, defect.defectCode);
+  const attachmentJobKey = (defect, variant = "") =>
+    `${defectCacheKey(state.division, defect.defectCode)}${variant}`;
+
+  /** 꺼내지 못해 빠진 로그. 나머지 분석은 그대로 진행된다. */
+  const drawSkipped = (job, host) => {
+    const skipped = job.skipped_logs || [];
+    if (!skipped.length) {
+      host.replaceChildren();
+      return;
+    }
+    const fold = el("details", "fold");
+    fold.append(el("summary", null, `건너뛴 로그 ${skipped.length}개`));
+    const list = el("ul");
+    for (const line of skipped) list.append(el("li", null, line));
+    fold.append(list);
+    host.replaceChildren(fold);
+  };
 
   const drawJobProgress = (job, progressHost) => {
     const bar = el("div", "bar");
@@ -333,21 +357,33 @@ export async function renderPlm(mount, sourceFile, ctx) {
     fill.classList.toggle("error", job.status === "error");
     bar.append(fill);
     const message = el("p", "card-note", job.display_message || job.error || job.message || job.status || "시작하는 중...");
-    progressHost.replaceChildren(message, bar);
-    return { fill, message };
+    const extra = el("div");
+    progressHost.replaceChildren(message, bar, extra);
+    drawSkipped(job, extra);
+    return { fill, message, extra };
   };
 
-  const followJob = (jobId, progressHost, defect, setBusy) => {
-    const key = attachmentJobKey(defect);
+  /** 분석이 끝나면 그 로그를 활성 파일로 삼는다. 화면은 그대로 둔다. */
+  const activateAnalyzed = async (job, message) => {
+    if (!job.current_file) return;
+    const active = await ctx.filesChanged({ select: job.current_file });
+    message.textContent = active === job.current_file
+      ? `${job.message} — '${job.current_file}' 을 활성 파일로 설정했습니다. 대시보드에서 볼 수 있습니다.`
+      : `${job.message} — '${job.current_file}'`;
+  };
+
+  const followJob = (jobId, { progressHost, defect, variant = "", setBusy, onDone }) => {
+    const key = attachmentJobKey(defect, variant);
     const stored = state.attachmentJobs[key] || {};
+    // 새 잡이면 지난 잡의 흔적(activated, 메시지, 후보 목록)을 물려받지 않는다.
     state.attachmentJobs[key] = {
-      ...stored,
+      ...(stored.job_id === jobId ? stored : {}),
       job_id: jobId,
       division: state.division,
       defect_code: defect.defectCode,
     };
 
-    const { fill, message } = drawJobProgress(state.attachmentJobs[key], progressHost);
+    const { fill, message, extra } = drawJobProgress(state.attachmentJobs[key], progressHost);
     setBusy?.(!JOB_DONE.has(state.attachmentJobs[key].status));
 
     const poll = async () => {
@@ -358,20 +394,20 @@ export async function renderPlm(mount, sourceFile, ctx) {
         fill.style.width = `${Math.max(2, job.progress || 0)}%`;
         fill.classList.toggle("done", job.status === "done");
         fill.classList.toggle("error", job.status === "error");
-        setBusy?.(!JOB_DONE.has(job.status));
+        drawSkipped(job, extra);
 
         if (!JOB_DONE.has(job.status)) {
           const timer = setTimeout(poll, JOB_POLL_MS);
           jobTimers.add(timer);
-        } else if (job.status === "done" && job.current_file && !state.attachmentJobs[key].activated) {
-          // Make the freshly analyzed log the active one, but leave this view
-          // as it is — the search and the selected defect stay put.
-          const active = await ctx.filesChanged({ select: job.current_file });
-          message.textContent = active === job.current_file
-            ? `${job.message} — '${job.current_file}' 을 활성 파일로 설정했습니다. 대시보드에서 볼 수 있습니다.`
-            : `${job.message} — '${job.current_file}'`;
-          state.attachmentJobs[key].display_message = message.textContent;
+          return;
+        }
+
+        setBusy?.(false);
+        // 한 번 끝난 잡은 화면을 다시 그려도 다시 처리하지 않는다.
+        if (job.status === "done" && !state.attachmentJobs[key].activated) {
           state.attachmentJobs[key].activated = true;
+          await onDone?.(job, message);
+          state.attachmentJobs[key].display_message = message.textContent;
         }
       } catch (error) {
         message.textContent = String(error.message || error);
@@ -394,42 +430,46 @@ export async function renderPlm(mount, sourceFile, ctx) {
       return;
     }
 
-    // 고른 첨부만 내려받는다 — 첨부가 여럿인 결함에서 전부 받아 여는 데
+    // 1단계: 열어 볼 첨부 고르기. 첨부가 여럿인 결함에서 전부 내려받아 여는 데
     // 걸리던 시간이 그대로 대기 시간이었다.
-    const selected = new Set();
+    const scanKey = attachmentJobKey(defect, "::scan");
+    const picked = new Set(state.attachmentPicks[scanKey] || []);
     const boxes = [];
+    const logHost = el("div", "stack");
     const progressHost = el("div");
-    const analyze = el("button", "primary", "로그 추출해 분석");
-    analyze.type = "button";
+    const scan = el("button", "primary", "로그 파일 찾기");
+    scan.type = "button";
     let busy = false;
     let selectAll = null;
 
     const refresh = () => {
-      const count = selected.size;
-      analyze.textContent = count
-        ? `선택한 ${count}개에서 로그 추출해 분석`
-        : "로그 추출해 분석 (파일을 선택하세요)";
-      analyze.disabled = busy || count === 0;
+      scan.textContent = picked.size
+        ? `선택한 첨부 ${picked.size}개에서 로그 파일 찾기`
+        : "로그 파일 찾기 (첨부를 선택하세요)";
+      scan.disabled = busy || picked.size === 0;
       if (selectAll) {
-        selectAll.checked = boxes.length > 0 && count === boxes.length;
-        selectAll.indeterminate = count > 0 && count < boxes.length;
+        selectAll.checked = boxes.length > 0 && picked.size === boxes.length;
+        selectAll.indeterminate = picked.size > 0 && picked.size < boxes.length;
       }
+      state.attachmentPicks[scanKey] = [...picked];
     };
 
     for (const file of files) {
       const row = el("div", "row");
+      const fileId = String(file.fileId);
       const analyzable = isArchiveName(file.title) && file.docId && file.fileId;
 
       if (analyzable) {
         const box = el("input");
         box.type = "checkbox";
-        box.title = "이 파일에서 로그 추출";
+        box.title = "이 압축 파일 안을 훑는다";
+        box.checked = picked.has(fileId);
         box.addEventListener("change", () => {
-          if (box.checked) selected.add(String(file.fileId));
-          else selected.delete(String(file.fileId));
+          if (box.checked) picked.add(fileId);
+          else picked.delete(fileId);
           refresh();
         });
-        boxes.push({ box, fileId: String(file.fileId) });
+        boxes.push({ box, fileId });
         row.append(box);
       } else {
         // 자리를 맞춰 두면 압축이 아닌 첨부도 목록에서 밀리지 않는다.
@@ -438,7 +478,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
       row.append(el("span", "row-name", file.title || "-"),
                  el("span", "grow"),
-                 el("span", "row-meta", file.fileSize ? `${(file.fileSize / 1024).toFixed(1)} KB` : "-"));
+                 el("span", "row-meta", file.fileSize ? sizeText(file.fileSize) : "-"));
 
       const download = el("button", null, "다운로드");
       download.type = "button";
@@ -448,7 +488,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
     }
 
     if (!boxes.length) {
-      attachmentHost.append(el("div", "empty", "분석할 수 있는 압축 첨부(ZIP/7z)가 없습니다."));
+      attachmentHost.append(el("div", "empty", "안을 훑을 수 있는 압축 첨부(ZIP/7z)가 없습니다."));
       return;
     }
 
@@ -459,38 +499,167 @@ export async function renderPlm(mount, sourceFile, ctx) {
       selectAll.addEventListener("change", () => {
         for (const { box, fileId } of boxes) {
           box.checked = selectAll.checked;
-          if (selectAll.checked) selected.add(fileId);
-          else selected.delete(fileId);
+          if (selectAll.checked) picked.add(fileId);
+          else picked.delete(fileId);
         }
         refresh();
       });
       allRow.append(selectAll, el("span", "row-name", `전체 선택 (압축 첨부 ${boxes.length}개)`));
       attachmentHost.prepend(allRow);
-    } else {
+    } else if (!picked.size) {
       // 압축 첨부가 하나뿐이면 고를 것이 없으므로 미리 체크해 둔다.
       boxes[0].box.checked = true;
-      selected.add(boxes[0].fileId);
+      picked.add(boxes[0].fileId);
     }
+
+    // 2단계: 훑어서 나온 로그 중 분석할 것 고르기. ap_silentlog 처럼 한 폴더에
+    // 잘게 쪼개져 있는 로그는 통째로 한 항목이 된다.
+    const drawCandidates = (candidates) => {
+      logHost.replaceChildren();
+      const found = candidates || [];
+      if (!found.length) {
+        logHost.append(el("div", "empty", "고를 만한 로그 파일이 없습니다."));
+        return;
+      }
+
+      const chosen = new Map();
+      const analyzeHost = el("div");
+      const analyze = el("button", "primary", "선택한 로그 분석");
+      analyze.type = "button";
+      let analyzing = false;
+
+      const refreshAnalyze = () => {
+        const count = [...chosen.values()].reduce((sum, items) => sum + items.length, 0);
+        analyze.textContent = count ? `선택한 로그 ${count}개 분석` : "분석할 로그를 선택하세요";
+        analyze.disabled = analyzing || count === 0;
+      };
+
+      // id 는 첨부까지 포함해야 한다. 첨부 두 개에 같은 이름의 폴더가 들어 있는
+      // 경우가 있다.
+      const addRow = (id, label, meta, items) => {
+        const row = el("div", "row");
+        const box = el("input");
+        box.type = "checkbox";
+        box.addEventListener("change", () => {
+          if (box.checked) chosen.set(id, items);
+          else chosen.delete(id);
+          refreshAnalyze();
+        });
+        row.append(box, el("span", "row-name", label), el("span", "grow"), el("span", "row-meta", meta));
+        logHost.append(row);
+        return box;
+      };
+
+      const groups = new Map();
+      const singles = [];
+      for (const candidate of found) {
+        if (!candidate.group) { singles.push(candidate); continue; }
+        const key = `${candidate.file_id}::${candidate.group}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(candidate);
+      }
+
+      logHost.append(el("p", "card-note", `찾은 로그 ${found.length}개. 분석할 것을 고르세요.`));
+
+      const rows = [];
+      for (const candidate of singles) {
+        rows.push(addRow(`${candidate.file_id}::${candidate.path}`, candidate.path,
+                         sizeText(candidate.size),
+                         [{ file_id: candidate.file_id, route: candidate.route }]));
+      }
+
+      for (const [id, items] of groups) {
+        const folder = items[0].group.split("/").pop();
+        const total = items.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        rows.push(addRow(id, `${folder} 폴더 (로그 ${items.length}개)`, sizeText(total),
+                         items.map((item) => ({ file_id: item.file_id, route: item.route }))));
+
+        const fold = el("details", "fold");
+        fold.append(el("summary", null, `${folder} 안의 파일`));
+        const list = el("ul");
+        for (const item of items) {
+          list.append(el("li", null, `${item.path.split("/").pop()} — ${sizeText(item.size)}`));
+        }
+        fold.append(list);
+        logHost.append(fold);
+      }
+
+      // 고를 것이 하나뿐이면 미리 체크해 둔다.
+      if (rows.length === 1) {
+        rows[0].checked = true;
+        rows[0].dispatchEvent(new Event("change"));
+      }
+
+      analyze.addEventListener("click", async () => {
+        const logs = [...chosen.values()].flat();
+        analyzing = true;
+        refreshAnalyze();
+        try {
+          const { job_id: jobId } = await api.plmAnalyzeAttachments(
+            state.division, defect.defectCode, null, logs,
+          );
+          followJob(jobId, {
+            progressHost: analyzeHost,
+            defect,
+            setBusy: (value) => { analyzing = value; refreshAnalyze(); },
+            onDone: activateAnalyzed,
+          });
+        } catch (error) {
+          analyzeHost.replaceChildren(el("p", "card-note", String(error.message || error)));
+          analyzing = false;
+          refreshAnalyze();
+        }
+      });
+
+      logHost.append(analyze, analyzeHost);
+      refreshAnalyze();
+
+      // 분석 잡이 돌고 있었다면 진행 상황을 이어서 보여 준다.
+      const running = state.attachmentJobs[attachmentJobKey(defect)];
+      if (running?.job_id) {
+        followJob(running.job_id, {
+          progressHost: analyzeHost,
+          defect,
+          setBusy: (value) => { analyzing = value; refreshAnalyze(); },
+          onDone: activateAnalyzed,
+        });
+      }
+    };
 
     const setBusy = (value) => { busy = value; refresh(); };
 
-    analyze.addEventListener("click", async () => {
+    scan.addEventListener("click", async () => {
+      logHost.replaceChildren();
+      delete state.attachmentJobs[scanKey];
       setBusy(true);
       try {
-        const { job_id: jobId } = await api.plmAnalyzeAttachments(
-          state.division, defect.defectCode, [...selected],
+        const { job_id: jobId } = await api.plmScanAttachmentLogs(
+          state.division, defect.defectCode, [...picked],
         );
-        followJob(jobId, progressHost, defect, setBusy);
+        followJob(jobId, {
+          progressHost, defect, variant: "::scan", setBusy,
+          onDone: (job) => drawCandidates(job.log_candidates),
+        });
       } catch (error) {
         progressHost.replaceChildren(el("p", "card-note", String(error.message || error)));
         setBusy(false);
       }
     });
-    attachmentHost.append(analyze, progressHost);
+
+    attachmentHost.append(scan, progressHost, logHost);
     refresh();
 
-    const existingJob = state.attachmentJobs[attachmentJobKey(defect)];
-    if (existingJob?.job_id) followJob(existingJob.job_id, progressHost, defect, setBusy);
+    // 탭을 다녀와도 훑은 결과와 진행 중인 잡은 그대로 이어진다.
+    const scanned = state.attachmentJobs[scanKey];
+    if (scanned?.log_candidates) {
+      drawJobProgress(scanned, progressHost);
+      drawCandidates(scanned.log_candidates);
+    } else if (scanned?.job_id) {
+      followJob(scanned.job_id, {
+        progressHost, defect, variant: "::scan", setBusy,
+        onDone: (job) => drawCandidates(job.log_candidates),
+      });
+    }
   };
 
   // -------------------------------------------------------------- AI 분석

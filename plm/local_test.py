@@ -103,9 +103,13 @@ _SAMPLE_LOG = b"""04-29 09:40:56.287  1234  5678 D RILJ    : [0123]< RIL_REQUEST
 
 
 def _sample_zip() -> bytes:
+    """실제 첨부와 같은 모양: 로그 하나 + ap_silentlog 폴더 + 로그가 아닌 파일."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("dumpstate.log", _SAMPLE_LOG)
+        archive.writestr("ap_silentlog/SILENT_LOG_01.log", _SAMPLE_LOG)
+        archive.writestr("ap_silentlog/SILENT_LOG_02.log", _SAMPLE_LOG)
+        archive.writestr("screenshot.png", b"not a log")
     return buffer.getvalue()
 
 

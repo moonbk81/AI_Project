@@ -211,6 +211,142 @@ def test_a_plm_failure_lands_on_the_job_rather_than_the_request(monkeypatch, tmp
     assert job["status"] == "error" and job["error"] == "권한 없음"
 
 
+def _one_attachment(monkeypatch, payload, downloads=None):
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {
+            "success": True,
+            "files": [{"title": "bugreport.zip", "docId": "D", "fileId": "F1"}],
+        },
+    )
+
+    def download(**kwargs):
+        if downloads is not None:
+            downloads.append(kwargs["file_id"])
+        return {"success": True, "data": payload}
+
+    monkeypatch.setattr("plm.service.download_attached_file", download)
+
+
+def test_scanning_lists_the_logs_a_user_can_pick(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _one_attachment(monkeypatch, make_zip({
+        "dumpstate.log": b"main log",
+        "ap_silentlog/SILENT_LOG_01.log": b"a",
+        "ap_silentlog/SILENT_LOG_02.log": b"b",
+        "screenshot.png": b"img",
+    }))
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_log_scan_job(job_id, "25", "D-1", ["F1"])
+
+    job = backend_main._get_job(job_id)
+    assert job["status"] == "done"
+    found = {c["path"]: c["group"] for c in job["log_candidates"]}
+    assert found == {
+        "dumpstate.log": "",
+        "ap_silentlog/SILENT_LOG_01.log": "ap_silentlog",
+        "ap_silentlog/SILENT_LOG_02.log": "ap_silentlog",
+    }
+
+
+def test_only_the_picked_logs_are_pulled_out_of_the_archive(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _one_attachment(monkeypatch, make_zip({
+        "dumpstate.log": b"main log",
+        "ap_silentlog/SILENT_LOG_01.log": b"silent one",
+    }))
+
+    analyzed = {}
+    monkeypatch.setattr(
+        backend_main,
+        "_run_analyze_job",
+        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+    )
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_selected_logs_job(
+        job_id, "25", "D-1", [{"file_id": "F1", "route": ["ap_silentlog/SILENT_LOG_01.log"]}]
+    )
+
+    assert [path.rsplit("/", 1)[-1] for path in analyzed["paths"]] == ["SILENT_LOG_01.log"]
+    assert open(analyzed["paths"][0], "rb").read() == b"silent one"
+
+
+def test_a_log_that_cannot_be_pulled_out_does_not_stop_the_rest(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _one_attachment(monkeypatch, make_zip({
+        "dumpstate.log": b"main log",
+        "ap_silentlog/empty.log": b"",
+    }))
+
+    analyzed = {}
+    monkeypatch.setattr(
+        backend_main,
+        "_run_analyze_job",
+        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+    )
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_selected_logs_job(job_id, "25", "D-1", [
+        {"file_id": "F1", "route": ["ap_silentlog/empty.log"]},   # 비어 있음
+        {"file_id": "F1", "route": ["ap_silentlog/사라진.log"]},   # 압축에 없음
+        {"file_id": "F1", "route": ["dumpstate.log"]},
+    ])
+
+    assert [path.rsplit("/", 1)[-1] for path in analyzed["paths"]] == ["dumpstate.log"]
+    job = backend_main._get_job(job_id)
+    assert job["status"] != "error"
+    assert [line.split(" (")[0] for line in job["skipped_logs"]] == ["empty.log", "사라진.log"]
+
+
+def test_the_job_only_fails_when_no_log_could_be_pulled_out(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _one_attachment(monkeypatch, make_zip({"dumpstate.log": b"main log"}))
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: pytest.fail("분석을 시작하면 안 된다"))
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_selected_logs_job(
+        job_id, "25", "D-1", [{"file_id": "F1", "route": ["없는파일.log"]}]
+    )
+
+    job = backend_main._get_job(job_id)
+    assert job["status"] == "error"
+    assert job["skipped_logs"] and "없는파일.log" in job["skipped_logs"][0]
+
+
+def test_an_attachment_is_downloaded_once_for_both_steps(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    downloads = []
+    _one_attachment(monkeypatch, make_zip({"dumpstate.log": b"main log"}), downloads)
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: None)
+
+    scan = backend_main._new_job("test")
+    backend_main._run_plm_log_scan_job(scan, "25", "D-1", ["F1"])
+    picked = backend_main._get_job(scan)["log_candidates"][0]
+
+    analyze = backend_main._new_job("test")
+    backend_main._run_plm_selected_logs_job(
+        analyze, "25", "D-1", [{"file_id": picked["file_id"], "route": picked["route"]}]
+    )
+
+    assert downloads == ["F1"]  # 두 단계가 같은 원본을 다시 받지 않는다
+
+
+def test_picking_logs_takes_the_selected_route(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        backend_main._executor, "submit", lambda fn, *args, **kwargs: seen.update(fn=fn.__name__)
+    )
+
+    client.post("/plm/attachments/analyze", json={
+        "defect_code": "D-1",
+        "logs": [{"file_id": "F1", "route": ["dumpstate.log"]}],
+    })
+
+    assert seen["fn"] == "_run_plm_selected_logs_job"
+
+
 def test_the_endpoint_answers_with_a_job_to_poll(client, monkeypatch):
     monkeypatch.setattr(backend_main._executor, "submit", lambda *args, **kwargs: None)
 

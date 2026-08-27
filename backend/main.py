@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import logging
 import os
+import re
 import shutil
 import sys
 import threading
@@ -143,6 +145,10 @@ class JobStatusResponse(BaseModel):
     report_path: Optional[str] = None
     payload_path: Optional[str] = None
     error: Optional[str] = None
+    # 로그 목록 잡이 찾아 낸 후보들. 다른 잡에서는 비어 있다.
+    log_candidates: Optional[List[Dict[str, Any]]] = None
+    # 꺼내지 못해 분석에서 빠진 로그들. 나머지는 그대로 분석한다.
+    skipped_logs: Optional[List[str]] = None
     created_at: str
     updated_at: str
 
@@ -226,12 +232,28 @@ class PlmAnalysisQueryResponse(BaseModel):
     original_content: str = ""
 
 
+class PlmAttachmentScanRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+    # 훑어 볼 첨부. 비우면 결함의 압축 첨부 전부.
+    file_ids: Optional[List[str]] = None
+
+
+class PlmLogSelection(BaseModel):
+    """사용자가 고른 로그 하나. `route` 는 압축 바깥에서 안으로 가는 멤버 이름들."""
+
+    file_id: str = Field(min_length=1)
+    route: List[str] = Field(min_length=1)
+
+
 class PlmAttachmentAnalyzeRequest(BaseModel):
     division_code: str = "25"
     defect_code: str = Field(min_length=1)
     # Only these attachments are downloaded. Empty/None means every archive
     # attachment, which is what the button did before the picker existed.
     file_ids: Optional[List[str]] = None
+    # 고른 로그만 꺼내 분석한다. 비우면 첨부 안의 로그를 예전처럼 전부 꺼낸다.
+    logs: Optional[List[PlmLogSelection]] = None
 
 
 class PlmCommentRequest(BaseModel):
@@ -491,6 +513,205 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
         _set_job(job_id, status="error", error=str(e), message="분석 실패")
 
 
+_ATTACHMENT_CACHE_DIR = os.path.join("./temp_logs", "plm_attachments", "cache")
+
+
+def _attachment_cache_path(division_code: str, defect_code: str, file_id: str) -> str:
+    key = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{division_code}_{defect_code}_{file_id}")
+    return os.path.join(_ATTACHMENT_CACHE_DIR, key)
+
+
+def _attachment_bytes(division_code: str, defect_code: str, attachment: Dict[str, Any]) -> bytes:
+    """첨부 원본 바이트. 한 번 받아 두면 목록 만들기와 분석이 다시 받지 않는다."""
+    from plm.service import download_attached_file
+
+    title = str(attachment.get("title") or "첨부")
+    path = _attachment_cache_path(division_code, defect_code, str(attachment.get("fileId")))
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    response = download_attached_file(
+        division_code=division_code,
+        doc_id=attachment.get("docId"),
+        title=attachment.get("title"),
+        file_id=attachment.get("fileId"),
+    ) or {}
+    if not response.get("success"):
+        raise RuntimeError(f"{title} 내려받기 실패: {response.get('message') or '알 수 없는 오류'}")
+
+    data = response.get("data")
+    if not data:
+        raise RuntimeError(f"{title} 의 내용이 비어 있습니다.")
+
+    os.makedirs(_ATTACHMENT_CACHE_DIR, exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+    return data
+
+
+def _selected_attachments(
+    division_code: str, defect_code: str, file_ids: Optional[List[str]]
+) -> List[Dict[str, Any]]:
+    """결함의 첨부 목록에서 사용자가 고른 것만. 비어 있으면 전부."""
+    from plm.service import list_attached_files
+
+    listing = list_attached_files(division_code=division_code, defect_code=defect_code)
+    if not listing.get("success"):
+        raise RuntimeError(listing.get("message") or "첨부 파일 목록 조회 실패")
+
+    files = listing.get("files") or []
+    if not file_ids:
+        return files
+
+    wanted = {str(file_id) for file_id in file_ids}
+    picked = [f for f in files if str(f.get("fileId")) in wanted]
+    if not picked:
+        raise RuntimeError("선택한 첨부 파일을 목록에서 찾지 못했습니다.")
+    return picked
+
+
+def _run_plm_log_scan_job(
+    job_id: str,
+    division_code: str,
+    defect_code: str,
+    file_ids: Optional[List[str]] = None,
+):
+    """고른 첨부 안에서 고를 만한 로그를 찾아 목록으로 만든다.
+
+    본문은 꺼내지 않는다. 압축의 목록만 읽고, 이름에 로그 힌트가 붙은 중첩
+    압축만 열어 본다. 실제 추출은 사용자가 고른 뒤에 그 파일만 한다.
+    """
+    from core.log_archive import find_log_candidates
+    from plm import log_pipeline
+
+    try:
+        _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=3)
+        archives = log_pipeline.select_archive_attachments(
+            _selected_attachments(division_code, defect_code, file_ids)
+        )
+        if not archives:
+            _set_job(
+                job_id, status="done", progress=100, log_candidates=[],
+                message="압축 첨부(ZIP/7z)가 없습니다.",
+            )
+            return
+
+        candidates: List[Dict[str, Any]] = []
+        failures: List[str] = []
+        for index, attachment in enumerate(archives, 1):
+            title = str(attachment.get("title") or "첨부")
+            share = int(90 * index / len(archives))
+            try:
+                _set_job(job_id, message=f"[{index}/{len(archives)}] {title} 내려받는 중...", progress=5 + share)
+                data = _attachment_bytes(division_code, defect_code, attachment)
+
+                _set_job(job_id, message=f"{title} 안에서 로그 파일 찾는 중...")
+                for candidate in find_log_candidates(data):
+                    candidates.append({
+                        "file_id": str(attachment.get("fileId")),
+                        "title": title,
+                        "path": candidate.path,
+                        "route": list(candidate.route),
+                        "size": candidate.size,
+                        "group": candidate.group,
+                    })
+            except Exception as e:
+                # 첨부 하나가 실패해도 나머지 목록은 쓸모가 있다.
+                logging.getLogger(__name__).error("Scan failed for %s: %s", title, e)
+                failures.append(title)
+
+        note = f" ({', '.join(failures)} 는 읽지 못했습니다)" if failures else ""
+        _set_job(
+            job_id,
+            status="done",
+            progress=100,
+            log_candidates=candidates,
+            message=(f"로그 파일 {len(candidates)}개를 찾았습니다.{note}" if candidates
+                     else f"분석할 만한 로그 파일을 찾지 못했습니다.{note}"),
+        )
+    except Exception as e:
+        _set_job(job_id, status="error", error=str(e), message="로그 목록 만들기 실패")
+
+
+def _run_plm_selected_logs_job(
+    job_id: str,
+    division_code: str,
+    defect_code: str,
+    selections: List[Dict[str, Any]],
+):
+    """사용자가 고른 로그만 압축에서 꺼내 분석한다."""
+    from core.log_archive import read_by_route
+
+    try:
+        _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=3)
+        files = _selected_attachments(
+            division_code, defect_code, [str(item["file_id"]) for item in selections]
+        )
+        by_id = {str(f.get("fileId")): f for f in files}
+
+        upload_dir = os.path.join("./temp_logs", "plm_attachments", job_id)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        file_paths: List[str] = []
+        skipped: List[str] = []
+        for index, item in enumerate(selections, 1):
+            route = list(item["route"])
+            label = "/".join(route)
+            name = os.path.basename(route[-1])
+
+            # 하나가 실패해도 나머지는 꺼낸다. 로그 스무 개를 고른 사람이 한
+            # 파일 때문에 처음부터 다시 하게 둘 이유가 없다.
+            try:
+                attachment = by_id.get(str(item["file_id"]))
+                if attachment is None:
+                    raise RuntimeError("이 로그가 든 첨부를 목록에서 찾지 못했습니다")
+
+                _set_job(
+                    job_id,
+                    message=f"[{index}/{len(selections)}] {name} 꺼내는 중...",
+                    progress=3 + int(7 * index / len(selections)),
+                )
+                content = read_by_route(
+                    _attachment_bytes(division_code, defect_code, attachment), route
+                )
+                if not content:
+                    raise RuntimeError("내용이 비어 있습니다")
+
+                # 폴더가 달라도 이름이 같을 수 있다(ap_silentlog 안이 특히 그렇다).
+                path = os.path.join(upload_dir, name)
+                if os.path.exists(path):
+                    path = os.path.join(upload_dir, re.sub(r"[^A-Za-z0-9_.-]", "_", label))
+                with open(path, "wb") as handle:
+                    handle.write(content)
+                file_paths.append(path)
+            except Exception as e:
+                logging.getLogger(__name__).error("Could not extract %s: %s", label, e)
+                skipped.append(f"{name} ({e})")
+
+        if not file_paths:
+            _set_job(
+                job_id,
+                status="error",
+                message="선택한 로그를 하나도 꺼내지 못했습니다.",
+                error="; ".join(skipped) or "꺼낼 로그가 없습니다.",
+                skipped_logs=skipped,
+            )
+            return
+
+        _set_job(
+            job_id,
+            skipped_logs=skipped,
+            progress=10,
+            message=(f"{len(file_paths)}개 LOG 파일 분석 시작"
+                     + (f" ({len(skipped)}개는 건너뜀)" if skipped else "")),
+        )
+        _run_analyze_job(job_id, file_paths, False, "", "")
+
+    except Exception as e:
+        _set_job(job_id, status="error", error=str(e), message="선택한 로그 분석 실패")
+
+
 def _run_plm_attachment_job(
     job_id: str,
     division_code: str,
@@ -507,21 +728,12 @@ def _run_plm_attachment_job(
     every archive on a defect that carries several is what made this slow.
     """
     from plm import log_pipeline
-    from plm.service import download_attached_file, list_attached_files
+    from plm.service import download_attached_file
 
     try:
         _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=2)
 
-        listing = list_attached_files(division_code=division_code, defect_code=defect_code)
-        if not listing.get("success"):
-            raise RuntimeError(listing.get("message") or "첨부 파일 목록 조회 실패")
-
-        files = listing.get("files") or []
-        if file_ids:
-            wanted = {str(file_id) for file_id in file_ids}
-            files = [f for f in files if str(f.get("fileId")) in wanted]
-            if not files:
-                raise RuntimeError("선택한 첨부 파일을 목록에서 찾지 못했습니다.")
+        files = _selected_attachments(division_code, defect_code, file_ids)
 
         def download(doc_id, title, file_id):
             return download_attached_file(
@@ -577,6 +789,7 @@ def _new_job(message: str) -> str:
             "report_path": None,
             "payload_path": None,
             "error": None,
+            "skipped_logs": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -1017,10 +1230,30 @@ def plm_analysis_query(req: PlmAnalysisQueryRequest) -> PlmAnalysisQueryResponse
     )
 
 
+@app.post("/plm/attachments/logs", response_model=AnalyzeJobResponse)
+def plm_attachment_logs(req: PlmAttachmentScanRequest) -> AnalyzeJobResponse:
+    """고른 첨부 안에 어떤 로그가 있는지만 훑는다. 결과는 잡의 log_candidates."""
+    job_id = _new_job("PLM 첨부 훑기 대기 중")
+    _executor.submit(
+        _run_plm_log_scan_job, job_id, req.division_code, req.defect_code, req.file_ids
+    )
+    return AnalyzeJobResponse(job_id=job_id)
+
+
 @app.post("/plm/attachments/analyze", response_model=AnalyzeJobResponse)
 def plm_attachment_analyze(req: PlmAttachmentAnalyzeRequest) -> AnalyzeJobResponse:
-    """Download a defect's attachments, extract the logs and analyze them."""
+    """Download a defect's attachments, extract the logs and analyze them.
+
+    `logs` 가 오면 그 파일들만 꺼낸다(사용자가 목록에서 고른 경우).
+    """
     job_id = _new_job("PLM 첨부 처리 대기 중")
+    if req.logs:
+        _executor.submit(
+            _run_plm_selected_logs_job, job_id, req.division_code, req.defect_code,
+            [item.model_dump() for item in req.logs],
+        )
+        return AnalyzeJobResponse(job_id=job_id)
+
     _executor.submit(
         _run_plm_attachment_job, job_id, req.division_code, req.defect_code, req.file_ids
     )

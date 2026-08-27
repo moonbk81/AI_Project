@@ -124,7 +124,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
-    assert "existingJob?.job_id" in plm.text and "display_message" in plm.text
+    assert "scanned?.job_id" in plm.text and "display_message" in plm.text
     assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
     assert "field(\"Division\"" not in plm.text
     assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text

@@ -86,12 +86,24 @@ export const api = {
     post("/plm/analyze", { division_code: divisionCode, defect_code: defectCode }),
   plmAnalysisQuery: (divisionCode, defectCode, comments) =>
     post("/plm/analysis-query", { division_code: divisionCode, defect_code: defectCode, comments }),
-  /** `fileIds` picks the attachments to open; omit it to take every archive. */
-  plmAnalyzeAttachments: (divisionCode, defectCode, fileIds) =>
+  /** 고른 첨부 안에 어떤 로그가 있는지만 훑는 잡. 결과는 잡의 log_candidates. */
+  plmScanAttachmentLogs: (divisionCode, defectCode, fileIds) =>
+    post("/plm/attachments/logs", {
+      division_code: divisionCode,
+      defect_code: defectCode,
+      file_ids: fileIds && fileIds.length ? fileIds : null,
+    }),
+
+  /**
+   * `logs` 를 주면 고른 로그만 꺼내 분석한다(목록에서 고른 경우).
+   * `logs` 없이 `fileIds` 만 주면 그 첨부 안의 로그를 전부 꺼낸다.
+   */
+  plmAnalyzeAttachments: (divisionCode, defectCode, fileIds, logs) =>
     post("/plm/attachments/analyze", {
       division_code: divisionCode,
       defect_code: defectCode,
       file_ids: fileIds && fileIds.length ? fileIds : null,
+      logs: logs && logs.length ? logs : null,
     }),
 
   // The comment body is turned into PLM's markup server-side, so the caller
