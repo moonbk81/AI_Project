@@ -1,7 +1,6 @@
 """Retrieval and reranking utilities for RAG search."""
 
 import json
-import re
 
 from rag.query_classifiers import (
     is_binder_proxy_count_query,
@@ -17,6 +16,7 @@ from rag.query_classifiers import (
 )
 
 from rag.domain_boosts import apply_domain_boosts
+from rag.keyword_match import build_keyword_scorer
 from rag.rerank_injections import apply_rerank_injections
 
 def build_where_filter(current_file=None, target_log_types=None, filters_dict=None):
@@ -39,11 +39,6 @@ def build_where_filter(current_file=None, target_log_types=None, filters_dict=No
         return {"$and": conditions}
     return None
 
-def _keyword_score(search_query: str, combined_text: str) -> float:
-    query_keywords = set(re.findall(r'[a-zA-Z0-9]+', search_query.lower()))
-    match_count = sum(1 for kw in query_keywords if kw in combined_text)
-    return match_count / max(1, len(query_keywords))
-
 def _rerank_results(results: dict, search_query: str, top_k: int) -> dict:
     if not results or not results.get('documents') or not results['documents'][0]:
         return results
@@ -54,13 +49,18 @@ def _rerank_results(results: dict, search_query: str, top_k: int) -> dict:
     distances = results['distances'][0] if 'distances' in results and results['distances'] else [0] * len(docs)
     query_lower = search_query.lower()
 
-    reranked_results = []
+    candidates = []
     for doc, meta, doc_id, dist in zip(docs, metas, ids, distances):
         doc_lower = doc.lower()
         meta_text = json.dumps(meta or {}, ensure_ascii=False, default=str).lower()
-        combined_text = f"{doc_lower}\n{meta_text}"
+        candidates.append((doc, meta, doc_id, dist, f"{doc_lower}\n{meta_text}"))
 
-        keyword_score = _keyword_score(search_query, combined_text)
+    # 키워드 가중치는 후보 집합 전체를 봐야 정해지므로(IDF) 점수 루프 전에 만든다.
+    keyword_scorer = build_keyword_scorer(search_query, [c[4] for c in candidates])
+
+    reranked_results = []
+    for doc, meta, doc_id, dist, combined_text in candidates:
+        keyword_score = keyword_scorer(combined_text)
         vector_score = 1.0 / (1.0 + dist)
         hybrid_score = (vector_score * 0.4) + (keyword_score * 0.6)
 

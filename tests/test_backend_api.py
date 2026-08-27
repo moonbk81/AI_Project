@@ -174,8 +174,10 @@ def test_files_endpoint_does_not_wake_the_full_rag_engine(monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def get_or_create_collection(self, name):
+        def get_or_create_collection(self, name, **kwargs):
             assert name == "ril_logs"
+            # 실제 chroma 는 configuration 인자를 받는다. HNSW 설정을 넘기는 쪽이
+            # 깨지지 않게 가짜도 같은 모양을 유지한다.
             return FakeCollection()
 
     fake_chromadb = type("FakeChromaDb", (), {"PersistentClient": FakeClient})

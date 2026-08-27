@@ -247,7 +247,6 @@ def evaluate_golden_dataset(dataset_path, output_csv, summary_csv, judge_model, 
     print(f"🚀 [INIT] 총 {len(golden_data)}개의 테스트 케이스 로드 완료.")
     print(f"   - 생성용 RAG 모델: {rag_model}")
     print(f"   - 평가용 Judge 모델: {judge_model}")
-
     # RAG 시스템 부팅 (backend/main.py 와 동일한 인스턴스 초기화 구조)
     rag_system = RilRagChat(db_path="./chroma_db", model_name=rag_model)
 
@@ -497,5 +496,5 @@ if __name__ == "__main__":
         rag_model=args.rag_model,
         ollama_base=args.ollama_base,
         test_ids=args.test_id,
-        categories=args.category
+        categories=args.category,
     )

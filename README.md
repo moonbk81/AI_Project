@@ -211,7 +211,6 @@ AI_Project/
   core/
     config.py
     constants.py
-    golden_matcher.py
     telephony_constants.py
   parsers/
     analysis_bucket_builder.py

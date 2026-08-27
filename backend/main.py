@@ -571,7 +571,13 @@ def _metadata_collection():
         path=_CHROMA_DB_PATH,
         settings=Settings(anonymized_telemetry=False),
     )
-    return client.get_or_create_collection(name="ril_logs")
+    from rag.collection_config import COLLECTION_CONFIGURATION
+
+    # 목록 조회는 읽기 전용이라 ef_search 조정(modify)까지 하지 않는다. 다만 컬렉션이
+    # 아직 없어서 여기서 만들어지는 경우에는 약한 기본 HNSW 설정으로 굳지 않게 한다.
+    return client.get_or_create_collection(
+        name="ril_logs", configuration=COLLECTION_CONFIGURATION
+    )
 
 
 def _file_owners() -> Dict[str, str]:

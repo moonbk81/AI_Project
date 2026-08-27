@@ -41,6 +41,7 @@ from rag.chroma_utils import (
 )
 from rag.routing import extract_json_object, get_hybrid_routing, get_llm_routing, get_semantic_routing
 from rag.llm_client import call_llm
+from rag.collection_config import COLLECTION_CONFIGURATION, ensure_hnsw_settings
 from rag.retrieval import build_where_filter, retrieve_and_rerank
 from rag.ingest import (
     ingest_file as ingest_payload_file,
@@ -51,16 +52,22 @@ from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
 from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
 from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
-from core.golden_matcher import DynamicGoldenMatcher
-
 class RilRagChat:
     def __init__(self, db_path="./chroma_db", collection_name="ril_logs", model_name=None, routing_mode="semantic"):
         print("🚀 [시스템 초기화] RAG 시스템을 부팅합니다...")
 
         # 1. Vector DB 초기화
         self.chroma_client = chromadb.PersistentClient(path=db_path, settings=Settings(anonymized_telemetry=False))
-        self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
-        self.knowledge_collection = self.chroma_client.get_or_create_collection(name="engineer_knowledge_base")
+        self.collection = self.chroma_client.get_or_create_collection(
+            name=collection_name, configuration=COLLECTION_CONFIGURATION
+        )
+        self.knowledge_collection = self.chroma_client.get_or_create_collection(
+            name="engineer_knowledge_base", configuration=COLLECTION_CONFIGURATION
+        )
+        # 이미 만들어진 컬렉션은 위 configuration 이 무시된다. 적용 가능한 값만 맞추고
+        # 재구축이 필요한 값이 어긋나 있으면 부팅 로그로 알린다.
+        ensure_hnsw_settings(self.collection)
+        ensure_hnsw_settings(self.knowledge_collection)
 
         # Mac(MPS) 또는 Ubuntu(CUDA) 환경에 맞게 디바이스 자동 설정
         device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -86,8 +93,6 @@ class RilRagChat:
         print(f" LLM 연결 준비 중...({get_llm_runtime_label(self.llm_model_name)})")
         print(f"✅ 시스템 준비 완료! (사용 디바이스: {device})\n")
         self._load_config()
-
-        self.golden_matcher = DynamicGoldenMatcher(self.embed_model, json_path="./eval_golden_dataset.json")
 
         self.tool_registry = {
             "get_cs_call_analytics": get_cs_call_analytics,
@@ -268,6 +273,25 @@ class RilRagChat:
 
         return "\n\n".join(guidelines)
 
+    # _format_results 가 만드는 "[자료 N - log_type]" 헤더가 문서 경계다.
+    # 아래 다이어트 정규식의 사정거리를 이 경계 안으로 묶어둔다.
+    _DOC_BOUNDARY = re.compile(r"(?=\[자료 \d+ - )")
+
+    # DOTALL 정규식이 문서를 넘나들며 지우면 질문과 무관한 문서에서 시작한 매칭이
+    # 뒤 문서의 결정적 증거(callFailCause 등)까지 통째로 삼킨다. 그래서 여는 토큰과
+    # 닫는 토큰 사이에 문서 헤더나 다음 레코드의 시작이 끼면 매칭을 포기하게 만든다.
+    _WTF_PATTERN = re.compile(
+        r"(?:\'|\"|\[)?\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}(?:\]|\'|\")?\s*SYSTEM_WTF:\s*"
+        r"(?:(?!\[자료 \d+ - |SYSTEM_WTF:).)*?교차 확인해야 합니다\.(?:\'|\")?",
+        re.DOTALL,
+    )
+    _NITZ_PATTERN = re.compile(
+        r"(?:\{|\'|\")?\s*log_time\s*:\s*"
+        r"(?:(?!\[자료 \d+ - |log_time\s*:).)*?"
+        r"dst_status\s*:\s*[^\,\}\]\n]+(?:\}|\'|\"|\])*",
+        re.DOTALL,
+    )
+
     def _clean_log_payload(self, text: str) -> str:
         """JSON 특수문자, 대괄호 노이즈 및 LLM의 어텐션을 붕괴시키는 대량의 반복 로그를 영구 방어합니다."""
         if not text:
@@ -282,20 +306,21 @@ class RilRagChat:
         stall_pattern = r"(?:\'|\")?key_related_events(?:\'|\")?\s*:\s*\[.*?\]"
         text = re.sub(stall_pattern, "key_related_events: [OMITTED_FOR_COMPRESSION]", text, flags=re.DOTALL)
 
-        # 💡 [어텐션 붕괴 방어벽 2] SYSTEM_WTF 찌꺼기 완벽 제거
-        # 괄호나 따옴표 유무에 상관없이 매칭
-        wtf_pattern = r"(?:\'|\"|\[)?\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}(?:\]|\'|\")?\s*SYSTEM_WTF:\s*.*?교차 확인해야 합니다\.(?:\'|\")?"
-        wtf_count = len(re.findall(wtf_pattern, text))
-        if wtf_count > 0:
-            text = re.sub(wtf_pattern, "", text)
+        # 💡 [어텐션 붕괴 방어벽 2/3] SYSTEM_WTF 찌꺼기와 NITZ 시간 보정 로그 압축
+        # 문서 블록으로 쪼갠 뒤 블록별로 적용한다. 통짜 문자열에 DOTALL 로 걸면
+        # 한 문서에서 시작한 매칭이 다음 문서의 증거까지 지워버린다.
+        blocks = self._DOC_BOUNDARY.split(text)
+        nitz_count = 0
+        for i, block in enumerate(blocks):
             # 메인 summary에 이미 압축 내용이 있으므로 본문에서는 완전히 날립니다.
-
-        # 💡 [어텐션 붕괴 방어벽 3] NITZ 시간 보정 로그 완벽 제거
-        # log_time: 2026-03... 부터 dst_status: 미적용 까지 포맷 무관하게 매칭
-        nitz_pattern = r"(?:\{|\'|\")?\s*log_time\s*:\s*.*?dst_status\s*:\s*[^\,\}\]]+(?:\}|\'|\"|\])*"
-        nitz_count = len(re.findall(nitz_pattern, text, flags=re.DOTALL))
+            block = self._WTF_PATTERN.sub("", block)
+            hits = len(self._NITZ_PATTERN.findall(block))
+            if hits:
+                nitz_count += hits
+                block = self._NITZ_PATTERN.sub("", block)
+            blocks[i] = block
+        text = "".join(blocks)
         if nitz_count > 0:
-            text = re.sub(nitz_pattern, "", text, flags=re.DOTALL)
             text = f"💡 [RAG_DIET_SYSTEM] NITZ 시간 보정 로그 {nitz_count}건이 감지되어 압축 처리되었습니다.\n" + text
 
         # 🧹 [진공 청소기] 요소가 삭제되고 남은 빈 콤마( , , , ) 찌꺼기 싹쓸이
@@ -333,9 +358,6 @@ class RilRagChat:
         if len(user_query) < 15 and chat_history:
             last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
-
-        search_query = self.golden_matcher.align_query(search_query)
-        print(f"[DEBUG] Aligned Search Query {search_query}")
 
         if self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
         elif self.routing_mode == "hybrid": routing_result = self._get_hybrid_routing(search_query)
@@ -459,13 +481,17 @@ class RilRagChat:
                 self.chroma_client.delete_collection(self.collection.name)
             except Exception:
                 pass # 이미 없으면 무시
-            self.collection = self.chroma_client.create_collection(name="ril_logs")
+            self.collection = self.chroma_client.create_collection(
+                name="ril_logs", configuration=COLLECTION_CONFIGURATION
+            )
 
             try:
                 self.chroma_client.delete_collection(self.knowledge_collection.name)
             except Exception:
                 pass
-            self.knowledge_collection = self.chroma_client.create_collection(name="engineer_knowledge_base")
+            self.knowledge_collection = self.chroma_client.create_collection(
+                name="engineer_knowledge_base", configuration=COLLECTION_CONFIGURATION
+            )
 
             print("✅ 모든 Vector DB 컬렉션이새로 생성되었습니다.")
             return True # 💡 정상적으로 True가 리턴되어야 UI가 폴더를 지웁니다!

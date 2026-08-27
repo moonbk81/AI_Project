@@ -53,20 +53,31 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
 
 
 def merge_log_files(file_paths, output_path):
+    """여러 로그를 시간순으로 합친다.
+
+    타임스탬프가 없는 줄(backtrace, CPU usage 표, 스택 프레임 등)에 고정 키를 주면
+    파일 맨 앞으로 끌려 올라가서 자기 앵커 줄과 떨어진다. 그러면 앵커 기준
+    ±N 줄 window 를 뜨는 후단 파서가 정작 원인이 적힌 본문을 못 본다. 그래서
+    직전 타임스탬프를 물려받게 하고, 같은 시각 안에서는 (파일, 원래 줄 번호)로
+    원본 순서를 그대로 유지한다.
+    """
     time_pattern = re.compile(r'^(\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3})')
     all_lines = []
 
-    for fp in file_paths:
+    for file_index, fp in enumerate(file_paths):
+        # 첫 타임스탬프가 나오기 전의 머리말은 파일 맨 앞에 그대로 둔다.
+        last_key = "00-00 00:00:00.000"
         with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
+            for line_number, line in enumerate(f):
                 match = time_pattern.search(line)
-                sort_key = match.group(1) if match else "00-00 00:00:00.000"
-                all_lines.append((sort_key, line))
+                if match:
+                    last_key = match.group(1)
+                all_lines.append((last_key, file_index, line_number, line))
 
-    all_lines.sort(key=lambda x: x[0])
+    all_lines.sort(key=lambda x: (x[0], x[1], x[2]))
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        for _, line in all_lines:
+        for _, _, _, line in all_lines:
             f.write(line)
 
 

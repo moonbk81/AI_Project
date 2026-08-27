@@ -3,11 +3,6 @@ from core.config import PROMPTS, ROUTING_MAP, SYSTEM_PROMPTS
 from ril_rag_chat import RilRagChat
 
 
-class IdentityMatcher:
-    def align_query(self, query):
-        return query
-
-
 def make_engine(monkeypatch):
     engine = RilRagChat.__new__(RilRagChat)
     engine.llm_model_name = "gemma4:12b"
@@ -22,7 +17,6 @@ def make_engine(monkeypatch):
     engine.model_config_registry = {"gemma4:12b": {"top_k": 3}}
     engine.collection = object()
     engine.embed_model = object()
-    engine.golden_matcher = IdentityMatcher()
     engine.tool_registry = {
         "get_ps_ims_call_analytics": lambda base: "CONFIG_SENTINEL_TOOL_FACT",
     }
