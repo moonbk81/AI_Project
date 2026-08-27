@@ -462,3 +462,98 @@ class TestKeywordScoreIgnoresSchema:
 
         # 희귀 토큰 하나가 점수를 독점하면 흔한 토큰 보유 문서가 0 에 가까워진다.
         assert scorer(common[0]) > 0.2
+
+
+class TestRecallEvalGroundTruth:
+    """골든셋을 검색 측정의 정답 라벨로 쓰는 규칙."""
+
+    def test_evidence_matching_survives_formatting_differences(self):
+        from rag.recall_eval import document_haystack, index_evidence
+
+        entries = [(
+            "d1",
+            "### [Type: Call_Session]\n-  callFailCause:   49\n- end_reason: CALL DROP",
+            {"is_user_reject": False, "call_id": "TC@119_1"},
+        )]
+        found = index_evidence(
+            ["callFailCause: 49", "TC@119_1", "is_user_reject: false", "없는값"], entries
+        )
+
+        assert found["callFailCause: 49"] == {"d1"}, "공백이 달라도 붙어야 한다"
+        assert found["TC@119_1"] == {"d1"}
+        assert found["is_user_reject: false"] == {"d1"}, "metadata 는 '키: 값' 으로 펴야 한다"
+        assert found["없는값"] == set()
+        assert "call drop" in document_haystack(entries[0][1], entries[0][2])
+
+    def test_negative_statements_are_not_treated_as_evidence(self):
+        from rag.recall_eval import scored_evidence_terms
+
+        case = {
+            "evidence_should_include": [
+                "SIGSEGV", "Crash_Event 없음", "존재하지 않", "음영지역/기지국 장애가 아님",
+            ]
+        }
+        assert scored_evidence_terms(case) == ["SIGSEGV"]
+
+    def test_absence_cases_are_recognised(self):
+        from rag.recall_eval import is_absence_case
+
+        assert is_absence_case({"trap_type": "absence_check"}) is True
+        assert is_absence_case({"trap_type": "negative_binder_leak_absence_check"}) is True
+        assert is_absence_case({"trap_type": "root_cause_disambiguation"}) is False
+        assert is_absence_case({}) is False
+
+    def test_denied_log_types_are_pulled_from_the_case(self):
+        from rag.recall_eval import denied_log_types
+
+        case = {
+            "evidence_should_include": ["Nitz_Time_Event", "존재하지 않"],
+            "must_have": ["Crash_Event 없음", "ANR_Context 없음"],
+            "root_cause": "request_failed 로그에는 Nitz_Time_Event가 존재하지 않습니다.",
+        }
+        denied = denied_log_types(case)
+        assert "Nitz_Time_Event" in denied
+        assert "Crash_Event" in denied
+        assert "ANR_Context" in denied
+        assert denied.count("Nitz_Time_Event") == 1
+
+    def test_absence_measure_flags_polluted_top_k(self):
+        from rag.recall_eval import measure_absence
+
+        case = {"trap_type": "absence_check", "evidence_should_include": ["Crash_Event 없음"]}
+        corpus = [("d1", "무관한 문서", {"log_type": "Boot_Stat"})]
+        clean = measure_absence(case, corpus, corpus)
+        assert clean["absence_holds"] == ["Crash_Event"]
+        assert clean["false_evidence_in_top_k"] == []
+
+        polluted_corpus = corpus + [("d2", "크래시", {"log_type": "Crash_Event"})]
+        polluted = measure_absence(case, polluted_corpus, polluted_corpus)
+        assert polluted["absence_broken"] == ["Crash_Event"]
+        assert polluted["false_evidence_in_top_k"] == ["Crash_Event"]
+
+    def test_retrieval_only_blames_evidence_that_exists(self):
+        from rag.recall_eval import measure_retrieval
+
+        case = {"evidence_should_include": ["있는근거", "코퍼스에없는근거"]}
+        corpus = [
+            ("d1", "있는근거 포함 문서", {}),
+            ("d2", "다른 문서", {}),
+        ]
+        # top_k 가 정답 문서를 놓친 경우
+        missed = measure_retrieval(case, [corpus[1]], corpus)
+        assert missed["answerable_evidence"] == 1, "코퍼스에 없는 근거는 검색 책임이 아니다"
+        assert missed["evidence_recall"] == 0.0
+        assert missed["missed_evidence"] == ["있는근거"]
+        assert missed["first_relevant_rank"] is None
+
+        # top_k 가 정답 문서를 올린 경우
+        hit = measure_retrieval(case, [corpus[0], corpus[1]], corpus)
+        assert hit["evidence_recall"] == 1.0
+        assert hit["first_relevant_rank"] == 1
+
+    def test_ann_recall_compares_exact_with_approximate(self):
+        from rag.recall_eval import ann_recall
+
+        assert ann_recall(["a", "b", "c", "d"], ["a", "b", "x", "y"]) == 0.5
+        assert ann_recall(["a"], ["a"]) == 1.0
+        assert ann_recall([], ["a"]) is None

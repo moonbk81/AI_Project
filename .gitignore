@@ -229,6 +229,9 @@ payloads/
 result/
 temp_logs/
 chroma_db/
+# 검색 리콜 측정 전용 산출물 (scripts/measure_retrieval_recall.py)
+chroma_eval/
+eval_artifacts/
 test_reports/
 bge-m3-offline/
 benchmark_results/
