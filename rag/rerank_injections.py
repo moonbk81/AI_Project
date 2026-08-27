@@ -9,6 +9,7 @@ import json
 from rag.query_classifiers import (
     is_binder_proxy_count_query,
     is_binder_query,
+    is_call_failure_query,
     is_call_release_misclassification_query,
     is_datacall_failure_query,
     is_dns_policy_query,
@@ -33,6 +34,27 @@ def _merge_top_results(forced_results: list, final_top_results: list, top_k: int
         seen_ids.add(item_id)
         merged.append(item)
     return merged[:top_k]
+
+def _is_failed_call_session(result: dict) -> bool:
+    meta = result.get("meta") or {}
+    if meta.get("log_type") != "Call_Session":
+        return False
+
+    status = str(meta.get("status", "")).upper()
+    text = " ".join([
+        str(result.get("doc", "")),
+        json.dumps(meta, ensure_ascii=False, default=str),
+    ]).lower()
+
+    if any(ok in status for ok in ["SUCCESS", "NORMAL_RELEASE", "CANCELED", "CANCELLED"]):
+        return False
+    return (
+        any(k in status for k in ["FAIL", "DROP"])
+        or any(k in text for k in [
+            "callfailcause", "call fail cause", "vendorcause", "vendor cause",
+            "fail_reason", "call drop", "call_drop", "ims_fail",
+        ])
+    )
 
 def apply_rerank_injections(
     reranked_results: list,
@@ -98,6 +120,11 @@ def apply_rerank_injections(
             for r in final_top_results
         ):
             final_top_results = [call_candidates[0]] + final_top_results[:max(0, top_k - 1)]
+
+    if is_call_failure_query(query_lower):
+        failed_calls = [result for result in reranked_results if _is_failed_call_session(result)]
+        if failed_calls:
+            final_top_results = _merge_top_results([failed_calls[0]], final_top_results, top_k)
 
     if is_datacall_failure_query(query_lower):
         setup_failure_candidates = []

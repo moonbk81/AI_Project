@@ -400,6 +400,28 @@ class TestSoftLogTypeFilter:
         )
         assert shared == ["Call_Session"]
 
+    def test_failed_call_session_is_forced_to_the_front_for_call_failure_questions(self):
+        from rag.retrieval import retrieve_and_rerank
+
+        rows = [
+            ("ok-call", "정상 통화 세션 status SUCCESS", {"log_type": "Call_Session", "status": "SUCCESS"}, 0.10),
+            (
+                "failed-call",
+                "통화 실패 세션 fail_reason callFailCause: 49 vendorCause: 24",
+                {"log_type": "Call_Session", "status": "CALL DROP", "fail_reason": "callFailCause: 49"},
+                0.45,
+            ),
+            ("sip", "SIP message", {"log_type": "IMS_SIP_Message", "status": "OK"}, 0.20),
+        ]
+        results = retrieve_and_rerank(
+            collection=_FakeCollection(rows),
+            embed_model=_FakeEmbedder(),
+            search_query="통화 실패/드롭 세션의 원인을 분석해줘",
+            top_k=2,
+        )
+
+        assert results["ids"][0][0] == "failed-call"
+
 
 class TestWeakEvidenceIsFlagged:
     """근거가 멀면 '없다' 고 말할 경로를 만든다."""
@@ -781,3 +803,33 @@ class TestBinderLeakDocumentKeepsItsSourceEvent:
         assert found["BINDER_PROXY_HISTOGRAM"], "골든셋이 요구하는 라벨을 찾지 못했다"
         assert found["IIntentReceiver"]
         assert found["7262개"]
+
+
+class TestCallPayloadKeepsFailures:
+    """대시보드에 보이는 실패 콜은 RAG payload 에도 남아야 한다."""
+
+    def test_old_failed_calls_are_kept_beside_the_recent_ten(self):
+        from rag_builders.telephony_builder import build_call_session_payloads
+
+        calls = [
+            {"id": "failed-old", "status": "CALL DROP", "fail_reason": "callFailCause: 49"},
+            *[
+                {"id": f"ok-{index}", "status": "SUCCESS", "fail_reason": ""}
+                for index in range(12)
+            ],
+        ]
+
+        payloads = build_call_session_payloads(
+            {"call_sessions": calls},
+            build_markdown_doc=lambda session, log_type: f"{log_type} {session['id']}",
+            extract_metadata=lambda session, log_type: {
+                "log_type": log_type,
+                "call_id": session["id"],
+                "status": session["status"],
+                "fail_reason": session["fail_reason"],
+            },
+        )
+
+        call_ids = [payload["metadata"]["call_id"] for payload in payloads]
+        assert "failed-old" in call_ids
+        assert len(call_ids) == 11

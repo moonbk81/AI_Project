@@ -6,6 +6,7 @@ import os
 from rag.query_classifiers import (
     is_binder_proxy_count_query,
     is_binder_query,
+    is_call_failure_query,
     is_call_release_misclassification_query,
     is_crash_absence_check,
     is_datacall_failure_query,
@@ -210,6 +211,8 @@ def retrieve_and_rerank(
     # 프로세스가 사는 동안 라우팅 설정이 조용히 오염된다.
     effective_target_log_types = list(target_log_types) if target_log_types else None
 
+    call_failure_query = is_call_failure_query(query_lower)
+
     if is_crash_absence_check(query_lower):
         effective_target_log_types = [
             "Native_Crash_Event",
@@ -225,6 +228,11 @@ def retrieve_and_rerank(
             "OOS_Event",
             "Device_Property_State",
         ]
+    if call_failure_query:
+        if effective_target_log_types is None:
+            effective_target_log_types = []
+        if "Call_Session" not in effective_target_log_types:
+            effective_target_log_types.append("Call_Session")
     if is_datacall_failure_query(query_lower):
         if effective_target_log_types is None:
             effective_target_log_types = []
@@ -240,7 +248,7 @@ def retrieve_and_rerank(
         fetch_k = max(top_k * 6, 24)
     elif is_binder_proxy_count_query(query_lower) or is_negative_binder_leak_check_query(query_lower):
         fetch_k = max(top_k * 8, 32)
-    elif is_call_release_misclassification_query(query_lower) or is_datacall_failure_query(query_lower) or is_nitz_query(query_lower) or is_binder_query(query_lower):
+    elif call_failure_query or is_call_release_misclassification_query(query_lower) or is_datacall_failure_query(query_lower) or is_nitz_query(query_lower) or is_binder_query(query_lower):
         fetch_k = max(top_k * 5, 20)
     else:
         fetch_k = max(top_k * 4, 16)

@@ -66,6 +66,18 @@ def is_call_release_misclassification_query(query_lower: str) -> bool:
     ])
     return has_call_scope and has_misclassification_check and has_release_or_reject_evidence
 
+def is_call_failure_query(query_lower: str) -> bool:
+    has_call_scope = any(k in query_lower for k in [
+        "call_session", "call session", "volte", "ims call", "ps call",
+        "통화", "호", "콜", "음성", "call", "voice call", "cs call", "cs 통화"
+    ])
+    has_failure_scope = any(k in query_lower for k in [
+        "fail", "failed", "failure", "drop", "dropped", "disconnect",
+        "끊김", "끊겼", "끊긴", "드롭", "콜드랍", "실패", "종료 사유", "거절 사유",
+        "callfailcause", "call fail cause", "vendorcause", "원인", "사유"
+    ])
+    return has_call_scope and has_failure_scope
+
 def is_call_drop_check_query(query_lower: str) -> bool:
     has_call_scope = any(k in query_lower for k in [
         "call_session", "call session", "volte", "ims call", "ps call",

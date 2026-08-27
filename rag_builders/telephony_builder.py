@@ -10,6 +10,23 @@ import json
 import os
 from rag_builders.common import append_callback_payload, append_payload, source_file_name
 
+def _is_failed_call_session(session):
+    status = str((session or {}).get("status") or "").upper()
+    reason = str((session or {}).get("fail_reason") or "").lower()
+    return (
+        any(k in status for k in ["FAIL", "DROP"])
+        or any(k in reason for k in ["callfailcause", "vendorcause", "ims_fail"])
+    ) and not any(k in status for k in ["SUCCESS", "NORMAL_RELEASE", "CANCELED", "CANCELLED"])
+
+def _recent_calls_with_failures(call_sessions, limit=10):
+    recent = list((call_sessions or [])[::-1][:limit])
+    seen = {id(session) for session in recent}
+    for session in call_sessions or []:
+        if _is_failed_call_session(session) and id(session) not in seen:
+            recent.append(session)
+            seen.add(id(session))
+    return recent
+
 def build_radio_power_payloads(report_data, build_markdown_doc, extract_metadata):
     rag_payload = []
     for rp in report_data.get("radio_power", []) or []:
@@ -19,7 +36,7 @@ def build_radio_power_payloads(report_data, build_markdown_doc, extract_metadata
 def build_call_session_payloads(report_data, build_markdown_doc, extract_metadata):
     rag_payload = []
     call_sessions = report_data.get("call_sessions", []) or []
-    for session in call_sessions[::-1][:10]:
+    for session in _recent_calls_with_failures(call_sessions):
         append_callback_payload(rag_payload, session, "Call_Session", build_markdown_doc, extract_metadata)
     return rag_payload
 
