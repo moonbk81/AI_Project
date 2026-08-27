@@ -33,6 +33,10 @@ def make_zip(entries):
         ("dumpState_1783577655961.log", True),
         ("dumpState_S911NKSS7EZCI_202607070957.log", True),
         ("act_dumpstate.txt", True),
+        ("dumpstate-2026-08-25-12-05-44.txt", True),  # 날짜 꼬리표
+        ("dumpstate_board.txt", True),
+        ("bugreport-a56x-UP1A-2026-08-17-16-07.txt", True),
+        ("dumpstateXYZ.txt", False),  # 구분자 없이 이어 붙은 이름은 다른 파일이다
         ("dumpstate.log.gz", False),  # still packed
         ("logcat.txt", False),
         ("", False),

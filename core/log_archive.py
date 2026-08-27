@@ -24,9 +24,10 @@ logger = logging.getLogger(__name__)
 LOG_PATTERNS = [
     r'^dumpstate\.log$',              # dumpstate.log
     r'^dumpstate\.txt$',              # dumpstate.txt
-    r'^dumpState\.log$',              # dumpState.log
-    r'^dumpState_\d+\.log$',          # dumpState_1783577655961.log (Unix timestamp only)
-    r'^dumpState_[A-Z0-9]+_\d{10,}\.log$',  # dumpState_S911NKSS7EZCI_202607070957.log (device ID + timestamp)
+    # 뒤에 무엇이 붙든 dumpstate 는 dumpstate 다. dumpState_1783577655961.log,
+    # dumpState_S911NKSS7EZCI_202607070957.log, dumpstate-2026-08-25-12-05-44.txt
+    # 처럼 기기·빌드마다 꼬리표가 달라 하나씩 적어 두면 계속 새는 이름이 생긴다.
+    r'^dumpstate[-_].+\.(log|txt)$',
     r'^act_dumpstate\.txt$',          # act_dumpstate.txt
     r'^bugreport[-_].*\.txt$',        # bugreport-a56x-...-2026-08-17.txt (dumpstate 본문)
 ]
