@@ -320,7 +320,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // ------------------------------------------------------------------ 첨부
   const attachments = panel(
     "첨부 파일",
-    "고른 압축 파일(ZIP/7z)만 내려받아 안의 LOG 파일을 목록으로 보여 줍니다. 분석할 로그를 골라 주세요.",
+    "선택한 압축 파일(ZIP/7z)만 내려받아 안의 LOG 파일을 목록으로 보여 줍니다. 분석할 로그를 선택해 주세요.",
   );
   const attachmentHost = el("div", "stack");
   attachments.body.append(attachmentHost);
@@ -559,11 +559,17 @@ export async function renderPlm(mount, sourceFile, ctx) {
         groups.get(key).push(candidate);
       }
 
-      logHost.append(el("p", "card-note", `찾은 로그 ${found.length}개. 분석할 것을 고르세요.`));
+      // 아는 로그 이름이 하나도 없으면 로그처럼 생긴 파일이 대신 온다. 확실한
+      // 것과 섞이지 않게 말로 구분해 준다.
+      const guessed = found.every((candidate) => candidate.kind === "other");
+      logHost.append(el("p", "card-note", guessed
+        ? `아는 로그 이름은 없었습니다. 로그일 수 있는 파일 ${found.length}개를 큰 것부터 보여 줍니다.`
+        : `찾은 로그 ${found.length}개. 분석할 것을 고르세요.`));
 
       const rows = [];
       for (const candidate of singles) {
-        rows.push(addRow(`${candidate.file_id}::${candidate.path}`, candidate.path,
+        const label = candidate.kind === "other" ? `${candidate.path} (추정)` : candidate.path;
+        rows.push(addRow(`${candidate.file_id}::${candidate.path}`, label,
                          sizeText(candidate.size),
                          [{ file_id: candidate.file_id, route: candidate.route }]));
       }

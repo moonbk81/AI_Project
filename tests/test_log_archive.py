@@ -4,6 +4,7 @@ import zipfile
 import pytest
 
 from core.log_archive import (
+    MAX_MAYBE_LOGS,
     NESTED_ARCHIVE_MAX_DEPTH,
     extract_file,
     extract_logs_from_archive,
@@ -245,3 +246,42 @@ def test_empty_logs_are_not_offered_as_candidates():
     assert [c.path for c in find_log_candidates(attachment)] == [
         "dumpstate.log", "ap_silentlog/logcat_main.txt",
     ]
+
+
+def test_a_bugreport_archive_is_opened_and_its_log_recognised():
+    inner = make_zip({"bugreport-a56x-2026-08-17.txt": b"dumpstate body", "version.txt": b"1"})
+    attachment = make_zip({"GalaxyDiagnostics_Bugreport.zip": inner, "readme.pdf": b"x"})
+
+    found = find_log_candidates(attachment)
+
+    assert [(c.path, c.kind) for c in found] == [
+        ("GalaxyDiagnostics_Bugreport.zip/bugreport-a56x-2026-08-17.txt", "log"),
+    ]
+
+
+def test_files_that_only_look_like_logs_are_offered_when_nothing_is_recognised():
+    inner = make_zip({"logcat_main.txt": b"a" * 50, "sec_log.log": b"b" * 10, "icon.png": b"x"})
+    attachment = make_zip({"SystemLog.zip": inner})
+
+    found = find_log_candidates(attachment)
+
+    # 큰 것부터, 압축 안의 경로를 그대로 달고 나온다.
+    assert [(c.path, c.kind) for c in found] == [
+        ("SystemLog.zip/logcat_main.txt", "other"),
+        ("SystemLog.zip/sec_log.log", "other"),
+    ]
+
+
+def test_a_known_log_wins_over_the_look_alikes():
+    attachment = make_zip({"dumpstate.log": b"body", "logcat_main.txt": b"a" * 100})
+
+    assert [c.path for c in find_log_candidates(attachment)] == ["dumpstate.log"]
+
+
+def test_the_look_alike_list_is_capped():
+    attachment = make_zip({f"part_{index:03d}.txt": b"x" * (index + 1) for index in range(MAX_MAYBE_LOGS + 10)})
+
+    found = find_log_candidates(attachment)
+
+    assert len(found) == MAX_MAYBE_LOGS
+    assert found[0].path == f"part_{MAX_MAYBE_LOGS + 9:03d}.txt"  # 큰 것부터

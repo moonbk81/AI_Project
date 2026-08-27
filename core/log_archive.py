@@ -28,6 +28,7 @@ LOG_PATTERNS = [
     r'^dumpState_\d+\.log$',          # dumpState_1783577655961.log (Unix timestamp only)
     r'^dumpState_[A-Z0-9]+_\d{10,}\.log$',  # dumpState_S911NKSS7EZCI_202607070957.log (device ID + timestamp)
     r'^act_dumpstate\.txt$',          # act_dumpstate.txt
+    r'^bugreport[-_].*\.txt$',        # bugreport-a56x-...-2026-08-17.txt (dumpstate 본문)
 ]
 
 # PLM 첨부는 압축 파일 안에 압축 파일이 다시 들어있는 경우가 많다(로그는 안쪽에 있음).
@@ -45,6 +46,13 @@ GROUPED_LOG_FOLDERS = ("ap_silentlog",)
 # 묶음 폴더 안에서 로그로 볼 확장자. 이름 규칙(LOG_PATTERNS)과 달리
 # SILENT_LOG_* 처럼 제각각이라 확장자로 본다.
 GROUPED_LOG_SUFFIXES = (".log", ".txt")
+
+# 아는 이름은 아니지만 로그일 수 있는 파일. 아는 이름이 하나도 없을 때
+# "못 찾았습니다" 로 끝내는 대신 이것들을 보여 주고 사람이 고르게 한다.
+MAYBE_LOG_SUFFIXES = (".log", ".txt")
+
+# 그런 파일이 수백 개인 첨부(FS 덤프 등)가 있어 큰 것부터 이만큼만 보여 준다.
+MAX_MAYBE_LOGS = 40
 
 ARCHIVE_SUFFIXES = (".zip", ".7z")
 
@@ -371,6 +379,8 @@ class LogCandidate(NamedTuple):
     route: tuple
     size: int
     group: str = ""
+    # "log" 는 아는 이름, "other" 는 로그처럼 생겼을 뿐인 파일.
+    kind: str = "log"
 
     @property
     def path(self) -> str:
@@ -382,9 +392,16 @@ def _is_grouped_log(filename: str) -> bool:
     return is_log_file(filename) or filename.lower().endswith(GROUPED_LOG_SUFFIXES)
 
 
-def _candidates_here(data: bytes, route: tuple) -> List[LogCandidate]:
-    """이 층에서 바로 고를 수 있는 로그들. 압축은 열지 않는다."""
-    found = []
+def _candidates_here(data: bytes, route: tuple):
+    """이 층에서 바로 고를 수 있는 파일들. 압축은 열지 않는다.
+
+    아는 로그 이름(``known``)과 로그처럼 생겼을 뿐인 파일(``maybe``)을 나눠
+    돌려준다. 아는 이름이 없을 때만 뒤엣것을 쓴다.
+    """
+    known: List[LogCandidate] = []
+    maybe: List[LogCandidate] = []
+    prefix = "/".join(route)
+
     for entry in entries(data):
         if entry.is_dir:
             continue
@@ -394,9 +411,11 @@ def _candidates_here(data: bytes, route: tuple) -> List[LogCandidate]:
 
         folder = grouped_folder_of(entry.name)
         if folder:
-            if not _is_grouped_log(base_filename):
-                continue
-        elif not is_log_file(base_filename):
+            looks_known = _is_grouped_log(base_filename)
+        else:
+            looks_known = is_log_file(base_filename)
+
+        if not looks_known and not base_filename.lower().endswith(MAYBE_LOG_SUFFIXES):
             continue
 
         # 0 바이트 로그가 섞여 있는 첨부가 있다(ap_silentlog 안이 특히 그렇다).
@@ -405,35 +424,27 @@ def _candidates_here(data: bytes, route: tuple) -> List[LogCandidate]:
             logger.info("Skipping empty log %s", entry.name)
             continue
 
-        prefix = "/".join(route)
-        found.append(LogCandidate(
+        candidate = LogCandidate(
             route=(*route, entry.name),
             size=entry.size,
             group=f"{prefix}/{folder}" if prefix and folder else folder,
-        ))
-    return found
+            kind="log" if looks_known else "other",
+        )
+        (known if looks_known else maybe).append(candidate)
+
+    return known, maybe
 
 
-def find_log_candidates(data: bytes, _depth: int = 0, _route: tuple = ()) -> List[LogCandidate]:
-    """압축 안에서 고를 만한 로그들을 찾아 목록으로 돌려준다.
+def _scan_for_logs(data: bytes, depth: int, route: tuple):
+    """한 압축을 훑어 (아는 로그, 그 밖의 후보) 를 모은다."""
+    known, maybe = _candidates_here(data, route)
+    if known:
+        # 이 층에 아는 로그가 있으면 옆의 압축은 열지 않는다. dumpstate.log 와
+        # 그것을 다시 압축한 dumpstate.zip 이 함께 든 첨부가 흔하다.
+        return known, maybe
 
-    본문은 읽지 않는다 — 목록(zip 은 중앙 디렉터리)만 보므로 첨부 하나를
-    훑는 값이 거의 들지 않는다. 예외는 중첩 압축이고, 그것도 이름에 로그
-    힌트가 있는 것만 연다.
-
-    규칙:
-      * 이 층에 로그가 있으면 옆의 압축은 열지 않는다. dumpstate.log 와 그것을
-        다시 압축한 dumpstate.zip 이 함께 든 첨부가 흔하다.
-      * ap_silentlog 같은 폴더 안의 로그는 ``group`` 이 채워져 나간다. 부르는
-        쪽에서 한 묶음으로 고르게 하기 위한 것이다.
-      * 힌트가 붙은 압축에서 아무것도 못 찾으면, 그때만 나머지 압축도 연다.
-    """
-    here = _candidates_here(data, _route)
-    if here:
-        return here
-
-    if _depth >= NESTED_ARCHIVE_MAX_DEPTH:
-        return []
+    if depth >= NESTED_ARCHIVE_MAX_DEPTH:
+        return [], maybe
 
     nested = [
         entry.name for entry in entries(data)
@@ -442,20 +453,45 @@ def find_log_candidates(data: bytes, _depth: int = 0, _route: tuple = ()) -> Lis
     hinted = [name for name in nested if looks_like_log_archive(os.path.basename(name))]
     plain = [name for name in nested if name not in set(hinted)]
 
-    # 힌트가 붙은 것부터, 그래도 없으면 나머지. 나머지까지 여는 경우는 어차피
-    # 아무 로그도 못 찾은 첨부라 아끼고 말 것이 없다.
+    # GalaxyDiagnostics_Bugreport.zip, SystemLog.zip 처럼 이름에 힌트가 붙은
+    # 것부터 연다. 그래도 아는 로그가 안 나오면 나머지 압축도 열어 본다 —
+    # 어차피 빈손인 첨부라 아낄 것이 없다.
     for wave in (hinted, plain):
-        found: List[LogCandidate] = []
         for name, content in _read_in_order(data, wave):
             if content is None:
                 logger.error("Failed to open nested archive %s", name)
                 continue
-            logger.info("Scanning nested archive %s (depth=%d)", name, _depth + 1)
-            found.extend(find_log_candidates(content, _depth + 1, (*_route, name)))
-        if found:
-            return found
+            logger.info("Scanning nested archive %s (depth=%d)", name, depth + 1)
+            inner_known, inner_maybe = _scan_for_logs(content, depth + 1, (*route, name))
+            known.extend(inner_known)
+            maybe.extend(inner_maybe)
+        if known:
+            break
 
-    return []
+    return known, maybe
+
+
+def find_log_candidates(data: bytes) -> List[LogCandidate]:
+    """압축 안에서 고를 만한 로그들을 찾아 목록으로 돌려준다.
+
+    본문은 읽지 않는다 — 목록(zip 은 중앙 디렉터리)만 보므로 첨부 하나를 훑는
+    값이 거의 들지 않는다. 예외는 중첩 압축이고, 그것도 이름에 로그 힌트가
+    붙은 것부터 연다.
+
+    아는 이름(dumpstate 계열, ap_silentlog 안의 로그)이 하나도 없으면 로그처럼
+    생긴 파일을 ``kind="other"`` 로 함께 돌려준다. 이름 규칙을 모르는 로그를
+    "찾지 못했습니다" 로 끝내 버리면 사람이 손쓸 방법이 없다.
+    """
+    known, maybe = _scan_for_logs(data, 0, ())
+    if known:
+        return known
+
+    # 큰 파일이 로그일 가능성이 높다. FS 덤프처럼 잔파일이 수백 개인 첨부를
+    # 목록으로 도배하지 않도록 여기서 자른다.
+    ranked = sorted(maybe, key=lambda candidate: candidate.size, reverse=True)
+    if len(ranked) > MAX_MAYBE_LOGS:
+        logger.info("Showing %d of %d possible logs", MAX_MAYBE_LOGS, len(ranked))
+    return ranked[:MAX_MAYBE_LOGS]
 
 
 def _read_in_order(data: bytes, names: List[str]):

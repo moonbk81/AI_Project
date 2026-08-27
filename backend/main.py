@@ -582,7 +582,7 @@ def _run_plm_log_scan_job(
     본문은 꺼내지 않는다. 압축의 목록만 읽고, 이름에 로그 힌트가 붙은 중첩
     압축만 열어 본다. 실제 추출은 사용자가 고른 뒤에 그 파일만 한다.
     """
-    from core.log_archive import find_log_candidates
+    from core.log_archive import find_log_candidates, list_archive_contents
     from plm import log_pipeline
 
     try:
@@ -599,6 +599,7 @@ def _run_plm_log_scan_job(
 
         candidates: List[Dict[str, Any]] = []
         failures: List[str] = []
+        inside: List[str] = []
         for index, attachment in enumerate(archives, 1):
             title = str(attachment.get("title") or "첨부")
             share = int(90 * index / len(archives))
@@ -607,7 +608,8 @@ def _run_plm_log_scan_job(
                 data = _attachment_bytes(division_code, defect_code, attachment)
 
                 _set_job(job_id, message=f"{title} 안에서 로그 파일 찾는 중...")
-                for candidate in find_log_candidates(data):
+                found = find_log_candidates(data)
+                for candidate in found:
                     candidates.append({
                         "file_id": str(attachment.get("fileId")),
                         "title": title,
@@ -615,21 +617,25 @@ def _run_plm_log_scan_job(
                         "route": list(candidate.route),
                         "size": candidate.size,
                         "group": candidate.group,
+                        "kind": candidate.kind,
                     })
+                if not found:
+                    # 왜 못 찾았는지는 안에 무엇이 있었는지를 봐야 안다.
+                    inside.extend(list(list_archive_contents(data))[:12])
             except Exception as e:
                 # 첨부 하나가 실패해도 나머지 목록은 쓸모가 있다.
                 logging.getLogger(__name__).error("Scan failed for %s: %s", title, e)
                 failures.append(title)
 
         note = f" ({', '.join(failures)} 는 읽지 못했습니다)" if failures else ""
-        _set_job(
-            job_id,
-            status="done",
-            progress=100,
-            log_candidates=candidates,
-            message=(f"로그 파일 {len(candidates)}개를 찾았습니다.{note}" if candidates
-                     else f"분석할 만한 로그 파일을 찾지 못했습니다.{note}"),
-        )
+        if candidates:
+            message = f"로그 파일 {len(candidates)}개를 찾았습니다.{note}"
+        else:
+            # 이름만 봐도 다음에 무엇을 해야 할지 알 수 있게, 안에 있던 것을 적는다.
+            seen = ", ".join(inside[:8]) if inside else "(목록을 읽지 못했습니다)"
+            message = f"분석할 만한 로그 파일을 찾지 못했습니다.{note} 안에 있던 파일: {seen}"
+
+        _set_job(job_id, status="done", progress=100, log_candidates=candidates, message=message)
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="로그 목록 만들기 실패")
 
