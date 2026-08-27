@@ -226,6 +226,16 @@ export function frameTable(rows, columns, limit) {
   return table(keys, (rows || []).map((row) => keys.map((key) => row[key])), limit);
 }
 
+export function sectionAnalysisQuestion(sectionName, spec, sourceFile) {
+  return [
+    `${sectionName}의 "${spec.title}" 섹션을 기준으로 현재 로그를 분석해줘.`,
+    spec.sub ? `섹션 설명: ${spec.sub}` : "",
+    spec.prompt ? `분석 초점: ${spec.prompt}` : "",
+    `대상 파일: ${sourceFile}`,
+    "이 카드와 관련된 이상 징후가 있는지, 원인 후보와 근거 로그를 함께 정리해줘.",
+  ].filter(Boolean).join("\n");
+}
+
 /**
  * A titled panel. `draw()` plots and keeps a table view behind a toggle, so the
  * numbers stay reachable without hovering — which is also the relief the light
@@ -262,6 +272,13 @@ export function card(title, subtitle) {
   return {
     section,
     body,
+    action(label, onClick, className = "") {
+      const button = el("button", className, label);
+      button.type = "button";
+      button.addEventListener("click", onClick);
+      head.insertBefore(button, toggle);
+      return button;
+    },
     /** Extra content above the plot (KPI rows, notes, pickers). */
     prepend(node) {
       body.insertBefore(node, plotHost);

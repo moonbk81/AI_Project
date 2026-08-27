@@ -4,7 +4,7 @@ import { api, baseName } from "../api.js";
 import { reportCard } from "../report.js";
 import {
   axis, barTrace, baseLayout, card, el, endLabels, fmt, frameTable, groupBy,
-  lineTrace, section, seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
+  lineTrace, section, sectionAnalysisQuestion, seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
 } from "../viz.js";
 
 function kpiBand(kpi) {
@@ -25,6 +25,7 @@ const CARDS = [
     chart: "service-state",
     title: "망 등록 상태 전이",
     sub: "Voice / Data 등록 상태가 바뀐 시점만",
+    prompt: "Voice/Data 등록 상태가 바뀐 시점, cause, operator 변화를 보고 OOS나 재등록 반복의 원인을 짚어줘.",
     render(series, panel) {
       const colors = seriesColors();
       const traces = [...groupBy(series.points, (p) => `${p.slot} · ${p.conn_type}`)].map(
@@ -48,6 +49,7 @@ const CARDS = [
     chart: "rf-timeline",
     title: "통화 구간과 RF 환경",
     sub: "RSRP 추이 위에 통화 구간과 SIP 오류를 겹쳐 표시",
+    prompt: "통화 drop 구간 전후의 RSRP 변화와 SIP 오류를 함께 보고 RF 문제인지 IMS/SIP 문제인지 구분해줘.",
     render(series, panel) {
       const colors = seriesColors();
       const traces = [
@@ -91,6 +93,7 @@ const CARDS = [
     chart: "signal-level",
     title: "RAT별 신호 세기",
     sub: "Signal level 추이",
+    prompt: "RAT별 signal level 저하, 급변, slot 차이를 보고 품질 저하나 망 전환 징후가 있는지 분석해줘.",
     render(series, panel) {
       const colors = seriesColors();
       const traces = [...groupBy(series.points, (p) => p.rat || "Unknown")].map(
@@ -115,6 +118,7 @@ const CARDS = [
     chart: "call-history",
     title: "통화 세션",
     sub: "세션 결과별 건수",
+    prompt: "실패/드롭 세션이 있으면 release cause, callFailCause, SIP/RF 주변 근거를 연결해서 통화 실패 원인을 정리해줘.",
     render(series, panel) {
       const counts = new Map();
       for (const status of series.statuses || []) counts.set(status, (counts.get(status) || 0) + 1);
@@ -142,6 +146,7 @@ const CARDS = [
     chart: "data-call",
     title: "Data Call 설정",
     sub: "APN별 상태 전이",
+    prompt: "Data call 실패 cause, APN, latency, Internet stall 관련 이벤트를 함께 보고 데이터 연결 실패 원인을 정리해줘.",
     render(series, panel) {
       const kpi = series.kpi;
       panel.prepend(tileRow([
@@ -174,6 +179,7 @@ const CARDS = [
     chart: "rilj",
     title: "RILJ transaction",
     sub: "무응답 · 오류 · 지연된 요청",
+    prompt: "Timeout, 오류 응답, slow request, UNSL 이벤트를 보고 modem/RIL 응답 지연이나 명령 실패가 있는지 분석해줘.",
     render(series, panel) {
       const kpi = series.kpi;
       panel.prepend(tileRow([
@@ -196,6 +202,7 @@ const CARDS = [
     chart: "sip-flow",
     title: "VoLTE / IMS SIP",
     sub: "단말과 IMS 망 사이 메시지",
+    prompt: "SIP 4xx~6xx 오류, transaction 흐름, setup latency를 보고 VoLTE/IMS 실패 지점을 정리해줘.",
     render(series, panel) {
       const kpi = series.kpi;
       panel.prepend(tileRow([
@@ -214,6 +221,7 @@ const CARDS = [
     chart: "network-timeline",
     title: "네트워크 품질 추이",
     sub: "구간별 DNS/TCP 통계",
+    prompt: "DNS/TCP 지연 spike와 netId별 품질 변화를 보고 인터넷 먹통이나 지연 구간의 계층별 원인을 정리해줘.",
     render(series, panel) {
       const colors = seriesColors();
       const picker = el("select", "metric-picker");
@@ -250,6 +258,7 @@ const CARDS = [
     chart: "dns-errors",
     title: "패키지별 DNS 오류",
     sub: "성공(0/SUCCESS)을 제외한 응답 코드",
+    prompt: "패키지별 DNS return code 분포를 보고 특정 앱/도메인/Private DNS 정책 문제 가능성을 정리해줘.",
     render(series, panel) {
       const codes = [...new Set(series.counts.map((row) => row.return_code))].slice(0, 4);
       const apps = [...new Set(series.counts.map((row) => row.app_name))];
@@ -277,6 +286,7 @@ const CARDS = [
     chart: "dns-issues",
     title: "DNS 실패 · 차단",
     sub: "패키지별 발생 건수",
+    prompt: "DNS 실패나 차단이 몰린 패키지를 중심으로 네트워크 문제인지 앱/정책 문제인지 구분해줘.",
     render(series, panel) {
       const rows = [...series.package_counts].sort((a, b) => a.count - b.count);
       const ramp = sequentialRamp();
@@ -301,6 +311,7 @@ const CARDS = [
     chart: "data-usage",
     title: "앱별 데이터 사용량",
     sub: "셀룰러 누적 사용량 상위 10개",
+    prompt: "데이터 사용량이 큰 앱과 시간대/세션 근거를 보고 비정상 트래픽이나 배터리 영향 가능성을 정리해줘.",
     render(series, panel) {
       const rows = [...series.app_totals].sort((a, b) => a.total_mb - b.total_mb);
       const ramp = sequentialRamp();
@@ -326,6 +337,7 @@ const CARDS = [
     chart: "power-thermal",
     title: "전력 · 발열",
     sub: "온도 센서 상위 10개",
+    prompt: "온도 센서 상위값, thermal threshold, wakelock/앱 사용량 근거를 함께 보고 발열 원인 후보를 정리해줘.",
     render(series, panel) {
       const thermals = series.thermals;
       if (thermals.status !== "ok") {
@@ -365,7 +377,7 @@ const CARDS = [
   },
 ];
 
-export async function renderDashboard(mount, sourceFile) {
+export async function renderDashboard(mount, sourceFile, ctx) {
   const band = section("세션 요약");
   mount.append(band.wrap);
 
@@ -384,6 +396,9 @@ export async function renderDashboard(mount, sourceFile) {
   // width and then hangs over its neighbours once the grid reflows.
   const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
+    if (ctx?.startChat) {
+      panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("대시보드", spec, sourceFile)), "primary");
+    }
     band.grid.append(panel.section);
     return { spec, panel };
   });

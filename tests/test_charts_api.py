@@ -113,6 +113,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     viz = client.get("/ui/js/viz.js")
     plm = client.get("/ui/js/views/plm.js")
     boot = client.get("/ui/js/views/boot.js")
+    dashboard = client.get("/ui/js/views/dashboard.js")
     bundle = client.get("/vendor/plotly.min.js")
 
     assert page.status_code == 200 and "로그 분석" in page.text
@@ -130,7 +131,13 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "scanned?.job_id" in plm.text and "display_message" in plm.text
     assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
     assert "field(\"Division\"" not in plm.text
+    assert dashboard.status_code == 200 and "LLM 분석 요청" in dashboard.text
+    assert "ctx.startChat(sectionAnalysisQuestion(\"대시보드\", spec, sourceFile))" in dashboard.text
+    assert "통화 drop 구간 전후의 RSRP 변화" in dashboard.text
     assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text
+    assert "LLM 분석 요청" in boot.text
+    assert "ctx.startChat(sectionAnalysisQuestion(\"부팅 탭\", spec, sourceFile))" in boot.text
+    assert "main thread callstack" in boot.text
     # plotly.js ships with the installed package; the page must not need a CDN.
     assert bundle.status_code == 200 and len(bundle.content) > 100_000
 

@@ -3,7 +3,7 @@
 import { api } from "../api.js";
 import {
   axis, barTrace, baseLayout, card, drawPlot, el, fmt, frameTable, lineTrace, section,
-  seriesColors, sequentialRamp, stepColor, table, tile, tileRow, token,
+  sectionAnalysisQuestion, seriesColors, sequentialRamp, stepColor, table, tile, tileRow, token,
 } from "../viz.js";
 
 function bootCard(series, panel) {
@@ -373,30 +373,60 @@ function nitzCard(series, panel) {
 }
 
 const CARDS = [
-  { chart: "boot", title: "부팅 지연 구간", sub: "가장 오래 걸린 이벤트", render: bootCard },
-  { chart: "nitz", title: "NITZ 타임존 변동", sub: "망이 알려준 시간대", render: nitzCard },
-  { chart: "binder-proxy", title: "Binder Proxy 현황", sub: "인터페이스별 Proxy 객체 수", render: proxyCard },
-  { chart: "crash", title: "시스템 이벤트", sub: "강제 종료 · 이상 징후 · Binder", render: systemEventsCard },
+  {
+    chart: "boot",
+    title: "부팅 지연 구간",
+    sub: "가장 오래 걸린 이벤트",
+    prompt: "Boot milestone과 Delta_ms가 큰 이벤트를 보고 부팅 병목 구간과 후속 영향 가능성을 분석해줘.",
+    render: bootCard,
+  },
+  {
+    chart: "nitz",
+    title: "NITZ 타임존 변동",
+    sub: "망이 알려준 시간대",
+    prompt: "NITZ offset 변경, ping-pong 여부, 예상 지역 변화를 보고 망 시간 정보가 불안정했는지 분석해줘.",
+    render: nitzCard,
+  },
+  {
+    chart: "binder-proxy",
+    title: "Binder Proxy 현황",
+    sub: "인터페이스별 Proxy 객체 수",
+    prompt: "Binder proxy histogram의 max count, descriptor, leak threshold 초과 여부를 보고 proxy leak 가능성을 분석해줘.",
+    render: proxyCard,
+  },
+  {
+    chart: "crash",
+    title: "시스템 이벤트",
+    sub: "강제 종료 · 이상 징후 · Binder",
+    prompt: "am_kill, am_wtf, Binder spam/지연/실패 이벤트를 연결해 시스템 강제 종료나 이상 징후의 원인 후보를 정리해줘.",
+    render: systemEventsCard,
+  },
   {
     chart: "crash", title: "ANR", sub: "펼치면 callstack 과 직전 로그까지", wide: true,
+    prompt: "ANR별 main thread callstack, lock contention, binder transaction, 직전 logcat/CPU/I/O 단서를 근거로 멈춤 원인을 분석해줘.",
     render: eventListCard((series) => series.anr_events, anrEvent, "ANR 이벤트가 없습니다."),
   },
   {
     chart: "crash", title: "Crash / FATAL EXCEPTION", sub: "펼치면 예외와 call stack 전체", wide: true,
+    prompt: "Exception 정보, top method, trigger, call stack, crash 직전 단서 로그를 근거로 Java crash 원인을 분석해줘.",
     render: eventListCard((series) => series.java_crashes, javaCrash, "Crash / FATAL 이벤트가 없습니다."),
   },
   {
     chart: "crash", title: "Native Crash", sub: "signal 과 abort message", wide: true,
+    prompt: "Signal, abort message, native callstack, 주변 로그를 근거로 native crash 원인 후보를 정리해줘.",
     render: eventListCard((series) => series.native_crashes, nativeCrash, "Native crash 가 없습니다."),
   },
 ];
 
-export async function renderBoot(mount, sourceFile) {
+export async function renderBoot(mount, sourceFile, ctx) {
   const band = section("부팅 시퀀스");
   mount.append(band.wrap);
 
   const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
+    if (ctx?.startChat) {
+      panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("부팅 탭", spec, sourceFile)), "primary");
+    }
     // Log dumps need the whole row; charts sit side by side.
     if (spec.wide) panel.section.classList.add("wide", "event-card");
     band.grid.append(panel.section);
