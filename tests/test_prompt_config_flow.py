@@ -79,6 +79,9 @@ def test_ask_prompt_includes_config_sections(monkeypatch):
     assert "CONFIG_SENTINEL_CALL_SESSION_TEMPLATE" in prompt
     assert "CONFIG_SENTINEL_TOOL_FACT" in prompt
     assert "CONFIG_SENTINEL_RETRIEVED_DOC" in prompt
+    assert "PLM 코멘트에 그대로 등록해도 어색하지 않은 개발자 코멘트체" in prompt
+    assert "내부 라우팅명, intent 이름, 규칙명, 템플릿명은 사용자에게 노출하지 않는다" in prompt
+    assert "Call_Analysis" in prompt  # 금지 예시로만 남아 있어야 한다.
     assert captured["user_query"] == "통화 끊김 원인 분석"
 
 
