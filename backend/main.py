@@ -12,6 +12,8 @@ Start with:
     ANALYSIS_CONCURRENCY=1  실제로 GPU 를 쓰는 분석 본체 (기본 1)
     ASK_CONCURRENCY=2       동시에 처리할 질문 수 (기본 2)
     ASK_WAIT_SECONDS=180    질문이 자리를 기다리는 한도. 넘으면 503.
+    ADMIN_KNOX_IDS=a.kim,b.lee   전체 초기화를 허용할 Knox ID (쉼표로 구분).
+                                 비워 두면 서버를 띄운 PC 에서만 초기화할 수 있다.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ import threading
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import File, Form, UploadFile, FastAPI, HTTPException
+from fastapi import File, Form, Header, Request, UploadFile, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -491,6 +493,27 @@ _RESULT_ARTIFACTS = {
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
 UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+# 계정 체계를 새로 만들지 않는다. 관리자를 알아보는 단서는 이미 있는 두 가지다:
+#   1) 서버를 띄운 그 PC 에서 온 요청인가 (loopback). 서버를 켠 사람이 관리자다.
+#   2) 이미 쓰고 있는 Knox ID 가 ADMIN_KNOX_IDS 에 들어 있는가.
+# 2번은 브라우저가 스스로 적어 보내는 값이라 마음먹으면 흉내 낼 수 있다. 실수로
+# 남의 DB 를 날리는 것을 막는 울타리이지 보안 경계가 아니다 — 그 이상이 필요하면
+# 사내 인증을 앞에 세워야 한다.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
+ADMIN_KNOX_IDS = {
+    knox.strip().lower()
+    for knox in os.getenv("ADMIN_KNOX_IDS", "").split(",")
+    if knox.strip()
+}
+
+
+def _is_admin(request: Request) -> bool:
+    host = (request.client.host if request.client else "") or ""
+    if host in _LOOPBACK_HOSTS:
+        return True
+    knox = (request.headers.get("X-Knox-Id") or "").strip().lower()
+    return bool(knox) and knox in ADMIN_KNOX_IDS
 _CHROMA_DB_PATH = "./chroma_db"
 
 
@@ -555,7 +578,14 @@ def _get_job(job_id: str) -> Dict[str, Any]:
         return dict(job)
 
 
-def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_t: str, end_t: str):
+def _run_analyze_job(
+    job_id: str,
+    file_paths: List[str],
+    use_slice: bool,
+    start_t: str,
+    end_t: str,
+    owner: str = "",
+):
     from core.analysis_pipeline import run_analysis_core
 
     def progress(message, value=None):
@@ -577,6 +607,7 @@ def _run_analyze_job(job_id: str, file_paths: List[str], use_slice: bool, start_
                 end_t=end_t,
                 ai_engine=get_engine(),
                 progress_callback=progress,
+                owner=owner,
             )
         _set_job(
             job_id,
@@ -893,7 +924,7 @@ def _reset_artifact_dirs():
 
 
 @app.get("/health")
-def health() -> Dict[str, Any]:
+def health(request: Request) -> Dict[str, Any]:
     model_name = get_default_llm_model("gemma4:12b")
     with _jobs_lock:
         active_jobs = len([job for job in _jobs.values() if job.get("status") in {"pending", "running"}])
@@ -908,6 +939,8 @@ def health() -> Dict[str, Any]:
         "chroma_db_path": _CHROMA_DB_PATH,
         "artifact_dirs": {folder: os.path.exists(folder) for folder in _ARTIFACT_DIRS},
         "active_jobs": active_jobs,
+        # 화면이 위험한 버튼을 보여 줄지 정하는 값. 판단은 서버가 다시 한다.
+        "admin": _is_admin(request),
         # 여럿이 함께 쓸 때 "느리다" 의 정체는 대개 이 대기열이다.
         "analysis_queue": _analysis_queue,
         "ask_queue": _ask_queue,
@@ -960,7 +993,15 @@ def quick_prompts() -> QuickPromptsResponse:
 
 
 @app.post("/db/reset", response_model=ResetResponse)
-def reset_db() -> ResetResponse:
+def reset_db(request: Request) -> ResetResponse:
+    """모두의 적재분과 산출물을 지운다. 그래서 관리자만 누를 수 있다."""
+    if not _is_admin(request):
+        raise HTTPException(
+            status_code=403,
+            detail="전체 초기화는 관리자만 할 수 있습니다. 서버를 띄운 PC 에서 열거나, "
+                   "관리자 Knox ID 로 접속해 주세요.",
+        )
+
     success = bool(get_engine().reset_db())
     if success:
         from backend.charts_api import clear_frame_cache
@@ -1142,6 +1183,7 @@ async def create_analyze_job(
     use_slice: bool = Form(False),
     start_t: str = Form(""),
     end_t: str = Form(""),
+    x_knox_id: str = Header(""),
 ) -> AnalyzeJobResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
@@ -1164,7 +1206,9 @@ async def create_analyze_job(
                 await run_in_threadpool(handle.write, chunk)
         file_paths.append(path)
 
-    _analysis_executor.submit(_run_analyze_job, job_id, file_paths, use_slice, start_t, end_t)
+    _analysis_executor.submit(
+        _run_analyze_job, job_id, file_paths, use_slice, start_t, end_t, x_knox_id
+    )
     return AnalyzeJobResponse(job_id=job_id)
 
 

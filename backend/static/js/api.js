@@ -1,9 +1,36 @@
 // Every call the frontend makes to this project's backend.
 
+const KNOX_KEY = "knoxId";
+
+/** 이 브라우저가 쓰는 Knox ID. 없으면 빈 문자열. */
+export function rememberedKnoxId() {
+  try {
+    return localStorage.getItem(KNOX_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+export function rememberKnoxId(value) {
+  try {
+    localStorage.setItem(KNOX_KEY, String(value || "").trim());
+  } catch (error) {
+    // 저장을 막아 둔 브라우저라면 이번 세션에만 쓰고 만다.
+  }
+}
+
+/** 서버가 "누가 올렸는지", "관리자인지" 를 알아보는 유일한 이름표. */
+function headers(extra) {
+  const all = { ...(extra || {}) };
+  const knox = rememberedKnoxId();
+  if (knox) all["X-Knox-Id"] = knox;
+  return all;
+}
+
 async function post(path, body) {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: headers({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -15,7 +42,7 @@ async function post(path, body) {
 
 async function get(path, params) {
   const query = params ? "?" + new URLSearchParams(params).toString() : "";
-  const response = await fetch(path + query);
+  const response = await fetch(path + query, { headers: headers() });
   if (!response.ok) throw new Error(`${path} → ${response.status}`);
   return response.json();
 }
@@ -34,7 +61,7 @@ export const api = {
   async ask(question, sourceFile, chatHistory) {
     const response = await fetch("/ask", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({ question, current_file: sourceFile, chat_history: chatHistory }),
     });
     if (!response.ok) {
@@ -66,7 +93,7 @@ export const api = {
   async analyze(files) {
     const form = new FormData();
     for (const file of files) form.append("files", file, file.name);
-    const response = await fetch("/jobs/analyze", { method: "POST", body: form });
+    const response = await fetch("/jobs/analyze", { method: "POST", headers: headers(), body: form });
     if (!response.ok) throw new Error(`분석 작업 생성 실패 (${response.status})`);
     return response.json();
   },
@@ -124,7 +151,7 @@ export const api = {
   async plmDownload(divisionCode, file) {
     const response = await fetch("/plm/files/download", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         division_code: divisionCode,
         doc_id: file.docId,
@@ -144,8 +171,11 @@ export const api = {
   },
 
   async resetDb() {
-    const response = await fetch("/db/reset", { method: "POST" });
-    if (!response.ok) throw new Error(`DB 초기화 실패 (${response.status})`);
+    const response = await fetch("/db/reset", { method: "POST", headers: headers() });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || `DB 초기화 실패 (${response.status})`);
+    }
     return response.json();
   },
 };

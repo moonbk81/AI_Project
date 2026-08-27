@@ -103,8 +103,15 @@ def run_analysis_core(
     progress_callback: ProgressCallback = None,
     temp_dir="./temp_logs",
     result_dir="./result",
+    owner="",
 ):
-    """Run the reusable analysis pipeline without any UI dependency."""
+    """Run the reusable analysis pipeline without any UI dependency.
+
+    ``owner`` 는 올린 사람의 이름표(Knox ID)다. 결과 파일 이름이 올린 로그의
+    파일명만으로 정해지면 한 서버를 여럿이 쓸 때 같은 이름을 올린 사람이 남의
+    리포트와 적재분을 조용히 덮어쓴다. 이름표가 붙으면 서로 섞이지 않고, 같은
+    사람이 같은 파일을 다시 돌리면 예전처럼 자기 것만 갱신된다.
+    """
     saved_paths = list(file_paths or [])
     if not saved_paths:
         raise ValueError("분석할 파일이 없습니다.")
@@ -122,6 +129,10 @@ def run_analysis_core(
     else:
         target_log_path = saved_paths[0]
         base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0]
+
+    label = re.sub(r"[^A-Za-z0-9._-]", "_", str(owner or "").strip())
+    if label:
+        base_name = f"{base_name}__{label}"
 
     if use_slice:
         if progress_callback:

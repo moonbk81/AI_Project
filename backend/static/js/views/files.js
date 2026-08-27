@@ -1,6 +1,6 @@
 // 파일 · 분석 — 적재된 로그를 고르고, 새 로그를 올려 분석을 돌린다.
 
-import { api } from "../api.js";
+import { api, rememberKnoxId, rememberedKnoxId } from "../api.js";
 import { el, fmt, tile, tileRow } from "../viz.js";
 
 const POLL_INTERVAL_MS = 2000;
@@ -43,6 +43,18 @@ function ingestedCard(files, activeFile, onPick) {
 
 function uploadCard(onStarted) {
   const panel = cardShell("새 로그 분석", "여러 개를 한 번에 올릴 수 있습니다. 분석은 순서대로 처리됩니다.");
+
+  // 한 서버를 여럿이 쓴다. 이름표가 없으면 같은 파일명을 올린 사람끼리 서로의
+  // 분석 결과를 덮어쓴다.
+  const knoxRow = el("div", "row");
+  const knox = el("input", "text-input");
+  knox.type = "text";
+  knox.placeholder = "Knox ID (예: bongki.moon)";
+  knox.value = rememberedKnoxId();
+  knox.addEventListener("change", () => rememberKnoxId(knox.value));
+  knoxRow.append(el("span", "row-name", "내 Knox ID"), knox);
+  panel.append(knoxRow,
+               el("p", "card-note", "올린 로그에 이름표로 붙습니다. 비워 두면 같은 파일명을 올린 다른 사람과 결과가 섞일 수 있습니다."));
 
   const input = el("input");
   input.type = "file";
@@ -88,6 +100,7 @@ function uploadCard(onStarted) {
     start.disabled = true;
     status.textContent = "업로드 중...";
     try {
+      rememberKnoxId(knox.value);
       const { job_id: jobId } = await api.analyze(picked);
       picked = [];
       drawQueue();
@@ -151,7 +164,12 @@ export async function renderFiles(mount, sourceFile, ctx) {
   const jobs = jobCard();
   const upload = uploadCard(() => pollJobs());
   const danger = cardShell("위험 구역", "Vector DB 의 모든 적재 내용을 지웁니다. 되돌릴 수 없습니다.");
-  grid.append(ingestedHost, upload, jobs.panel, danger);
+  grid.append(ingestedHost, upload, jobs.panel);
+
+  // 남의 적재분까지 지우는 버튼이라 관리자에게만 보여 준다. 막는 것은 서버다.
+  api.health()
+    .then((body) => { if (body.admin) grid.append(danger); })
+    .catch(() => {});
 
   let active = sourceFile;
 

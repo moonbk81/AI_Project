@@ -1,6 +1,6 @@
 // 채팅 — 적재된 로그에 대해 묻고, 근거 로그와 함께 답을 읽는다.
 
-import { api } from "../api.js";
+import { api, rememberKnoxId, rememberedKnoxId } from "../api.js";
 import { setMarkdown } from "../markdown.js";
 import { el } from "../viz.js";
 
@@ -60,16 +60,6 @@ function userBubble(text) {
   return wrap;
 }
 
-const KNOX_KEY = "knoxId";
-
-const rememberedKnoxId = () => {
-  try {
-    return localStorage.getItem(KNOX_KEY) || "";
-  } catch (error) {
-    return "";
-  }
-};
-
 /**
  * Register this answer on the PLM defect the PLM tab has open.
  *
@@ -104,7 +94,7 @@ function registerBlock(turn, ctx) {
     note.textContent = "등록 중...";
     try {
       try {
-        localStorage.setItem(KNOX_KEY, knox.value.trim());
+        rememberKnoxId(knox.value);
       } catch (error) {
         /* private mode */
       }
