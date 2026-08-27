@@ -1,6 +1,6 @@
 // Shell: which view is on screen, which log it looks at, which theme.
 
-import { api } from "./api.js";
+import { api, rememberKnoxId, rememberedKnoxId } from "./api.js";
 import { el } from "./viz.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBoot } from "./views/boot.js";
@@ -67,6 +67,64 @@ function drawNav() {
     });
     nodes.nav.append(button);
   }
+}
+
+/**
+ * 로그인이라 부르지만 비밀번호는 없다. 이름표를 정하는 자리다.
+ *
+ * 이 이름이 올린 로그와 남긴 글에 붙고, 없으면 쓰기 동작이 막힌다. 서버도
+ * 이 값을 검증하지 않는다 — 사고를 막는 울타리이지 인증이 아니다.
+ */
+function drawUser() {
+  const knox = rememberedKnoxId();
+  nodes.user.replaceChildren();
+
+  if (!knox) {
+    const login = el("button", "chip", "로그인");
+    login.type = "button";
+    login.addEventListener("click", () => drawLoginForm());
+    nodes.user.append(login);
+    return;
+  }
+
+  const name = el("span", "user-name", knox);
+  const logout = el("button", null, "로그아웃");
+  logout.type = "button";
+  logout.addEventListener("click", () => {
+    rememberKnoxId("");
+    drawUser();
+    rerender();
+  });
+  nodes.user.append(name, logout);
+}
+
+function drawLoginForm() {
+  nodes.user.replaceChildren();
+
+  const input = el("input", "text-input");
+  input.type = "text";
+  input.placeholder = "Knox ID";
+  input.value = rememberedKnoxId();
+
+  const done = el("button", "primary", "확인");
+  done.type = "button";
+
+  const finish = () => {
+    const value = input.value.trim();
+    if (!value) return;
+    rememberKnoxId(value);
+    drawUser();
+    rerender();
+  };
+
+  done.addEventListener("click", finish);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") finish();
+    if (event.key === "Escape") drawUser();
+  });
+
+  nodes.user.append(input, done);
+  input.focus();
 }
 
 function drawFilePicker() {
@@ -195,6 +253,7 @@ async function boot() {
   nodes.file = document.getElementById("file");
   nodes.main = document.getElementById("main");
   nodes.theme = document.getElementById("theme");
+  nodes.user = document.getElementById("user");
 
   try {
     const saved = localStorage.getItem("theme");
@@ -210,6 +269,7 @@ async function boot() {
   });
 
   drawNav();
+  drawUser();
   await loadFiles();
   drawFilePicker();
   rerender();

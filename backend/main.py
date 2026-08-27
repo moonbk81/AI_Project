@@ -59,6 +59,9 @@ class AskResponse(BaseModel):
 
 class FilesResponse(BaseModel):
     files: List[str]
+    # {파일 이름: 올린 사람 Knox ID}. 예전에 올려 주인을 모르는 파일은 빠져 있다.
+    # 접근 제어가 아니라 "내가 올린 것만 보기" 를 위한 표시다.
+    uploaded_by: Dict[str, str] = Field(default_factory=dict)
 
 
 class QuickPromptsResponse(BaseModel):
@@ -155,6 +158,7 @@ class JobStatusResponse(BaseModel):
     status: str
     progress: int = 0
     message: str = ""
+    owner: str = ""
     current_file: Optional[str] = None
     report_path: Optional[str] = None
     payload_path: Optional[str] = None
@@ -508,6 +512,26 @@ ADMIN_KNOX_IDS = {
 }
 
 
+def _caller(request: Request) -> str:
+    """이 요청을 보낸 사람의 Knox ID. 로그인하지 않았으면 빈 문자열."""
+    return (request.headers.get("X-Knox-Id") or "").strip()
+
+
+def _require_caller(request: Request) -> str:
+    """흔적이 남는 동작에는 이름이 있어야 한다.
+
+    검증하지는 않는다(자기 신고값이다). 누가 무엇을 했는지 남기고, 이름표 없이
+    올린 로그가 남의 것과 섞이는 일을 막는 것이 목적이다.
+    """
+    knox = _caller(request)
+    if not knox:
+        raise HTTPException(
+            status_code=401,
+            detail="Knox ID 로 로그인한 뒤에 할 수 있습니다.",
+        )
+    return knox
+
+
 def _is_admin(request: Request) -> bool:
     host = (request.client.host if request.client else "") or ""
     if host in _LOOPBACK_HOSTS:
@@ -548,6 +572,18 @@ def _metadata_collection():
         settings=Settings(anonymized_telemetry=False),
     )
     return client.get_or_create_collection(name="ril_logs")
+
+
+def _file_owners() -> Dict[str, str]:
+    """적재된 파일의 주인. 엔진이 아직 안 떠 있으면 메타데이터 컬렉션만 본다."""
+    try:
+        from rag.ingest import get_files_with_owners
+
+        collection = _engine.collection if _engine is not None else _metadata_collection()
+        return {name: owner for name, owner in get_files_with_owners(collection).items() if owner}
+    except Exception as exc:
+        print(f"[FILES] owner listing failed: {exc}", file=sys.stderr)
+        return {}
 
 
 def _list_files_without_loading_engine() -> List[str]:
@@ -896,12 +932,14 @@ def _run_plm_attachment_job(
         _set_job(job_id, status="error", error=str(e), message="첨부 로그 분석 실패")
 
 
-def _new_job(message: str) -> str:
+def _new_job(message: str, owner: str = "") -> str:
     job_id = uuid.uuid4().hex
     now = datetime.now().isoformat(timespec="seconds")
     with _jobs_lock:
         _jobs[job_id] = {
             "job_id": job_id,
+            # 누가 건 작업인지. 여럿이 한 서버를 쓰면 목록만 보고는 알 수 없다.
+            "owner": owner,
             "status": "pending",
             "progress": 0,
             "message": message,
@@ -982,7 +1020,10 @@ def ask(req: AskRequest) -> AskResponse:
 
 @app.get("/files", response_model=FilesResponse)
 def files() -> FilesResponse:
-    return FilesResponse(files=_list_files_without_loading_engine())
+    return FilesResponse(
+        files=_list_files_without_loading_engine(),
+        uploaded_by=_file_owners(),
+    )
 
 
 @app.get("/quick-prompts", response_model=QuickPromptsResponse)
@@ -1158,7 +1199,9 @@ def recommend_knowledge_category(req: KnowledgeCategoryRequest) -> KnowledgeCate
 
 
 @app.post("/knowledge", response_model=KnowledgeSaveResponse)
-def save_knowledge(req: KnowledgeSaveRequest) -> KnowledgeSaveResponse:
+def save_knowledge(req: KnowledgeSaveRequest, request: Request) -> KnowledgeSaveResponse:
+    # 남는 기록이라 누가 남겼는지는 있어야 한다.
+    _require_caller(request)
     from core.knowledge import build_info as build_info_from_metas, target_ids as ids_for_category
 
     # A caller that has an answer's retrieved rows should not also have to work
@@ -1179,16 +1222,20 @@ def save_knowledge(req: KnowledgeSaveRequest) -> KnowledgeSaveResponse:
 
 @app.post("/jobs/analyze", response_model=AnalyzeJobResponse)
 async def create_analyze_job(
+    request: Request,
     files: List[UploadFile] = File(...),
     use_slice: bool = Form(False),
     start_t: str = Form(""),
     end_t: str = Form(""),
-    x_knox_id: str = Header(""),
 ) -> AnalyzeJobResponse:
+    # 올린 사람 이름표가 결과 파일 이름에 들어간다. 이름이 없으면 같은 파일명을
+    # 올린 다른 사람의 분석을 덮어쓴다.
+    x_knox_id = _require_caller(request)
+
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
-    job_id = _new_job("작업 대기 중")
+    job_id = _new_job("작업 대기 중", owner=x_knox_id)
     upload_dir = os.path.join("./temp_logs", "backend_uploads", job_id)
     os.makedirs(upload_dir, exist_ok=True)
     file_paths: List[str] = []
@@ -1373,9 +1420,9 @@ def plm_analysis_query(req: PlmAnalysisQueryRequest) -> PlmAnalysisQueryResponse
 
 
 @app.post("/plm/attachments/logs", response_model=AnalyzeJobResponse)
-def plm_attachment_logs(req: PlmAttachmentScanRequest) -> AnalyzeJobResponse:
+def plm_attachment_logs(req: PlmAttachmentScanRequest, request: Request) -> AnalyzeJobResponse:
     """고른 첨부 안에 어떤 로그가 있는지만 훑는다. 결과는 잡의 log_candidates."""
-    job_id = _new_job("PLM 첨부 훑기 대기 중")
+    job_id = _new_job("PLM 첨부 훑기 대기 중", owner=_caller(request))
     _executor.submit(
         _run_plm_log_scan_job, job_id, req.division_code, req.defect_code, req.file_ids
     )
@@ -1383,12 +1430,14 @@ def plm_attachment_logs(req: PlmAttachmentScanRequest) -> AnalyzeJobResponse:
 
 
 @app.post("/plm/attachments/analyze", response_model=AnalyzeJobResponse)
-def plm_attachment_analyze(req: PlmAttachmentAnalyzeRequest) -> AnalyzeJobResponse:
+def plm_attachment_analyze(
+    req: PlmAttachmentAnalyzeRequest, request: Request
+) -> AnalyzeJobResponse:
     """Download a defect's attachments, extract the logs and analyze them.
 
     `logs` 가 오면 그 파일들만 꺼낸다(사용자가 목록에서 고른 경우).
     """
-    job_id = _new_job("PLM 첨부 처리 대기 중")
+    job_id = _new_job("PLM 첨부 처리 대기 중", owner=_caller(request))
     if req.logs:
         _executor.submit(
             _run_plm_selected_logs_job, job_id, req.division_code, req.defect_code,
@@ -1403,7 +1452,9 @@ def plm_attachment_analyze(req: PlmAttachmentAnalyzeRequest) -> AnalyzeJobRespon
 
 
 @app.post("/plm/comment", response_model=PlmCommentResponse)
-def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
+def plm_comment(req: PlmCommentRequest, request: Request) -> PlmCommentResponse:
+    # PLM 에 남는 글이다. 이름 없이 쓰게 두지 않는다.
+    _require_caller(request)
     from plm.comments import build_comment_payload
     from plm.service import submit_comment
 
@@ -1438,7 +1489,12 @@ def plm_comment(req: PlmCommentRequest) -> PlmCommentResponse:
 
 
 @app.post("/plm/defects/register", response_model=PlmDefectRegisterResponse)
-def plm_defect_register(req: PlmDefectRegisterRequest) -> PlmDefectRegisterResponse:
+def plm_defect_register(
+    req: PlmDefectRegisterRequest, request: Request
+) -> PlmDefectRegisterResponse:
+    # PLM 에 결함이 새로 생긴다. 이름 없이 등록하게 두지 않는다.
+    _require_caller(request)
+
     from plm.registration import build_defect_payload, missing_required
     from plm.service import register_defect
 

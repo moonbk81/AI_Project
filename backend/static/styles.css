@@ -369,3 +369,8 @@ textarea.text-input { resize: vertical; line-height: 1.5; }
 .model-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -6px 0 12px; }
 .model-line .chip { cursor: default; }
 .model-meta { font-size: 12px; color: var(--text-muted); }
+
+/* 헤더의 로그인 자리. 이름과 로그아웃 버튼, 또는 로그인 입력이 들어간다. */
+.user-slot { display: inline-flex; align-items: center; gap: 6px; }
+.user-slot .text-input { width: 150px; }
+.user-name { font-size: 12px; font-weight: 600; color: var(--text-secondary); }

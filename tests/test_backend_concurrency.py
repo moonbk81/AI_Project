@@ -125,7 +125,11 @@ def test_a_large_upload_is_written_whole_without_being_held_in_memory(client, mo
     )
 
     payload = b"x" * (backend_main.UPLOAD_CHUNK_BYTES * 2 + 7)  # 청크 경계를 넘긴다
-    response = client.post("/jobs/analyze", files={"files": ("big.log", payload, "text/plain")})
+    response = client.post(
+        "/jobs/analyze",
+        files={"files": ("big.log", payload, "text/plain")},
+        headers={"X-Knox-Id": "bongki.moon"},
+    )
 
     assert response.status_code == 200
     with open(submitted["paths"][0], "rb") as handle:
@@ -236,7 +240,7 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "LogOrchestrator", FakeOrchestrator)
     monkeypatch.setattr(pipeline, "RagPayloadBuilder", FakeBuilder)
 
-    engine = SimpleNamespace(ingest_file=lambda path, force=False: True)
+    engine = SimpleNamespace(ingest_file=lambda path, force=False, uploaded_by="": True)
     made = [
         pipeline.run_analysis_core(
             ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine, owner=owner
@@ -253,3 +257,109 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
         ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine
     )
     assert os.path.basename(alone.report_path) == "dumpstate_report.json"
+
+
+# ---------------------------------------------------- 로그인(이름표)과 쓰기
+
+
+def test_writing_without_a_knox_id_is_refused(client, monkeypatch):
+    """흔적이 남는 동작은 이름이 있어야 한다."""
+    monkeypatch.setattr(
+        backend_main, "get_engine", lambda: pytest.fail("이름을 보기 전에 엔진을 건드리면 안 된다")
+    )
+
+    upload = client.post("/jobs/analyze", files={"files": ("a.log", b"x", "text/plain")})
+    comment = client.post("/plm/comment", json={"form": {"defect_code": "D-1", "comment": "메모"}})
+    knowledge = client.post("/knowledge", json={"feedback": "이건 이렇게 보면 된다"})
+
+    assert [upload.status_code, comment.status_code, knowledge.status_code] == [401, 401, 401]
+    assert "Knox ID" in upload.json()["detail"]
+
+
+def test_reading_needs_no_login(client):
+    """보기만 하는 것은 막지 않는다."""
+    assert client.get("/files").status_code == 200
+    assert client.get("/jobs").status_code == 200
+
+
+def test_a_job_remembers_who_started_it(client, monkeypatch):
+    monkeypatch.setattr(backend_main._analysis_executor, "submit", lambda *args, **kwargs: None)
+
+    body = client.post(
+        "/jobs/analyze",
+        files={"files": ("a.log", b"x", "text/plain")},
+        headers={"X-Knox-Id": "bongki.moon"},
+    ).json()
+
+    assert backend_main._get_job(body["job_id"])["owner"] == "bongki.moon"
+    listed = client.get("/jobs").json()["jobs"]
+    assert [job["owner"] for job in listed if job["job_id"] == body["job_id"]] == ["bongki.moon"]
+
+
+# --------------------------------------------------- 내가 올린 로그만 보기
+
+
+class FakeCollection:
+    def __init__(self, metadatas):
+        self._metadatas = metadatas
+
+    def get(self, include=None, limit=None, offset=0, **kwargs):
+        return {"metadatas": self._metadatas[offset:offset + (limit or len(self._metadatas))]}
+
+
+def test_the_file_list_says_who_uploaded_each_log():
+    from rag.ingest import get_files_with_owners
+
+    collection = FakeCollection([
+        {"source_file": "mine_payload.json", "uploaded_by": "bongki.moon"},
+        {"source_file": "mine_payload.json", "uploaded_by": "bongki.moon"},
+        {"source_file": "theirs_payload.json", "uploaded_by": "other.kim"},
+        {"source_file": "old_payload.json"},  # 이름표가 붙기 전에 올린 것
+    ])
+
+    assert get_files_with_owners(collection) == {
+        "mine_payload.json": "bongki.moon",
+        "theirs_payload.json": "other.kim",
+        "old_payload.json": "",
+    }
+
+
+def test_files_endpoint_carries_the_owners(client, monkeypatch):
+    monkeypatch.setattr(backend_main, "_list_files_without_loading_engine", lambda: ["a_payload.json"])
+    monkeypatch.setattr(backend_main, "_file_owners", lambda: {"a_payload.json": "bongki.moon"})
+
+    assert client.get("/files").json() == {
+        "files": ["a_payload.json"],
+        "uploaded_by": {"a_payload.json": "bongki.moon"},
+    }
+
+
+def test_the_uploader_is_written_into_every_row(tmp_path, monkeypatch):
+    """'내가 올린 것만 보기' 는 이 메타데이터 하나에 기댄다."""
+    import json
+
+    from rag.ingest import ingest_file
+
+    monkeypatch.chdir(tmp_path)
+    payload = tmp_path / "sample_payload.json"
+    payload.write_text(json.dumps([{"document": "로그 한 줄", "metadata": {"log_type": "rilj"}}]))
+
+    added = {}
+
+    class Collection:
+        def get(self, **kwargs):
+            return {"ids": []}
+
+        def add(self, documents, embeddings, metadatas, ids):
+            added["metadatas"] = metadatas
+
+    class Embedder:
+        def encode(self, docs, **kwargs):
+            import numpy
+
+            return numpy.zeros((len(docs), 3))
+
+    ingest_file(Collection(), Embedder(), str(payload), uploaded_by="bongki.moon")
+
+    assert added["metadatas"][0]["uploaded_by"] == "bongki.moon"
+    assert added["metadatas"][0]["source_file"] == "sample_payload.json"

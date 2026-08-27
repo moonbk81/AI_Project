@@ -163,7 +163,7 @@ def run_analysis_core(
     builder.build_payload(payload_name)
 
     payload_path = os.path.join("./payloads", payload_name)
-    ai_engine.ingest_file(payload_path, force=True)
+    ai_engine.ingest_file(payload_path, force=True, uploaded_by=owner)
     if progress_callback:
         progress_callback("", 100)
 

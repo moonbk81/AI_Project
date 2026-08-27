@@ -12,7 +12,8 @@ import backend.main as backend_main
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    return TestClient(backend_main.app)
+    # 쓰기 동작은 로그인(Knox ID)을 요구한다. 미로그인 거절은 따로 확인한다.
+    return TestClient(backend_main.app, headers={"X-Knox-Id": "test.user"})
 
 
 def make_zip(entries):

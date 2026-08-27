@@ -29,9 +29,13 @@ def _log_error(msg):
     print(f"❌ {msg}")
 
 
-def ingest_file(collection, embed_model, file_path, force=False, model_name="default"):
+def ingest_file(collection, embed_model, file_path, force=False, model_name="default", uploaded_by=""):
     """
     RAG 페이로드를 임베딩하여 Vector DB에 저장합니다.
+
+    ``uploaded_by`` 는 올린 사람의 Knox ID 로, "내가 올린 로그만 보기" 를 위한
+    표시다. 접근 제어가 아니라 보기 필터이며 값은 자기 신고값이다. 비어 있으면
+    키 자체를 넣지 않아 "예전에 올려 주인을 모르는 것" 과 구분된다.
 
     Returns:
         dict: {"added": int, "skipped": int, "errors": int}
@@ -107,6 +111,8 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
         meta = item.get("metadata", {}) or {}
         meta = meta.copy()
         meta["source_file"] = filename
+        if uploaded_by:
+            meta["uploaded_by"] = uploaded_by
 
         # Store only a compact pointer to global metadata for debugging/filtering,
         # without bloating every Chroma metadata row.
@@ -224,6 +230,41 @@ def get_all_files(collection):
 
     _log_info(f"적재된 파일 목록 조회 완료: {len(files)} files")
     return sorted(list(files))
+
+
+def get_files_with_owners(collection):
+    """적재된 파일과 올린 사람: ``{source_file: uploaded_by}``.
+
+    주인을 모르는 파일은 빈 문자열로 나온다. 한 파일에 여러 주인이 찍히는 일은
+    없지만(같은 이름은 통째로 지우고 다시 넣는다) 그렇더라도 마지막 것을 쓴다.
+    """
+    owners = {}
+    offset = 0
+    limit = 5000
+
+    while True:
+        try:
+            results = collection.get(include=["metadatas"], limit=limit, offset=offset)
+            if not results or not results.get("metadatas"):
+                break
+
+            for meta in results["metadatas"]:
+                if not meta or "source_file" not in meta:
+                    continue
+                name = meta["source_file"]
+                owner = str(meta.get("uploaded_by") or "")
+                if owner or name not in owners:
+                    owners[name] = owner
+
+            if len(results["metadatas"]) < limit:
+                break
+            offset += limit
+
+        except Exception as e:
+            _log_error(f"파일 목록 조회 중 에러: {e}")
+            break
+
+    return owners
 
 
 def reset_db(collection):

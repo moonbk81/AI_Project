@@ -152,13 +152,14 @@ class RilRagChat:
     def _get_semantic_routing(self, query):
         return get_semantic_routing(query, self.routing_map, self.embed_model)
 
-    def ingest_file(self, file_path, force=False, model_name="default"):
+    def ingest_file(self, file_path, force=False, model_name="default", uploaded_by=""):
         return ingest_payload_file(
             collection=self.collection,
             embed_model=self.embed_model,
             file_path=file_path,
             force=force,
-            model_name=self.llm_model_name
+            model_name=self.llm_model_name,
+            uploaded_by=uploaded_by,
         )
 
     def ingest_folder(self, folder_path="./payloads"):

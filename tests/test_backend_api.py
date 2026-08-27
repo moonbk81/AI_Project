@@ -89,7 +89,8 @@ def client(monkeypatch, tmp_path, fake_engine, fake_executor):
     monkeypatch.setattr(backend_main, "_analysis_executor", fake_executor)
     with backend_main._jobs_lock:
         backend_main._jobs.clear()
-    return TestClient(backend_main.app)
+    # 쓰기 동작은 로그인(Knox ID)을 요구한다. 미로그인 거절은 따로 확인한다.
+    return TestClient(backend_main.app, headers={"X-Knox-Id": "test.user"})
 
 
 def test_get_engine_initializes_once_under_concurrent_requests(monkeypatch):
@@ -156,7 +157,7 @@ def test_files_and_metadata_endpoints(client):
     metadata_response = client.get("/metadata", params={"source_file": "radio.log"})
 
     assert files_response.status_code == 200
-    assert files_response.json() == {"files": ["radio.log"]}
+    assert files_response.json() == {"files": ["radio.log"], "uploaded_by": {}}
     assert metadata_response.status_code == 200
     assert metadata_response.json() == {
         "ids": ["meta-1"],
@@ -188,7 +189,7 @@ def test_files_endpoint_does_not_wake_the_full_rag_engine(monkeypatch):
     response = TestClient(backend_main.app).get("/files")
 
     assert response.status_code == 200
-    assert response.json() == {"files": ["fast.log"]}
+    assert response.json() == {"files": ["fast.log"], "uploaded_by": {}}
     assert backend_main._engine is None
 
 

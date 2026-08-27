@@ -52,6 +52,12 @@ export const api = {
 
   files: () => get("/files").then((body) => body.files || []),
 
+  /** 파일 목록과 올린 사람({이름: knox id})을 함께. */
+  filesWithOwners: () => get("/files").then((body) => ({
+    files: body.files || [],
+    uploadedBy: body.uploaded_by || {},
+  })),
+
   quickPrompts: () => get("/quick-prompts").then((body) => body.prompts || {}),
 
   kpi: (sourceFile) => get("/dashboard/kpi", { source_file: sourceFile }),

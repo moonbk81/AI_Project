@@ -1,6 +1,6 @@
 // 파일 · 분석 — 적재된 로그를 고르고, 새 로그를 올려 분석을 돌린다.
 
-import { api, rememberKnoxId, rememberedKnoxId } from "../api.js";
+import { api, rememberedKnoxId } from "../api.js";
 import { el, fmt, tile, tileRow } from "../viz.js";
 
 const POLL_INTERVAL_MS = 2000;
@@ -16,7 +16,7 @@ function cardShell(title, subtitle) {
   return panel;
 }
 
-function ingestedCard(files, activeFile, onPick) {
+function ingestedCard(files, uploadedBy, activeFile, onPick) {
   const panel = cardShell("적재된 로그", "분석 대상으로 고르면 모든 화면이 그 파일을 봅니다.");
 
   if (!files.length) {
@@ -25,18 +25,44 @@ function ingestedCard(files, activeFile, onPick) {
   }
 
   const list = el("div", "stack");
-  for (const file of files) {
-    const row = el("div", "row");
-    row.append(el("span", "row-name" + (file === activeFile ? " active" : ""), file));
+  const knox = rememberedKnoxId();
 
-    const pick = el("button", null, file === activeFile ? "보는 중" : "이 파일 보기");
-    pick.type = "button";
-    pick.disabled = file === activeFile;
-    pick.addEventListener("click", () => onPick(file));
+  // 여럿이 한 서버를 쓰면 목록이 금방 남의 로그로 찬다. 걸러 보는 스위치일
+  // 뿐이고, 가린 파일도 이름만 알면 누구나 열 수 있다.
+  const onlyMine = el("input");
+  onlyMine.type = "checkbox";
+  onlyMine.disabled = !knox;
+  const filterRow = el("label", "check");
+  filterRow.append(onlyMine, el("span", null, knox ? `내가 올린 것만 (${knox})` : "내가 올린 것만 (로그인 필요)"));
+  panel.append(filterRow);
 
-    row.append(el("span", "grow"), pick);
-    list.append(row);
-  }
+  const draw = () => {
+    list.replaceChildren();
+    const shown = onlyMine.checked ? files.filter((file) => uploadedBy[file] === knox) : files;
+
+    if (!shown.length) {
+      list.append(el("div", "empty", "내가 올린 로그가 없습니다."));
+      return;
+    }
+
+    for (const file of shown) {
+      const row = el("div", "row");
+      row.append(el("span", "row-name" + (file === activeFile ? " active" : ""), file));
+      row.append(el("span", "grow"),
+                 el("span", "row-meta", uploadedBy[file] ? `올린 사람 ${uploadedBy[file]}` : "올린 사람 미상"));
+
+      const pick = el("button", null, file === activeFile ? "보는 중" : "이 파일 보기");
+      pick.type = "button";
+      pick.disabled = file === activeFile;
+      pick.addEventListener("click", () => onPick(file));
+
+      row.append(pick);
+      list.append(row);
+    }
+  };
+
+  onlyMine.addEventListener("change", draw);
+  draw();
   panel.append(list);
   return panel;
 }
@@ -44,17 +70,12 @@ function ingestedCard(files, activeFile, onPick) {
 function uploadCard(onStarted) {
   const panel = cardShell("새 로그 분석", "여러 개를 한 번에 올릴 수 있습니다. 분석은 순서대로 처리됩니다.");
 
-  // 한 서버를 여럿이 쓴다. 이름표가 없으면 같은 파일명을 올린 사람끼리 서로의
-  // 분석 결과를 덮어쓴다.
-  const knoxRow = el("div", "row");
-  const knox = el("input", "text-input");
-  knox.type = "text";
-  knox.placeholder = "Knox ID (예: bongki.moon)";
-  knox.value = rememberedKnoxId();
-  knox.addEventListener("change", () => rememberKnoxId(knox.value));
-  knoxRow.append(el("span", "row-name", "내 Knox ID"), knox);
-  panel.append(knoxRow,
-               el("p", "card-note", "올린 로그에 이름표로 붙습니다. 비워 두면 같은 파일명을 올린 다른 사람과 결과가 섞일 수 있습니다."));
+  // 올린 사람 이름표가 결과 파일 이름에 들어간다. 이름이 없으면 같은 파일명을
+  // 올린 다른 사람의 분석을 덮어쓰므로, 서버가 미로그인 업로드를 받지 않는다.
+  const knox = rememberedKnoxId();
+  panel.append(el("p", "card-note", knox
+    ? `올린 사람: ${knox} — 결과 파일에 이 이름이 붙습니다.`
+    : "로그인해야 올릴 수 있습니다. 오른쪽 위에서 Knox ID 로 로그인하세요."));
 
   const input = el("input");
   input.type = "file";
@@ -64,13 +85,14 @@ function uploadCard(onStarted) {
   const start = el("button", "primary", "분석 및 DB 적재 시작");
   start.type = "button";
   start.disabled = true;
+  input.disabled = !knox;
 
   const status = el("p", "card-note");
   let picked = [];
 
   const drawQueue = () => {
     queue.replaceChildren();
-    start.disabled = picked.length === 0;
+    start.disabled = picked.length === 0 || !knox;
 
     for (const [index, file] of picked.entries()) {
       const row = el("div", "row");
@@ -100,7 +122,6 @@ function uploadCard(onStarted) {
     start.disabled = true;
     status.textContent = "업로드 중...";
     try {
-      rememberKnoxId(knox.value);
       const { job_id: jobId } = await api.analyze(picked);
       picked = [];
       drawQueue();
@@ -132,6 +153,7 @@ function jobCard() {
     for (const job of jobs) {
       const row = el("div", "job");
       row.append(el("span", "row-name", job.current_file || job.job_id.slice(0, 8)));
+      if (job.owner) row.append(el("span", "row-meta", job.owner));
       row.append(el("span", "row-meta", job.message || job.status));
 
       const bar = el("div", "bar");
@@ -175,13 +197,20 @@ export async function renderFiles(mount, sourceFile, ctx) {
 
   const drawIngested = async ({ select } = {}) => {
     if (select !== undefined) active = await ctx.filesChanged({ select });
-    const files = await api.files().catch(() => []);
+    const { files, uploadedBy } = await api.filesWithOwners()
+      .catch(() => ({ files: [], uploadedBy: {} }));
+
+    const knox = rememberedKnoxId();
+    const mine = knox ? files.filter((file) => uploadedBy[file] === knox).length : 0;
 
     tiles.replaceChildren(tileRow([
       tile("적재된 로그", fmt.count(files.length), "개"),
+      tile("내가 올린 로그", fmt.count(mine), "개", knox ? "" : "로그인하면 표시됩니다"),
       tile("보는 중", active || "-"),
     ]));
-    ingestedHost.replaceChildren(ingestedCard(files, active, (file) => ctx.setSourceFile(file)));
+    ingestedHost.replaceChildren(
+      ingestedCard(files, uploadedBy, active, (file) => ctx.setSourceFile(file)),
+    );
   };
 
   // Finished jobs stay in the list, so only a job that completes while this
