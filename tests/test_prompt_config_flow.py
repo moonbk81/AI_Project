@@ -159,6 +159,21 @@ class TestToolFactsReachThePrompt:
 
         assert "총 3회 발생" in captured["system_prompt"]
 
+    def test_guidelines_do_not_read_stale_tool_facts_from_the_engine(self, monkeypatch):
+        """동시 질문에서 다른 요청의 구조화 팩트가 섞이면 안 된다."""
+        engine = make_engine(monkeypatch)
+        engine._temp_tool_facts = {
+            "wtf_stats_detailed": {
+                "stale_process": {"count": 99, "first_time": "old", "last_time": "old"}
+            }
+        }
+        captured = _capture_prompt(engine)
+
+        engine.ask("통화 끊김 원인 분석", current_file="radio_payload.json")
+
+        assert "stale_process" not in captured["system_prompt"]
+        assert "총 99회 발생" not in captured["system_prompt"]
+
 
 class TestParseToolFact:
     def test_json_string_becomes_a_dict(self):

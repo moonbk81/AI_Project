@@ -258,7 +258,7 @@ class RilRagChat:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
-    def _get_domain_specific_guideline(self, query, intents, retrieved_log_types):
+    def _get_domain_specific_guideline(self, query, intents, retrieved_log_types, tool_facts=None):
         query_lower = query.lower()
         log_guidelines_dict = getattr(self, "log_guidelines", {}) or self.prompts.get('log_guidelines', {})
 
@@ -270,9 +270,9 @@ class RilRagChat:
             if log_type in log_guidelines_dict:
                 guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
 
-        # 3. SYSTEM_WTF 통계 주입 (self._temp_tool_facts 활용)
-        if hasattr(self, '_temp_tool_facts') and self._temp_tool_facts:
-            wtf_stats = self._temp_tool_facts.get("wtf_stats_detailed", {})
+        # 3. SYSTEM_WTF 통계 주입
+        if tool_facts:
+            wtf_stats = tool_facts.get("wtf_stats_detailed", {})
             wtf_guideline = format_system_wtf_stats(wtf_stats)
             if wtf_guideline:
                 guidelines.append(wtf_guideline)
@@ -415,8 +415,8 @@ class RilRagChat:
         # 도구들은 json.dumps 로 만든 JSON 문자열을 돌려준다. 프롬프트에 넣을 문자열과
         # 별도로 구조를 그대로 보관해 둔다. 예전에는 프롬프트용으로 합치고 정제까지 끝낸
         # 문자열을 다시 json.loads 하려 했는데, 그 문자열은 "[도구명 분석 팩트]:" 로
-        # 시작하므로 조건이 성립할 수 없었다. 그래서 _temp_tool_facts 는 항상 비어 있었고
-        # SYSTEM_WTF 발생 횟수 통계 주입이 한 번도 실행되지 않았다.
+        # 시작하므로 조건이 성립할 수 없었다. 그래서 SYSTEM_WTF 발생 횟수 통계
+        # 주입이 한 번도 실행되지 않았다.
         tool_facts_list = []
         structured_tool_facts = {}
         if current_base != "Unknown" and selected_tools:
@@ -444,16 +444,17 @@ class RilRagChat:
         if past_knowledge_context:
             tool_facts = f"{past_knowledge_context}\n\n{tool_facts}"
 
-        # 💡 [핵심] 구조화된 도구 결과 임시 보관 (prompt_template 주입용)
-        self._temp_tool_facts = structured_tool_facts
-
         if health_kpi:
             sanitized_kpi = self._clean_log_payload(health_kpi)
             tool_facts = f"=== [단말 전반 KPI 상태] ===\n{sanitized_kpi}\n\n=== [세부 도구 분석 팩트] ===\n{tool_facts}"
 
         # 3. 가이드라인 및 프롬프트 생성
-        domain_guidelines = self._get_domain_specific_guideline(search_query, intents, retrieved_log_types)
-        self._temp_tool_facts = None # 완료 후 초기화
+        domain_guidelines = self._get_domain_specific_guideline(
+            search_query,
+            intents,
+            retrieved_log_types,
+            tool_facts=structured_tool_facts,
+        )
 
         # 4. 구조화된 분석 결론 주입 (StructuredEventRenderer)
         direct_structured_answer = StructuredEventRenderer.render(results, user_query)
