@@ -267,7 +267,15 @@ def main():
                 distances = ((matrix[scoped] - vector) ** 2).sum(axis=1)
                 order = np.argsort(distances)[: args.top_k]
                 exact_ids = [ids[scoped[i]] for i in order]
-                ann = ann_recall(exact_ids, results["ids"][0])
+
+                # 근사 검색만 따로 본다. 리랭킹 후 결과와 비교하면 리랭커가 일부러
+                # 순서를 바꾼 것까지 ANN 손실로 잡혀 두 층이 뒤섞인다.
+                raw = collection.query(
+                    query_embeddings=[vector.tolist()],
+                    n_results=args.top_k,
+                    where={"source_file": payload_name},
+                )
+                ann = ann_recall(exact_ids, raw["ids"][0])
 
         rows.append({
             "test_id": test_id,
