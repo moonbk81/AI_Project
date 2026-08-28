@@ -248,7 +248,7 @@ export async function renderFiles(mount, sourceFile, ctx) {
     try {
       await api.resetDb();
       resetNote.textContent = "초기화했습니다.";
-      await drawIngested({ select: null });
+      await ctx.filesChanged({ select: null, redraw: true });
     } catch (error) {
       resetNote.textContent = String(error.message || error);
     } finally {

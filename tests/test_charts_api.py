@@ -156,6 +156,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     plm = client.get("/ui/js/views/plm.js")
     boot = client.get("/ui/js/views/boot.js")
     dashboard = client.get("/ui/js/views/dashboard.js")
+    files = client.get("/ui/js/views/files.js")
     bundle = client.get("/vendor/plotly.min.js")
 
     assert page.status_code == 200 and "로그 분석" in page.text
@@ -164,6 +165,8 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert app.headers["cache-control"] == "no-store"
     assert app.status_code == 200 and "renderDashboard" in app.text
     assert "await Promise.all([loadFiles(), fontsSettled])" not in app.text
+    assert "async filesChanged({ select, redraw = false } = {})" in app.text
+    assert "if (redraw) rerender();" in app.text
     assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
@@ -174,6 +177,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
     assert "field(\"Division\"" not in plm.text
     assert dashboard.status_code == 200 and "LLM 분석 요청" in dashboard.text
+    assert files.status_code == 200 and "ctx.filesChanged({ select: null, redraw: true })" in files.text
     assert "ctx.startChat(sectionAnalysisQuestion(\"대시보드\", spec, sourceFile))" in dashboard.text
     assert "통화 drop 구간 전후의 RSRP 변화" in dashboard.text
     assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text

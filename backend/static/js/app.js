@@ -258,10 +258,11 @@ function rerender() {
       * caller is *inside* that view; redrawing it would throw away what the
       * user is looking at (a PLM search, a half-filled form).
       */
-    async filesChanged({ select } = {}) {
+    async filesChanged({ select, redraw = false } = {}) {
       await loadFiles();
       if (select && state.files.includes(select)) state.sourceFile = select;
       drawFilePicker();
+      if (redraw) rerender();
       return state.sourceFile;
     },
     onLeave(handler) {
