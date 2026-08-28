@@ -222,12 +222,12 @@ class AnalysisBucketBuilder:
             ):
                 state['in_proxy_histogram'] = False
 
-        if self._contains_any(line, self.BINDER_KEYWORDS):
+        if self._contains_any_lower(line, self.BINDER_KEYWORDS):
             buckets['binder'].add(idx)
 
         # Binder context는 이벤트 주변의 제한된 문맥만 모읍니다.
         # context 라인을 binder_warnings에 넣으면 UI 상세 테이블이 수천 행으로 불어납니다.
-        if self._contains_any(line, self.BINDER_CONTEXT_ANCHOR_KEYWORDS):
+        if self._contains_any_lower(line, self.BINDER_CONTEXT_ANCHOR_KEYWORDS):
             self._collect_binder_context_window(buckets, lines, idx)
         elif self._contains_any_lower(line, self.BINDER_CONTEXT_KEYWORDS):
             # 앵커 없이 전역으로 잡히는 context는 과다 수집 방지를 위해 직접 append하지 않습니다.

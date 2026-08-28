@@ -25,7 +25,6 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         "THREAD_EXHAUSTION",
         "BINDER_BUFFER_ERROR",
         "BINDER_ONEWAY_SPAM",
-        "BINDER_PROXY_HISTOGRAM",
         "BINDER_PROXY_LEAK",
     }
 
@@ -48,10 +47,18 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
 
         # 💡 히스토그램 누수 정보 분리 수집
         if warning_type in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK"):
+            max_count = warning.get("max_count", 0) or 0
+            try:
+                max_count = int(max_count)
+            except (TypeError, ValueError):
+                max_count = 0
+            is_leak_candidate = bool(warning.get("rca_candidate", warning_type == "BINDER_PROXY_LEAK" or max_count > 1000))
             proxy_leaks.append({
                 "time": warning.get("time", "Unknown"),
-                "max_count": warning.get("max_count", 0),
-                "desc": desc
+                "max_count": max_count,
+                "desc": desc,
+                "is_leak_candidate": is_leak_candidate,
+                "evidence_role": warning.get("evidence_role") or ("rca_candidate" if is_leak_candidate else "state_dump"),
             })
             continue
 
@@ -159,6 +166,10 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         item for item in warning_facts
         if item.get("rca_candidate") is True
     ]
+    proxy_rca_events = [
+        item for item in proxy_leaks
+        if item.get("is_leak_candidate") is True
+    ]
 
     system_kills = [
         {
@@ -198,7 +209,7 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         "max_wait_ms": max_wait_ms,
         "has_thread_exhaustion": len(thread_exhaustion_events) > 0,
         "has_binder_transaction_failure": len(transaction_failures) > 0,
-        "has_binder_rca_signal": bool(rca_candidate_events or proxy_leaks),
+        "has_binder_rca_signal": bool(rca_candidate_events or proxy_rca_events),
         "transaction_failure_interpretation": (
             "BINDER_TRANSACTION_FAILURE/DeadObjectException/RemoteException은 보조 증상입니다. "
             "THREAD_EXHAUSTION, BINDER_BUFFER_ERROR, BINDER_ONEWAY_SPAM, "
@@ -207,6 +218,7 @@ def get_binder_warning_analytics(base_name: str, result_dir: str = "./result") -
         ),
         "binder_warnings": warning_facts[:50],
         "rca_candidate_events": rca_candidate_events[:20],
+        "proxy_rca_events": proxy_rca_events[:20],
         "thread_exhaustion_events": thread_exhaustion_events[:20],
         "transaction_failure_events": transaction_failures[:20],
         "binder_context_summary": {

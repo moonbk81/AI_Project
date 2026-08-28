@@ -1067,6 +1067,9 @@ class BinderWarningParser(BaseParser):
         "SYSTEM_WTF",
         "BINDER_ONEWAY_SPAM", # 💡 신규 이벤트 타입 추가
     }
+    STARVATION_RCA_THRESHOLD_MS = 1000
+    REPEATED_DELAY_WINDOW_SECONDS = 60
+    PROXY_LEAK_THRESHOLD = 1000
 
     def _extract_time(self, line_str):
         ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line_str)
@@ -1079,9 +1082,33 @@ class BinderWarningParser(BaseParser):
             return "높음"
         return "주의"
 
+    def _time_to_sec(self, time_str):
+        ts_m = re.search(r'\d{2}-\d{2}\s(\d{2}):(\d{2}):(\d{2}\.\d{3})', str(time_str))
+        if not ts_m:
+            return None
+        hour, minute, second = ts_m.groups()
+        return int(hour) * 3600 + int(minute) * 60 + float(second)
+
+    def _is_repeated_within_window(self, events):
+        if len(events) < 3:
+            return False
+
+        seconds = [self._time_to_sec(event.get("time")) for event in events]
+        for idx in range(0, len(seconds) - 2):
+            start = seconds[idx]
+            end = seconds[idx + 2]
+            if start is None or end is None:
+                continue
+            delta = end - start
+            if delta < 0:
+                delta += 24 * 3600
+            if delta <= self.REPEATED_DELAY_WINDOW_SECONDS:
+                return True
+        return False
+
     def analyze(self, lines):
         warnings = []
-        delay_count_by_target = {}
+        delay_events_by_target = {}
         last_delay_event_by_target = {}
         seen_raw = set()
         in_proxy_histogram = False
@@ -1150,6 +1177,8 @@ class BinderWarningParser(BaseParser):
                             "time": histogram_time,
                             "type": "BINDER_PROXY_HISTOGRAM",
                             "max_count": max_count,
+                            "evidence_role": "rca_candidate" if max_count > self.PROXY_LEAK_THRESHOLD else "state_dump",
+                            "rca_candidate": max_count > self.PROXY_LEAK_THRESHOLD,
                             "desc": f"Binder Proxy 객체 상태 덤프: {details}",
                             "raw": raw_logs
                         })
@@ -1165,10 +1194,16 @@ class BinderWarningParser(BaseParser):
             # 1. Thread Exhaustion / Starved
             if "binder thread pool" in lower and ("is full" in lower or "starved for" in lower):
                 starved_match = re.search(r'starved for (\d+)\s*ms', line_str, re.IGNORECASE)
+                is_full = "is full" in lower
                 if starved_match:
                     delay_ms = int(starved_match.group(1))
-                    desc = f"Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 {delay_ms}ms(약 {round(delay_ms / 1000, 1)}초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."
+                    is_rca_candidate = delay_ms >= self.STARVATION_RCA_THRESHOLD_MS
+                    if is_rca_candidate:
+                        desc = f"Binder thread pool starvation 감지: IPC 처리 스레드가 부족하여 {delay_ms}ms(약 {round(delay_ms / 1000, 1)}초) 대기했습니다. ANR/Watchdog/system_server 지연과 시간 상관관계 확인이 필요합니다."
+                    else:
+                        desc = f"짧은 Binder thread pool starvation 감지: {delay_ms}ms 대기했습니다. 단독 Root Cause로 보지 말고 주변 지연/반복 여부 확인용 보조 신호로만 사용합니다."
                 else:
+                    is_rca_candidate = is_full
                     desc = "Binder thread pool 포화 감지. IPC 처리 자원 부족을 의미하는 강한 이상 신호이며, 동시간대 ANR/Watchdog/느린 Binder transaction 여부를 함께 확인해야 합니다."
 
                 warnings.append({
@@ -1176,19 +1211,30 @@ class BinderWarningParser(BaseParser):
                     "type": "THREAD_EXHAUSTION",
                     "desc": desc,
                     "raw": line_str,
-                    "evidence_role": "rca_candidate",
-                    "rca_candidate": True
+                    "evidence_role": "rca_candidate" if is_rca_candidate or is_full else "secondary_signal",
+                    "rca_candidate": is_rca_candidate or is_full
                 })
                 continue
 
             # 2. Binder transaction delay
-            if "binder transaction to" in line_str and "took" in line_str:
+            if "binder transaction to" in lower and "took" in lower:
                 try:
-                    target_part = line_str.split("Binder transaction to ", 1)[1]
-                    target = target_part.split()[0]
-                    took_part = line_str.split("took ", 1)[1]
-                    duration_str = "".join(filter(str.isdigit, took_part.split("ms", 1)[0]))
-                    duration_ms = int(duration_str)
+                    tx_m = re.search(
+                        r'binder transaction to\s+(?P<target>.*?)(?:,\s*function:\s*(?P<function>.*?))?,\s*code:\s*(?P<code>\d+),\s*took\s*(?P<duration>\d+)\s*ms',
+                        line_str,
+                        re.IGNORECASE
+                    )
+                    if not tx_m:
+                        tx_m = re.search(
+                            r'binder transaction to\s+(?P<target>\S+).*?took\s*(?P<duration>\d+)\s*ms',
+                            line_str,
+                            re.IGNORECASE
+                        )
+                    if not tx_m:
+                        raise ValueError("unrecognized binder transaction delay format")
+
+                    target = (tx_m.group("target") or "Unknown").strip().strip(",") or "Unknown"
+                    duration_ms = int(tx_m.group("duration"))
 
                     if duration_ms > 1000:
                         level = self._severity_label(duration_ms)
@@ -1202,7 +1248,7 @@ class BinderWarningParser(BaseParser):
                             "rca_candidate": False
                         }
                         warnings.append(event)
-                        delay_count_by_target[target] = delay_count_by_target.get(target, 0) + 1
+                        delay_events_by_target.setdefault(target, []).append(event)
                         last_delay_event_by_target[target] = event
                 except Exception:
                     warnings.append({
@@ -1275,26 +1321,40 @@ class BinderWarningParser(BaseParser):
                         })
                     continue
 
-                # 일반 버퍼 에러 처리 (Spamming이 아닌 경우)
+	                # 일반 버퍼 에러 처리 (Spamming이 아닌 경우)
+                is_secondary_no_vma = "binder_alloc_buf" in lower and "no vma" in lower
+                is_strong_buffer_signal = any(k in lower for k in [
+                    "transactiontoolargeexception",
+                    "no space left",
+                    "buffer allocation",
+                    "parcel size",
+                    "binder buffer",
+                ])
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_BUFFER_ERROR",
-                    "desc": "Binder buffer/parcel 크기 관련 오류 감지. 대용량 parcel, buffer 부족 또는 TransactionTooLargeException 가능성이 있습니다.",
+                    "desc": (
+                        "binder_alloc_buf no vma 감지. 대상 프로세스 종료나 mmap 소멸 이후 나타나는 후속 증상일 수 있으므로 단독 Binder buffer Root Cause로 단정하지 않습니다."
+                        if is_secondary_no_vma and not is_strong_buffer_signal
+                        else "Binder buffer/parcel 크기 관련 오류 감지. 대용량 parcel, buffer 부족 또는 TransactionTooLargeException 가능성이 있습니다."
+                    ),
                     "raw": line_str,
-                    "evidence_role": "rca_candidate",
-                    "rca_candidate": True
+                    "evidence_role": "secondary_symptom" if is_secondary_no_vma and not is_strong_buffer_signal else "rca_candidate",
+                    "rca_candidate": not (is_secondary_no_vma and not is_strong_buffer_signal)
                 })
                 continue
 
         # 동일 target의 반복 지연 처리
-        for target, cnt in delay_count_by_target.items():
-            if cnt >= 3:
+        for target, events in delay_events_by_target.items():
+            if self._is_repeated_within_window(events):
                 last = last_delay_event_by_target.get(target, {})
                 warnings.append({
                     "time": last.get("time", ""),
                     "type": "REPEATED_BINDER_DELAY",
-                    "desc": f"[{target}] 대상 Binder transaction 지연이 {cnt}회 반복되었습니다. 단발성 지연보다 서비스 병목 가능성이 높아 ANR/Watchdog 시점과 비교가 필요합니다.",
-                    "raw": last.get("raw", "")
+                    "desc": f"[{target}] 대상 Binder transaction 지연이 {len(events)}회 반복되었습니다({self.REPEATED_DELAY_WINDOW_SECONDS}초 이내 3회 이상). 단발성 지연보다 서비스 병목 가능성이 높아 ANR/Watchdog 시점과 비교가 필요합니다.",
+                    "raw": last.get("raw", ""),
+                    "evidence_role": "secondary_signal",
+                    "rca_candidate": False
                 })
 
         return warnings
