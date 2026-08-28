@@ -335,6 +335,46 @@ def test_data_stall_flows_are_exposed_for_dashboard_summary():
     }
 
 
+def test_rf_warning_events_are_exposed_for_dashboard_summary():
+    report = build_internet_stall_report(
+        {
+            "timeline": [
+                _event(layer="RF", event_type="WEAK_SIGNAL", time="08-25 10:00:00", reason="signal level=0", slot="0", rat="LTE"),
+                _event(layer="RF", event_type="OOS_OR_REG_STATE", time="08-25 10:00:05", reason="voice=OOS, data=OOS", slot="1"),
+                _event(layer="RF", event_type="REG_STATE_CHANGE", time="08-25 10:00:10", reason="voice=IN_SERVICE"),
+                _event(layer="DNS", event_type="DNS_TIMEOUT", time="08-25 10:00:15"),
+            ]
+        },
+        year=2026,
+    )
+
+    rows = report.rf_warnings[["time", "event_type", "slot", "rat", "reason"]].astype(object)
+    rows = rows.where(pd.notna(rows), None)
+
+    assert rows.to_dict("records") == [
+        {"time": "08-25 10:00:00", "event_type": "WEAK_SIGNAL", "slot": "0", "rat": "LTE", "reason": "signal level=0"},
+        {"time": "08-25 10:00:05", "event_type": "OOS_OR_REG_STATE", "slot": "1", "rat": None, "reason": "voice=OOS, data=OOS"},
+    ]
+
+
+def test_rf_warning_summary_uses_explicit_field_when_timeline_was_compacted():
+    report = build_internet_stall_report(
+        {
+            "rf_warnings": [
+                {"time": "08-25 09:59:00", "event_type": "WEAK_SIGNAL", "slot": "0", "rat": "NR", "reason": "signal level=1"}
+            ],
+            "timeline": [
+                _event(layer="DNS", event_type="DNS_TIMEOUT", time="08-25 10:00:15"),
+            ],
+        },
+        year=2026,
+    )
+
+    assert report.rf_warnings[["time", "event_type", "slot", "rat", "reason"]].to_dict("records") == [
+        {"time": "08-25 09:59:00", "event_type": "WEAK_SIGNAL", "slot": "0", "rat": "NR", "reason": "signal level=1"}
+    ]
+
+
 def test_windows_are_ranked_worst_first_but_keep_their_index():
     report = build_internet_stall_report(
         {

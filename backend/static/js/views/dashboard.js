@@ -262,8 +262,14 @@ const CARDS = [
     render(series, panel) {
       const kpi = series.kpi;
       const flows = series.data_stall_flows || [];
+      const rfWarnings = series.rf_warnings || [];
       const completed = flows.filter((row) => row.status === "회복 완료").length;
       const unresolved = Math.max(flows.length - completed, 0);
+      const eventLabel = (eventType) => {
+        if (eventType === "WEAK_SIGNAL") return "약전계";
+        if (eventType === "OOS_OR_REG_STATE") return "권외/등록상태";
+        return eventType || "-";
+      };
 
       panel.prepend(tileRow([
         tile("Data Stall 흐름", fmt.count(kpi.data_stall_flow_count ?? flows.length), "개",
@@ -288,6 +294,18 @@ const CARDS = [
         ]));
       } else {
         summary.append(el("p", "card-note", "명확한 Data Stall start/recovery/end 흐름이 없습니다."));
+      }
+
+      if (rfWarnings.length) {
+        summary.append(el("h3", "sub-head", "RF 경고 내용"));
+        summary.append(table(["시각", "내용", "Slot", "RAT", "설명"],
+          rfWarnings.slice(0, 6).map((row) => [
+            row.time,
+            eventLabel(row.event_type),
+            row.slot || "-",
+            row.rat || "-",
+            row.reason || "-",
+          ])));
       }
 
       panel.content(summary);

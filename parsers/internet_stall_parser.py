@@ -229,6 +229,7 @@ class InternetStallParser(BaseParser):
         )
 
         data_stall_flows = self._build_data_stall_flows(timeline)
+        rf_warnings = self._collect_rf_warnings(timeline)
         stall_windows = self._build_stall_windows(timeline)
         root_summary = self._summarize_root_causes(stall_windows, timeline)
         kpi = self._build_kpi(timeline, stall_windows, root_summary, data_stall_flows)
@@ -237,6 +238,7 @@ class InternetStallParser(BaseParser):
             "schema_version": "internet_stall_v1",
             "kpi": kpi,
             "data_stall_flows": data_stall_flows[:80],
+            "rf_warnings": rf_warnings[:80],
             "root_cause_summary": root_summary,
             "stall_windows": self._compact_stall_windows_for_output(stall_windows),
             "timeline": [self._compact_event_for_output(event) for event in timeline[-300:]],
@@ -638,6 +640,14 @@ class InternetStallParser(BaseParser):
             flows.append(current)
 
         return flows[-200:]
+
+    def _collect_rf_warnings(self, timeline):
+        warnings = [
+            event for event in timeline
+            if event.get("layer") == "RF"
+            and event.get("event_type") in ("OOS_OR_REG_STATE", "WEAK_SIGNAL")
+        ]
+        return [self._compact_event_for_output(event) for event in warnings[-200:]]
 
     def _infer_window_causes(self, related):
         layers = defaultdict(int)

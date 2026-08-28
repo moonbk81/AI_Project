@@ -389,6 +389,7 @@ _DATA_STALL_FLOW_COLUMNS = [
     "event_count",
     "trigger",
 ]
+_RF_WARNING_COLUMNS = ["time", "event_type", "slot", "rat", "reason", "raw"]
 
 
 @dataclass(frozen=True)
@@ -448,6 +449,7 @@ class InternetStallReport:
     timeline_hover_columns: List[str] = field(default_factory=list)
     timeline_table: pd.DataFrame = field(default_factory=pd.DataFrame)
     data_stall_flows: pd.DataFrame = field(default_factory=pd.DataFrame)
+    rf_warnings: pd.DataFrame = field(default_factory=pd.DataFrame)
     windows: List[StallWindow] = field(default_factory=list)
 
     def windows_frame(self) -> pd.DataFrame:
@@ -574,6 +576,17 @@ def build_internet_stall_report(
             [column for column in _TIMELINE_TABLE_COLUMNS if column in timeline.columns]
         ]
 
+    rf_warnings = pd.DataFrame(data.get("rf_warnings", []) or [])
+    if not rf_warnings.empty:
+        rf_warnings = rf_warnings[[column for column in _RF_WARNING_COLUMNS if column in rf_warnings.columns]]
+    elif timeline_status == "ok":
+        rf_df = timeline[
+            (timeline["layer"] == "RF")
+            & (timeline["event_type"].isin(["OOS_OR_REG_STATE", "WEAK_SIGNAL"]))
+        ]
+        if not rf_df.empty:
+            rf_warnings = rf_df[[column for column in _RF_WARNING_COLUMNS if column in rf_df.columns]]
+
     flows = pd.DataFrame(data.get("data_stall_flows", []) or [], columns=_DATA_STALL_FLOW_COLUMNS)
     if not flows.empty:
         flows = flows[[column for column in _DATA_STALL_FLOW_COLUMNS if column in flows.columns]]
@@ -587,5 +600,6 @@ def build_internet_stall_report(
         timeline_hover_columns=hover_columns,
         timeline_table=timeline_table,
         data_stall_flows=flows,
+        rf_warnings=rf_warnings,
         windows=_stall_windows(data.get("stall_windows", []) or [], year),
     )

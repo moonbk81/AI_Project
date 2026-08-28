@@ -35,3 +35,21 @@ def test_wifi_datastall_sampling_lines_do_not_create_lifecycle_flows():
     assert result["kpi"]["data_stall_flow_count"] == 0
     assert result["kpi"]["data_stall_count"] == 0
     assert result["data_stall_flows"] == []
+
+
+def test_rf_warnings_are_preserved_outside_compacted_timeline():
+    result = InternetStallParser().analyze(
+        [],
+        report_data={
+            "signal_level_history": [
+                {"time": "08-25 10:00:00.000", "slot": "0", "rat": "NR", "level": 1, "raw_info": "weak"},
+                {"time": "08-25 10:00:01.000", "slot": "0", "rat": "LTE", "level": 4, "raw_info": "good"},
+            ],
+            "oos_events": [
+                {"time": "08-25 10:00:02.000", "slotId": "1", "voice_reg": "OUT_OF_SERVICE", "data_reg": "OUT_OF_SERVICE"}
+            ],
+        },
+    )
+
+    assert result["kpi"]["rf_warning_count"] == 2
+    assert [item["event_type"] for item in result["rf_warnings"]] == ["WEAK_SIGNAL", "OOS_OR_REG_STATE"]
