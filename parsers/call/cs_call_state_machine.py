@@ -22,6 +22,14 @@ class CsCallStateMachine:
 
         return None
 
+    def _extract_direction(self, payload: str):
+        """payload에서 MO/MT 방향을 추정한다."""
+        if re.search(r'\bmt\b|incoming:\s*true|INCOMING', payload, re.I):
+            return "MT"
+        if re.search(r'\bmo\b|incoming:\s*false|>\s*(?:DIAL|EMERGENCY_DIAL)', payload, re.I):
+            return "MO"
+        return None
+
     def _create_new_call(self, ts, payload, active_list, slot_id, current_id):
         """CS 시작 이벤트를 신규 active call 세션으로 생성한다."""
         return {
@@ -30,8 +38,10 @@ class CsCallStateMachine:
             "start_time": ts,
             "end_time": None,
             "id": current_id if current_id else f"Unknown_{len(active_list)}_{ts[-6:].replace('.','')}",
+            "direction": self._extract_direction(payload) or "Unknown",
             "status": "DIALING",
             "is_user_reject": False,
+            "saw_local_hangup": False,
             "fail_reason": "0",
             "logs": [f"[{ts}] START: {payload}"]
         }
@@ -55,22 +65,65 @@ class CsCallStateMachine:
 
         return None
 
-    def _resolve_recent_completed_call(self, target_call, payload, completed_list):
+    def _resolve_recent_completed_call(self, target_call, ts, payload, completed_list):
         """종료 직후 들어온 LAST_CALL_FAIL_CAUSE가 어느 세션에 붙을지 보정한다."""
         if target_call:
             return target_call, False
         if "LAST_CALL_FAIL_CAUSE" in payload and completed_list:
-            return completed_list[-1], True
+            recent_call = completed_list[-1]
+            if abs(self._time_to_sec(ts) - self._time_to_sec(recent_call.get("end_time", ts))) <= 3:
+                return recent_call, True
         return None, False
+
+    def _time_to_sec(self, t_str: str) -> int:
+        try:
+            if " " in t_str:
+                t_str = t_str.split(" ")[1]
+            h, m, s = t_str.split(".")[0].split(":")
+            return int(h) * 3600 + int(m) * 60 + int(s)
+        except Exception:
+            return 0
+
+    def _is_poll_start_event(self, payload: str) -> bool:
+        """GET_CURRENT_CALLS의 INCOMING 상태는 기존 ring 세션에 붙일 수 있다."""
+        return bool(re.search(r'<\s*GET_CURRENT_CALLS\s*\{[^}]*INCOMING', payload, re.I))
+
+    def _is_cs_relevant_payload(self, payload: str) -> bool:
+        """active call에 붙일 가치가 있는 CS call payload인지 판단한다."""
+        return any(
+            keyword in payload
+            for keyword in [
+                "DIAL",
+                "HANGUP",
+                "GET_CURRENT_CALLS",
+                "LAST_CALL_FAIL_CAUSE",
+                "UNSOL_CALL_RING",
+                "CALL_DROP",
+                "callId:",
+                "telecomCallID",
+                "notifyDisconnect",
+                "Connection update",
+                "New Connection",
+                "poll:",
+                "calltrackerDump",
+                "dumpCallTracker",
+            ]
+        )
 
     def _append_call_log(self, target_call, ts, payload, slot_id):
         """세션에 로그와 slot/status 기본 정보를 반영한다."""
         if target_call["slot"] == "Unknown" and slot_id != "Unknown":
             target_call["slot"] = slot_id
 
+        direction = self._extract_direction(payload)
+        if target_call["direction"] == "Unknown" and direction:
+            target_call["direction"] = direction
+
         target_call["logs"].append(f"[{ts}] {payload}")
         if ",ACTIVE," in payload:
             target_call["status"] = "SUCCESS"
+        if re.search(r'\[\d+\]>\s*HANGUP|>\s*HANGUP', payload, re.I):
+            target_call["saw_local_hangup"] = True
 
     def _apply_last_call_fail_cause(self, target_call, payload):
         """LAST_CALL_FAIL_CAUSE payload에서 cause/vendor cause를 반영한다."""
@@ -85,8 +138,16 @@ class CsCallStateMachine:
         cause_str = f"callFailCause: {c_match.group(1)}"
         if v_match:
             cause_str += f", vendorCause: {v_match.group(1)}"
+        if "vendorCause:" not in cause_str and "vendorCause:" in target_call.get("fail_reason", ""):
+            return
         target_call["fail_reason"] = cause_str
-        target_call["status"] = "CALL DROP"
+
+        reason_code = c_match.group(1)
+        if reason_code == "16":
+            target_call["status"] = "SUCCESS" if target_call["status"] == "SUCCESS" else "CANCELED"
+            target_call["is_user_reject"] = target_call["status"] == "CANCELED"
+        else:
+            target_call["status"] = "CALL DROP"
 
     def _apply_cs_reason(self, target_call, payload):
         """CS_REASON payload에서 성공/실패/취소 상태와 fail reason을 반영한다."""
@@ -120,11 +181,15 @@ class CsCallStateMachine:
             reason = target_call.get("fail_reason", "0")
             if any(code in reason for code in ["16(", "Normal"]):
                 target_call["status"] = "CANCELED"
+            elif target_call.get("saw_local_hangup") or target_call.get("direction") == "MT":
+                target_call["status"] = "CANCELED"
+                target_call["is_user_reject"] = True
             elif reason != "0":
                 target_call["status"] = "FAIL"
             else:
                 target_call["status"] = "CALL DROP"
 
+        target_call.pop("saw_local_hangup", None)
         completed_list.append(target_call)
         active_list.remove(target_call)
 
@@ -138,15 +203,24 @@ class CsCallStateMachine:
 
         # 1. 새로운 CS Call 발생 시 active_list에 추가
         if TEL_PATTERNS['CS_START'].search(payload):
+            if self._is_poll_start_event(payload) and active_list:
+                target_call = self._find_target_call(current_id, active_list) or active_list[-1]
+                self._append_call_log(target_call, ts, payload, slot_id)
+                self._finalize_if_ended(target_call, ts, payload, completed_list, active_list)
+                return
+
             active_list.append(
                 self._create_new_call(ts, payload, active_list, slot_id, current_id)
             )
             return
 
+        if not current_id and not self._is_cs_relevant_payload(payload):
+            return
+
         # 2. 이 로그가 어느 통화의 것인지(Target Call) 식별
         target_call = self._find_target_call(current_id, active_list)
         target_call, is_just_completed = self._resolve_recent_completed_call(
-            target_call, payload, completed_list
+            target_call, ts, payload, completed_list
         )
 
         if not target_call:

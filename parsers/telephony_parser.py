@@ -14,8 +14,16 @@ class TelephonyParser(BaseParser):
 
     def _normalize_payload_from_radio_line(self, clean_line: str) -> str:
         """Radio log 라인에서 실제 payload만 분리한다."""
+        payload_m = re.search(r'\s[VDIWEFS]\s+[^:]+:\s*(.*)$', clean_line)
+        if payload_m:
+            return payload_m.group(1).strip()
+
         parts = clean_line.split(":", 1)
         return parts[1].strip() if len(parts) > 1 else clean_line
+
+    def _is_radio_log_line(self, clean_line: str) -> bool:
+        """섹션 헤더 없이 잘린 radio logcat 라인인지 판단한다."""
+        return bool(re.search(r'^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+radio\s+', clean_line))
 
     def _time_to_sec(self, t_str: str) -> int:
         """MM-DD HH:MM:SS.mmm 형태의 timestamp를 초 단위로 변환한다."""
@@ -88,8 +96,35 @@ class TelephonyParser(BaseParser):
         radio_sessions.extend(active_radio_calls)
 
     def _merge_cs_sessions(self, dump_sessions, radio_sessions):
-        """dump 기반 CS 세션을 우선 사용하고 없을 때 radio 기반 세션을 사용한다."""
-        return dump_sessions if dump_sessions else radio_sessions
+        """dump/radio 기반 CS 세션을 합치되 같은 콜이면 정보가 많은 쪽을 보존한다."""
+        if not dump_sessions:
+            return radio_sessions
+        if not radio_sessions:
+            return dump_sessions
+
+        merged = list(dump_sessions)
+        for radio_session in radio_sessions:
+            radio_sec = self._time_to_sec(radio_session["start_time"])
+            duplicate_idx = None
+            for idx, dump_session in enumerate(merged):
+                same_type = dump_session.get("type") == radio_session.get("type")
+                same_status = dump_session.get("status") == radio_session.get("status")
+                near_start = abs(self._time_to_sec(dump_session["start_time"]) - radio_sec) <= 2
+                if same_type and same_status and near_start:
+                    duplicate_idx = idx
+                    break
+
+            if duplicate_idx is None:
+                merged.append(radio_session)
+                continue
+
+            existing = merged[duplicate_idx]
+            radio_has_binding = "TC@" in radio_session.get("id", "") or radio_session.get("slot") != "Unknown"
+            existing_has_binding = "TC@" in existing.get("id", "") or existing.get("slot") != "Unknown"
+            if radio_has_binding and not existing_has_binding:
+                merged[duplicate_idx] = radio_session
+
+        return merged
 
     def _bind_connection_history(self, sessions, conn_histories):
         """TC ID가 없는 세션을 Connection History 기준으로 보강한다."""
@@ -158,7 +193,7 @@ class TelephonyParser(BaseParser):
                     continue
 
             if clean_line.startswith("Call Log") or "DUMP OF SERVICE telecom" in clean_line:
-                in_call_log = True; continue
+                in_call_log = True; in_radio = False; continue
             if in_call_log and (clean_line.startswith("---------") or ("DUMP OF" in clean_line and "telecom" not in clean_line)):
                 in_call_log = False; continue
 
@@ -180,7 +215,7 @@ class TelephonyParser(BaseParser):
                         slot_id=current_dump_slot, tc_id_re=tc_id_re
                     )
 
-            elif in_radio:
+            elif in_radio or self._is_radio_log_line(clean_line):
                 m = radio_time_re.search(clean_line)
                 if m:
                     ts = f"{m.group(1)} {m.group(2)}"
