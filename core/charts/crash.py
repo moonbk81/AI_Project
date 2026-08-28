@@ -290,6 +290,8 @@ class AnrEvent:
     process: Any
     reason: Any
     pid: Any
+    intent_action: Any = _UNKNOWN
+    triage: Dict[str, Any] = field(default_factory=dict)
     summary: Optional[AnrSummary] = None
     pre_logcat: List[str] = field(default_factory=list)
     cpu_logs: List[str] = field(default_factory=list)
@@ -336,21 +338,161 @@ def _anr_binder_transactions(transactions: List[Dict[str, Any]]) -> pd.DataFrame
     )
 
 
+def _first_stack_frame(lines: List[str]) -> str:
+    for line in lines or []:
+        clean = str(line).strip()
+        if clean.startswith(("at ", "native:")):
+            return clean
+    return _UNKNOWN
+
+
+def _java_owner(frame: str) -> str:
+    match = re.search(r'at\s+([\w.$]+)\.([\w$<>-]+)\(', frame or "")
+    if not match:
+        return _UNKNOWN
+
+    class_name, method = match.groups()
+    owner = class_name.split(".")[-1]
+    return f"{owner}.{method}"
+
+
+def _max_iowait(logs: List[str]) -> Optional[float]:
+    values = []
+    for line in logs or []:
+        for match in re.finditer(r'([\d.]+)%\s+iowait', str(line), re.I):
+            try:
+                values.append(float(match.group(1)))
+            except ValueError:
+                continue
+    return max(values) if values else None
+
+
+def _has_high_cpu(logs: List[str]) -> bool:
+    for line in logs or []:
+        if re.search(r'\b(?:[89]\d|100)%\s+TOTAL\b', str(line)):
+            return True
+        if re.search(r'\b(?:[2-9]\d|100)%\s+\d+/[\w.:$-]+', str(line)):
+            return True
+        if re.search(r'ActivityManager:\s+Load:\s+(?:[8-9]|\d{2,})\.', str(line)):
+            return True
+    return False
+
+
+def _anr_triage(
+    anr: Dict[str, Any],
+    main_stack: List[str],
+    lock_chain: Optional[AnrLockChain],
+    binder_transactions: pd.DataFrame,
+    context: Dict[str, Any],
+) -> Dict[str, Any]:
+    reason = anr.get("reason", _UNKNOWN)
+    intent_action = anr.get("intent_action", _UNKNOWN)
+    blocker_stack = lock_chain.blocker_stack if lock_chain else []
+    main_frame = _first_stack_frame(main_stack)
+    owner_frame = _first_stack_frame(blocker_stack)
+    main_owner = _java_owner(main_frame)
+    owner_owner = _java_owner(owner_frame)
+
+    cpu_logs = context.get("cpu_logs", []) or []
+    io_logs = context.get("io_logs", []) or []
+    max_iowait = _max_iowait(io_logs)
+    has_binder = not binder_transactions.empty
+
+    if _has_high_cpu(cpu_logs):
+        cpu_strength = "강함"
+        cpu_note = "ANR 시점 CPU 사용률이 높아 처리 지연을 키웠을 가능성이 큽니다."
+    elif cpu_logs:
+        cpu_strength = "보조"
+        cpu_note = "CPU 로그가 있어 보조 단서로 확인할 수 있습니다."
+    else:
+        cpu_strength = "근거 약함"
+        cpu_note = "CPU 병목을 직접 가리키는 로그가 부족합니다."
+
+    if max_iowait is not None and max_iowait >= 10:
+        io_strength = "강함"
+        io_note = f"iowait 최대 {max_iowait:g}%로 I/O 지연 가능성이 큽니다."
+    elif max_iowait is not None and max_iowait >= 2:
+        io_strength = "보조"
+        io_note = f"iowait 최대 {max_iowait:g}%로 보조 단서 수준입니다."
+    elif io_logs:
+        io_strength = "근거 약함"
+        io_note = "I/O 관련 섹션은 있으나 iowait 수치가 낮아 직접 원인 근거는 약합니다."
+    else:
+        io_strength = "근거 약함"
+        io_note = "I/O 지연을 직접 가리키는 로그가 부족합니다."
+
+    binder_strength = "강함" if has_binder else "근거 약함"
+    binder_note = (
+        "Main thread의 대기 중 Binder transaction이 확인됩니다."
+        if has_binder
+        else "Main thread 기준 대기 중 Binder transaction은 확인되지 않습니다."
+    )
+
+    if lock_chain:
+        primary = "Lock contention"
+        next_check = (
+            f"우선 점유 Thread TID {lock_chain.blocker_thread}의 `{owner_owner}` 경로와 "
+            f"main thread의 `{main_owner}` 호출 흐름을 확인하세요."
+        )
+    elif has_binder:
+        primary = "Binder wait"
+        next_check = "우선 대기 중인 Binder transaction의 대상 PID/TID와 대상 서비스 처리 지연을 확인하세요."
+    elif _has_high_cpu(cpu_logs):
+        primary = "CPU pressure"
+        next_check = "우선 ANR 직전 CPU 상위 프로세스와 main thread 작업량을 확인하세요."
+    elif max_iowait is not None and max_iowait >= 10:
+        primary = "I/O pressure"
+        next_check = "우선 ANR 시점의 디스크/스토리지 대기와 main thread I/O 호출을 확인하세요."
+    else:
+        primary = "원인 후보 미확정"
+        next_check = "우선 main thread top stack과 ANR reason에 연결된 Broadcast/Service 처리 경로를 확인하세요."
+
+    return {
+        "primary_signal": primary,
+        "facts": [
+            {"label": "Process", "value": anr.get("process", _UNKNOWN)},
+            {"label": "PID", "value": (anr.get("process_info", {}) or {}).get("pid", _UNKNOWN)},
+            {"label": "Reason", "value": reason},
+            {"label": "Intent action", "value": intent_action},
+        ],
+        "main_thread": {
+            "top_frame": main_frame,
+            "check_target": main_owner,
+        },
+        "lock_owner": {
+            "tid": lock_chain.blocker_thread if lock_chain else _UNKNOWN,
+            "top_frame": owner_frame,
+            "check_target": owner_owner,
+        },
+        "signals": [
+            {"label": "CPU", "strength": cpu_strength, "note": cpu_note},
+            {"label": "I/O", "strength": io_strength, "note": io_note},
+            {"label": "Binder", "strength": binder_strength, "note": binder_note},
+        ],
+        "next_check": next_check,
+    }
+
+
 def _anr_event(anr: Dict[str, Any]) -> AnrEvent:
     context = anr.get("context_analysis", {}) or {}
+    lock_chain = _anr_lock_chain(anr.get("lock_chain", {}) or {})
+    binder_transactions = _anr_binder_transactions(anr.get("active_binder_transactions", []))
+    main_stack = list((anr.get("main", {}) or {}).get("stack") or [])
     return AnrEvent(
         time=anr.get("time", _UNKNOWN_TIME),
         process=anr.get("process", "Unknown Process"),
         reason=anr.get("reason", "Unknown Reason"),
         pid=(anr.get("process_info", {}) or {}).get("pid", _UNKNOWN),
+        intent_action=anr.get("intent_action", _UNKNOWN),
+        triage=_anr_triage(anr, main_stack, lock_chain, binder_transactions, context),
         summary=_anr_summary(anr.get("analysis_summary", {}) or {}),
         pre_logcat=_tail(anr.get("pre_anr_logcat"), PRE_ANR_LOGCAT_LINES),
         cpu_logs=_tail(context.get("cpu_logs"), ANR_CONTEXT_LINES),
         system_server_logs=_tail(context.get("system_server_logs"), ANR_CONTEXT_LINES),
         io_logs=_tail(context.get("io_logs"), ANR_CONTEXT_LINES),
-        lock_chain=_anr_lock_chain(anr.get("lock_chain", {}) or {}),
-        binder_transactions=_anr_binder_transactions(anr.get("active_binder_transactions", [])),
-        main_stack=list((anr.get("main", {}) or {}).get("stack") or []),
+        lock_chain=lock_chain,
+        binder_transactions=binder_transactions,
+        main_stack=main_stack,
     )
 
 

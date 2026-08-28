@@ -457,18 +457,19 @@ class AnrParser(BaseParser):
         anr_list = []
         current_anr = None
 
-        anr_start_re = re.compile(
-            r'(?:ActivityManager:\s)?ANR in\s+(\S+)|Application is not responding:\s+(\S+)',
-            re.I
-        )
-        # 🚨 추가: Logcat에 찍히는 ActivityManager PID 캡처용
+        activity_anr_re = re.compile(r'ActivityManager:\s+ANR in\s+(\S+)(?:\s+\(.*?PID\s+(\d+)\))?', re.I)
+        app_not_responding_re = re.compile(r'Application is not responding:\s+(.+)', re.I)
+        am_anr_re = re.compile(r'am_anr\s*:\s*\[\s*\d+\s*,\s*(\d+)\s*,\s*([^,\]]+)\s*,\s*[^,\]]+\s*,\s*(.+)\]$', re.I)
+        completed_anr_re = re.compile(r'ActivityManager:\s+Completed ANR of\s+(\S+)', re.I)
         anr_pid_re = re.compile(r'ActivityManager:\s+PID:\s+(\d+)')
         anr_reason_re = re.compile(r'ActivityManager:\s+Reason:\s+(.+)')
         cmd_line_re = re.compile(r'Cmd line:\s+(.+)')
+        package_re = re.compile(r'\b(?:[a-zA-Z_]\w*\.)+[a-zA-Z_]\w*(?::[a-zA-Z_]\w*)?\b')
 
         cpu_re = re.compile(r'CPU usage from|CPU usage since|Load:')
         system_server_re = re.compile(r'system_server|Watchdog|ActivityManager|InputDispatcher|WindowManager')
         io_re = re.compile(r'\biowait\b|\bblocked\b|slow operation|StrictMode|fsync|disk|I/O|io ', re.I)
+        max_context_seconds = 30.0
 
         pre_context = deque(maxlen=120)
 
@@ -486,6 +487,7 @@ class AnrParser(BaseParser):
         cpu_logs = []
         system_server_logs = []
         io_logs = []
+        current_anr_start_sec = None
 
         def reset_trace_state():
             nonlocal all_threads, target_pid, main_tid
@@ -505,6 +507,161 @@ class AnrParser(BaseParser):
             system_server_logs = []
             io_logs = []
 
+        def time_to_sec(clean_line):
+            ts_m = RE_TIME.search(clean_line)
+            if not ts_m:
+                return None
+            try:
+                _, time_part = ts_m.group(0).split(" ")
+                hour, minute, second = time_part.split(":")
+                return int(hour) * 3600 + int(minute) * 60 + float(second)
+            except (ValueError, TypeError):
+                return None
+
+        def is_in_context_window(clean_line):
+            if current_anr_start_sec is None:
+                return True
+
+            line_sec = time_to_sec(clean_line)
+            if line_sec is None:
+                return True
+
+            delta = line_sec - current_anr_start_sec
+            if delta < 0:
+                delta += 24 * 3600
+            return delta <= max_context_seconds
+
+        def extract_application_process(detail):
+            first_token = detail.split()[0].strip(",;") if detail.split() else ""
+            if package_re.fullmatch(first_token):
+                return first_token
+
+            pkg_m = package_re.search(detail)
+            if pkg_m:
+                return pkg_m.group(0)
+            return None
+
+        def extract_intent_action(reason):
+            intent_m = re.search(r'act=([^\s\}]+)', reason or "")
+            return intent_m.group(1) if intent_m else "Unknown"
+
+        def event_time_to_sec(event):
+            time_str = event.get("time")
+            if not time_str or time_str == "Unknown":
+                return None
+            return time_to_sec(time_str)
+
+        def time_delta_seconds(left, right):
+            if left is None or right is None:
+                return None
+            delta = abs(left - right)
+            return min(delta, (24 * 3600) - delta)
+
+        def is_same_anr(existing, incoming):
+            if existing.get("process") != incoming.get("process"):
+                return False
+
+            existing_pid = (existing.get("process_info", {}) or {}).get("pid") or existing.get("logcat_pid")
+            incoming_pid = (incoming.get("process_info", {}) or {}).get("pid") or incoming.get("logcat_pid")
+            if existing_pid not in (None, "Unknown") and incoming_pid not in (None, "Unknown") and existing_pid != incoming_pid:
+                return False
+
+            existing_action = existing.get("intent_action")
+            incoming_action = incoming.get("intent_action")
+            existing_reason = existing.get("reason")
+            incoming_reason = incoming.get("reason")
+            same_reason = (
+                existing_reason == incoming_reason
+                or (
+                    existing_action not in (None, "Unknown")
+                    and incoming_action not in (None, "Unknown")
+                    and existing_action == incoming_action
+                )
+            )
+            if not same_reason:
+                return False
+
+            delta = time_delta_seconds(event_time_to_sec(existing), event_time_to_sec(incoming))
+            return delta is None or delta <= 5.0
+
+        def merge_unique_logs(left, right, limit=80):
+            merged = []
+            seen = set()
+            for item in (left or []) + (right or []):
+                if item in seen:
+                    continue
+                seen.add(item)
+                merged.append(item)
+            return merged[-limit:]
+
+        def merge_transactions(left, right, limit=20):
+            merged = []
+            seen = set()
+            for item in (left or []) + (right or []):
+                if not isinstance(item, dict):
+                    continue
+                key = item.get("raw") or tuple(sorted(item.items()))
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+            return merged[-limit:]
+
+        def prefer_known(current, candidate):
+            return candidate if current in (None, "Unknown", "", []) and candidate not in (None, "Unknown", "", []) else current
+
+        def merge_anr(existing, incoming):
+            existing["time"] = min(
+                [t for t in [existing.get("time"), incoming.get("time")] if t and t != "Unknown"],
+                default=existing.get("time", "Unknown")
+            )
+            existing["reason"] = prefer_known(existing.get("reason"), incoming.get("reason"))
+            existing["intent_action"] = prefer_known(existing.get("intent_action"), incoming.get("intent_action"))
+
+            existing_pid = (existing.get("process_info", {}) or {}).get("pid")
+            incoming_pid = (incoming.get("process_info", {}) or {}).get("pid")
+            if existing_pid in (None, "Unknown") and incoming_pid not in (None, "Unknown"):
+                existing.setdefault("process_info", {})["pid"] = incoming_pid
+
+            if incoming.get("main", {}).get("stack") and not existing.get("main", {}).get("stack"):
+                existing["main"] = incoming["main"]
+            if incoming.get("lock_chain", {}).get("blocker_thread") and not existing.get("lock_chain", {}).get("blocker_thread"):
+                existing["lock_chain"] = incoming["lock_chain"]
+
+            existing_summary = existing.setdefault("analysis_summary", {})
+            for key, value in (incoming.get("analysis_summary", {}) or {}).items():
+                if isinstance(value, bool):
+                    existing_summary[key] = existing_summary.get(key, False) or value
+                elif key == "evidence_level" and value == "TRACE_INCLUDED":
+                    existing_summary[key] = value
+                else:
+                    existing_summary[key] = prefer_known(existing_summary.get(key), value)
+
+            existing["active_binder_transactions"] = merge_transactions(
+                existing.get("active_binder_transactions"),
+                incoming.get("active_binder_transactions"),
+            )
+
+            existing_context = existing.setdefault("context_analysis", {})
+            incoming_context = incoming.get("context_analysis", {}) or {}
+            for key in ("cpu_logs", "system_server_logs", "io_logs"):
+                existing_context[key] = merge_unique_logs(existing_context.get(key), incoming_context.get(key))
+            existing["raw_context_analysis"] = existing_context
+            existing["raw_log"] = merge_unique_logs(
+                existing.get("raw_log", "").splitlines(),
+                incoming.get("raw_log", "").splitlines(),
+                limit=40
+            )
+            existing["raw_log"] = "\n".join(existing["raw_log"]) + ("\n" if existing["raw_log"] else "")
+            existing["pre_anr_logcat"] = existing.get("pre_anr_logcat") or incoming.get("pre_anr_logcat", [])
+
+        def append_or_merge_anr(incoming):
+            for existing in anr_list:
+                if is_same_anr(existing, incoming):
+                    merge_anr(existing, incoming)
+                    return
+            anr_list.append(incoming)
+
         def find_cmd_line(start_idx):
             for k in range(1, 6):
                 idx = start_idx + k
@@ -516,6 +673,9 @@ class AnrParser(BaseParser):
             return None
 
         def collect_context_hint(clean_line):
+            if current_anr and not is_in_context_window(clean_line):
+                return
+
             if cpu_re.search(clean_line):
                 cpu_logs.append(clean_line)
 
@@ -557,6 +717,12 @@ class AnrParser(BaseParser):
             # 🚨 수정: 최상위 payload에 프로세스, PID, Intent Action을 확정적으로 노출
             final_pid = target_pid or current_anr.get("logcat_pid", "Unknown")
 
+            context_analysis = {
+                "cpu_logs": cpu_logs[-80:],
+                "system_server_logs": system_server_logs[-80:],
+                "io_logs": io_logs[-80:]
+            }
+
             current_anr.update({
                 "process_info": {
                     "name": current_anr.get("process"),
@@ -585,17 +751,14 @@ class AnrParser(BaseParser):
                     "blocker_stack": blocker_stack
                 },
                 "active_binder_transactions": matched_tx,
-                "raw_context_analysis": {
-                    "cpu_logs": cpu_logs[-80:],
-                    "system_server_logs": system_server_logs[-80:],
-                    "io_logs": io_logs[-80:]
-                }
+                "context_analysis": context_analysis,
+                "raw_context_analysis": context_analysis
             })
 
             # LLM 인지 과부하 방지를 위해 임시 필드 삭제
             current_anr.pop("logcat_pid", None)
 
-            anr_list.append(current_anr)
+            append_or_merge_anr(current_anr)
 
         reset_trace_state()
 
@@ -604,29 +767,44 @@ class AnrParser(BaseParser):
             collect_context_hint(clean_line)
 
             # 1. ANR 시작 감지
-            if anr_m := anr_start_re.search(clean_line):
+            process_name = None
+            logcat_pid = "Unknown"
+            reason = "Unknown"
+
+            if anr_m := activity_anr_re.search(clean_line):
+                process_name = anr_m.group(1)
+                logcat_pid = anr_m.group(2) or "Unknown"
+            elif anr_m := am_anr_re.search(clean_line):
+                logcat_pid = anr_m.group(1)
+                process_name = anr_m.group(2).strip()
+                reason = anr_m.group(3).strip()
+            elif anr_m := app_not_responding_re.search(clean_line):
+                process_name = extract_application_process(anr_m.group(1))
+
+            if process_name:
                 if current_anr:
                     finalize_current_anr()
 
                 reset_trace_state()
-
-                # 🚨 수정: group(1)이 None일 경우 group(2) 사용 (안전한 프로세스명 추출)
-                process_name = anr_m.group(1) or anr_m.group(2)
+                current_anr_start_sec = time_to_sec(clean_line)
 
                 if target_package and process_name != target_package:
                     current_anr = None
+                    current_anr_start_sec = None
                     pre_context.append(clean_line)
                     continue
 
                 current_anr = {
                     "time": "Unknown",
                     "process": process_name,
-                    "logcat_pid": "Unknown",
-                    "reason": "Unknown",
-                    "intent_action": "Unknown",
+                    "logcat_pid": logcat_pid,
+                    "reason": reason,
+                    "intent_action": extract_intent_action(reason),
                     "raw_log": clean_line + "\n",
                     "pre_anr_logcat": list(pre_context)
                 }
+                if logcat_pid != "Unknown":
+                    target_pid = logcat_pid
 
                 if ts_m := RE_TIME.search(clean_line):
                     current_anr["time"] = ts_m.group(0)
@@ -637,6 +815,16 @@ class AnrParser(BaseParser):
             if not current_anr:
                 pre_context.append(clean_line)
                 continue
+
+            if completed_m := completed_anr_re.search(clean_line):
+                if completed_m.group(1) == current_anr.get("process"):
+                    current_anr["raw_log"] += clean_line + "\n"
+                    finalize_current_anr()
+                    current_anr = None
+                    current_anr_start_sec = None
+                    reset_trace_state()
+                    pre_context.append(clean_line)
+                    continue
 
             # 🚨 추가: traces.txt 없이 Logcat만 있을 때를 대비한 PID 확보
             if pid_m := anr_pid_re.search(clean_line):
@@ -652,9 +840,7 @@ class AnrParser(BaseParser):
                 current_anr["reason"] = reason_str
 
                 # 🚨 핵심: act= 인텐트 액션명을 명시적으로 파싱하여 최상위 키에 할당
-                intent_m = re.search(r'act=([^\s\}]+)', reason_str)
-                if intent_m:
-                    current_anr["intent_action"] = intent_m.group(1)
+                current_anr["intent_action"] = extract_intent_action(reason_str)
 
                 current_anr["raw_log"] += clean_line + "\n"
 

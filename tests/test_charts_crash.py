@@ -209,6 +209,50 @@ def test_anr_summary_is_absent_when_the_parser_ran_no_checks():
     assert summary.has_main_stack is True and summary.has_io_hint is False
 
 
+def test_anr_event_includes_rule_based_triage():
+    overview = build_crash_overview(
+        {
+            "anr_context": [
+                {
+                    "time": "03-25 00:05:58.802",
+                    "process": "com.android.phone",
+                    "reason": "Broadcast of Intent { act=com.example.ACTION }",
+                    "intent_action": "com.example.ACTION",
+                    "process_info": {"pid": 4529},
+                    "analysis_summary": {"has_main_stack": True, "has_lock_contention": True},
+                    "main": {
+                        "stack": [
+                            '"main" tid=1 Blocked',
+                            "at com.android.providers.telephony.TelephonyProvider.insertSynchronized(TelephonyProvider.java:7145)",
+                        ]
+                    },
+                    "lock_chain": {
+                        "lock_address": "0x1",
+                        "blocker_thread": 83,
+                        "blocker_stack": [
+                            '"owner" tid=83 Runnable',
+                            "at com.android.providers.telephony.TelephonyProvider.updateApnDb(TelephonyProvider.java:8689)",
+                        ],
+                    },
+                    "context_analysis": {
+                        "cpu_logs": ["03-25 00:05:58.802 ActivityManager: Load: 11.4 / 2.79 / 0.93"],
+                        "io_logs": ["03-25 00:05:58.802 ActivityManager: 82% TOTAL: 0.6% iowait"],
+                    },
+                }
+            ]
+        }
+    )
+
+    triage = overview.anr_events[0].triage
+    assert triage["primary_signal"] == "Lock contention"
+    assert triage["facts"][3] == {"label": "Intent action", "value": "com.example.ACTION"}
+    assert triage["main_thread"]["check_target"] == "TelephonyProvider.insertSynchronized"
+    assert triage["lock_owner"]["check_target"] == "TelephonyProvider.updateApnDb"
+    assert triage["signals"][0]["strength"] == "강함"
+    assert triage["signals"][1]["strength"] == "근거 약함"
+    assert "TID 83" in triage["next_check"]
+
+
 # --------------------------------------------------------------------- crashes
 
 
