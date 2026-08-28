@@ -7,6 +7,11 @@ class BatteryThermalAnalyzer(BaseParser):
         super().__init__(context_getter)
         self.re_thermal_new = re.compile(r'Temperature\{mValue=([-\d.]+).*?mName=([a-zA-Z0-9_]+)', re.I)
         self.re_thermal_old = re.compile(r'Temperature:\s*(\d+).*?Sensor:\s*([a-zA-Z0-9_]+)', re.I)
+        self.re_samsung_current_temp = re.compile(r'(?:^|\s)([a-z][a-z0-9_.-]+)(?:\s+[a-z0-9_.-]+)?:\s+current_temp_store\s+temperature\s*:\s*(-?\d+(?:\.\d+)?)', re.I)
+        self.re_samsung_fg_temp = re.compile(r'\b(max[0-9a-z_]+_fg)_write_temp:\s+temperature\s+to\s+\((-?\d+)', re.I)
+        self.re_samsung_lrp = re.compile(r'\bsec_bat_store_attrs:\s+LRP\((-?\d+)\)', re.I)
+        self.re_sec_input_temp = re.compile(r'\[sec_input\].*?\bset\s+temperature\s*:\s*(-?\d+(?:\.\d+)?)', re.I)
+        self.re_battery_changed_temp = re.compile(r'\bBatteryService:.*?\btemperature\s*:\s*(-?\d+)', re.I)
         # 앱 이름 부분에 u0a123, 10123, *alarm*, 콜론(:) 등이 올 수 있도록 정규식 확장
         self.re_wakelock = re.compile(r'Wake lock\s+([a-zA-Z0-9_.*:-]+).*?(\d+)\s*ms.*?(\d+)\s*times', re.I)
 
@@ -16,8 +21,27 @@ class BatteryThermalAnalyzer(BaseParser):
 
         # 성능 최적화: 전체 dump를 받더라도 관심 없는 라인은 clean_line/regex 검사 자체를 건너뜁니다.
         self.uid_marker_keywords = ("App ID:", "Package:")
-        self.thermal_marker_keywords = ("Temperature", "CurrentValue")
-        self.wakelock_marker_keywords = ("Wake lock",)
+        self.thermal_marker_keywords = (
+            "temperature",
+            "currentvalue",
+            "current_temp_store",
+            "sec_bat_store_attrs",
+            "batteryservice",
+            "sec_input_set_temperature_data",
+        )
+        self.wakelock_marker_keywords = ("wake lock",)
+
+    def _normalize_temperature(self, value):
+        temp = float(value)
+        return temp / 10.0 if abs(temp) > 80 else temp
+
+    def _record_thermal(self, thermals, sensor_name, temperature):
+        sensor = str(sensor_name).strip().strip(":").replace(" ", "_")
+        if not sensor:
+            return
+        temp = self._normalize_temperature(temperature)
+        if sensor not in thermals or temp > thermals[sensor]:
+            thermals[sensor] = temp
 
     def analyze(self, lines):
         thermals = {}
@@ -27,11 +51,12 @@ class BatteryThermalAnalyzer(BaseParser):
 
         for line in lines:
             raw_line = str(line)
+            lower_line = raw_line.lower()
 
             # 대부분의 dump 라인은 배터리/써멀 분석과 무관하므로 빠르게 skip합니다.
             has_uid_marker = any(marker in raw_line for marker in self.uid_marker_keywords)
-            has_thermal_marker = any(marker in raw_line for marker in self.thermal_marker_keywords)
-            has_wakelock_marker = any(marker in raw_line for marker in self.wakelock_marker_keywords)
+            has_thermal_marker = any(marker in lower_line for marker in self.thermal_marker_keywords)
+            has_wakelock_marker = any(marker in lower_line for marker in self.wakelock_marker_keywords)
 
             if not (has_uid_marker or has_thermal_marker or has_wakelock_marker):
                 continue
@@ -60,14 +85,39 @@ class BatteryThermalAnalyzer(BaseParser):
                 m_new = self.re_thermal_new.search(clean_line)
                 if m_new:
                     sensor_name = m_new.group(2)
-                    thermals[sensor_name] = float(m_new.group(1))
+                    self._record_thermal(thermals, sensor_name, m_new.group(1))
                     continue # 매칭 성공 시 구형 포맷 검사는 스킵
 
                 # 2순위: 구형 포맷 매칭 시도
                 m_old = self.re_thermal_old.search(clean_line)
                 if m_old:
                     sensor_name = m_old.group(2)
-                    thermals[sensor_name] = float(m_old.group(1))
+                    self._record_thermal(thermals, sensor_name, m_old.group(1))
+                    continue
+
+                m_current = self.re_samsung_current_temp.search(clean_line)
+                if m_current:
+                    self._record_thermal(thermals, m_current.group(1), m_current.group(2))
+                    continue
+
+                m_fg = self.re_samsung_fg_temp.search(clean_line)
+                if m_fg:
+                    self._record_thermal(thermals, m_fg.group(1), m_fg.group(2))
+                    continue
+
+                m_lrp = self.re_samsung_lrp.search(clean_line)
+                if m_lrp:
+                    self._record_thermal(thermals, "battery_lrp", m_lrp.group(1))
+                    continue
+
+                m_sec_input = self.re_sec_input_temp.search(clean_line)
+                if m_sec_input:
+                    self._record_thermal(thermals, "sec_input", m_sec_input.group(1))
+                    continue
+
+                m_battery = self.re_battery_changed_temp.search(clean_line)
+                if m_battery:
+                    self._record_thermal(thermals, "battery", m_battery.group(1))
 
             # ==========================================
             # 3. 웨이크락(배터리 점유) 분석 및 UID 매핑
