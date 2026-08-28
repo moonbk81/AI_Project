@@ -226,6 +226,59 @@ export function frameTable(rows, columns, limit) {
   return table(keys, (rows || []).map((row) => keys.map((key) => row[key])), limit);
 }
 
+function tableText(node) {
+  const rows = [];
+  for (const tr of node.querySelectorAll("tr")) {
+    rows.push([...tr.children].map((cell) => cell.textContent || "").join("\t"));
+  }
+  return rows.join("\n");
+}
+
+async function writeTextClipboard(text) {
+  if (!text.trim()) throw new Error("복사할 내용이 없습니다.");
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  if (!copied) throw new Error("클립보드에 쓸 수 없습니다.");
+}
+
+async function writePlotClipboard(plotHost) {
+  await ensurePlotly();
+  if (!window.Plotly || !plotHost.classList.contains("js-plotly-plot")) {
+    throw new Error("복사할 그래프가 없습니다.");
+  }
+
+  const dataUrl = await window.Plotly.toImage(plotHost, {
+    format: "png",
+    width: Math.max(720, Math.round(plotHost.getBoundingClientRect().width || 720)),
+    height: Math.max(420, Math.round(plotHost.getBoundingClientRect().height || 420)),
+    scale: 2,
+  });
+  const blob = await fetch(dataUrl).then((response) => response.blob());
+
+  if (!window.ClipboardItem || !navigator.clipboard?.write) {
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = "chart.png";
+    link.click();
+    return "downloaded";
+  }
+
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  return "copied";
+}
+
 export function sectionAnalysisQuestion(sectionName, spec, sourceFile) {
   return [
     `${sectionName}의 "${spec.title}" 섹션을 기준으로 현재 로그를 분석해줘.`,
@@ -249,7 +302,11 @@ export function card(title, subtitle) {
   const toggle = el("button", null, "표");
   toggle.type = "button";
   toggle.classList.add("hidden");
-  head.append(toggle);
+  const copy = el("button", null, "복사");
+  copy.type = "button";
+  copy.title = "현재 카드 내용 복사";
+  copy.classList.add("hidden");
+  head.append(copy, toggle);
   section.append(head);
   if (subtitle) section.append(el("p", "card-sub", subtitle));
 
@@ -269,6 +326,31 @@ export function card(title, subtitle) {
     toggle.textContent = showTable ? "차트" : "표";
   });
 
+  copy.addEventListener("click", async () => {
+    const original = copy.textContent;
+    copy.disabled = true;
+    try {
+      if (!tableHost.classList.contains("hidden")) {
+        await writeTextClipboard(tableText(tableHost));
+        copy.textContent = "복사됨";
+      } else if (plotHost.classList.contains("content-host")) {
+        await writeTextClipboard(tableText(plotHost) || plotHost.textContent || "");
+        copy.textContent = "복사됨";
+      } else {
+        const result = await writePlotClipboard(plotHost);
+        copy.textContent = result === "downloaded" ? "저장됨" : "복사됨";
+      }
+    } catch (error) {
+      console.error("copy card", error);
+      copy.textContent = "실패";
+    } finally {
+      setTimeout(() => {
+        copy.textContent = original;
+        copy.disabled = false;
+      }, 1200);
+    }
+  });
+
   return {
     section,
     body,
@@ -276,7 +358,7 @@ export function card(title, subtitle) {
       const button = el("button", className, label);
       button.type = "button";
       button.addEventListener("click", onClick);
-      head.insertBefore(button, toggle);
+      head.insertBefore(button, copy);
       return button;
     },
     /** Extra content above the plot (KPI rows, notes, pickers). */
@@ -284,16 +366,22 @@ export function card(title, subtitle) {
       body.insertBefore(node, plotHost);
     },
     empty(status) {
+      plotHost.classList.remove("content-host");
       plotHost.replaceChildren(el("div", "empty", emptyText(status)));
       toggle.classList.add("hidden");
+      copy.classList.add("hidden");
     },
     note(text) {
+      plotHost.classList.remove("content-host");
       plotHost.replaceChildren(el("div", "empty", text));
       toggle.classList.add("hidden");
+      copy.classList.add("hidden");
     },
     draw(traces, layout, tableView) {
+      plotHost.classList.remove("content-host");
       plotHost.classList.remove("hidden");
       drawPlot(plotHost, traces, layout);
+      copy.classList.remove("hidden");
       if (tableView) {
         tableHost.replaceChildren(tableView);
         toggle.classList.remove("hidden");
@@ -304,6 +392,7 @@ export function card(title, subtitle) {
       plotHost.classList.add("content-host");
       plotHost.replaceChildren(node);
       toggle.classList.add("hidden");
+      copy.classList.remove("hidden");
     },
   };
 }

@@ -168,6 +168,10 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "async filesChanged({ select, redraw = false } = {})" in app.text
     assert "if (redraw) rerender();" in app.text
     assert viz.status_code == 200 and 'script.src = "/vendor/plotly.min.js"' in viz.text
+    assert 'const copy = el("button", null, "복사");' in viz.text
+    assert "window.Plotly.toImage" in viz.text
+    assert "tableText(tableHost)" in viz.text
+    assert 'new ClipboardItem({ "image/png": blob })' in viz.text
     assert plm.status_code == 200 and "ctx.plmState" in plm.text
     assert "attachmentJobs" in app.text
     # 로그인 전에는 첫 화면이 로그인 창이고, 파일 목록조차 부르지 않는다.
