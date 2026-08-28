@@ -288,6 +288,69 @@ def test_oversized_intents_are_flagged_from_the_raw_logs():
     assert overview.java_crashes[1].suspects_transaction_too_large is False
 
 
+def test_java_crash_event_includes_rule_based_triage():
+    overview = build_crash_overview(
+        {
+            "crash_context": [
+                {
+                    "timestamp": "12-29 08:42:12.830",
+                    "process": "system_server",
+                    "crash_type": "FATAL EXCEPTION",
+                    "exception_info": "java.lang.ArrayIndexOutOfBoundsException: length=0; index=0",
+                    "top_method": "CoverAuthenticator$CoverAuthHandler.handleMessage",
+                    "call_stack": [
+                        "at com.samsung.accessory.manager.authentication.cover.CoverAuthenticator$CoverAuthHandler.handleMessage(qb/104131572:108)",
+                    ],
+                }
+            ]
+        }
+    )
+
+    triage = overview.java_crashes[0].triage
+    assert triage["primary_signal"] == "Java exception"
+    assert triage["facts"][2] == {"label": "Exception", "value": "java.lang.ArrayIndexOutOfBoundsException"}
+    assert triage["check_target"] == "CoverAuthenticator$CoverAuthHandler.handleMessage"
+    assert triage["signals"][0]["strength"] == "강함"
+    assert "입력값/상태값" in triage["next_check"]
+
+
+def test_dead_system_exception_is_labeled_as_follow_up_signal():
+    overview = build_crash_overview(
+        {
+            "crash_context": [
+                {
+                    "process": "com.android.phone",
+                    "exception_info": "android.os.DeadSystemException: The system died; earlier logs will point to the root cause",
+                    "cross_context_logs": ["DeadSystemException: The system died; earlier logs will point to the root cause"],
+                }
+            ]
+        }
+    )
+
+    triage = overview.java_crashes[0].triage
+    assert triage["primary_signal"] == "System died follow-up"
+    assert triage["signals"][2]["strength"] == "강함"
+    assert "system_server FATAL" in triage["next_check"]
+
+
+def test_transaction_too_large_gets_binder_triage_signal():
+    overview = build_crash_overview(
+        {
+            "crash_context": [
+                {
+                    "process": "com.example.app",
+                    "exception_info": "android.os.TransactionTooLargeException: data parcel size 1048576 bytes",
+                    "cross_context_logs": ["android.os.TransactionTooLargeException: data parcel size"],
+                }
+            ]
+        }
+    )
+
+    triage = overview.java_crashes[0].triage
+    assert triage["primary_signal"] == "Oversized Binder payload"
+    assert triage["signals"][1]["strength"] == "강함"
+
+
 def test_system_events_do_not_repeat_as_app_crashes():
     overview = build_crash_overview(
         {
@@ -313,6 +376,53 @@ def test_native_crash_callstack_becomes_a_frame():
     crash = overview.native_crashes[0]
     assert (crash.process, crash.signal, crash.abort_message) == ("cp", "SIGSEGV", "none")
     assert crash.callstack["pc"].tolist() == ["0x1"]
+
+
+def test_native_crash_time_falls_back_to_parser_time_key():
+    overview = build_crash_overview(
+        {
+            "native_crash_context": [
+                {
+                    "time": "04-28 08:23:59.610",
+                    "process": "rild",
+                    "signal": "SIGSEGV",
+                    "callstack": [],
+                }
+            ]
+        }
+    )
+
+    assert overview.native_crashes[0].time == "04-28 08:23:59.610"
+
+
+def test_native_crash_event_includes_rule_based_triage():
+    overview = build_crash_overview(
+        {
+            "native_crash_context": [
+                {
+                    "time": "04-28 08:23:59.610",
+                    "process": "rild",
+                    "signal": "SIGSEGV",
+                    "abort_message": "none",
+                    "callstack": [
+                        {
+                            "frame_level": "00",
+                            "library": "libsec-ril.so",
+                            "function": "DataCallManager::NotifyDataCallState(Dca*, DataCall*, int, int)",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    triage = overview.native_crashes[0].triage
+    assert triage["primary_signal"] == "Native memory fault"
+    assert triage["facts"][3] == {"label": "Top library", "value": "libsec-ril.so"}
+    assert triage["top_frame"]["function"].startswith("DataCallManager::NotifyDataCallState")
+    assert triage["signals"][0]["strength"] == "강함"
+    assert triage["signals"][1]["strength"] == "근거 약함"
+    assert "libsec-ril.so" in triage["next_check"]
 
 
 def test_a_session_with_nothing_wrong():

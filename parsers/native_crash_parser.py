@@ -28,6 +28,7 @@ class NativeCrashParser(BaseParser):
 
                 current_crash = {
                     "time": timestamp, # ✨ 드디어 정상적인 시간이 들어갑니다!
+                    "timestamp": timestamp,
                     "crash_type": "NATIVE_CRASH",
                     "process": signal_pattern.group(4) if signal_pattern else "unknown",
                     "signal": signal_pattern.group(2) if signal_pattern else "unknown",

@@ -514,6 +514,7 @@ class NativeCrash:
     process: Any
     signal: Any
     abort_message: Any
+    triage: Dict[str, Any] = field(default_factory=dict)
     callstack: pd.DataFrame = field(default_factory=pd.DataFrame)
     cross_context_logs: List[str] = field(default_factory=list)
 
@@ -524,6 +525,7 @@ class JavaCrash:
     process: Any
     crash_type: str
     is_kernel: bool
+    triage: Dict[str, Any] = field(default_factory=dict)
     exception_info: Any = None
     top_method: Any = None
     pre_context: List[str] = field(default_factory=list)
@@ -534,13 +536,174 @@ class JavaCrash:
     suspects_transaction_too_large: bool = False
 
 
+def _exception_type(exception_info: Any, trigger: Any) -> str:
+    text = str(exception_info or trigger or "")
+    match = re.search(r'((?:[\w$]+\.)+[\w$]*(?:Exception|Error))(?::|\s|$)', text)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b([\w$]*(?:Exception|Error))(?::|\s|$)', text)
+    return match.group(1) if match else _UNKNOWN
+
+
+def _crash_triage(crash: Dict[str, Any], is_kernel: bool, crash_type: str, top_method: Any, raw_logs: str) -> Dict[str, Any]:
+    exception = _exception_type(crash.get("exception_info"), crash.get("trigger"))
+    call_stack = list(crash.get("call_stack") or [])
+    top_frame = _first_stack_frame(call_stack)
+    check_target = top_method if top_method and top_method != _UNKNOWN else _java_owner(top_frame)
+
+    lower_exception = str(exception).lower()
+    has_dead_system = "deadsystemexception" in raw_logs or "the system died" in raw_logs
+    has_binder_failure = "binder transaction failure" in raw_logs or "transaction errors" in raw_logs
+    has_transaction_too_large = "transactiontoolargeexception" in raw_logs
+
+    if is_kernel:
+        primary = "Kernel/modem fatal"
+        next_check = "우선 kernel/modem crash 원문과 재부팅/CP dump 시점을 확인하세요."
+    elif has_dead_system:
+        primary = "System died follow-up"
+        next_check = "이 이벤트는 system_server 사망 이후 따라온 증상일 수 있어, 직전 system_server FATAL의 exception과 top method를 먼저 확인하세요."
+    elif has_transaction_too_large:
+        primary = "Oversized Binder payload"
+        next_check = "우선 Intent/Bundle/IPC payload 크기와 Binder buffer 사용량을 확인하세요."
+    elif check_target and check_target != _UNKNOWN:
+        primary = "Java exception"
+        next_check = f"우선 `{check_target}`에서 `{exception}` 발생 조건과 입력값/상태값을 확인하세요."
+    else:
+        primary = "Crash 원인 후보 미확정"
+        next_check = "우선 exception 메시지와 call stack 첫 프레임을 기준으로 발생 경로를 확인하세요."
+
+    if lower_exception in ("arrayindexoutofboundsexception", "indexoutofboundsexception"):
+        exception_note = "배열/리스트 index 범위 검증 누락 가능성이 큽니다."
+    elif lower_exception in ("nullpointerexception", "kotlinnullpointerexception"):
+        exception_note = "null 상태값 또는 lifecycle 순서 문제를 우선 의심하세요."
+    elif has_dead_system:
+        exception_note = "선행 system_server 사망 후속 증상일 가능성이 높습니다."
+    elif exception != _UNKNOWN:
+        exception_note = "예외 타입과 메시지가 1차 원인 단서입니다."
+    else:
+        exception_note = "명확한 예외 타입 추출 근거가 부족합니다."
+
+    binder_strength = "강함" if has_transaction_too_large else "보조" if has_binder_failure else "근거 약함"
+    binder_note = (
+        "TransactionTooLargeException 계열 로그가 확인됩니다."
+        if has_transaction_too_large
+        else "Binder transaction failure가 보여 후속 증상 여부를 확인해야 합니다."
+        if has_binder_failure
+        else "Binder/IPC 직접 원인 근거는 약합니다."
+    )
+
+    system_strength = "강함" if is_kernel or has_dead_system else "보조" if crash.get("process") == "system_server" else "근거 약함"
+    system_note = (
+        "kernel/modem fatal로 일반 앱 Java crash와 분리해서 봐야 합니다."
+        if is_kernel
+        else "DeadSystemException은 선행 system_server 사망을 가리키는 경우가 많습니다."
+        if has_dead_system
+        else "system_server 프로세스 FATAL이라 시스템 영향도가 큽니다."
+        if crash.get("process") == "system_server"
+        else "시스템 프로세스 사망 근거는 약합니다."
+    )
+
+    return {
+        "primary_signal": primary,
+        "facts": [
+            {"label": "Process", "value": crash.get("process", _UNKNOWN)},
+            {"label": "Crash type", "value": crash_type},
+            {"label": "Exception", "value": exception},
+            {"label": "Top method", "value": top_method or check_target or _UNKNOWN},
+        ],
+        "top_frame": top_frame,
+        "check_target": check_target,
+        "signals": [
+            {"label": "Exception", "strength": "강함" if exception != _UNKNOWN else "근거 약함", "note": exception_note},
+            {"label": "Binder", "strength": binder_strength, "note": binder_note},
+            {"label": "System", "strength": system_strength, "note": system_note},
+        ],
+        "next_check": next_check,
+    }
+
+
+def _native_frame_value(row: Dict[str, Any], *names: str) -> Any:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, "", _UNKNOWN):
+            return value
+    return _UNKNOWN
+
+
+def _native_crash_triage(crash: Dict[str, Any], callstack: pd.DataFrame) -> Dict[str, Any]:
+    top = callstack.iloc[0].to_dict() if not callstack.empty else {}
+    library = _native_frame_value(top, "library")
+    function = _native_frame_value(top, "function")
+    signal = crash.get("signal", _UNKNOWN)
+    abort_message = crash.get("abort_message", "none")
+
+    if signal == "SIGSEGV":
+        primary = "Native memory fault"
+        signal_note = "SIGSEGV는 null/dangling pointer, invalid address 접근 가능성이 큽니다."
+    elif signal == "SIGABRT":
+        primary = "Native abort"
+        signal_note = "SIGABRT는 assert, abort(), fatal check, abort message를 우선 봐야 합니다."
+    elif signal and signal != _UNKNOWN:
+        primary = "Native signal"
+        signal_note = f"{signal} 발생 지점의 native frame과 tombstone register를 함께 확인하세요."
+    else:
+        primary = "Native crash 후보 미확정"
+        signal_note = "명확한 signal 추출 근거가 부족합니다."
+
+    if library != _UNKNOWN and function != _UNKNOWN:
+        next_check = f"우선 `{library}`의 `{function}` 호출 경로와 crash 직전 입력 상태를 확인하세요."
+    elif library != _UNKNOWN:
+        next_check = f"우선 `{library}`의 top frame과 symbol 매핑을 확인하세요."
+    else:
+        next_check = "우선 tombstone backtrace의 #00 frame, fault addr, signal code를 확인하세요."
+
+    abort_strength = "강함" if abort_message and abort_message != "none" else "근거 약함"
+    abort_note = (
+        "Abort message가 직접 원인 단서로 제공됩니다."
+        if abort_strength == "강함"
+        else "Abort message가 없어 signal/fault addr/backtrace 중심으로 봐야 합니다."
+    )
+
+    module_strength = "강함" if library != _UNKNOWN and function != _UNKNOWN else "보조" if library != _UNKNOWN else "근거 약함"
+    module_note = (
+        f"Top frame이 {library}!{function}로 식별됩니다."
+        if library != _UNKNOWN and function != _UNKNOWN
+        else f"Top library {library}는 확인되지만 function symbol이 부족합니다."
+        if library != _UNKNOWN
+        else "Top native module 식별 근거가 부족합니다."
+    )
+
+    return {
+        "primary_signal": primary,
+        "facts": [
+            {"label": "Process", "value": crash.get("process", _UNKNOWN)},
+            {"label": "Signal", "value": signal},
+            {"label": "Abort message", "value": abort_message},
+            {"label": "Top library", "value": library},
+        ],
+        "top_frame": {
+            "library": library,
+            "function": function,
+            "frame_level": _native_frame_value(top, "frame_level", "frame"),
+        },
+        "signals": [
+            {"label": "Signal", "strength": "강함" if signal != _UNKNOWN else "근거 약함", "note": signal_note},
+            {"label": "Abort", "strength": abort_strength, "note": abort_note},
+            {"label": "Module", "strength": module_strength, "note": module_note},
+        ],
+        "next_check": next_check,
+    }
+
+
 def _native_crash(crash: Dict[str, Any]) -> NativeCrash:
+    callstack = pd.DataFrame(crash.get("callstack") or [])
     return NativeCrash(
-        time=crash.get("timestamp", _UNKNOWN_TIME),
+        time=crash.get("timestamp", crash.get("time", _UNKNOWN_TIME)),
         process=crash.get("process", _UNKNOWN),
         signal=crash.get("signal", _UNKNOWN),
         abort_message=crash.get("abort_message", "none"),
-        callstack=pd.DataFrame(crash.get("callstack") or []),
+        triage=_native_crash_triage(crash, callstack),
+        callstack=callstack,
         cross_context_logs=list(crash.get("cross_context_logs") or []),
     )
 
@@ -549,16 +712,18 @@ def _java_crash(crash: Dict[str, Any]) -> JavaCrash:
     is_kernel = bool(crash.get("is_kernel", False))
     top_method = crash.get("top_method")
     raw_logs = str(crash.get("cross_context_logs", crash.get("trigger", ""))).lower()
+    crash_type = (
+        "KERNEL PANIC / MODEM CRASH"
+        if is_kernel
+        else crash.get("crash_type", crash.get("type", "FATAL EXCEPTION"))
+    )
 
     return JavaCrash(
         time=crash.get("timestamp", crash.get("time", _UNKNOWN_TIME)),
         process=crash.get("process", "Unknown Process"),
-        crash_type=(
-            "KERNEL PANIC / MODEM CRASH"
-            if is_kernel
-            else crash.get("crash_type", crash.get("type", "FATAL EXCEPTION"))
-        ),
+        crash_type=crash_type,
         is_kernel=is_kernel,
+        triage=_crash_triage(crash, is_kernel, crash_type, top_method, raw_logs),
         exception_info=crash.get("exception_info"),
         top_method=top_method if top_method and top_method != _UNKNOWN else None,
         pre_context=list(crash.get("context") or []),

@@ -172,6 +172,53 @@ function anrEvent(anr) {
   return node;
 }
 
+function crashTriage(crash) {
+  const triage = crash.triage;
+  if (!triage) return null;
+
+  const wrap = el("div", "triage");
+  const head = el("div", "triage-head");
+  head.append(el("h4", null, "Crash 1차 진단"));
+  if (triage.primary_signal) head.append(el("span", "triage-primary", triage.primary_signal));
+  wrap.append(head);
+
+  const facts = el("dl", "triage-facts");
+  for (const fact of triage.facts || []) {
+    facts.append(el("dt", null, fact.label));
+    facts.append(el("dd", null, fact.value || "-"));
+  }
+  wrap.append(facts);
+
+  if (triage.top_frame && triage.top_frame !== "Unknown") {
+    const focus = el("div", "triage-focus");
+    const item = el("div", "triage-focus-item");
+    item.append(el("strong", null, "Top frame"));
+    item.append(el("code", null, triage.check_target || triage.top_frame));
+    item.append(el("span", null, triage.top_frame));
+    focus.append(item);
+    wrap.append(focus);
+  }
+
+  const signals = el("div", "triage-signals");
+  for (const signal of triage.signals || []) {
+    const item = el("div", "triage-signal");
+    item.append(el("span", "triage-signal-label", signal.label));
+    item.append(el("span", `triage-strength ${signal.strength === "강함" ? "strong" : signal.strength === "보조" ? "medium" : "weak"}`, signal.strength));
+    item.append(el("p", null, signal.note));
+    signals.append(item);
+  }
+  if (signals.children.length) wrap.append(signals);
+
+  if (triage.next_check) {
+    const next = el("div", "triage-next");
+    next.append(el("strong", null, "우선 체크"));
+    next.append(el("span", null, triage.next_check));
+    wrap.append(next);
+  }
+
+  return wrap;
+}
+
 function javaCrash(crash) {
   const node = fold(`[${crash.time}] ${crash.process} — ${crash.crash_type}`);
 
@@ -181,6 +228,8 @@ function javaCrash(crash) {
     node.append(box);
   }
   if (crash.top_method) node.append(el("p", "card-note", `주요 Method: ${crash.top_method}`));
+  const triage = crashTriage(crash);
+  if (triage) node.append(triage);
 
   if (crash.suspects_transaction_too_large) {
     const warn = el("div", "alert");
@@ -209,9 +258,58 @@ function javaCrash(crash) {
   return node;
 }
 
+function nativeCrashTriage(crash) {
+  const triage = crash.triage;
+  if (!triage) return null;
+
+  const wrap = el("div", "triage");
+  const head = el("div", "triage-head");
+  head.append(el("h4", null, "Native crash 1차 진단"));
+  if (triage.primary_signal) head.append(el("span", "triage-primary", triage.primary_signal));
+  wrap.append(head);
+
+  const facts = el("dl", "triage-facts");
+  for (const fact of triage.facts || []) {
+    facts.append(el("dt", null, fact.label));
+    facts.append(el("dd", null, fact.value || "-"));
+  }
+  wrap.append(facts);
+
+  if (triage.top_frame?.function && triage.top_frame.function !== "Unknown") {
+    const focus = el("div", "triage-focus");
+    const item = el("div", "triage-focus-item");
+    item.append(el("strong", null, `Frame #${triage.top_frame.frame_level || "00"}`));
+    item.append(el("code", null, triage.top_frame.library || "-"));
+    item.append(el("span", null, triage.top_frame.function));
+    focus.append(item);
+    wrap.append(focus);
+  }
+
+  const signals = el("div", "triage-signals");
+  for (const signal of triage.signals || []) {
+    const item = el("div", "triage-signal");
+    item.append(el("span", "triage-signal-label", signal.label));
+    item.append(el("span", `triage-strength ${signal.strength === "강함" ? "strong" : signal.strength === "보조" ? "medium" : "weak"}`, signal.strength));
+    item.append(el("p", null, signal.note));
+    signals.append(item);
+  }
+  if (signals.children.length) wrap.append(signals);
+
+  if (triage.next_check) {
+    const next = el("div", "triage-next");
+    next.append(el("strong", null, "우선 체크"));
+    next.append(el("span", null, triage.next_check));
+    wrap.append(next);
+  }
+
+  return wrap;
+}
+
 function nativeCrash(crash) {
   const node = fold(`[${crash.time}] ${crash.process} — ${crash.signal}`);
   node.append(el("p", "card-note", `Abort message: ${crash.abort_message}`));
+  const triage = nativeCrashTriage(crash);
+  if (triage) node.append(triage);
 
   if (crash.callstack.length) {
     node.append(el("h4", "sub-head", "Native callstack"));
