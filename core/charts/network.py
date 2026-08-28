@@ -226,6 +226,7 @@ def build_network_timeline_stats(
 # ------------------------------------------------------------------ data usage
 
 _DATA_USAGE_TOP_APPS = 10
+_DATA_USAGE_TOP_APPS_BY_BUCKET = 7
 
 
 @dataclass(frozen=True)
@@ -242,6 +243,20 @@ class DataUsageProfile:
     rat_totals: pd.DataFrame = field(default_factory=pd.DataFrame)
     timeline_status: str = "absent"
     timeline: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+
+@dataclass(frozen=True)
+class DataUsageTopByTime:
+    """Top data-usage apps per hourly bucket.
+
+    `status` is `"ok"`, `"unavailable"`, `"no_data"` or `"unparsable_time"`.
+    """
+
+    status: str
+    bucket_minutes: int = 60
+    top_n: int = _DATA_USAGE_TOP_APPS_BY_BUCKET
+    frame: pd.DataFrame = field(default_factory=pd.DataFrame)
+    table: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _usage_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -284,6 +299,49 @@ def build_data_usage_profile(
         rat_totals=rat_totals,
         timeline_status="ok" if not timeline.empty else "empty",
         timeline=timeline,
+    )
+
+
+def build_data_usage_top_by_time(
+    df: pd.DataFrame,
+    *,
+    year: Optional[int] = None,
+    bucket_minutes: int = 60,
+    top_n: int = _DATA_USAGE_TOP_APPS_BY_BUCKET,
+) -> DataUsageTopByTime:
+    if not has_columns(df) or "log_type" not in df.columns:
+        return DataUsageTopByTime(status="unavailable", bucket_minutes=bucket_minutes, top_n=top_n)
+
+    du_df = _usage_frame(df)
+    if du_df.empty:
+        return DataUsageTopByTime(status="no_data", bucket_minutes=bucket_minutes, top_n=top_n)
+    if "time" not in du_df.columns:
+        return DataUsageTopByTime(status="unparsable_time", bucket_minutes=bucket_minutes, top_n=top_n)
+
+    timed = with_parsed_times(du_df, "time", year=year)
+    if timed.empty:
+        return DataUsageTopByTime(status="unparsable_time", bucket_minutes=bucket_minutes, top_n=top_n)
+
+    timed["app_name"] = timed["app_name"].fillna("UNKNOWN").astype(str)
+    timed["bucket_dt"] = timed["time_dt"].dt.floor(f"{bucket_minutes}min")
+    timed["bucket"] = timed["bucket_dt"].dt.strftime("%m-%d %H:%M")
+
+    totals = (
+        timed.groupby(["bucket_dt", "bucket", "app_name"], as_index=False)["total_mb"]
+        .sum()
+        .sort_values(["bucket_dt", "total_mb", "app_name"], ascending=[True, False, True])
+    )
+    totals["rank"] = totals.groupby("bucket_dt")["total_mb"].rank(method="first", ascending=False).astype(int)
+    top = totals[totals["rank"] <= top_n].copy()
+    top = top.sort_values(["bucket_dt", "rank"]).reset_index(drop=True)
+
+    table = top[["bucket", "rank", "app_name", "total_mb"]].copy()
+    return DataUsageTopByTime(
+        status="ok",
+        bucket_minutes=bucket_minutes,
+        top_n=top_n,
+        frame=top[["bucket", "bucket_dt", "app_name", "total_mb", "rank"]],
+        table=table,
     )
 
 

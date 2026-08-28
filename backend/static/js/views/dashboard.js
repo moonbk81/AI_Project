@@ -334,6 +334,45 @@ const CARDS = [
     },
   },
   {
+    chart: "data-usage-top-time",
+    title: "시간대별 앱 사용량 Top 7",
+    sub: "1시간 단위 앱별 셀룰러 사용량",
+    prompt: "시간대별 상위 앱 사용량을 보고 특정 앱의 트래픽 집중, 백그라운드 사용, 장애 시간대와의 상관관계를 정리해줘.",
+    render(series, panel) {
+      const colors = seriesColors();
+      const buckets = [...new Set(series.frame.map((r) => r.bucket))];
+      const apps = [...new Set(series.frame.map((r) => r.app_name))];
+      const byKey = new Map(series.frame.map((r) => [`${r.bucket}\n${r.app_name}`, r]));
+
+      const traces = apps.map((app, index) => ({
+        type: "bar",
+        name: app,
+        x: buckets,
+        y: buckets.map((bucket) => byKey.get(`${bucket}\n${app}`)?.total_mb || 0),
+        marker: {
+          color: colors[index % colors.length],
+          cornerradius: 3,
+          line: { width: 1, color: getComputedStyle(document.body).getPropertyValue("--surface-1").trim() },
+        },
+        customdata: buckets.map((bucket) => byKey.get(`${bucket}\n${app}`)?.rank || ""),
+        hovertemplate: "<b>%{y:.1f} MB</b><br>%{x}<br>rank %{customdata}<extra>" + app + "</extra>",
+      }));
+
+      panel.prepend(tileRow([
+        tile("시간 버킷", fmt.count(buckets.length), "개"),
+        tile("버킷당 상위", fmt.count(series.top_n), "앱"),
+      ]));
+      panel.draw(traces, baseLayout({
+        barmode: "stack",
+        showlegend: traces.length > 1,
+        hovermode: "x unified",
+        margin: { l: 64, r: 24, t: 8, b: 72 },
+        xaxis: axis({ tickangle: -35, nticks: Math.min(buckets.length, 10) }),
+        yaxis: axis({ title: { text: "MB", font: { size: 11 } } }),
+      }), frameTable(series.table, ["bucket", "rank", "app_name", "total_mb"]));
+    },
+  },
+  {
     chart: "power-thermal",
     title: "전력 · 발열",
     sub: "온도 센서 상위 10개",

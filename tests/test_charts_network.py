@@ -4,6 +4,7 @@ from core.charts import (
     DNS_SPIKE_THRESHOLD_MS,
     INTERNET_STALL_LAYER_TABS,
     build_data_usage_profile,
+    build_data_usage_top_by_time,
     build_dns_error_breakdown,
     build_dns_health_warnings,
     build_dns_issue_summary,
@@ -213,6 +214,47 @@ def test_usage_timeline_states():
 def test_usage_profile_states():
     assert build_data_usage_profile(pd.DataFrame()).status == "unavailable"
     assert build_data_usage_profile(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+
+
+def test_usage_top_by_time_keeps_top_seven_per_hour():
+    rows = [
+        _usage("YouTube", 100, time="2026-08-25 10:10:00"),
+        _usage("Chrome", 80, time="2026-08-25 10:20:00"),
+        _usage("Maps", 60, time="2026-08-25 10:30:00"),
+        _usage("Mail", 40, time="2026-08-25 10:40:00"),
+        _usage("Store", 30, time="2026-08-25 10:41:00"),
+        _usage("Music", 20, time="2026-08-25 10:42:00"),
+        _usage("Chat", 10, time="2026-08-25 10:43:00"),
+        _usage("Tiny", 1, time="2026-08-25 10:44:00"),
+        _usage("YouTube", 5, time="2026-08-25 11:01:00"),
+    ]
+
+    series = build_data_usage_top_by_time(pd.DataFrame(rows), year=2026)
+
+    assert series.status == "ok"
+    assert series.top_n == 7
+    assert series.frame[series.frame["bucket"] == "08-25 10:00"]["app_name"].tolist() == [
+        "YouTube",
+        "Chrome",
+        "Maps",
+        "Mail",
+        "Store",
+        "Music",
+        "Chat",
+    ]
+    assert series.frame[series.frame["bucket"] == "08-25 11:00"]["app_name"].tolist() == ["YouTube"]
+    assert series.table.iloc[0].to_dict() == {
+        "bucket": "08-25 10:00",
+        "rank": 1,
+        "app_name": "YouTube",
+        "total_mb": 100,
+    }
+
+
+def test_usage_top_by_time_states():
+    assert build_data_usage_top_by_time(pd.DataFrame()).status == "unavailable"
+    assert build_data_usage_top_by_time(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+    assert build_data_usage_top_by_time(pd.DataFrame([_usage("YouTube", 1, time="시간 미상")])).status == "unparsable_time"
 
 
 # -------------------------------------------------------------- internet stall

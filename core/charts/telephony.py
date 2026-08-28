@@ -212,7 +212,16 @@ def build_service_state_series(
 # --------------------------------------------------------------- call sessions
 
 # Columns of the call table, in display order; missing ones are simply skipped.
-_CALL_HISTORY_COLUMNS = ["time", "slot", "status", "fail_reason", "call_id", "source_file"]
+_CALL_HISTORY_COLUMNS = [
+    "time",
+    "slot",
+    "status",
+    "fail_reason",
+    "release_reason",
+    "call_id",
+    "id",
+    "source_file",
+]
 
 
 @dataclass(frozen=True)
@@ -231,7 +240,22 @@ class CallHistorySummary:
     table: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-def build_call_history_summary(df: pd.DataFrame) -> CallHistorySummary:
+def _call_session_frame(data: Any) -> pd.DataFrame:
+    if isinstance(data, pd.DataFrame):
+        return data
+    if isinstance(data, list):
+        frame = pd.DataFrame(data)
+        if frame.empty:
+            return frame
+        frame["log_type"] = "Call_Session"
+        if "time" not in frame.columns and "start_time" in frame.columns:
+            frame["time"] = frame["start_time"]
+        return frame
+    return pd.DataFrame()
+
+
+def build_call_history_summary(data: Any) -> CallHistorySummary:
+    df = _call_session_frame(data)
     if not _has_columns(df) or "log_type" not in df.columns:
         return CallHistorySummary(status="unavailable")
 

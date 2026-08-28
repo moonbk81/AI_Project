@@ -27,6 +27,7 @@ from core.charts import (
     build_crash_overview,
     build_data_call_summary,
     build_data_usage_profile,
+    build_data_usage_top_by_time,
     build_dns_error_breakdown,
     build_dns_health_warnings,
     build_dns_issue_summary,
@@ -74,12 +75,19 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     # From the session's metadata rows.
     "service-state": ChartSpec(build_service_state_series),
     "signal-level": ChartSpec(build_signal_level_series),
-    "call-history": ChartSpec(build_call_history_summary),
+    "call-history": ChartSpec(build_call_history_summary, source="report", field="call_sessions"),
     # The timeline frame carries every metadata column of every usage row; the
     # chart needs three of them, and the difference is a quarter of a megabyte.
     "data-usage": ChartSpec(
         build_data_usage_profile,
         project={"timeline": ["time_dt", "app_name", "total_mb"]},
+    ),
+    "data-usage-top-time": ChartSpec(
+        build_data_usage_top_by_time,
+        project={
+            "frame": ["bucket", "bucket_dt", "app_name", "total_mb", "rank"],
+            "table": ["bucket", "rank", "app_name", "total_mb"],
+        },
     ),
     "dns-errors": ChartSpec(build_dns_error_breakdown),
     "dns-issues": ChartSpec(build_dns_issue_summary),
@@ -182,14 +190,26 @@ def artifact(source_file: Optional[str], name: str) -> Any:
         return {}
 
     base = os.path.basename(source_file)
+    candidates = [base]
     if base.endswith(_PAYLOAD_SUFFIX):
-        base = base[: -len(_PAYLOAD_SUFFIX)]
+        candidates.append(base[: -len(_PAYLOAD_SUFFIX)])
+    if base.endswith("_report.json"):
+        candidates.append(base[: -len("_report.json")])
+    if base.endswith(".json"):
+        candidates.append(base[: -len(".json")])
+    if "__" in base:
+        candidates.append(base.split("__", 1)[0])
 
-    path = os.path.join("./result", f"{base}_{name}.json")
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        path = os.path.join("./result", f"{candidate}_{name}.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+    return {}
 
 
 def _project(result: Any, columns_by_field: Dict[str, List[str]]) -> Any:

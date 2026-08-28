@@ -48,3 +48,44 @@ def test_user_release_is_not_reported_as_fail_reason():
     assert session["is_user_reject"] is True
     assert session["fail_reason"] == "0"
     assert session["release_reason"] == "501_CODE_USER_TERMINATED (SIP_200_null)"
+
+
+def test_sip_480_user_decline_is_reported_as_failed_call():
+    lines = [
+        "04-09 12:06:54.097 radio  4210  4210 D ImsPhoneCallTracker: [0] dial - initialCallNetworkType: 13",
+        "04-09 12:06:54.099 radio  4210  4210 D IPF     : [IPCT]> makeCall {642609099}",
+        "04-09 12:06:54.101 radio  4210  4210 D IPF     : [IPCT]< makeCall {[ImsCall objId:87635467 session:[ImsCallSession objId:144249306 callId:[UNINITIALIZED]]]}",
+        "04-09 12:07:00.876 radio  4210  4210 D IPF     : [IPCT]< CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE, 480, Temporarily Unavailable}, [ImsCall objId:87635467]}",
+        "04-09 12:07:00.878 radio  4210  4210 D ImsPhoneCallTracker: [0] processCallStateChange [ImsCall objId:87635467] state=DISCONNECTED cause=36",
+        "04-09 12:07:00.881 radio  4210  4210 D IPF     : [IPCN]> close {[ImsCall objId:87635467]}",
+    ]
+
+    session = ImsCallParser(_extract_timestamp).parse(lines)[0]
+
+    assert session["status"] == "FAIL"
+    assert session["is_user_reject"] is False
+    assert session["fail_reason"] == "504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)"
+    assert session["release_reason"] == "0"
+
+
+def test_sip_480_in_release_reason_is_still_reported_as_failed_call():
+    parser = ImsCallParser(_extract_timestamp)
+
+    session = parser.build_session(
+        obj_id="87635467",
+        events=[
+            "[04-09 12:06:54.097] dial - initialCallNetworkType: 13",
+            "[04-09 12:07:00.876] CallListener.onCallTerminated {ImsReasonInfo :: {504 : CODE_USER_DECLINE, 480, Temporarily Unavailable}, [ImsCall objId:87635467]}",
+        ],
+        tc_id="TC@4_1",
+        fail_reason="",
+        release_reason="504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)",
+        direction="MO",
+        ims_bracket_re=re.compile(r"ImsReasonInfo\s*::\s*\{\s*(\d+)\s*:\s*([A-Z_0-9]+)"),
+        ims_standard_re=re.compile(r"ImsReasonInfo\s*(?:[:\s\(\=]+code\=)?[:\s\(\=]*(\d+)", re.IGNORECASE),
+    )
+
+    assert session["status"] == "FAIL"
+    assert session["is_user_reject"] is False
+    assert session["fail_reason"] == "504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)"
+    assert session["release_reason"] == "0"

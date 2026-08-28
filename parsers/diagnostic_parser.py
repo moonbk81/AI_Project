@@ -256,11 +256,12 @@ class DnsParser(BaseParser):
 
                     if "SUCCESS" in rest.upper(): return_code = "SUCCESS"
                     else:
-                        rc_match = re.search(r',\s*(\d+)\(([^)]+)\)', rest)
+                        rc_match = re.search(r'(?:^|,\s*)(\d+)\(([^)]+)\)', rest)
                         if rc_match:
                             raw_code, status_text = rc_match.group(1), rc_match.group(2)
                             return_code = "SUCCESS" if raw_code == "0" else f"{status_text} (Code:{raw_code})".strip()
-                            if "isBlocked=true" in rest: return_code = f"BLOCKED (Code:{raw_code})"
+                            if re.search(r'isBlocked\s*=\s*true', rest, re.I):
+                                return_code = f"BLOCKED (Code:{raw_code})"
                         else: return_code = "UNKNOWN"
 
                     result["queries"].append({

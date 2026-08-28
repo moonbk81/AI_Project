@@ -90,6 +90,48 @@ def test_the_status_travels_so_the_frontend_need_not_guess(client):
     assert body["series"]["points"] == []
 
 
+def test_artifact_lookup_accepts_report_suffixed_source_file(monkeypatch, tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    artifact_path = result_dir / "ps_call_504_unavailable_ims_sip.json"
+    artifact_path.write_text(json.dumps([{"time": "04-09 12:07:00.865"}]), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    data = charts_api.artifact("ps_call_504_unavailable__bongki.moon_report.json", "ims_sip")
+
+    assert data == [{"time": "04-09 12:07:00.865"}]
+
+
+def test_call_history_reads_report_artifact_not_stale_metadata(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "result").mkdir()
+    (tmp_path / "result" / "ps_call_504_unavailable__bongki.moon_report.json").write_text(
+        json.dumps(
+            {
+                "call_sessions": [
+                    {
+                        "id": "TC@4_1",
+                        "start_time": "04-09 12:07:59.968",
+                        "status": "FAIL",
+                        "fail_reason": "504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    body = client.get(
+        "/charts/call-history",
+        params={"source_file": "ps_call_504_unavailable__bongki.moon_payload.json"},
+    ).json()
+
+    assert body["series"]["status"] == "ok"
+    assert body["series"]["call_count"] == 1
+    assert body["series"]["statuses"] == ["FAIL"]
+    assert body["series"]["table"][0]["id"] == "TC@4_1"
+
+
 def test_metadata_charts_do_not_wake_the_full_rag_engine(monkeypatch):
     monkeypatch.setattr(backend_main, "_engine", None)
     monkeypatch.setattr(backend_main, "_metadata_collection", lambda: FakeCollection(ROWS))

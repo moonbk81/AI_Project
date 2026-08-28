@@ -85,6 +85,22 @@ class ImsCallParser:
         is_release = "CODE_USER" in extracted_code or "USER_DECLINE" in extracted_code or "TERMINATED" in extracted_code
         return is_release and (not existing_code or is_release)
 
+    def is_network_failure_reason(self, reason: str) -> bool:
+        """User-named IMS codes can still wrap a network SIP failure."""
+        if not reason:
+            return False
+
+        upper_reason = reason.upper()
+        if "SIP_" not in upper_reason:
+            return False
+
+        sip_match = re.search(r"SIP_(\d{3})", upper_reason)
+        if not sip_match:
+            return False
+
+        sip_code = int(sip_match.group(1))
+        return sip_code >= 400 and sip_code not in {487}
+
     def append_unique_event(self, events: list, event: str) -> None:
         if not events or events[-1] != event:
             events.append(event)
@@ -113,12 +129,18 @@ class ImsCallParser:
     ):
         start_time = events[0].split("]")[0].replace("[", "") if events else "Unknown"
         end_time = events[-1].split("]")[0].replace("[", "") if events else "Unknown"
-        is_user_reject = any("USER_DECLINE" in e for e in events)
-
         has_start_failed = any("onCallStartFailed" in e for e in events)
-        has_user_release = any("CODE_USER" in e or "USER_DECLINE" in e for e in events)
+        has_network_failure = (
+            self.is_network_failure_reason(fail_reason)
+            or self.is_network_failure_reason(release_reason)
+        )
+        is_user_reject = any("USER_DECLINE" in e for e in events) and not has_network_failure
+        has_user_release = (
+            any("CODE_USER" in e or "USER_DECLINE" in e for e in events)
+            and not has_network_failure
+        )
 
-        if has_start_failed and not has_user_release:
+        if has_network_failure or (has_start_failed and not has_user_release):
             status = "FAIL"
         elif has_user_release:
             status = "NORMAL_RELEASE"
@@ -126,7 +148,11 @@ class ImsCallParser:
             status = "SUCCESS"
 
         display_id = f"{tc_id} (objId:{obj_id})" if tc_id else f"objId:{obj_id}"
-        final_reason = self.resolve_final_reason(events, status, fail_reason, ims_bracket_re, ims_standard_re)
+        final_reason = (
+            fail_reason
+            or (release_reason if has_network_failure else "")
+            or self.resolve_final_reason(events, status, fail_reason, ims_bracket_re, ims_standard_re)
+        )
         if status != "FAIL":
             release_reason = release_reason or final_reason
             final_reason = "0"

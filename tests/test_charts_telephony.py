@@ -165,6 +165,27 @@ def test_calls_without_a_status_field_report_no_breakdown():
     assert build_call_history_summary(df).statuses is None
 
 
+def test_call_history_can_use_report_sessions_directly():
+    sessions = [
+        {
+            "id": "TC@4_1",
+            "start_time": "04-09 12:07:59.968",
+            "status": "FAIL",
+            "fail_reason": "504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)",
+            "release_reason": "0",
+        }
+    ]
+
+    summary = build_call_history_summary(sessions)
+
+    assert summary.status == "ok"
+    assert summary.call_count == 1
+    assert summary.statuses == ["FAIL"]
+    assert summary.table["time"].tolist() == ["04-09 12:07:59.968"]
+    assert summary.table["id"].tolist() == ["TC@4_1"]
+    assert summary.table["fail_reason"].tolist() == ["504_CODE_USER_DECLINE (SIP_480_Temporarily Unavailable)"]
+
+
 def test_session_without_calls_is_distinct_from_no_metadata():
     assert build_call_history_summary(pd.DataFrame()).status == "unavailable"
     assert build_call_history_summary(pd.DataFrame([{"log_type": "OOS_Event"}])).status == "no_calls"

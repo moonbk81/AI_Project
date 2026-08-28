@@ -98,6 +98,36 @@ class LogOrchestrator:
         end = min(len(lines), idx + window + 1)
         buckets[bucket_name].update(range(start, end))
 
+    def _enrich_dns_queries(self, dns_queries, network_timeseries):
+        """Network_DNS_Issue에서 확인한 package/policy를 DNS_Query에도 반영한다."""
+        if not dns_queries:
+            return dns_queries
+
+        issues = (network_timeseries or {}).get("dns_issues", []) or []
+        issue_by_key = {
+            (i.get("time"), str(i.get("net_id")), str(i.get("uid"))): i
+            for i in issues
+            if isinstance(i, dict)
+        }
+
+        for query in dns_queries:
+            if not isinstance(query, dict):
+                continue
+            key = (query.get("time"), str(query.get("net_id")), str(query.get("uid")))
+            issue = issue_by_key.get(key)
+            if not issue:
+                continue
+
+            package = issue.get("package")
+            if package:
+                query["app_name"] = package
+            if issue.get("is_blocked"):
+                query["return_code"] = "BLOCKED"
+            query["is_blocked"] = issue.get("is_blocked", query.get("is_blocked"))
+            query["effective_policy"] = issue.get("effective_policy", query.get("effective_policy"))
+            query["suspected_reason"] = issue.get("suspected_reason", query.get("suspected_reason"))
+        return dns_queries
+
     def run_batch(self, output_path):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
@@ -190,7 +220,10 @@ class LogOrchestrator:
                 buckets['dns'],
                 global_uid_map=global_uid_map
             ):
-                result['dns_queries'] = dns_res.get('queries', [])
+                result['dns_queries'] = self._enrich_dns_queries(
+                    dns_res.get('queries', []),
+                    result.get('network_timeseries', {}),
+                )
                 if health_warnings := dns_res.get('health_warnings', []):
                     result['dns_health_warnings'] = health_warnings
 
