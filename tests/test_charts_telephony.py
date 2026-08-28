@@ -35,6 +35,8 @@ def test_registration_codes_map_by_leading_digit():
     assert map_registration_state("1 (denied)") == "OUT_OF_SERVICE"
     assert map_registration_state("2") == "EMERGENCY_ONLY"
     assert map_registration_state("3") == "POWER_OFF"
+    assert map_registration_state("POWER_OFF") == "POWER_OFF"
+    assert map_registration_state("OUT_OF_SERVICE") == "OUT_OF_SERVICE"
     assert map_registration_state("Unknown") == "UNKNOWN"
     assert map_registration_state(float("nan")) == "UNKNOWN"
     assert map_registration_state(None) == "UNKNOWN"

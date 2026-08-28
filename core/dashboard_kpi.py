@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
-_OOS_PATTERN = "OUT_OF_SERVICE|OOS"
+_OOS_PATTERN = "OUT_OF_SERVICE|OOS|POWER_OFF"
 _CALL_FAIL_PATTERN = "FAIL|DROP"
 
 

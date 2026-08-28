@@ -242,6 +242,13 @@ class TelephonyParser(BaseParser):
 # 2. Radio Log 전담 망 이탈(OOS) 파서
 # ==========================================
 class OosParser(BaseParser):
+    SERVICE_STATE_MAP = {
+        "0": "IN_SERVICE",
+        "1": "OUT_OF_SERVICE",
+        "2": "EMERGENCY_ONLY",
+        "3": "POWER_OFF",
+    }
+
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
         self.last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
@@ -253,6 +260,81 @@ class OosParser(BaseParser):
             val = match.group(1).strip().rstrip(')')
             if "(" in val and ")" not in val: val += ")"
             return val
+        return "Unknown"
+
+    def _canonical_service_state(self, raw_state):
+        """Android ServiceState 값을 사람이 읽는 canonical 상태명으로 변환한다."""
+        state = "" if raw_state is None else str(raw_state).strip()
+        if not state or state == "Unknown":
+            return "UNKNOWN"
+
+        first = state[0]
+        if first in self.SERVICE_STATE_MAP:
+            return self.SERVICE_STATE_MAP[first]
+
+        upper_state = state.upper()
+        for name in ("POWER_OFF", "OUT_OF_SERVICE", "EMERGENCY_ONLY", "IN_SERVICE"):
+            if name in upper_state:
+                return name
+
+        return "UNKNOWN"
+
+    def _is_radio_log_line(self, clean_line: str) -> bool:
+        """섹션 헤더 없이 잘린 radio logcat 라인인지 판단한다."""
+        return bool(re.search(r'^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+radio\s+', clean_line))
+
+    def _extract_service_state_data(self, clean_line: str):
+        """여러 Android ServiceState 로그 포맷에서 상태 payload를 꺼낸다."""
+        if "mVoiceRegState" not in clean_line or "mDataRegState" not in clean_line:
+            return None
+
+        for marker in ("newSS={", "ss={", "changed to {", "ServiceState updated: {"):
+            if marker in clean_line:
+                return clean_line.split(marker, 1)[1].rsplit("}", 1)[0]
+
+        return None
+
+    def _extract_slot_id(self, clean_line: str, tag: str | None):
+        """tag/payload에서 slot id를 추정한다."""
+        for pattern in (
+            r'PHONE(\d)',
+            r'\[(\d+)\]\s+(?:ServiceState updated|pollState|Poll ServiceState)',
+            r'(?:SST|DNC)-(\d+)',
+            r'(?:phoneId|phondId|slotId|SlotID)\s*=\s*(\d+)',
+        ):
+            slot_m = re.search(pattern, clean_line, re.I)
+            if slot_m:
+                return slot_m.group(1)
+
+        if tag and ("RILD2" in tag or "SST-1" in tag):
+            return "1"
+        return "0"
+
+    def _is_in_service(self, voice_state: str, data_state: str) -> bool:
+        return voice_state == "IN_SERVICE" and data_state == "IN_SERVICE"
+
+    def _is_power_off(self, voice_state: str, data_state: str) -> bool:
+        return voice_state == "POWER_OFF" or data_state == "POWER_OFF"
+
+    def _infer_reason(self, voice_state: str, data_state: str, ss_data: str, context_summary: str):
+        if self._is_in_service(voice_state, data_state):
+            return "None"
+        if self._is_power_off(voice_state, data_state):
+            return "AIRPLANE_MODE_OR_RADIO_POWER_OFF"
+
+        rej = self._parse_sst_val(ss_data, 'rej_cause')
+        if rej != "0" and rej != "Unknown":
+            return f"NW_REJECT_CAUSE_{rej}"
+        if (
+            re.search(r'airplane[^\\n=]*(?:=|:|changed\\s*=)\\s*true', context_summary)
+            or "radio power off" in context_summary
+            or "radio_power on = false" in context_summary
+        ):
+            return "AIRPLANE_MODE_OR_RADIO_POWER_OFF"
+        if "rrc connection release" in context_summary:
+            return "RRC_RELEASE_BY_NW"
+        if "out_of_service" in context_summary or "no_service" in context_summary:
+            return "SIGNAL_LOSS_OR_SHADOW_AREA"
         return "Unknown"
 
     def analyze(self, lines):
@@ -271,38 +353,40 @@ class OosParser(BaseParser):
                 in_radio = False
                 continue
 
-            if in_radio:
+            if in_radio or self._is_radio_log_line(clean_line):
                 tag_m = RE_TAG.search(line)
                 tag = tag_m.group(1).strip() if tag_m else None
-                if not tag or tag not in VALID_TAGS: continue
+                ss_data = self._extract_service_state_data(clean_line)
+                if not ss_data and (not tag or tag not in VALID_TAGS):
+                    continue
 
-                if TEL_PATTERNS['SST_POLL'].search(clean_line) and "newSS={" in clean_line:
-                    ss_data = clean_line.split("newSS={")[1].rsplit("}", 1)[0]
-                    v_reg, d_reg = self._parse_sst_val(ss_data, 'v_reg'), self._parse_sst_val(ss_data, 'd_reg')
+                if ss_data:
+                    raw_v_reg = self._parse_sst_val(ss_data, 'v_reg')
+                    raw_d_reg = self._parse_sst_val(ss_data, 'd_reg')
+                    v_reg = self._canonical_service_state(raw_v_reg)
+                    d_reg = self._canonical_service_state(raw_d_reg)
 
-                    slot_id = "1" if ('RILD2' in tag or 'SST-1' in tag or 'PHONE1' in clean_line) else "0"
+                    slot_id = self._extract_slot_id(clean_line, tag)
                     prev = self.last_slot_states[slot_id]
-                    if (v_reg[0] != prev["v"] or d_reg[0] != prev["d"]):
+                    if (v_reg != prev["v"] or d_reg != prev["d"]):
                         recent_logs = [l for l in list(self.pre_context) if not any(t in l for t in NETWORK_EXCLUDE_TAGS)]
                         context_summary = " ".join(recent_logs[-20:]).lower()
 
-                        prev_in_service = (prev["v"] == "0" and prev["d"] == "0")
-                        now_in_service = (v_reg[0] == "0" and d_reg[0] == "0")
+                        prev_unknown = prev["v"] is None and prev["d"] is None
+                        prev_in_service = self._is_in_service(prev["v"], prev["d"])
+                        now_in_service = self._is_in_service(v_reg, d_reg)
 
-                        if not prev_in_service and now_in_service: event_type = "OOS_RECOVER"
+                        if prev_unknown and not now_in_service: event_type = "OOS_ENTER"
+                        elif not prev_in_service and now_in_service: event_type = "OOS_RECOVER"
                         elif prev_in_service and not now_in_service: event_type = "OOS_ENTER"
                         else: event_type = "OOS_STATE_CHANGE"
 
-                        reason = "Unknown"
-                        rej = self._parse_sst_val(ss_data, 'rej_cause')
-                        if rej != "0" and rej != "Unknown": reason = f"NW_REJECT_CAUSE_{rej}"
-                        elif "rrc connection release" in context_summary: reason = "RRC_RELEASE_BY_NW"
-                        elif "out_of_service" in context_summary or "no_service" in context_summary: reason = "SIGNAL_LOSS_OR_SHADOW_AREA"
-                        if v_reg[0] == "0" or d_reg[0] =="0": reason = "None"
+                        reason = self._infer_reason(v_reg, d_reg, ss_data, context_summary)
 
                         oos_event = {
                             "time": ts, "slotId": slot_id, "event_type": event_type,
                             "voice_reg": v_reg, "data_reg": d_reg, "rat": self._parse_sst_val(ss_data, 'rat'),
+                            "raw_voice_reg": raw_v_reg, "raw_data_reg": raw_d_reg,
                             "root_cause_candidate": reason,
                             "operator": f"{self._parse_sst_val(ss_data, 'op_long')} ({self._parse_sst_val(ss_data, 'op_short')})",
                             "rej_cause": self._parse_sst_val(ss_data, 'rej_cause'),
@@ -314,7 +398,7 @@ class OosParser(BaseParser):
                             oos_event["cross_context_logs"] = self.get_context_fn(lines, ts)
 
                         oos_history.append(oos_event)
-                        self.last_slot_states[slot_id] = {"v": v_reg[0], "d": d_reg[0]}
+                        self.last_slot_states[slot_id] = {"v": v_reg, "d": d_reg}
 
             self.pre_context.append(clean_line)
 

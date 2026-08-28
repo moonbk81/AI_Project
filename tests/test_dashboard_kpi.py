@@ -82,6 +82,7 @@ def test_unparseable_data_usage_counts_as_zero_mb():
 def test_oos_counted_from_either_registration_column():
     assert compute_session_kpi([{"log_type": "OOS_Event", "data_reg": "OOS"}])["oos_count"] == 1
     assert compute_session_kpi([{"log_type": "OOS_Event", "voice_reg": "OOS"}])["oos_count"] == 1
+    assert compute_session_kpi([{"log_type": "OOS_Event", "data_reg": "POWER_OFF"}])["oos_count"] == 1
     # One row flagged on both columns is still one event.
     both = [{"log_type": "OOS_Event", "voice_reg": "OOS", "data_reg": "OUT_OF_SERVICE"}]
     assert compute_session_kpi(both)["oos_count"] == 1

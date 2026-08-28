@@ -53,12 +53,20 @@ def map_registration_state(reg_value: Any) -> str:
     """Map a raw `voice_reg` / `data_reg` field onto a service state.
 
     The logs put the 3GPP registration code first and often append vendor
-    detail (`"1 (denied)"`), so only the leading character is read.
+    detail (`"1 (denied)"`). Some parser paths already store the canonical
+    Android state name, so both forms are accepted.
     """
     reg_str = "" if reg_value is None else str(reg_value)
     if not reg_str or reg_str == "nan":
         return _UNKNOWN_STATE
-    return _REG_PREFIX_STATES.get(reg_str[0], _UNKNOWN_STATE)
+    if reg_str[0] in _REG_PREFIX_STATES:
+        return _REG_PREFIX_STATES[reg_str[0]]
+
+    upper_reg = reg_str.upper()
+    for state in SERVICE_STATE_ORDER:
+        if state in upper_reg:
+            return state
+    return _UNKNOWN_STATE
 
 
 @dataclass(frozen=True)
