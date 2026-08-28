@@ -58,6 +58,69 @@ class DataCallProcessor(BaseParser):
         )
         return match.group(1).strip() if match else None
 
+    def _extract_event_time(self, clean_line: str) -> str:
+        log_time = re.search(r'(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})', clean_line)
+        if log_time:
+            return log_time.group(1)
+
+        iso_time = re.search(r'\d{4}-(\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})[.,](\d{3})', clean_line)
+        if iso_time:
+            return f"{iso_time.group(1)} {iso_time.group(2)}.{iso_time.group(3)}"
+
+        return "Unknown"
+
+    def _parse_data_evaluation(self, clean_line: str):
+        if "Data evaluation:" not in clean_line:
+            return None
+
+        reason_m = re.search(r'Data evaluation:\s*evaluation reason:([^,]+)', clean_line, re.I)
+        allowed_m = re.search(r'Data allowed reason:\s*([^,]+)', clean_line, re.I)
+        disallowed_m = re.search(r'Data disallowed reasons:\s*([^,]+)', clean_line, re.I)
+        profile_m = re.search(r'candidate profile=(.+?)(?:,\s*time=|\]\]|$)', clean_line, re.I)
+        request_pkg_m = re.search(r'RequestorPkg:\s*([^\s\]]+)', clean_line)
+        uid_m = re.search(r'\bUid:\s*(\d+)', clean_line)
+        network_m = re.search(r'network type=([^,]+)', clean_line, re.I)
+        reg_state_m = re.search(r'reg state=([^,]+)', clean_line, re.I)
+        cid_m = re.search(r'\bcid=([\d-]+)', clean_line, re.I)
+        dnn_m = re.search(r'(?:mDnn=|TrafficDescriptor=\{mDnn=)([^,}\s]+)', clean_line, re.I)
+        apn_setting_m = re.search(r'\[ApnSetting\]\s*([^,\]]+),\s*\d+,\s*\d+,\s*([^,\]]+)', clean_line)
+
+        allowed = allowed_m.group(1).strip() if allowed_m else ""
+        disallowed = disallowed_m.group(1).strip() if disallowed_m else ""
+        profile = profile_m.group(1).strip() if profile_m else "UNKNOWN"
+        reason = reason_m.group(1).strip() if reason_m else "UNKNOWN"
+
+        apn = "UNKNOWN"
+        if dnn_m:
+            apn = dnn_m.group(1).strip()
+        elif apn_setting_m:
+            apn = apn_setting_m.group(2).strip() or apn_setting_m.group(1).strip()
+
+        status = "SUCCESS" if allowed and not disallowed else "FAIL"
+        cause = f"evaluation={reason}"
+        if allowed:
+            cause += f", allowed={allowed}"
+        if disallowed:
+            cause += f", disallowed={disallowed}"
+
+        return {
+            'event_type': 'DATA_EVALUATION',
+            'req_time': self._extract_event_time(clean_line),
+            'res_time': self._extract_event_time(clean_line),
+            'token': 'DNC',
+            'cid': cid_m.group(1) if cid_m else "-1",
+            'apn': apn,
+            'network': network_m.group(1).strip() if network_m else "UNKNOWN",
+            'protocol': "UNKNOWN",
+            'status': status,
+            'cause': cause,
+            'latency_ms': 0,
+            'requestor_pkg': request_pkg_m.group(1) if request_pkg_m else "UNKNOWN",
+            'uid': uid_m.group(1) if uid_m else "UNKNOWN",
+            'reg_state': reg_state_m.group(1).strip() if reg_state_m else "UNKNOWN",
+            'candidate_profile': profile,
+        }
+
     def analyze(self, lines):
         """run_parser()를 대체하는 단일 분석 인터페이스 (메모리 리스트 기반)"""
         pending_requests = {}      # SETUP_DATA_CALL Request 대기열
@@ -70,6 +133,11 @@ class DataCallProcessor(BaseParser):
         for idx, line in enumerate(lines):
             clean_line = self.clean_line(line)
             if not clean_line: continue
+
+            data_evaluation = self._parse_data_evaluation(clean_line)
+            if data_evaluation:
+                self.parsed_data.append(data_evaluation)
+                continue
 
             if "fail cause" in clean_line.lower() and ("RILD" in clean_line or "RILD2" in clean_line):
                 rild_cause_match = re.search(r'fail cause\s*\((\d+)\) is permanent fail', clean_line, re.IGNORECASE)
