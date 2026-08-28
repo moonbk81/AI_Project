@@ -255,6 +255,45 @@ const CARDS = [
     },
   },
   {
+    chart: "internet-stall",
+    title: "Data Stall 흐름",
+    sub: "시작 · 복구 진행 · 종료 시점",
+    prompt: "Data Stall 흐름의 시작/복구/종료 시점, 지속 시간, 주변 DataCall/RF 근거를 연결해서 장애 흐름을 정리해줘.",
+    render(series, panel) {
+      const kpi = series.kpi;
+      const flows = series.data_stall_flows || [];
+      const completed = flows.filter((row) => row.status === "회복 완료").length;
+      const unresolved = Math.max(flows.length - completed, 0);
+
+      panel.prepend(tileRow([
+        tile("Data Stall 흐름", fmt.count(kpi.data_stall_flow_count ?? flows.length), "개",
+             unresolved ? `미종료 ${unresolved}개` : "모두 회복",
+             unresolved ? "critical" : "good"),
+        tile("복구 완료", fmt.count(completed), "개"),
+        tile("DataCall 실패", fmt.count(kpi.data_call_fail_or_drop_count), "건"),
+        tile("RF 경고", fmt.count(kpi.rf_warning_count), "건"),
+      ]));
+
+      const summary = el("div", "stack");
+
+      if (flows.length) {
+        summary.append(frameTable(flows.slice(0, 8), [
+          "start_time",
+          "recovery_start_time",
+          "recovery_end_time",
+          "end_time",
+          "duration_sec",
+          "status",
+          "event_count",
+        ]));
+      } else {
+        summary.append(el("p", "card-note", "명확한 Data Stall start/recovery/end 흐름이 없습니다."));
+      }
+
+      panel.content(summary);
+    },
+  },
+  {
     chart: "dns-errors",
     title: "패키지별 DNS 오류",
     sub: "성공(0/SUCCESS)을 제외한 응답 코드",

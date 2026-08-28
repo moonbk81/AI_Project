@@ -305,6 +305,36 @@ def test_timeline_states_without_usable_events():
     assert build_internet_stall_report({"timeline": [{"time": "nonsense"}]}).timeline_status == "unparsable_time"
 
 
+def test_data_stall_flows_are_exposed_for_dashboard_summary():
+    report = build_internet_stall_report(
+        {
+            "data_stall_flows": [
+                {
+                    "start_time": "08-25 10:00:00",
+                    "recovery_start_time": "08-25 10:00:05",
+                    "recovery_end_time": "08-25 10:00:12",
+                    "end_time": "08-25 10:00:12",
+                    "duration_sec": 12,
+                    "status": "회복 완료",
+                    "event_count": 3,
+                    "trigger": "DATA_STALL_START",
+                }
+            ]
+        }
+    )
+
+    assert report.data_stall_flows.iloc[0].to_dict() == {
+        "start_time": "08-25 10:00:00",
+        "recovery_start_time": "08-25 10:00:05",
+        "recovery_end_time": "08-25 10:00:12",
+        "end_time": "08-25 10:00:12",
+        "duration_sec": 12,
+        "status": "회복 완료",
+        "event_count": 3,
+        "trigger": "DATA_STALL_START",
+    }
+
+
 def test_windows_are_ranked_worst_first_but_keep_their_index():
     report = build_internet_stall_report(
         {

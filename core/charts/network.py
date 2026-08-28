@@ -379,6 +379,16 @@ _WINDOW_COLUMNS = [
     "confidence",
     "layer_counts",
 ]
+_DATA_STALL_FLOW_COLUMNS = [
+    "start_time",
+    "recovery_start_time",
+    "recovery_end_time",
+    "end_time",
+    "duration_sec",
+    "status",
+    "event_count",
+    "trigger",
+]
 
 
 @dataclass(frozen=True)
@@ -437,6 +447,7 @@ class InternetStallReport:
     timeline: pd.DataFrame = field(default_factory=pd.DataFrame)
     timeline_hover_columns: List[str] = field(default_factory=list)
     timeline_table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    data_stall_flows: pd.DataFrame = field(default_factory=pd.DataFrame)
     windows: List[StallWindow] = field(default_factory=list)
 
     def windows_frame(self) -> pd.DataFrame:
@@ -563,6 +574,10 @@ def build_internet_stall_report(
             [column for column in _TIMELINE_TABLE_COLUMNS if column in timeline.columns]
         ]
 
+    flows = pd.DataFrame(data.get("data_stall_flows", []) or [], columns=_DATA_STALL_FLOW_COLUMNS)
+    if not flows.empty:
+        flows = flows[[column for column in _DATA_STALL_FLOW_COLUMNS if column in flows.columns]]
+
     return InternetStallReport(
         status="ok",
         kpi=kpi,
@@ -571,5 +586,6 @@ def build_internet_stall_report(
         timeline=timeline if timeline_status == "ok" else pd.DataFrame(),
         timeline_hover_columns=hover_columns,
         timeline_table=timeline_table,
+        data_stall_flows=flows,
         windows=_stall_windows(data.get("stall_windows", []) or [], year),
     )

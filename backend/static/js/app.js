@@ -4,7 +4,6 @@ import { api, rememberKnoxId, rememberedKnoxId } from "./api.js";
 import { el } from "./viz.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBoot } from "./views/boot.js";
-import { renderInternet } from "./views/internet.js";
 import { renderSatellite } from "./views/satellite.js";
 import { renderChat } from "./views/chat.js";
 import { renderKnowledge } from "./views/knowledge.js";
@@ -15,7 +14,6 @@ import { defectCacheKey } from "./views/plm_data.js";
 const VIEWS = [
   { id: "dashboard", label: "대시보드", render: renderDashboard, needsFile: true },
   { id: "boot", label: "부팅", render: renderBoot, needsFile: true },
-  { id: "internet", label: "인터넷 품질", render: renderInternet, needsFile: true },
   { id: "satellite", label: "위성", render: renderSatellite, needsFile: true },
   { id: "chat", label: "채팅", render: renderChat, needsFile: true },
   { id: "knowledge", label: "분석 사례", render: renderKnowledge, needsFile: false },

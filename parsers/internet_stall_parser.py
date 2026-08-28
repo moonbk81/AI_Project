@@ -60,6 +60,7 @@ class InternetStallParser(BaseParser):
             "latency_ms": event.get("latency_ms"),
             "slot": event.get("slot"),
             "rat": event.get("rat"),
+            "phase": event.get("phase"),
         }
         compact = {k: v for k, v in compact.items() if v not in (None, "")}
 
@@ -153,7 +154,7 @@ class InternetStallParser(BaseParser):
     )
 
     DATA_STALL_RE = re.compile(
-        r'(data stall|DataStall|onDataStallAlarm|Suspecting data stall|trigger data stall|Data stall detected)',
+        r'(data stall|DataStall|onDataStallAlarm|Suspecting data stall|trigger data stall|Data stall detected|hdd_data_stall_send_event)',
         re.IGNORECASE
     )
 
@@ -227,13 +228,15 @@ class InternetStallParser(BaseParser):
             key=lambda x: self._to_sort_key(x.get("time"))
         )
 
+        data_stall_flows = self._build_data_stall_flows(timeline)
         stall_windows = self._build_stall_windows(timeline)
         root_summary = self._summarize_root_causes(stall_windows, timeline)
-        kpi = self._build_kpi(timeline, stall_windows, root_summary)
+        kpi = self._build_kpi(timeline, stall_windows, root_summary, data_stall_flows)
 
         return {
             "schema_version": "internet_stall_v1",
             "kpi": kpi,
+            "data_stall_flows": data_stall_flows[:80],
             "root_cause_summary": root_summary,
             "stall_windows": self._compact_stall_windows_for_output(stall_windows),
             "timeline": [self._compact_event_for_output(event) for event in timeline[-300:]],
@@ -299,10 +302,14 @@ class InternetStallParser(BaseParser):
         reason = ""
 
         if self.DATA_STALL_RE.search(line):
+            data_stall_type, phase = self._classify_data_stall_phase(line)
+            if not data_stall_type:
+                return None
+
             layer = "DATA_STALL"
-            event_type = "DATA_STALL_DETECTED"
+            event_type = data_stall_type
             severity = "critical"
-            reason = "Data stall 감지/복구 관련 로그"
+            reason = "Data stall 시작/복구/종료 흐름"
 
         elif self.VALIDATION_FAIL_RE.search(line):
             layer = "VALIDATION"
@@ -355,7 +362,7 @@ class InternetStallParser(BaseParser):
         if not layer:
             return None
 
-        return {
+        event = {
             "time": ts,
             "layer": layer,
             "event_type": event_type,
@@ -365,6 +372,34 @@ class InternetStallParser(BaseParser):
             "net_id": self._extract_net_id(line),
             "package": self._extract_package(line)
         }
+        if layer == "DATA_STALL":
+            event["phase"] = phase
+        return event
+
+    def _classify_data_stall_phase(self, line):
+        lower = line.lower()
+
+        # Throughput/CCA samples are useful for low-level Wi-Fi debugging, but
+        # they are not lifecycle boundaries for a user-facing stall summary.
+        if "wifidatastall:" in lower and not any(
+            marker in lower for marker in ("suspecting", "detected", "data stall event", "recovery")
+        ):
+            return None, None
+
+        if any(marker in lower for marker in ("recovered", "resolved", "end data stall", "data stall end", "datastalled:false")):
+            return "DATA_STALL_END", "end"
+
+        if "recovery" in lower:
+            if any(marker in lower for marker in ("start", "begin", "trigger", "attempt")):
+                return "DATA_STALL_RECOVERY_START", "recovery_start"
+            if any(marker in lower for marker in ("end", "finish", "done", "complete", "success", "recovered")):
+                return "DATA_STALL_RECOVERY_END", "recovery_end"
+            return "DATA_STALL_RECOVERY", "recovery"
+
+        if any(marker in lower for marker in ("start", "begin", "suspecting", "detected", "onDataStallAlarm".lower(), "data stall event")):
+            return "DATA_STALL_START", "start"
+
+        return "DATA_STALL_DETECTED", "detected"
 
     def _convert_data_call_events(self, data_call_events):
         converted = []
@@ -389,6 +424,7 @@ class InternetStallParser(BaseParser):
                 layer = "DATA_STALL"
                 mapped_type = "DATA_STALL_RECOVERY"
                 severity = "critical"
+                phase = "recovery"
             elif event_type == "DATA_SETUP" and e.get("status") != "SUCCESS":
                 severity = "warning"
                 mapped_type = "DATA_SETUP_FAIL"
@@ -398,7 +434,7 @@ class InternetStallParser(BaseParser):
                 severity = "warning"
                 mapped_type = "DATA_CALL_DROP"
 
-            converted.append({
+            converted_event = {
                 "time": time_value,
                 "layer": layer,
                 "event_type": mapped_type,
@@ -410,7 +446,10 @@ class InternetStallParser(BaseParser):
                 "protocol": e.get("protocol"),
                 "latency_ms": e.get("latency_ms"),
                 "raw": raw_payload
-            })
+            }
+            if layer == "DATA_STALL":
+                converted_event["phase"] = phase
+            converted.append(converted_event)
         return converted
 
     def _convert_rf_events(self, report_data):
@@ -469,7 +508,11 @@ class InternetStallParser(BaseParser):
     def _build_stall_windows(self, timeline, window_sec=10):
         trigger_types = {
             "DATA_STALL_DETECTED",
+            "DATA_STALL_START",
             "DATA_STALL_RECOVERY",
+            "DATA_STALL_RECOVERY_START",
+            "DATA_STALL_RECOVERY_END",
+            "DATA_STALL_END",
             "VALIDATION_FAIL",
             "DNS_ISSUE",
             "DNS_SLOW_RESPONSE",
@@ -531,6 +574,70 @@ class InternetStallParser(BaseParser):
                 deduped.append(w)
 
         return deduped[-200:]
+
+    def _build_data_stall_flows(self, timeline):
+        events = [
+            e for e in timeline
+            if e.get("layer") == "DATA_STALL"
+            and e.get("event_type") in {
+                "DATA_STALL_START",
+                "DATA_STALL_DETECTED",
+                "DATA_STALL_RECOVERY",
+                "DATA_STALL_RECOVERY_START",
+                "DATA_STALL_RECOVERY_END",
+                "DATA_STALL_END",
+            }
+        ]
+        if not events:
+            return []
+
+        flows = []
+        current = None
+
+        for event in events:
+            event_type = event.get("event_type")
+            event_time = event.get("time")
+            parsed_time = self._parse_time(event_time)
+
+            if event_type in ("DATA_STALL_START", "DATA_STALL_DETECTED") or current is None:
+                if current is not None:
+                    flows.append(current)
+                current = {
+                    "start_time": event_time,
+                    "recovery_start_time": None,
+                    "recovery_end_time": None,
+                    "end_time": None,
+                    "duration_sec": None,
+                    "status": "진행/종료 미확인",
+                    "event_count": 1,
+                    "trigger": event_type,
+                    "reason": event.get("reason"),
+                    "raw": event.get("raw"),
+                }
+                continue
+
+            current["event_count"] += 1
+
+            if event_type in ("DATA_STALL_RECOVERY", "DATA_STALL_RECOVERY_START") and not current.get("recovery_start_time"):
+                current["recovery_start_time"] = event_time
+            elif event_type == "DATA_STALL_RECOVERY_END":
+                current["recovery_end_time"] = event_time
+            elif event_type == "DATA_STALL_END":
+                current["end_time"] = event_time
+
+            end_time = current.get("end_time") or current.get("recovery_end_time")
+            start_dt = self._parse_time(current.get("start_time"))
+            end_dt = self._parse_time(end_time)
+            if start_dt and end_dt:
+                current["duration_sec"] = round((end_dt - start_dt).total_seconds(), 3)
+                current["status"] = "회복 완료"
+            elif parsed_time and event_type in ("DATA_STALL_RECOVERY", "DATA_STALL_RECOVERY_START"):
+                current["status"] = "복구 진행"
+
+        if current is not None:
+            flows.append(current)
+
+        return flows[-200:]
 
     def _infer_window_causes(self, related):
         layers = defaultdict(int)
@@ -629,7 +736,7 @@ class InternetStallParser(BaseParser):
             for k, v in sorted(summary.items(), key=lambda item: item[1]["count"], reverse=True)
         }
 
-    def _build_kpi(self, timeline, stall_windows, root_summary):
+    def _build_kpi(self, timeline, stall_windows, root_summary, data_stall_flows=None):
         count_by_type = defaultdict(int)
         count_by_layer = defaultdict(int)
 
@@ -653,7 +760,18 @@ class InternetStallParser(BaseParser):
             "primary_root_cause_candidate": primary_candidate,
             "dns_issue_count": count_by_type.get("DNS_ISSUE", 0) + count_by_type.get("PRIVATE_DNS_FAIL", 0),
             "validation_fail_count": count_by_type.get("VALIDATION_FAIL", 0),
-            "data_stall_count": count_by_type.get("DATA_STALL_DETECTED", 0) + count_by_type.get("DATA_STALL_RECOVERY", 0),
+            "data_stall_count": sum(
+                count_by_type.get(name, 0)
+                for name in (
+                    "DATA_STALL_DETECTED",
+                    "DATA_STALL_START",
+                    "DATA_STALL_RECOVERY",
+                    "DATA_STALL_RECOVERY_START",
+                    "DATA_STALL_RECOVERY_END",
+                    "DATA_STALL_END",
+                )
+            ),
+            "data_stall_flow_count": len(data_stall_flows or []),
             "data_call_fail_or_drop_count": count_by_type.get("DATA_SETUP_FAIL", 0) + count_by_type.get("DATA_CALL_DROP", 0),
             "tcp_tls_timeout_count": count_by_type.get("TCP_TLS_TIMEOUT", 0),
             "rf_warning_count": count_by_layer.get("RF", 0),
