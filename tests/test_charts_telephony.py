@@ -420,22 +420,28 @@ def test_report_without_rilj_data():
 # ----------------------------------------------------- RF / call joint timeline
 
 
-def _signal_sample(details, time="08-25 10:00:00"):
-    return {"time": time, "level": 3, "slot": "0", "rat": "LTE", "details": details}
+def _signal_sample(details, time="08-25 10:00:00", rat="LTE"):
+    return {"time": time, "level": 3, "slot": "0", "rat": rat, "details": details}
 
 
-def test_rf_timeline_prefers_lte_and_falls_back_to_nr():
+def test_rf_timeline_uses_sample_rat_and_falls_back_to_nr():
     timeline = build_rf_call_timeline(
         {
             "signal_level_history": [
                 _signal_sample({"LTE": {"RSRP": "-95dBm", "RSRQ": "-11", "SINR": "5"}}),
                 _signal_sample({"LTE": {"RSRP": "Unknown"}, "NR": {"RSRP": "-110dBm"}}, time="08-25 10:00:01"),
+                _signal_sample(
+                    {"LTE": {"RSRP": "-100dBm"}, "NR": {"RSRP": "-108dBm"}},
+                    time="08-25 10:00:02",
+                    rat="NR",
+                ),
             ]
         },
         year=2026,
     )
 
-    assert [p.rsrp_dbm for p in timeline.rsrp_points] == [-95, -110]
+    assert [p.rsrp_dbm for p in timeline.rsrp_points] == [-95, -110, -108]
+    assert [p.rat for p in timeline.rsrp_points] == ["LTE", "NR", "NR"]
     assert "RAT: NR" in timeline.rsrp_points[1].hover_text
     assert "SINR: Unknown" in timeline.rsrp_points[1].hover_text
 

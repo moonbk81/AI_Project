@@ -689,6 +689,7 @@ _SECOND_PRECISION = 14
 class RsrpPoint:
     time_dt: pd.Timestamp
     rsrp_dbm: int
+    rat: str
     hover_text: str
 
 
@@ -725,8 +726,12 @@ def _report_time(value: Any, year: int) -> pd.Timestamp:
 
 
 def _strongest_rat_reading(details: Dict[str, Any], fallback_rat: str) -> tuple:
-    """Prefer the LTE reading, fall back to NR; both may be unreported."""
-    for rat in ("LTE", "NR"):
+    """Prefer the sample RAT, then fall back across LTE/NR."""
+    ordered_rats = []
+    if fallback_rat:
+        ordered_rats.append(str(fallback_rat).upper())
+    ordered_rats.extend(["LTE", "NR"])
+    for rat in dict.fromkeys(ordered_rats):
         if rat in details and details[rat].get("RSRP") != "Unknown":
             return details[rat]["RSRP"], rat
     return "Unknown", fallback_rat
@@ -751,6 +756,7 @@ def _rsrp_points(signal_history: List[Dict[str, Any]], year: int) -> List[RsrpPo
                 RsrpPoint(
                     time_dt=time_dt,
                     rsrp_dbm=int(match.group(1)),
+                    rat=rat,
                     hover_text=(
                         f"Time: {sample.get('time')}<br>"
                         f"RAT: {rat} (Slot {sample.get('slot', '0')})<br>"

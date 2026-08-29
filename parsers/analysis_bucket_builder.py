@@ -142,7 +142,12 @@ class AnalysisBucketBuilder:
         if line.startswith("!@Boot"):
             buckets['boot'].add(idx)
 
-        if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line or "NetworkSignalStrengthHandler" in line:
+        if (
+            "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line
+            or "NetworkSignalStrengthHandler" in line
+            or "CellSignalStrengthLte" in line
+            or "CellSignalStrengthNr" in line
+        ):
             buckets['signal'].add(idx)
 
         if self._contains_any(line, self.BASIC_USAGE_KEYWORDS):

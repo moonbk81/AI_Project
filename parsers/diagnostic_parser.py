@@ -22,6 +22,69 @@ class BootParser(BaseParser):
         return boot_events
 
 class SignalParser(BaseParser):
+    _INVALID_SIGNAL_VALUES = {"99", "255", "2147483647", "-2147483648"}
+
+    def _field(self, text, name):
+        match = re.search(rf'\b{name}=(-?\d+)', text, re.I)
+        return match.group(1) if match else None
+
+    def _dbm(self, value):
+        if value is None or value in self._INVALID_SIGNAL_VALUES:
+            return "Unknown"
+        return f"{value} dBm" if value.startswith("-") else f"-{value} dBm"
+
+    def _db(self, value):
+        if value is None or value in self._INVALID_SIGNAL_VALUES:
+            return "Unknown"
+        return f"{value} dB" if value.startswith("-") else f"-{value} dB"
+
+    def _tenths_db(self, value):
+        if value is None or value in self._INVALID_SIGNAL_VALUES:
+            return "Unknown"
+        try:
+            return f"{int(value) / 10.0} dB"
+        except ValueError:
+            return "Unknown"
+
+    def _signed_db(self, value):
+        if value is None or value in self._INVALID_SIGNAL_VALUES:
+            return "Unknown"
+        return f"{value} dB"
+
+    def _parse_cell_signal_strength(self, line):
+        details = {}
+
+        lte_cells = re.findall(r'(CellInfoLte:\{.*?CellSignalStrengthLte: .*?)(?=, CellInfo|] \[PHONE|\Z)', line)
+        if not lte_cells and "CellSignalStrengthLte:" in line:
+            lte_cells = re.findall(r'(CellSignalStrengthLte: .*?)(?=, CellInfo|] \[PHONE|\Z)', line)
+        if lte_cells:
+            lte = next((cell for cell in lte_cells if "mRegistered=YES" in cell), lte_cells[0])
+            details["LTE"] = {
+                "RSRP": self._dbm(self._field(lte, "rsrp")),
+                "RSRQ": self._db(self._field(lte, "rsrq")),
+                "SINR": self._tenths_db(self._field(lte, "rssnr")),
+                "RSSI": self._dbm(self._field(lte, "rssi")),
+                "raw": re.search(r'CellSignalStrengthLte: ([^}]+)', lte).group(1).strip()
+                if re.search(r'CellSignalStrengthLte: ([^}]+)', lte)
+                else "CellSignalStrengthLte",
+            }
+
+        nr_cells = re.findall(r'(CellInfoNr:\{.*?CellSignalStrengthNr: .*?)(?=, CellInfo|] \[PHONE|\Z)', line)
+        if not nr_cells and "CellSignalStrengthNr:" in line:
+            nr_cells = re.findall(r'(CellSignalStrengthNr: .*?)(?=, CellInfo|] \[PHONE|\Z)', line)
+        if nr_cells:
+            nr = next((cell for cell in nr_cells if "mRegistered=YES" in cell), nr_cells[0])
+            details["NR"] = {
+                "RSRP": self._dbm(self._field(nr, "ssRsrp")),
+                "RSRQ": self._db(self._field(nr, "ssRsrq")),
+                "SINR": self._signed_db(self._field(nr, "ssSinr")),
+                "raw": re.search(r'CellSignalStrengthNr: ([^}]+)', nr).group(1).strip()
+                if re.search(r'CellSignalStrengthNr: ([^}]+)', nr)
+                else "CellSignalStrengthNr",
+            }
+
+        return {rat: values for rat, values in details.items() if values.get("RSRP") != "Unknown"}
+
     def analyze(self, lines):
         history = []
         raw_signals = [] # 💡 라디오 로그(상세 신호)를 담아둘 새로운 바구니
@@ -75,6 +138,13 @@ class SignalParser(BaseParser):
 
                 if details:
                     raw_signals.append({"time": ts, "details": details})
+
+            if "CellSignalStrengthLte" in line or "CellSignalStrengthNr" in line:
+                ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line)
+                if not ts_m: continue
+                details = self._parse_cell_signal_strength(line)
+                if details:
+                    raw_signals.append({"time": ts_m.group(0), "details": details})
 
             # 2️⃣ 레벨 변경 이벤트 수집 -> history 바구니에 보관 (이 시점엔 details를 빈칸으로 둠)
             if "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line:

@@ -52,13 +52,14 @@ const CARDS = [
     prompt: "통화 drop 구간 전후의 RSRP 변화와 SIP 오류를 함께 보고 RF 문제인지 IMS/SIP 문제인지 구분해줘.",
     render(series, panel) {
       const colors = seriesColors();
-      const traces = [
-        lineTrace("RSRP(dBm)", series.rsrp_points.map((p) => p.time_dt),
-                  series.rsrp_points.map((p) => p.rsrp_dbm), colors[0], {
-          text: series.rsrp_points.map((p) => p.hover_text.replace(/<br>/g, " · ")),
-          hoverinfo: "text",
-        }),
-      ];
+      const traces = [...groupBy(series.rsrp_points, (p) => p.rat || "Unknown")].map(
+        ([rat, points], index) =>
+          lineTrace(`RSRP ${rat}`, points.map((p) => p.time_dt),
+                    points.map((p) => p.rsrp_dbm), colors[index % colors.length], {
+            text: points.map((p) => p.hover_text.replace(/<br>/g, " · ")),
+            hoverinfo: "text",
+          }),
+      );
 
       if (series.sip_errors.length) {
         traces.push({
@@ -69,7 +70,7 @@ const CARDS = [
           text: series.sip_errors.map((e) => e.label),
           hovertemplate: "<b>%{text}</b><br>%{x}<extra>SIP 오류</extra>",
         });
-        traces[1].marker.color = getComputedStyle(document.body).getPropertyValue("--status-critical").trim();
+        traces[traces.length - 1].marker.color = getComputedStyle(document.body).getPropertyValue("--status-critical").trim();
       }
 
       // Call windows are context behind the line, not a series of their own.
