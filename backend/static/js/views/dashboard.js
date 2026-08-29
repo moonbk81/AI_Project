@@ -133,7 +133,7 @@ const CARDS = [
         hovermode: "x unified",
         margin: { l: 56, r: 88, t: 8, b: 72 },
         xaxis: axis({ tickangle: -35, nticks: 8 }),
-        yaxis: axis({ title: { text: "level", font: { size: 11 } } }),
+        yaxis: axis({ title: { text: "level", font: { size: 11 } }, range: [-0.1, 4.1], dtick: 1 }),
         annotations: endLabels(traces),
       }), frameTable(series.points, ["time", "rat", "slot", "level"]));
     },
