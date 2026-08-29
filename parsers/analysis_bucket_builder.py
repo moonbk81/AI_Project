@@ -143,10 +143,10 @@ class AnalysisBucketBuilder:
             buckets['boot'].add(idx)
 
         if (
-            "EVENT_SIGNAL_LEVEL_INFO_CHANGED" in line
-            or "NetworkSignalStrengthHandler" in line
-            or "CellSignalStrengthLte" in line
+            "CellSignalStrengthLte" in line
             or "CellSignalStrengthNr" in line
+            or "CellSignalStrengthWcdma" in line
+            or "CellSignalStrengthGsm" in line
         ):
             buckets['signal'].add(idx)
 
