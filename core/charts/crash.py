@@ -202,7 +202,25 @@ class BinderProxyHistogram:
     time: Any
     max_count: int
     is_leak: bool
+    threshold: int = BINDER_PROXY_LEAK_THRESHOLD
+    threshold_ratio: float = 0.0
+    top_descriptor: str = _UNKNOWN
+    top_count: int = 0
+    suspected_cause: str = "누수된 Binder interface의 acquire/release 또는 register/unregister 생명주기 확인 필요"
+    related_too_many_binders_kill_count: int = 0
+    related_wtf_count: int = 0
+    related_wtf_processes: List[str] = field(default_factory=list)
     counts: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+
+def _proxy_suspected_cause(descriptor: str) -> str:
+    if "IIntentReceiver" in descriptor:
+        return "동적 BroadcastReceiver register 이후 unregister 누락 가능성 확인"
+    if "IServiceConnection" in descriptor:
+        return "Service bind 이후 unbind 누락 또는 ServiceConnection 생명주기 불일치 확인"
+    if "IContentProvider" in descriptor:
+        return "ContentProvider client/provider reference 해제 누락 가능성 확인"
+    return "누수된 Binder interface의 acquire/release 또는 register/unregister 생명주기 확인 필요"
 
 
 def _as_dicts(binder_warnings: Any) -> List[Dict[str, Any]]:
@@ -228,8 +246,24 @@ def _as_dicts(binder_warnings: Any) -> List[Dict[str, Any]]:
 
 
 def build_binder_proxy_histograms(binder_warnings: Any) -> List[BinderProxyHistogram]:
+    warnings = _as_dicts(binder_warnings)
+    too_many_binders_kills = [
+        warning for warning in warnings
+        if warning.get("type") == "SYSTEM_KILL"
+        and "Too many Binders sent to SYSTEM" in " ".join([
+            str(warning.get("desc", "")),
+            str(warning.get("raw", "")),
+            str(warning.get("raw_info", "")),
+        ])
+    ]
+    wtf_processes = sorted({
+        str(warning.get("process") or _UNKNOWN)
+        for warning in warnings
+        if warning.get("type") == "SYSTEM_WTF"
+    })
+
     histograms = []
-    for warning in _as_dicts(binder_warnings):
+    for warning in warnings:
         if warning.get("type") not in ("BINDER_PROXY_HISTOGRAM", "BINDER_PROXY_LEAK"):
             continue
 
@@ -247,16 +281,32 @@ def build_binder_proxy_histograms(binder_warnings: Any) -> List[BinderProxyHisto
                 )
 
         counts = pd.DataFrame(rows, columns=["Class", "FullClass", "Count"])
+        top_descriptor = _UNKNOWN
+        top_count = 0
         if not counts.empty:
             # Ascending, because a horizontal bar chart draws the first row lowest.
             counts = counts.sort_values(by="Count", ascending=True)
+            top = counts.iloc[-1]
+            top_descriptor = str(top["FullClass"])
+            top_count = int(top["Count"])
 
-        max_count = warning.get("max_count", 0)
+        try:
+            max_count = int(warning.get("max_count", 0) or 0)
+        except (TypeError, ValueError):
+            max_count = 0
+        max_count = max(max_count, top_count)
         histograms.append(
             BinderProxyHistogram(
                 time=warning.get("time", _UNKNOWN),
                 max_count=max_count,
                 is_leak=max_count > BINDER_PROXY_LEAK_THRESHOLD,
+                threshold_ratio=round(max_count / BINDER_PROXY_LEAK_THRESHOLD, 1),
+                top_descriptor=top_descriptor,
+                top_count=top_count or max_count,
+                suspected_cause=_proxy_suspected_cause(top_descriptor),
+                related_too_many_binders_kill_count=len(too_many_binders_kills),
+                related_wtf_count=sum(1 for warning in warnings if warning.get("type") == "SYSTEM_WTF"),
+                related_wtf_processes=wtf_processes,
                 counts=counts,
             )
         )

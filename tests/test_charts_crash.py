@@ -117,12 +117,22 @@ _HISTOGRAM_RAW = "android.os.IBinder x 1500\ncom.foo.Bar$Stub x 12\nnot a histog
 
 def test_proxy_histogram_is_parsed_and_ordered_for_a_horizontal_chart():
     histogram = build_binder_proxy_histograms(
-        [_warning("BINDER_PROXY_HISTOGRAM", max_count=1500, raw=_HISTOGRAM_RAW)]
+        [
+            _warning("SYSTEM_WTF", process="com.android.phone"),
+            _warning("SYSTEM_KILL", desc="Too many Binders sent to SYSTEM", raw="am_kill"),
+            _warning("BINDER_PROXY_HISTOGRAM", max_count=1500, raw=_HISTOGRAM_RAW),
+        ]
     )[0]
 
     assert histogram.counts["Count"].tolist() == [12, 1500]  # ascending: biggest bar on top
     assert histogram.counts["Class"].tolist() == ["Bar$Stub", "IBinder"]
     assert histogram.counts["FullClass"].tolist()[1] == "android.os.IBinder"
+    assert histogram.top_descriptor == "android.os.IBinder"
+    assert histogram.top_count == 1500
+    assert histogram.threshold_ratio == 1.5
+    assert histogram.related_too_many_binders_kill_count == 1
+    assert histogram.related_wtf_count == 1
+    assert histogram.related_wtf_processes == ["com.android.phone"]
 
 
 def test_leak_threshold_is_exclusive():

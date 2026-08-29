@@ -358,21 +358,10 @@ function systemEventsCard(series, panel) {
       raw.append(el("pre", null, spam.raw));
       blocks.push(raw);
     }
-    if (binder.events.length) {
-      const truncated = binder.event_count > binder.display_cap;
-      push(`Binder 지연 · 실패 ${binder.event_count}건` + (truncated ? ` (최근 ${binder.display_cap}건 표시)` : ""),
-           frameTable(binder.events));
-    }
-    if (binder.signals.length || binder.checklist.length) {
-      const extra = fold("Binder 관련 추가 요약");
-      if (binder.signals.length) extra.append(frameTable(binder.signals));
-      for (const item of binder.checklist) extra.append(el("p", "card-note", `· ${item}`));
-      blocks.push(extra);
-    }
   }
 
   if (!blocks.length) {
-    panel.note("시스템 강제 종료나 Binder 이벤트가 없습니다.");
+    panel.note("표시할 시스템 강제 종료, am_wtf, Binder oneway spam 이벤트가 없습니다.");
     return;
   }
   const wrap = el("div", "stack");
@@ -381,12 +370,32 @@ function systemEventsCard(series, panel) {
 }
 
 function proxyCard(series, panel) {
+  const leakItems = series.items.filter((histogram) => histogram.is_leak);
+  if (!leakItems.length) {
+    panel.note("임계치를 초과한 Binder Proxy histogram이 없습니다.");
+    return;
+  }
+
   const wrap = el("div", "stack");
   const colors = seriesColors();
 
-  series.items.forEach((histogram, index) => {
+  leakItems.forEach((histogram, index) => {
+    const killCount = Number(histogram.related_too_many_binders_kill_count || 0);
+    const wtfCount = Number(histogram.related_wtf_count || 0);
+    wrap.append(tileRow([
+      tile("최대 의심 객체", histogram.top_descriptor || "Unknown", "", histogram.suspected_cause),
+      tile("임계치 대비", `${histogram.threshold_ratio || 0}x`, "", `${fmt.count(histogram.max_count)} / ${fmt.count(histogram.threshold)}개`,
+           (histogram.threshold_ratio || 0) >= 5 ? "critical" : "warn"),
+      tile("연관 am_kill", fmt.count(killCount), "건",
+           killCount ? "Too many Binders sent to SYSTEM" : "동반 없음",
+           killCount ? "critical" : "good"),
+      tile("연관 am_wtf", fmt.count(wtfCount), "건",
+           (histogram.related_wtf_processes || []).slice(0, 2).join(", ") || "동반 없음",
+           wtfCount ? "warn" : "good"),
+    ]));
+
     wrap.append(el("h3", "sub-head",
-      `[${histogram.time}] 최대 ${fmt.count(histogram.max_count)}개` + (histogram.is_leak ? " — 임계치 초과" : "")));
+      `[${histogram.time}] 최대 ${fmt.count(histogram.max_count)}개 — 임계치 초과`));
 
     if (!histogram.counts.length) {
       wrap.append(el("p", "card-note", "히스토그램 원문에서 인터페이스를 읽지 못했습니다."));
@@ -543,16 +552,16 @@ const CARDS = [
   },
   {
     chart: "binder-proxy",
-    title: "Binder Proxy 현황",
-    sub: "인터페이스별 Proxy 객체 수",
-    prompt: "Binder proxy histogram의 max count, descriptor, leak threshold 초과 여부를 보고 proxy leak 가능성을 분석해줘.",
+    title: "Binder Proxy 누수 의심",
+    sub: "인터페이스별 proxy 객체 수와 임계치 초과 여부",
+    prompt: "Binder proxy histogram의 max count, descriptor, leak threshold 초과 여부를 보고 특정 인터페이스의 proxy 객체 누수 가능성을 분석해줘.",
     render: proxyCard,
   },
   {
     chart: "crash",
-    title: "시스템 이벤트",
-    sub: "강제 종료 · 이상 징후 · Binder",
-    prompt: "am_kill, am_wtf, Binder spam/지연/실패 이벤트를 연결해 시스템 강제 종료나 이상 징후의 원인 후보를 정리해줘.",
+    title: "시스템 강제 종료·이상 징후",
+    sub: "am_kill · am_wtf · Binder oneway spam",
+    prompt: "am_kill, am_wtf, Binder oneway spam 이벤트를 연결해 시스템 강제 종료나 이상 징후의 원인 후보를 정리해줘.",
     render: systemEventsCard,
   },
   {
