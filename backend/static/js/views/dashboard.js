@@ -247,18 +247,25 @@ const CARDS = [
     sub: "구간별 DNS/TCP 통계",
     prompt: "DNS/TCP 지연 spike와 netId별 품질 변화를 보고 인터넷 먹통이나 지연 구간의 계층별 원인을 정리해줘.",
     render(series, panel) {
+      if (!series.metrics?.length) {
+        panel.empty("no_data");
+        return;
+      }
       const colors = seriesColors();
       const picker = el("select", "metric-picker");
       for (const metric of series.metrics) picker.append(new Option(metric.label, metric.column));
 
       const drawMetric = (column) => {
         const metric = series.metrics.find((m) => m.column === column) || series.metrics[0];
-        const traces = [...groupBy(series.frame, (row) => row.netId)].map(([name, rows], index) =>
-          lineTrace(`netId ${name}`, rows.map((r) => r.time_dt), rows.map((r) => r[column]),
-                    colors[index % colors.length], {
+        const traces = [...groupBy(series.frame, (row) => row.netId)].map(([name, rows], index) => {
+          const points = rows
+            .map((row) => ({ x: row.time_dt, y: Number(row[metric.column]) }))
+            .filter((point) => point.x && Number.isFinite(point.y));
+          return lineTrace(`netId ${name}`, points.map((point) => point.x), points.map((point) => point.y),
+                           colors[index % colors.length], {
             hovertemplate: `<b>%{y}</b> ${metric.unit}<br>%{x}<extra>netId ${name}</extra>`,
-          }),
-        );
+          });
+        }).filter((trace) => trace.x.length);
         panel.draw(traces, baseLayout({
           showlegend: traces.length > 1,
           hovermode: "x unified",

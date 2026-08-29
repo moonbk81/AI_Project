@@ -144,6 +144,31 @@ def test_tcp_metric_is_offered_only_when_it_was_measured():
     assert [metric.column for metric in all_missing.metrics] == ["dns_avg", "dns_err_rate"]
 
 
+def test_timeline_metrics_include_dns_detail_columns_when_present():
+    stats = build_network_timeline_stats(
+        pd.DataFrame(
+            [
+                _stat(
+                    "08-25 10:00:00",
+                    10,
+                    dns_max=120,
+                    dns_delayed_cnt=0,
+                    dns_blocked_cnt=0,
+                )
+            ]
+        ),
+        year=2026,
+    )
+
+    assert [metric.column for metric in stats.metrics] == [
+        "dns_avg",
+        "dns_max",
+        "dns_err_rate",
+        "dns_delayed_cnt",
+        "dns_blocked_cnt",
+    ]
+
+
 def test_spikes_come_from_latency_or_a_flagged_delay():
     df = pd.DataFrame(
         [

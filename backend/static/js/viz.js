@@ -378,13 +378,21 @@ export function card(title, subtitle) {
       copy.classList.add("hidden");
     },
     draw(traces, layout, tableView) {
+      const showingTable = tableView && !tableHost.classList.contains("hidden");
       plotHost.classList.remove("content-host");
-      plotHost.classList.remove("hidden");
+      plotHost.classList.toggle("hidden", showingTable);
       drawPlot(plotHost, traces, layout);
       copy.classList.remove("hidden");
       if (tableView) {
         tableHost.replaceChildren(tableView);
+        tableHost.classList.toggle("hidden", !showingTable);
         toggle.classList.remove("hidden");
+        toggle.textContent = showingTable ? "차트" : "표";
+      } else {
+        tableHost.replaceChildren();
+        tableHost.classList.add("hidden");
+        toggle.classList.add("hidden");
+        toggle.textContent = "표";
       }
     },
     /** A card whose content is a table (or any node) rather than a plot. */

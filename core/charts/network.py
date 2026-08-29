@@ -179,14 +179,20 @@ class NetworkTimelineStats:
 
 
 def _timeline_metrics(ts_df: pd.DataFrame) -> List[MetricOption]:
-    metrics = [
+    candidates = [
         MetricOption("DNS 평균 응답 시간(ms)", "dns_avg", "ms"),
+        MetricOption("DNS 최대 응답 시간(ms)", "dns_max", "ms"),
         MetricOption("DNS 오류율(%)", "dns_err_rate", "%"),
+        MetricOption("DNS 지연 건수", "dns_delayed_cnt", "건"),
+        MetricOption("DNS 차단 건수", "dns_blocked_cnt", "건"),
+        # TCP loss is only collected on some builds; offer it when it has values.
+        MetricOption("TCP 평균 손실률(%)", "tcp_avg_loss", "%"),
     ]
-    # TCP loss is only collected on some builds; offer it when it has values.
-    if "tcp_avg_loss" in ts_df.columns and ts_df["tcp_avg_loss"].notna().any():
-        metrics.append(MetricOption("TCP 평균 손실률(%)", "tcp_avg_loss", "%"))
-    return metrics
+    return [
+        metric
+        for metric in candidates
+        if metric.column in ts_df.columns and ts_df[metric.column].notna().any()
+    ]
 
 
 def build_network_timeline_stats(
@@ -208,6 +214,7 @@ def build_network_timeline_stats(
         return NetworkTimelineStats(status="unparsable_time")
 
     ts_df["netId"] = ts_df["netId"].astype(str)  # a network id is a label, not a number
+    metrics = _timeline_metrics(ts_df)
     if "dns_delayed_cnt" not in ts_df.columns:
         ts_df["dns_delayed_cnt"] = 0
 
@@ -219,7 +226,7 @@ def build_network_timeline_stats(
     spikes = spike_df[spike_columns].sort_values("dns_avg", ascending=False)
 
     return NetworkTimelineStats(
-        status="ok", frame=ts_df, metrics=_timeline_metrics(ts_df), spikes=spikes
+        status="ok", frame=ts_df, metrics=metrics, spikes=spikes
     )
 
 
