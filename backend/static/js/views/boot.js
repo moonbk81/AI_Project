@@ -582,13 +582,13 @@ const CARDS = [
 ];
 
 export async function renderBoot(mount, sourceFile, ctx) {
-  const band = section("부팅 시퀀스");
+  const band = section("시스템 진단");
   mount.append(band.wrap);
 
   const panels = CARDS.map((spec) => {
     const panel = card(spec.title, spec.sub);
     if (ctx?.startChat) {
-      panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("부팅 탭", spec, sourceFile)), "primary");
+      panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("시스템 진단 탭", spec, sourceFile)), "primary");
     }
     // Log dumps need the whole row; charts sit side by side.
     if (spec.wide) panel.section.classList.add("wide", "event-card");

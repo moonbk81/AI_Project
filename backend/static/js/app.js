@@ -13,7 +13,7 @@ import { defectCacheKey } from "./views/plm_data.js";
 
 const VIEWS = [
   { id: "dashboard", label: "대시보드", render: renderDashboard, needsFile: true },
-  { id: "boot", label: "부팅", render: renderBoot, needsFile: true },
+  { id: "boot", label: "시스템 진단", render: renderBoot, needsFile: true },
   { id: "satellite", label: "위성", render: renderSatellite, needsFile: true },
   { id: "chat", label: "채팅", render: renderChat, needsFile: true },
   { id: "knowledge", label: "분석 사례", render: renderKnowledge, needsFile: false },
