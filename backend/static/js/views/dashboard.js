@@ -10,14 +10,37 @@ import {
 function kpiBand(kpi) {
   const dropped = kpi.call_drop_count > 0;
   const outOfService = kpi.oos_count > 0;
-  return tileRow([
+  const wrap = el("div");
+  const ctx = kpi.device_context || {};
+  wrap.append(tileRow([
+    tile("모델", ctx.model_name || "N/A", "", ctx.build_id || ""),
+    tile("Radio", ctx.radio || "N/A"),
+    tile("Build Network", ctx.network || "N/A"),
+  ]));
+
+  for (const sim of ctx.sim_slots || []) {
+    wrap.append(tileRow([
+      tile(`SIM Slot ${sim.slot}`, sim.state || "N/A", "", sim.carrier || ""),
+      tile("SIM MCC/MNC", sim.mcc_mnc || "N/A", "", [sim.mcc, sim.mnc].filter((v) => v && v !== "N/A").join(" / ")),
+    ]));
+  }
+
+  for (const net of ctx.network_slots || []) {
+    wrap.append(tileRow([
+      tile(`망 Slot ${net.slot}`, net.rat || "N/A", "", `${net.voice_reg || "N/A"} / ${net.data_reg || "N/A"}`),
+      tile("Network PLMN", net.plmn || net.mcc_mnc || "N/A", "", net.network_name || net.operator || ""),
+    ]));
+  }
+
+  wrap.append(tileRow([
     tile("통화 성공률", fmt.fixed(kpi.call_success_rate), "%",
          dropped ? `실패/드롭 ${kpi.call_drop_count}건` : "실패 없음", dropped ? "critical" : "good"),
     tile("OOS 이벤트", fmt.count(kpi.oos_count), "",
          outOfService ? "권외 전환 감지" : "서비스 유지", outOfService ? "critical" : "good"),
     tile("평균 신호 레벨", fmt.fixed(kpi.avg_signal_level), "", "0(최악) ~ 4(최상)"),
     tile("최다 사용 앱", kpi.top_app_name, "", fmt.mb(kpi.top_app_mb)),
-  ]);
+  ]));
+  return wrap;
 }
 
 const CARDS = [

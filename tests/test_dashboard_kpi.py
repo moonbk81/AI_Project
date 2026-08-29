@@ -13,17 +13,28 @@ def test_headline_numbers_from_metadata():
             {"log_type": "OOS_Event", "voice_reg": "IN_SERVICE", "data_reg": "IN_SERVICE"},
             {"log_type": "Signal_Level", "level": 3},
             {"log_type": "Signal_Level", "level": 1},
+            {"log_type": "Build_Info", "model_name": "q7q", "build_id": "BP4A", "radio": "R1", "network": "TMB"},
+            {
+                "log_type": "System_Property",
+                "gsm.sim.state": "LOADED,ABSENT",
+                "gsm.sim.operator.numeric": "310260,",
+                "gsm.sim.operator.alpha": "T-Mobile,",
+                "gsm.operator.numeric": "310260,",
+                "gsm.operator.alpha": "T-Mobile,",
+            },
         ]
     )
 
-    assert kpi == {
-        "top_app_name": "YouTube",
-        "top_app_mb": 123.5,
-        "call_success_rate": 33.3,
-        "call_drop_count": 2,
-        "oos_count": 1,
-        "avg_signal_level": 2.0,
-    }
+    assert kpi["top_app_name"] == "YouTube"
+    assert kpi["top_app_mb"] == 123.5
+    assert kpi["call_success_rate"] == 33.3
+    assert kpi["call_drop_count"] == 2
+    assert kpi["oos_count"] == 1
+    assert kpi["avg_signal_level"] == 2.0
+    assert kpi["device_context"]["model_name"] == "q7q"
+    assert kpi["device_context"]["sim_slots"][0]["mcc_mnc"] == "310260"
+    assert kpi["device_context"]["sim_slots"][1]["state"] == "ABSENT"
+    assert kpi["device_context"]["network_slots"][0]["plmn"] == "310260"
 
 
 def test_empty_session_reports_neutral_numbers():
@@ -34,6 +45,14 @@ def test_empty_session_reports_neutral_numbers():
         "call_drop_count": 0,
         "oos_count": 0,
         "avg_signal_level": 0.0,
+        "device_context": {
+            "model_name": "N/A",
+            "build_id": "N/A",
+            "radio": "N/A",
+            "network": "N/A",
+            "sim_slots": [],
+            "network_slots": [],
+        },
     }
 
 
@@ -76,6 +95,14 @@ def test_unparseable_data_usage_counts_as_zero_mb():
         "call_drop_count": 0,
         "oos_count": 0,
         "avg_signal_level": 0.0,
+        "device_context": {
+            "model_name": "N/A",
+            "build_id": "N/A",
+            "radio": "N/A",
+            "network": "N/A",
+            "sim_slots": [],
+            "network_slots": [],
+        },
     }
 
 

@@ -186,7 +186,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "통화 drop 구간 전후의 RSRP 변화" in dashboard.text
     assert boot.status_code == 200 and "scattergeo" in boot.text and "Asia/Seoul" in boot.text
     assert "LLM 분석 요청" in boot.text
-    assert "ctx.startChat(sectionAnalysisQuestion(\"부팅 탭\", spec, sourceFile))" in boot.text
+    assert "ctx.startChat(sectionAnalysisQuestion(\"시스템 진단 탭\", spec, sourceFile))" in boot.text
     assert "main thread callstack" in boot.text
     # plotly.js ships with the installed package; the page must not need a CDN.
     assert bundle.status_code == 200 and len(bundle.content) > 100_000

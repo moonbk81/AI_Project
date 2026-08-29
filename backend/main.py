@@ -92,6 +92,7 @@ class SessionKpiResponse(BaseModel):
     call_success_rate: float
     call_drop_count: int
     oos_count: int
+    device_context: Dict[str, Any]
 
 
 class SatelliteOverviewResponse(BaseModel):
