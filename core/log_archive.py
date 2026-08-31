@@ -41,6 +41,13 @@ MAX_TOTAL_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 # 로그가 들어 있을 만한 이름만 골라 연다.
 LOG_ARCHIVE_HINTS = ("dumpstate", "bugreport", "systemlog", "log")
 
+# 같은 첨부에 폰과 웨어러블 로그가 함께 들어오는 경우가 있다. Galaxy Wearable 이
+# 워치 덤프를 G_MANAGER/gear_dump.zip 으로 넣어 주고, 그 안에 다시
+# bugreport-<모델>.zip 이, 그 안에 워치 dumpstate 가 들어 있다.
+# 이건 옆에 있는 폰 로그의 재압축이 아니라 "다른 기기의 로그"라, 폰 로그를
+# 찾았더라도 열어야 한다. LOG_ARCHIVE_HINTS 와 마찬가지로 이름만 보는 어림이다.
+COMPANION_DEVICE_HINTS = ("g_manager", "gear")
+
 # 안의 로그를 하나씩 고르는 것이 의미 없는 폴더. 통째로 한 항목으로 묶는다.
 GROUPED_LOG_FOLDERS = ("ap_silentlog",)
 
@@ -358,6 +365,16 @@ def looks_like_log_archive(filename: str) -> bool:
     return any(hint in name for hint in LOG_ARCHIVE_HINTS)
 
 
+def is_companion_device_archive(member_name: str) -> bool:
+    """다른 기기(워치 등)의 덤프를 담은 중첩 압축인지.
+
+    폴더 이름(``G_MANAGER/``)이든 압축 이름(``gear_dump.zip``)이든 걸리도록
+    멤버 경로 전체를 본다.
+    """
+    name = str(member_name).lower()
+    return any(hint in name for hint in COMPANION_DEVICE_HINTS)
+
+
 def grouped_folder_of(member_name: str) -> str:
     """멤버가 묶음 폴더(ap_silentlog 등) 안에 있으면 그 폴더 경로.
 
@@ -439,26 +456,17 @@ def _candidates_here(data: bytes, route: tuple):
 def _scan_for_logs(data: bytes, depth: int, route: tuple):
     """한 압축을 훑어 (아는 로그, 그 밖의 후보) 를 모은다."""
     known, maybe = _candidates_here(data, route)
-    if known:
-        # 이 층에 아는 로그가 있으면 옆의 압축은 열지 않는다. dumpstate.log 와
-        # 그것을 다시 압축한 dumpstate.zip 이 함께 든 첨부가 흔하다.
-        return known, maybe
 
     if depth >= NESTED_ARCHIVE_MAX_DEPTH:
-        return [], maybe
+        return known, maybe
 
     nested = [
         entry.name for entry in entries(data)
         if not entry.is_dir and is_archive_name(os.path.basename(entry.name))
     ]
-    hinted = [name for name in nested if looks_like_log_archive(os.path.basename(name))]
-    plain = [name for name in nested if name not in set(hinted)]
 
-    # GalaxyDiagnostics_Bugreport.zip, SystemLog.zip 처럼 이름에 힌트가 붙은
-    # 것부터 연다. 그래도 아는 로그가 안 나오면 나머지 압축도 열어 본다 —
-    # 어차피 빈손인 첨부라 아낄 것이 없다.
-    for wave in (hinted, plain):
-        for name, content in _read_in_order(data, wave):
+    def descend(names: List[str]):
+        for name, content in _read_in_order(data, names):
             if content is None:
                 logger.error("Failed to open nested archive %s", name)
                 continue
@@ -466,6 +474,27 @@ def _scan_for_logs(data: bytes, depth: int, route: tuple):
             inner_known, inner_maybe = _scan_for_logs(content, depth + 1, (*route, name))
             known.extend(inner_known)
             maybe.extend(inner_maybe)
+
+    # 다른 기기(워치)의 덤프는 폰 로그의 재압축이 아니므로, 폰 로그를 찾았든
+    # 아니든 언제나 연다. 안 그러면 폰 로그가 든 첨부에서는 워치를 고를 수 없다.
+    companion = [name for name in nested if is_companion_device_archive(name)]
+    if companion:
+        descend(companion)
+
+    if known:
+        # 이 층에 아는 로그가 있으면 나머지 압축은 열지 않는다. dumpstate.log 와
+        # 그것을 다시 압축한 dumpstate.zip 이 함께 든 첨부가 흔하다.
+        return known, maybe
+
+    rest = [name for name in nested if name not in set(companion)]
+    hinted = [name for name in rest if looks_like_log_archive(os.path.basename(name))]
+    plain = [name for name in rest if name not in set(hinted)]
+
+    # GalaxyDiagnostics_Bugreport.zip, SystemLog.zip 처럼 이름에 힌트가 붙은
+    # 것부터 연다. 그래도 아는 로그가 안 나오면 나머지 압축도 열어 본다 —
+    # 어차피 빈손인 첨부라 아낄 것이 없다.
+    for wave in (hinted, plain):
+        descend(wave)
         if known:
             break
 

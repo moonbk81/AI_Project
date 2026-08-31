@@ -289,3 +289,52 @@ def test_the_look_alike_list_is_capped():
 
     assert len(found) == MAX_MAYBE_LOGS
     assert found[0].path == f"part_{MAX_MAYBE_LOGS + 9:03d}.txt"  # 큰 것부터
+
+
+# ------------------------------------------------------- 워치(웨어러블) 첨부
+
+def make_watch_attachment(extra=None):
+    """Galaxy Wearable 이 넣어 주는 워치 덤프의 실제 중첩 구조.
+
+    첨부 → G_MANAGER/gear_dump.zip → bugreport-<모델>.zip → 워치 dumpstate
+    """
+    inner = make_zip({"dumpState_SM-R950_20260830.log": b"watch dumpstate body"})
+    gear_dump = make_zip({"bugreport-SM-R950_20260830.zip": inner})
+    return make_zip({"G_MANAGER/gear_dump.zip": gear_dump, **(extra or {})})
+
+
+WATCH_PATH = (
+    "G_MANAGER/gear_dump.zip/bugreport-SM-R950_20260830.zip/"
+    "dumpState_SM-R950_20260830.log"
+)
+
+
+def test_a_watch_dump_is_found_three_archives_deep():
+    assert [c.path for c in find_log_candidates(make_watch_attachment())] == [WATCH_PATH]
+
+
+def test_a_watch_dump_is_still_offered_beside_a_phone_log():
+    """폰 로그를 찾았다고 워치 압축까지 닫아 버리면 워치를 고를 방법이 없다."""
+    attachment = make_watch_attachment({"dumpState_SM-S928N_20260830.log": b"phone body"})
+
+    assert [c.path for c in find_log_candidates(attachment)] == [
+        "dumpState_SM-S928N_20260830.log",
+        WATCH_PATH,
+    ]
+
+
+def test_the_watch_dump_reads_back_through_its_route():
+    attachment = make_watch_attachment({"dumpState_SM-S928N_20260830.log": b"phone body"})
+    watch = next(c for c in find_log_candidates(attachment) if "R950" in c.path)
+
+    assert read_by_route(attachment, watch.route) == b"watch dumpstate body"
+
+
+def test_a_repack_of_the_log_beside_it_is_still_left_shut():
+    """워치 예외가 재압축 중복 방지까지 풀어 버리면 안 된다."""
+    attachment = make_zip({
+        "dumpstate.log": b"plain file",
+        "dumpstate.zip": make_zip({"dumpstate.log": b"inner copy"}),
+    })
+
+    assert [c.path for c in find_log_candidates(attachment)] == ["dumpstate.log"]
