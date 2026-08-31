@@ -440,3 +440,23 @@ def test_a_session_with_nothing_wrong():
     assert build_crash_overview(None).status == "clean"
     assert build_crash_overview({"crash_context": [], "binder_warnings": []}).status == "clean"
     assert build_crash_overview({"binder_warnings": [_warning("BINDER_DELAY")]}).status == "ok"
+
+
+def test_transaction_too_large_in_nearby_logs_only_is_a_weak_binder_signal():
+    overview = build_crash_overview(
+        {
+            "crash_context": [
+                {
+                    "process": "com.example.app",
+                    "exception_info": "java.lang.NullPointerException",
+                    "top_method": "MainActivity.onCreate",
+                    "cross_context_logs": ["android.os.TransactionTooLargeException: data parcel size"],
+                }
+            ]
+        }
+    )
+
+    triage = overview.java_crashes[0].triage
+    assert triage["primary_signal"] == "Java exception"
+    assert triage["signals"][1]["strength"] == "보조"
+    assert "단정하지 마세요" in triage["signals"][1]["note"]

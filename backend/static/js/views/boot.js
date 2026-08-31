@@ -232,10 +232,17 @@ function javaCrash(crash) {
   if (triage) node.append(triage);
 
   if (crash.suspects_transaction_too_large) {
-    const warn = el("div", "alert");
-    warn.append(el("p", null,
-      "TransactionTooLargeException 의심: Intent 데이터가 Binder buffer 한계를 넘었을 가능성이 있습니다."));
-    node.append(warn);
+    // 예외 자체에 찍힌 것과 주변 로그에서 스쳐간 것은 무게가 다르다.
+    const inException = /TransactionTooLargeException/i.test(crash.exception_info || "");
+    if (inException) {
+      const warn = el("div", "alert");
+      warn.append(el("p", null,
+        "TransactionTooLargeException: Intent 데이터가 Binder buffer 한계를 넘었습니다."));
+      node.append(warn);
+    } else {
+      node.append(el("p", "card-note",
+        "주변 로그에 TransactionTooLargeException 이 있습니다 — 다른 IPC 호출의 실패일 수 있어 이 crash 의 원인으로 보기 어렵습니다."));
+    }
   }
 
   const stack = logFold("Call stack", crash.call_stack, { open: true });

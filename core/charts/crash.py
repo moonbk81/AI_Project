@@ -604,7 +604,16 @@ def _crash_triage(crash: Dict[str, Any], is_kernel: bool, crash_type: str, top_m
     lower_exception = str(exception).lower()
     has_dead_system = "deadsystemexception" in raw_logs or "the system died" in raw_logs
     has_binder_failure = "binder transaction failure" in raw_logs or "transaction errors" in raw_logs
-    has_transaction_too_large = "transactiontoolargeexception" in raw_logs
+    # 이 crash 자신의 예외/스택에 있어야 원인이다. 주변 로그에만 보이면 다른 IPC 호출의 실패일 수 있다.
+    own_text = " ".join([
+        str(crash.get("exception_info") or ""),
+        str(crash.get("trigger") or ""),
+        " ".join(str(frame) for frame in (crash.get("call_stack") or [])),
+    ]).lower()
+    has_transaction_too_large = "transactiontoolargeexception" in own_text
+    nearby_transaction_too_large = (
+        not has_transaction_too_large and "transactiontoolargeexception" in raw_logs
+    )
 
     if is_kernel:
         primary = "Kernel/modem fatal"
@@ -633,10 +642,16 @@ def _crash_triage(crash: Dict[str, Any], is_kernel: bool, crash_type: str, top_m
     else:
         exception_note = "명확한 예외 타입 추출 근거가 부족합니다."
 
-    binder_strength = "강함" if has_transaction_too_large else "보조" if has_binder_failure else "근거 약함"
+    binder_strength = (
+        "강함" if has_transaction_too_large
+        else "보조" if nearby_transaction_too_large or has_binder_failure
+        else "근거 약함"
+    )
     binder_note = (
-        "TransactionTooLargeException 계열 로그가 확인됩니다."
+        "이 crash 의 예외에 TransactionTooLargeException 이 직접 찍혀 있습니다."
         if has_transaction_too_large
+        else "주변 로그에만 TransactionTooLargeException 이 보입니다. 다른 IPC 호출의 실패일 수 있어 이 crash 의 원인으로 단정하지 마세요."
+        if nearby_transaction_too_large
         else "Binder transaction failure가 보여 후속 증상 여부를 확인해야 합니다."
         if has_binder_failure
         else "Binder/IPC 직접 원인 근거는 약합니다."
