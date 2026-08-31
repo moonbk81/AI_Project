@@ -179,6 +179,40 @@ Base URL 에 `http://<backend-host>:8080/v1` 을 넣습니다. API 키는 검사
   노출하지 마십시오.
 - 대시보드/PLM 탭 같은 화면은 채팅 규격으로 표현할 수 없으므로 backend 브라우저 UI에서 사용합니다.
 
+### 다중 사용자 / 관리자 설정
+
+여러 팀원이 같은 서버를 사용할 때, 누가 어떤 로그를 올렸는지 추적하고 실수로 전체 DB를 초기화하는 것을 방지합니다.
+
+**로그인 방식**
+
+- 로그인은 **이름표**일 뿐 인증이 아닙니다 (비밀번호 없음, 서버 검증 없음).
+- 아무 이름이나 입력 가능하지만, 쓰기 작업(업로드·PLM 댓글·결함 등록)은 로그인 상태에서만 가능합니다.
+- `localStorage.knoxId`로 저장되며 브라우저를 닫아도 유지됩니다(세션 만료 없음).
+- 진짜 보안이 필요하면 앞단에 사내 인증 프록시를 세워야 합니다.
+
+**관리자 설정**
+
+`ADMIN_KNOX_IDS` 환경변수로 관리자 Knox ID를 지정합니다:
+
+```bash
+# 단일 관리자
+ADMIN_KNOX_IDS=bongki.moon python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
+
+# 여러 명 (쉼표로 구분, 공백 없음)
+ADMIN_KNOX_IDS=a.kim,b.lee python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080
+```
+
+관리자는 다음 권한을 가집니다:
+
+- `/db/reset` 엔드포인트 접근 (전체 DB와 산출물 초기화)
+- 브라우저 UI에서 "초기화" 버튼 표시
+
+두 가지 방법으로 관리자 권한을 얻습니다:
+
+1. **Loopback 요청**: 서버를 띄운 PC(127.0.0.1 또는 ::1)에서 접근 — 자동으로 관리자 인식
+2. **ADMIN_KNOX_IDS 등재**: 지정된 Knox ID로 로그인
+
+`GET /health.admin` 응답에서 `"admin": true/false`로 현재 권한 상태를 확인할 수 있습니다.
 
 Backend 모드의 자동 분석 파이프라인은 `POST /jobs/analyze`로 작업을 만들고 `GET /jobs/{job_id}` 또는 `GET /jobs`로 진행 상태를 조회합니다. 대시보드 metadata는 `GET /metadata`, 지식 베이스는 `GET /knowledge`와 `POST /knowledge`, 분석 결과 JSON은 `GET /results/{base_name}/{artifact}`에서 처리합니다. `GET /health`는 runtime, engine load 여부, active job 수를 반환합니다.
 
