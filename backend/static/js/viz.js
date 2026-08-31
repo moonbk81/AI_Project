@@ -42,8 +42,19 @@ export function ensurePlotly() {
 export function drawPlot(node, traces, layout) {
   ensurePlotly()
     .then((Plotly) => {
-      node.replaceChildren();  // drop the loading placeholder plotly would keep
-      Plotly.react(node, traces, layout, PLOT_CONFIG);
+      // react() updates the svg plotly already put on this node, so the node's
+      // children must survive. Clearing them first left plotly patching a
+      // detached tree — it still sees `js-plotly-plot` and `_fullLayout` on the
+      // node, so it takes the update path and draws nowhere. Every redraw after
+      // the first (a metric picker, say) went blank. Clear only when there is no
+      // live plot: the loading placeholder, or a note()/content() that replaced
+      // one. newPlot purges plotly's stale state for us.
+      if (node.querySelector(".plot-container")) {
+        Plotly.react(node, traces, layout, PLOT_CONFIG);
+      } else {
+        node.replaceChildren();
+        Plotly.newPlot(node, traces, layout, PLOT_CONFIG);
+      }
 
       if (!node._sizeWatcher && typeof ResizeObserver !== "undefined") {
         node._sizeWatcher = new ResizeObserver(() => Plotly.Plots.resize(node));
