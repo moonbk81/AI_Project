@@ -87,8 +87,8 @@ def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str
                 first_process = native_crashes[0].get("process") or native_crashes[0].get("process_name")
                 subject = f"{first_process} Native Crash" if first_process else "Native Crash"
             return (
-                f"{subject}만 확인됩니다. 일반 앱 Java Exception 기반 `Crash_Event`는 확인되지 않으며, "
-                "일반 앱 응답 없음 `ANR_Context`도 확인되지 않습니다. 따라서 질문 범위 기준으로는 "
+                f"{subject}만 확인됩니다. 일반 앱의 Java Exception 크래시는 확인되지 않으며, "
+                "앱 응답 없음(ANR)도 확인되지 않습니다. 따라서 질문 범위 기준으로는 "
                 "Java Crash 동반 없음, 일반 앱 ANR 동반 없음으로 판단됩니다. Binder/IPC 경고 등 다른 시스템 이벤트는 "
                 "일반 앱 Crash/ANR 원인으로 확장하지 않습니다."
             )
@@ -116,7 +116,7 @@ def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str
         times = [str(meta.get("time", "")) for meta in thread_exhaustion_events if meta.get("time")]
         time_summary = ", ".join(times[:3])
         return (
-            "네, 단말 내부 IPC 병목 흔적이 확인됩니다. 검색된 `Binder_Warning`에서 "
+            "네, 단말 내부 IPC 병목 흔적이 확인됩니다. 바인더 경고 기록에서 "
             f"`THREAD_EXHAUSTION`이 감지되었고, Binder thread pool 고갈로 Starvation 대기가 발생했습니다. "
             f"발생 시간대는 {time_summary}이며, 최대 대기 시간은 {max_ms}ms입니다. "
             "이는 기지국/망 장애가 아니라 단말 내부 Binder IPC 처리 스레드 부족에 따른 시스템 성능 저하로 판단됩니다."
@@ -166,7 +166,7 @@ def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str
         )
         if not has_positive_leak:
             return (
-                "Binder proxy leak 확인되지 않음. 검색 결과에서 `BINDER_PROXY_LEAK_RCA`가 확인되지 않고, "
+                "Binder proxy leak 확인되지 않음. 누수로 판정된 원인 분석 결과가 없고, "
                 "Binder Proxy Histogram 기반의 leak 근거도 확인되지 않습니다. 따라서 이 로그에서는 Binder proxy leak에 의한 "
                 "시스템 리소스 고갈 또는 프로세스 강제 종료로 판단하면 안 됩니다."
             )

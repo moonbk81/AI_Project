@@ -50,6 +50,7 @@ from rag.ingest import (
 )
 from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
+from rag.plain_language import humanize
 from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
 from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
 class RilRagChat:
@@ -517,6 +518,9 @@ class RilRagChat:
 
         # 7. LLM 호출 및 결과 반환
         answer, thinking = self._call_llm(system_prompt=system_prompt, user_query=user_query, is_bench=is_bench)
+        # 프롬프트가 내부 이름으로 지시하니 모델은 그 이름 그대로 답한다. 규칙만으로는
+        # 새지 않는다는 보장이 없어서, 내보내기 직전에 한 번 더 사람 말로 바꾼다.
+        answer = humanize(answer)
         return answer, results.get('ids', [[]])[0], results.get('metadatas', [[]])[0], thinking
 
     def get_all_files(self):

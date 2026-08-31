@@ -77,7 +77,7 @@ class StructuredEventRenderer:
         if not parts:
             return None
 
-        parts.append("이 이벤트는 일반 앱 Crash_Event나 Native_Crash_Event로 단정하지 말고, Binder_Warning/RCA_Event와 함께 시스템 리소스 고갈 또는 Binder proxy leak 가능성을 교차 확인해야 함.")
+        parts.append("이 이벤트는 일반 앱 크래시나 네이티브 크래시로 단정하지 말고, 바인더 경고 기록·원인 분석 결과와 함께 시스템 리소스 고갈 또는 Binder proxy leak 가능성을 교차 확인해야 함.")
         return " ".join(parts)
 
     @classmethod

@@ -80,7 +80,10 @@ def test_ask_prompt_includes_config_sections(monkeypatch):
     assert "CONFIG_SENTINEL_TOOL_FACT" in prompt
     assert "CONFIG_SENTINEL_RETRIEVED_DOC" in prompt
     assert "PLM 코멘트에 그대로 등록해도 어색하지 않은 개발자 코멘트체" in prompt
-    assert "내부 라우팅명, intent 이름, 규칙명, 템플릿명은 사용자에게 노출하지 않는다" in prompt
+    assert "이 시스템의 내부 이름은 답변에 쓰지 않는다" in prompt
+    assert "get_..._analytics 형태 전부" in prompt
+    assert "문서 분류(log_type) 이름" in prompt
+    assert "단말이 남긴 문자열은 원문 그대로 인용한다" in prompt
     assert "Call_Analysis" in prompt  # 금지 예시로만 남아 있어야 한다.
     assert captured["user_query"] == "통화 끊김 원인 분석"
 
@@ -189,3 +192,22 @@ class TestParseToolFact:
         assert RilRagChat._parse_tool_fact("매칭된 도구 분석 결과가 없습니다.") == {}
         assert RilRagChat._parse_tool_fact("[1, 2, 3]") == {}
         assert RilRagChat._parse_tool_fact(None) == {}
+
+
+def test_internal_names_are_gone_from_what_ask_returns(monkeypatch):
+    """규칙만으로는 새지 않는다는 보장이 없어서 내보내기 직전에 한 번 더 거른다."""
+    engine = make_engine(monkeypatch)
+    engine._call_llm = lambda system_prompt, user_query, is_bench=False: (
+        "get_ps_ims_call_analytics 결과 `Call_Session` 2건에서 끊김이 확인됩니다. "
+        "am_kill 사유는 'Too many Binders sent to SYSTEM' 입니다.",
+        "thinking",
+    )
+
+    answer, _, _, _ = engine.ask("통화 끊김 원인 분석", current_file="radio_payload.json")
+
+    assert "get_ps_ims_call_analytics" not in answer
+    assert "Call_Session" not in answer
+    assert "통화 세션 기록 2건" in answer
+    # 단말이 남긴 문자열은 근거라 그대로 있어야 한다.
+    assert "am_kill" in answer
+    assert "Too many Binders sent to SYSTEM" in answer
