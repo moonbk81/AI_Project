@@ -168,3 +168,30 @@ def test_null_binder_guard_log_is_never_a_buffer_root_cause():
     assert buffer_error["rca_candidate"] is False
     assert buffer_error["evidence_role"] == "secondary_symptom"
     assert "parcel 크기나 buffer 고갈과 무관" in buffer_error["desc"]
+
+
+def test_native_proxy_limit_warning_becomes_its_own_event():
+    event = _events_by_type(
+        [
+            "06-01 15:13:16.733  3179  6884 E libbinder.BpBinder: Too many binder proxy objects"
+            " sent to uid 1000 from uid 1001 (6000 proxies held)"
+        ]
+    )["BINDER_PROXY_LIMIT"]
+
+    assert event["rca_candidate"] is True
+    assert (event["from_uid"], event["to_uid"]) == ("1001", "1000")
+    assert event["max_count"] == 6000
+
+
+def test_the_wtf_that_names_a_proxy_leak_is_not_a_plain_wtf():
+    events = BinderWarningParser().analyze(
+        [
+            "06-01 15:13:16.733  3179  3387 I am_wtf  : [0,3179,system_server,-1,ActivityManager,"
+            "Uid 1001 [android.uid.phone:1001] sent too many Binders to uid 1000]",
+            "06-01 15:13:20.000  3179  3387 I am_wtf  : [0,3179,system_server,-1,ActivityManager,something else]",
+        ]
+    )
+
+    assert [event["type"] for event in events] == ["BINDER_PROXY_LIMIT", "SYSTEM_WTF"]
+    assert events[0]["process"] == "android.uid.phone:1001"
+    assert events[0]["rca_candidate"] is True

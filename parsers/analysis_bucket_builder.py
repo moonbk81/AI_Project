@@ -85,6 +85,9 @@ class AnalysisBucketBuilder:
         "DeadObjectException", "FAILED_TRANSACTION", "binder transaction failed",
         "Binder transaction failure",
         "TransactionTooLargeException", "binder_alloc", "binder buffer",
+        # BpBinder 의 proxy 한계 경고. 누수 uid 쌍과 보유 개수를 직접 말해주고
+        # am_kill 보다 먼저 뜨는데, 여기 없어서 파서까지 닿지 못했다.
+        "binder proxy objects", "proxies held",
         "am_kill", "am_wtf",
     ]
     BINDER_CONTEXT_KEYWORDS = [

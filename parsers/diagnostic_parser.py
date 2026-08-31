@@ -1093,6 +1093,7 @@ class BinderWarningParser(BaseParser):
         "SYSTEM_KILL",
         "SYSTEM_WTF",
         "BINDER_ONEWAY_SPAM", # 💡 신규 이벤트 타입 추가
+        "BINDER_PROXY_LIMIT",
     }
     STARVATION_RCA_THRESHOLD_MS = 1000
     REPEATED_DELAY_WINDOW_SECONDS = 60
@@ -1133,6 +1134,46 @@ class BinderWarningParser(BaseParser):
     def _extract_time(self, line_str):
         ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line_str)
         return ts_m.group(0) if ts_m else line_str[:18].strip()
+
+    # 커널/네이티브가 프록시 한계를 알리는 줄. 누수 uid 쌍과 보유 개수를 담고 있다.
+    PROXY_LIMIT_NATIVE = re.compile(
+        r"too many binder proxy objects sent to uid\s*(?P<to_uid>\d+)\s*from uid\s*(?P<from_uid>\d+)"
+        r"(?:.*?\((?P<held>\d+)\s*proxies held\))?",
+        re.IGNORECASE,
+    )
+    # 같은 사건을 ActivityManager 가 am_wtf 로 남긴 것. 평범한 wtf 와 섞이면 안 된다.
+    PROXY_LIMIT_WTF = re.compile(
+        r"uid\s*(?P<from_uid>\d+)\s*(?:\[(?P<from_name>[^\]]+)\]\s*)?sent too many binders to uid\s*(?P<to_uid>\d+)",
+        re.IGNORECASE,
+    )
+
+    def _proxy_limit_warning(self, line_str, lower, event_time):
+        """프록시 한계 경고를 이벤트로 만든다. 해당 없으면 None."""
+        native = self.PROXY_LIMIT_NATIVE.search(line_str)
+        wtf = None if native else self.PROXY_LIMIT_WTF.search(line_str)
+        match = native or wtf
+        if not match:
+            return None
+
+        fields = match.groupdict()
+        held = int(fields["held"]) if fields.get("held") else 0
+        holder = fields.get("from_name") or f"uid {fields['from_uid']}"
+        held_text = f", 보유 {held}개" if held else ""
+        return {
+            "time": event_time,
+            "type": "BINDER_PROXY_LIMIT",
+            "process": holder,
+            "from_uid": fields["from_uid"],
+            "to_uid": fields["to_uid"],
+            "max_count": held,
+            "desc": (
+                f"Binder proxy 한계 경고: {holder} 가 uid {fields['to_uid']} 로 보낸 proxy 가 한계에 도달했습니다"
+                f"{held_text}. 특정 프로세스가 Binder 객체를 놓아주지 않고 있다는 직접 근거입니다."
+            ),
+            "raw": line_str,
+            "evidence_role": "rca_candidate",
+            "rca_candidate": True,
+        }
 
     def _classify_kill_reason(self, reason):
         """am_kill 사유를 양성 회수 / RCA 근거 / 판단 보류로 나눈다."""
@@ -1232,6 +1273,11 @@ class BinderWarningParser(BaseParser):
                         "rca_candidate": kill_role == "rca_candidate",
                         "cross_context_logs": self.get_context_fn(lines, event_time) if self.get_context_fn else []
                     })
+                continue
+
+            proxy_limit = self._proxy_limit_warning(line_str, lower, event_time)
+            if proxy_limit:
+                warnings.append(proxy_limit)
                 continue
 
             if "am_wtf" in line_str:
