@@ -72,3 +72,99 @@ def test_binder_bucket_matching_is_case_insensitive():
     )
 
     assert buckets["binder"]
+
+
+def test_benign_am_kill_reasons_are_not_rca_evidence():
+    events = BinderWarningParser().analyze(
+        [
+            "08-22 15:24:10.921  1000  2837  5011 I am_kill : [0,13938,com.android.chrome:sandboxed_process0,0,isolated not needed,0]",
+            "08-22 15:24:11.000  1000  2837  5011 I am_kill : [0,13556,com.example.app,0,remove task,0]",
+        ]
+    )
+
+    assert [event["evidence_role"] for event in events] == ["benign_event", "benign_event"]
+    assert [event["rca_candidate"] for event in events] == [False, False]
+    assert "장애/강제 종료 근거나 Root Cause 로 인용하지 않습니다" in events[0]["desc"]
+
+
+def test_kill_reasons_that_name_a_failure_stay_rca_candidates():
+    events = BinderWarningParser().analyze(
+        [
+            "03-30 22:58:17.454  1000  2837  2853 I am_kill : [0,4529,com.android.phone,-800,Too many Binders sent to SYSTEM,0]",
+            "03-30 22:58:20.000  1000  2837  2853 I am_kill : [0,4600,com.example.app,0,bg anr,0]",
+        ]
+    )
+
+    assert [event["rca_candidate"] for event in events] == [True, True]
+    assert events[0]["kill_reason"].startswith("Too many Binders sent to SYSTEM")
+
+
+def test_kill_reason_we_do_not_recognise_stays_undecided():
+    event = _events_by_type(
+        ["03-30 22:59:35.098  1000  2837  2853 I am_kill : [0,7788,com.example.app,0,Cant deliver broadcast,0]"]
+    )["SYSTEM_KILL"]
+
+    assert event["evidence_role"] == "event"
+    assert event["rca_candidate"] is False
+
+
+def test_lone_transaction_too_large_is_a_local_symptom():
+    event = _events_by_type(
+        [
+            "03-30 22:59:42.103  1000  2837  2853 E BroadcastQueue: Failure sending broadcast Intent { act=android.net.action.RECOMMEND_NETWORKS }"
+            " android.os.TransactionTooLargeException: data parcel size 1049112 bytes"
+        ]
+    )["BINDER_BUFFER_ERROR"]
+
+    assert event["rca_candidate"] is False
+    assert event["evidence_role"] == "secondary_symptom"
+    assert "단독 Root Cause 로 단정하지 않습니다" in event["desc"]
+
+
+def test_transaction_too_large_is_promoted_when_a_kill_lands_beside_it():
+    events = BinderWarningParser().analyze(
+        [
+            "03-30 22:58:17.454  1000  2837  2853 I am_kill : [0,4529,com.android.phone,-800,Too many Binders sent to SYSTEM,0]",
+            "03-30 22:58:30.000  1000  2837  2853 E BroadcastQueue: android.os.TransactionTooLargeException: data parcel size 1049112 bytes",
+            "03-30 23:40:00.000  1000  2837  2853 E BroadcastQueue: android.os.TransactionTooLargeException: data parcel size 524288 bytes",
+        ]
+    )
+    buffer_errors = [event for event in events if event["type"] == "BINDER_BUFFER_ERROR"]
+
+    assert [event["rca_candidate"] for event in buffer_errors] == [True, False]
+    assert "원인 후보로 올립니다" in buffer_errors[0]["desc"]
+
+
+def test_a_benign_kill_alone_does_not_promote_transaction_too_large():
+    events = BinderWarningParser().analyze(
+        [
+            "08-22 15:24:10.921  1000  2837  5011 I am_kill : [0,13938,com.android.chrome:sandboxed_process0,0,isolated not needed,0]",
+            "08-22 15:24:12.000  1000  2837  2853 E BroadcastQueue: android.os.TransactionTooLargeException: data parcel size 1049112 bytes",
+        ]
+    )
+    buffer_error = [event for event in events if event["type"] == "BINDER_BUFFER_ERROR"][0]
+
+    assert buffer_error["rca_candidate"] is False
+
+
+def test_real_buffer_exhaustion_stays_an_rca_candidate():
+    event = _events_by_type(
+        ["[ 1245.411590] binder: 2910:2910 transaction failed 29189/-28, size 76-0 line 3269 No space left on device"]
+    )["BINDER_BUFFER_ERROR"]
+
+    assert event["rca_candidate"] is True
+    assert event["evidence_role"] == "rca_candidate"
+
+
+def test_null_binder_guard_log_is_never_a_buffer_root_cause():
+    events = BinderWarningParser().analyze(
+        [
+            "03-30 22:59:42.103 1041 1308 1308 E libbinder.IPCThreadState: binder thread pool (1 threads) starved for 2512 ms",
+            "03-30 22:59:13.752 10266  4946 10300 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException",
+        ]
+    )
+    buffer_error = [event for event in events if event["type"] == "BINDER_BUFFER_ERROR"][0]
+
+    assert buffer_error["rca_candidate"] is False
+    assert buffer_error["evidence_role"] == "secondary_symptom"
+    assert "parcel 크기나 buffer 고갈과 무관" in buffer_error["desc"]

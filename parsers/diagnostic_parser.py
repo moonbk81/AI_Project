@@ -1097,10 +1097,51 @@ class BinderWarningParser(BaseParser):
     STARVATION_RCA_THRESHOLD_MS = 1000
     REPEATED_DELAY_WINDOW_SECONDS = 60
     PROXY_LEAK_THRESHOLD = 1000
+    BUFFER_CORROBORATION_WINDOW_SECONDS = 30
+    # 커널이 버퍼를 못 잡아준 신호. 호출 하나가 아니라 대상 프로세스 전체가 영향을 받는다.
+    BUFFER_EXHAUSTION_MARKERS = (
+        "no space left",
+        "buffer allocation failed",
+        "failed to allocate",
+    )
+
+    # am_kill 사유는 대부분 AMS 가 쓸모없어진 프로세스를 회수하며 남기는 정상 기록이다.
+    # 장애로 읽어야 하는 사유만 따로 세워두고, 나머지는 판단을 보류한다.
+    BENIGN_KILL_REASONS = (
+        "isolated not needed",
+        "remove task",
+        "stop ",
+        "force stop",
+        "force-stop",
+        "user stopped",
+        "swap low and too many cached",
+        "empty for",
+        "empty #",
+        "cached #",
+        "background",
+        "finishing",
+    )
+    RCA_KILL_REASONS = (
+        "too many binders sent to system",
+        "crash",
+        "anr",
+        "excessive cpu",
+        "watchdog",
+        "depends on",
+    )
 
     def _extract_time(self, line_str):
         ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line_str)
         return ts_m.group(0) if ts_m else line_str[:18].strip()
+
+    def _classify_kill_reason(self, reason):
+        """am_kill 사유를 양성 회수 / RCA 근거 / 판단 보류로 나눈다."""
+        text = (reason or "").strip().lower()
+        if any(k in text for k in self.BENIGN_KILL_REASONS):
+            return "benign"
+        if any(k in text for k in self.RCA_KILL_REASONS):
+            return "rca_candidate"
+        return "event"
 
     def _severity_label(self, duration_ms):
         if duration_ms >= 5000:
@@ -1137,6 +1178,7 @@ class BinderWarningParser(BaseParser):
         warnings = []
         delay_events_by_target = {}
         last_delay_event_by_target = {}
+        anr_seconds = []
         seen_raw = set()
         in_proxy_histogram = False
         current_histogram = []
@@ -1151,17 +1193,43 @@ class BinderWarningParser(BaseParser):
             lower = line_str.lower()
             event_time = self._extract_time(line_str)
 
+            # 버퍼 에러를 뒷받침할 근거로만 쓴다. ANR 자체는 여기서 이벤트로 만들지 않는다.
+            if "am_anr" in lower or "application not responding" in lower:
+                anr_second = self._time_to_sec(event_time)
+                if anr_second is not None:
+                    anr_seconds.append(anr_second)
+
             if "am_kill" in line_str:
                 match = re.search(r'am_kill\s*:\s*\[\d+,\d+,([^,]+),-?\d+,\s*([^\]]+)\]', line_str)
                 if match:
                     process = match.group(1)
                     reason = match.group(2)
+                    kill_role = self._classify_kill_reason(reason)
+                    if kill_role == "benign":
+                        desc = (
+                            f"ActivityManager 프로세스 회수 이벤트. 대상 프로세스: {process}, 사유: {reason}. "
+                            "바인딩이 끊긴 isolated 프로세스나 종료된 task 를 정리하는 정상 동작이므로, "
+                            "장애/강제 종료 근거나 Root Cause 로 인용하지 않습니다."
+                        )
+                    elif kill_role == "rca_candidate":
+                        desc = (
+                            f"시스템(ActivityManager) 강제 종료 이벤트 감지. 대상 프로세스: {process}, 사유: {reason}. "
+                            "사유 자체가 장애를 가리키므로 동시간대 Crash/ANR/Binder/메모리 상태와 함께 원인으로 검토합니다."
+                        )
+                    else:
+                        desc = (
+                            f"시스템(ActivityManager) 강제 종료 이벤트 감지. 대상 프로세스: {process}, 사유: {reason}. "
+                            "Crash/ANR로 단정하지 말고 동시간대 Binder/메모리/프로세스 상태와 교차 확인해야 합니다."
+                        )
                     warnings.append({
                         "time": event_time,
                         "type": "SYSTEM_KILL",
                         "process": process,
-                        "desc": f"시스템(ActivityManager) 강제 종료 이벤트 감지. 대상 프로세스: {process}, 사유: {reason}. Crash/ANR로 단정하지 말고 동시간대 Binder/메모리/프로세스 상태와 교차 확인해야 합니다.",
+                        "kill_reason": reason,
+                        "desc": desc,
                         "raw": line_str,
+                        "evidence_role": "benign_event" if kill_role == "benign" else kill_role,
+                        "rca_candidate": kill_role == "rca_candidate",
                         "cross_context_logs": self.get_context_fn(lines, event_time) if self.get_context_fn else []
                     })
                 continue
@@ -1306,12 +1374,12 @@ class BinderWarningParser(BaseParser):
                         })
                 continue
 
-            # 4. Binder transaction failure 계열
+            # 4. Binder transaction failure 계열 (버퍼 고갈 라인은 5번에서 다룬다)
             if any(k in lower for k in [
                 "deadobjectexception", "failed_transaction", "binder transaction failed",
                 "binder transaction failure", "transaction failed", "transaction failure",
                 "remoteexception"
-            ]):
+            ]) and not any(k in lower for k in self.BUFFER_EXHAUSTION_MARKERS):
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_TRANSACTION_FAILURE",
@@ -1350,24 +1418,43 @@ class BinderWarningParser(BaseParser):
 
 	                # 일반 버퍼 에러 처리 (Spamming이 아닌 경우)
                 is_secondary_no_vma = "binder_alloc_buf" in lower and "no vma" in lower
-                is_strong_buffer_signal = any(k in lower for k in [
-                    "transactiontoolargeexception",
-                    "no space left",
-                    "buffer allocation",
-                    "parcel size",
-                    "binder buffer",
-                ])
+                is_buffer_exhaustion = any(k in lower for k in self.BUFFER_EXHAUSTION_MARKERS)
+                # TransactionTooLargeException 은 그 호출 하나가 실패하고 끝나는 국소 증상이다.
+                # system_server 상대이거나 동시간대 킬/ANR 이 있을 때만(아래 후처리) 원인 후보로 올린다.
+                is_too_large = "transactiontoolargeexception" in lower
+                hits_system_server = any(k in lower for k in ["system_server", "systemserver", "activitymanager"])
+                # binder 가 null 이라 원격에 일부러 예외를 던지는 가드 로그. parcel 크기와 무관하다.
+                is_null_binder = "nullbinder" in lower
+
+                if is_null_binder:
+                    desc = (
+                        "NullBinder 가드 로그. 대상 binder 가 null 이라 호출부에 TransactionTooLargeException 을 "
+                        "던진 것으로, parcel 크기나 buffer 고갈과 무관합니다. Root Cause 근거로 쓰지 않습니다."
+                    )
+                    evidence_role, rca_candidate = "secondary_symptom", False
+                elif is_buffer_exhaustion or (is_too_large and hits_system_server):
+                    desc = "Binder buffer 고갈/대용량 parcel 오류 감지. 대상 프로세스의 IPC 전반이 막힐 수 있어 원인 후보로 봅니다."
+                    evidence_role, rca_candidate = "rca_candidate", True
+                elif is_too_large:
+                    desc = (
+                        "TransactionTooLargeException 감지. 해당 IPC 호출 하나가 parcel 크기 한계로 실패한 국소 증상이라, "
+                        "동시간대 강제 종료/ANR 이나 buffer 고갈 근거 없이는 단독 Root Cause 로 단정하지 않습니다."
+                    )
+                    evidence_role, rca_candidate = "secondary_symptom", False
+                elif is_secondary_no_vma:
+                    desc = "binder_alloc_buf no vma 감지. 대상 프로세스 종료나 mmap 소멸 이후 나타나는 후속 증상일 수 있으므로 단독 Binder buffer Root Cause로 단정하지 않습니다."
+                    evidence_role, rca_candidate = "secondary_symptom", False
+                else:
+                    desc = "Binder buffer/parcel 크기 관련 로그 감지. 전후 Crash/ANR/thread starvation 근거와 함께 볼 보조 신호입니다."
+                    evidence_role, rca_candidate = "secondary_signal", False
+
                 warnings.append({
                     "time": event_time,
                     "type": "BINDER_BUFFER_ERROR",
-                    "desc": (
-                        "binder_alloc_buf no vma 감지. 대상 프로세스 종료나 mmap 소멸 이후 나타나는 후속 증상일 수 있으므로 단독 Binder buffer Root Cause로 단정하지 않습니다."
-                        if is_secondary_no_vma and not is_strong_buffer_signal
-                        else "Binder buffer/parcel 크기 관련 오류 감지. 대용량 parcel, buffer 부족 또는 TransactionTooLargeException 가능성이 있습니다."
-                    ),
+                    "desc": desc,
                     "raw": line_str,
-                    "evidence_role": "secondary_symptom" if is_secondary_no_vma and not is_strong_buffer_signal else "rca_candidate",
-                    "rca_candidate": not (is_secondary_no_vma and not is_strong_buffer_signal)
+                    "evidence_role": evidence_role,
+                    "rca_candidate": rca_candidate
                 })
                 continue
 
@@ -1384,7 +1471,41 @@ class BinderWarningParser(BaseParser):
                     "rca_candidate": False
                 })
 
+        self._promote_corroborated_buffer_errors(warnings, anr_seconds)
         return warnings
+
+    def _promote_corroborated_buffer_errors(self, warnings, anr_seconds):
+        """TransactionTooLarge 는 같은 구간에 실제 킬/ANR/starvation 이 있을 때만 원인 후보다."""
+        pending = [
+            w for w in warnings
+            if w.get("type") == "BINDER_BUFFER_ERROR"
+            and not w.get("rca_candidate")
+            and "transactiontoolargeexception" in str(w.get("raw", "")).lower()
+            and "nullbinder" not in str(w.get("raw", "")).lower()
+        ]
+        if not pending:
+            return
+
+        corroborations = [
+            self._time_to_sec(w.get("time"))
+            for w in warnings
+            if w.get("rca_candidate") and w.get("type") in ("SYSTEM_KILL", "THREAD_EXHAUSTION")
+        ]
+        corroborations = [t for t in corroborations if t is not None] + list(anr_seconds)
+        if not corroborations:
+            return
+
+        for event in pending:
+            when = self._time_to_sec(event.get("time"))
+            if when is None:
+                continue
+            if any(abs(when - t) <= self.BUFFER_CORROBORATION_WINDOW_SECONDS for t in corroborations):
+                event["evidence_role"] = "rca_candidate"
+                event["rca_candidate"] = True
+                event["desc"] += (
+                    f" 다만 전후 {self.BUFFER_CORROBORATION_WINDOW_SECONDS}초 안에 강제 종료/ANR/thread starvation 이 "
+                    "함께 확인되어 원인 후보로 올립니다."
+                )
 
     def build_context_summary(self, context_lines, max_examples=12):
         # ... (기존 코드와 동일하게 유지)
