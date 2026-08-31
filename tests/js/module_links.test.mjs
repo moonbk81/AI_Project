@@ -54,7 +54,9 @@ test("every named frontend import resolves", async (t) => {
 
     await t.test(rel, async () => {
       for (const { names, from } of imports) {
-        const target = path.resolve(path.dirname(file), from);
+        // Specifiers carry a cache-busting query in the browser
+        // ("./views/dashboard.js?v=2026..."); on disk that is not part of the path.
+        const target = path.resolve(path.dirname(file), from.replace(/[?#].*$/, ""));
         const module = await import(pathToFileURL(target).href);
         for (const name of names) {
           assert.ok(
