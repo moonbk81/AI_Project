@@ -49,6 +49,19 @@ def extract_proxy_count(warning: dict) -> int:
     nums = [safe_int(x, 0) for x in re.findall(r"\b\d{3,7}\b", text)]
     return max(nums) if nums else 0
 
+def is_critical_binder_event(warning: dict) -> bool:
+    """핵심 신호로 앞세울 바인더 이벤트인지 판단한다.
+
+    buffer 에러는 파서가 원인 후보로 표시했을 때만 핵심이다. 단발
+    TransactionTooLargeException 처럼 국소 증상인 경우는 일반 이벤트로 내려보낸다.
+    """
+    warning_type = warning.get("type")
+    if warning_type not in CRITICAL_BINDER_TYPES:
+        return False
+    if warning_type == "BINDER_BUFFER_ERROR":
+        return bool(warning.get("rca_candidate"))
+    return True
+
 def build_binder_leak_rca_docs(report_data, input_file):
     """Build high-level RCA documents from Binder proxy leak + am_kill context."""
     rca_docs = []
@@ -200,15 +213,12 @@ def build_binder_payloads(report_data, input_file):
     ]
 
     # 3. 💡 핵심 단서 우선 처리 (Oneway Spam, Buffer Error 등)
-    critical_events = [
-        bw for bw in remaining_warnings
-        if bw.get("type") in CRITICAL_BINDER_TYPES
-    ]
+    critical_events = [bw for bw in remaining_warnings if is_critical_binder_event(bw)]
 
     # 4. 짜잘한 일반 지연 이벤트들 (최종 10개 제한용)
     normal_warnings = [
         bw for bw in remaining_warnings
-        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF") and bw.get("type") not in CRITICAL_BINDER_TYPES
+        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF") and not is_critical_binder_event(bw)
     ]
 
     # --- Payload 조립 시작 ---
@@ -225,6 +235,7 @@ def build_binder_payloads(report_data, input_file):
             "time": bw.get("time", ""),
             "type": bw.get("type", ""),
             "process": bw.get("process", "Unknown"),
+            "kill_reason": bw.get("kill_reason", ""),
             "desc": bw.get("desc", ""),
             "raw_info": raw_info,
             "evidence_role": bw.get("evidence_role") or (
@@ -232,10 +243,17 @@ def build_binder_payloads(report_data, input_file):
             ),
             "rca_candidate": bool(bw.get("rca_candidate", is_too_many_binders_kill)),
         }
-        text_content = (
-            f"[시스템 Kill/WTF 이벤트] 시간: {meta['time']}, "
-            f"프로세스: {meta['process']}, 유형: {meta['type']}, 상세: {meta['desc']}"
-        )
+        if meta["evidence_role"] == "benign_event":
+            text_content = (
+                f"[시스템 정상 프로세스 회수] 시간: {meta['time']}, "
+                f"프로세스: {meta['process']}, 유형: {meta['type']}, 상세: {meta['desc']} "
+                "이 이벤트는 장애가 아니므로 강제 종료 사유나 Root Cause 근거로 인용하지 마십시오."
+            )
+        else:
+            text_content = (
+                f"[시스템 Kill/WTF 이벤트] 시간: {meta['time']}, "
+                f"프로세스: {meta['process']}, 유형: {meta['type']}, 상세: {meta['desc']}"
+            )
         append_payload(rag_payload, text_content, meta)
 
     # 💡 신규: 핵심 이벤트들을 일반 이벤트보다 먼저, 그리고 더 넉넉하게(최대 30개) Payload에 추가합니다.
@@ -247,6 +265,8 @@ def build_binder_payloads(report_data, input_file):
             "type": bw.get("type", ""),
             "desc": bw.get("desc", ""),
             "raw_info": bw.get("raw", bw.get("raw_info", "")),
+            "evidence_role": bw.get("evidence_role") or "rca_candidate",
+            "rca_candidate": bool(bw.get("rca_candidate", True)),
         }
         text_content = (
             f"[바인더 핵심 이상 신호] 시간: {meta['time']}, "
@@ -270,7 +290,7 @@ def build_binder_payloads(report_data, input_file):
             "evidence_role": evidence_role,
             "rca_candidate": bool(bw.get("rca_candidate", False)),
         }
-        if is_transaction_failure:
+        if evidence_role == "secondary_symptom":
             text_content = (
                 f"[바인더 보조 증상] 시간: {meta['time']}, 유형: {meta['type']}, "
                 f"상세: {meta['desc']} "

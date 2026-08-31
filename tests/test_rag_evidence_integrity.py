@@ -833,3 +833,63 @@ class TestCallPayloadKeepsFailures:
         call_ids = [payload["metadata"]["call_id"] for payload in payloads]
         assert "failed-old" in call_ids
         assert len(call_ids) == 11
+
+
+class TestBinderPayloadDoesNotInflateSeverity:
+    """양성 이벤트가 '핵심 이상 신호' 자리를 차지하면 RCA 가 그쪽으로 끌려간다."""
+
+    def _payloads(self, warnings):
+        from rag_builders.binder_builder import build_binder_payloads
+
+        return build_binder_payloads({"binder_warnings": warnings}, "dumpState_0.log")
+
+    def test_lone_transaction_too_large_is_not_a_core_signal(self):
+        payloads = self._payloads(
+            [
+                {
+                    "type": "BINDER_BUFFER_ERROR",
+                    "time": "03-30 22:59:42.103",
+                    "desc": "TransactionTooLargeException 감지.",
+                    "evidence_role": "secondary_symptom",
+                    "rca_candidate": False,
+                }
+            ]
+        )
+
+        assert [p["metadata"]["log_type"] for p in payloads] == ["Binder_Warning"]
+        assert "Root Cause를 확정하지 마십시오" in payloads[0]["document"]
+
+    def test_a_corroborated_buffer_error_still_leads(self):
+        payloads = self._payloads(
+            [
+                {
+                    "type": "BINDER_BUFFER_ERROR",
+                    "time": "03-30 22:58:30.000",
+                    "desc": "Binder buffer 고갈.",
+                    "evidence_role": "rca_candidate",
+                    "rca_candidate": True,
+                }
+            ]
+        )
+
+        assert [p["metadata"]["log_type"] for p in payloads] == ["Binder_Warning_Critical"]
+        assert payloads[0]["metadata"]["rca_candidate"] is True
+
+    def test_a_benign_kill_says_so_in_the_document(self):
+        payloads = self._payloads(
+            [
+                {
+                    "type": "SYSTEM_KILL",
+                    "time": "08-22 15:24:10.921",
+                    "process": "com.android.chrome:sandboxed_process0",
+                    "kill_reason": "isolated not needed,0",
+                    "desc": "ActivityManager 프로세스 회수 이벤트.",
+                    "evidence_role": "benign_event",
+                    "rca_candidate": False,
+                }
+            ]
+        )
+
+        assert payloads[0]["metadata"]["kill_reason"] == "isolated not needed,0"
+        assert payloads[0]["metadata"]["rca_candidate"] is False
+        assert "Root Cause 근거로 인용하지 마십시오" in payloads[0]["document"]
