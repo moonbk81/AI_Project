@@ -122,11 +122,14 @@ def _system_properties(df: pd.DataFrame) -> Dict[str, str]:
     return props
 
 
-def _prop_slots(props: Dict[str, str], *keys: str) -> List[str]:
-    for key in keys:
-        if key in props:
-            return _split_slot_values(props[key])
-    return []
+def _prop_slots(props: Dict[str, str], key: str) -> List[str]:
+    """Slot-indexed values for one property.
+
+    Android joins the per-SIM values into a single property, comma separated and
+    positional: `gsm.sim.state = "LOADED,ABSENT"`. A single-SIM dump has no comma
+    and yields one entry; an empty slot yields "N/A".
+    """
+    return _split_slot_values(props.get(key))
 
 
 def _slot_value(values: List[str], index: int) -> str:
@@ -134,9 +137,9 @@ def _slot_value(values: List[str], index: int) -> str:
 
 
 def _sim_slots(props: Dict[str, str]) -> List[Dict[str, str]]:
-    states = _prop_slots(props, "gsm.sim.state", "gsm.sim.state2")
-    operators = _prop_slots(props, "gsm.sim.operator.numeric", "gsm.sim.operator.numeric2")
-    carriers = _prop_slots(props, "gsm.sim.operator.alpha", "gsm.sim.operator.alpha2")
+    states = _prop_slots(props, "gsm.sim.state")
+    operators = _prop_slots(props, "gsm.sim.operator.numeric")
+    carriers = _prop_slots(props, "gsm.sim.operator.alpha")
     count = max(len(states), len(operators), len(carriers), 0)
 
     slots = []
@@ -165,8 +168,8 @@ def _network_slots(df: pd.DataFrame, props: Dict[str, str]) -> List[Dict[str, st
                 "operator": _value(row.get("operator")),
             }
 
-    network_numbers = _prop_slots(props, "gsm.operator.numeric", "gsm.operator.numeric2")
-    network_names = _prop_slots(props, "gsm.operator.alpha", "gsm.operator.alpha2")
+    network_numbers = _prop_slots(props, "gsm.operator.numeric")
+    network_names = _prop_slots(props, "gsm.operator.alpha")
     for index in range(max(len(network_numbers), len(network_names))):
         slot = str(index)
         current = by_slot.setdefault(slot, {"slot": slot})

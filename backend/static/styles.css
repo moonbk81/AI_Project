@@ -165,11 +165,14 @@ main { padding: 22px 24px 64px; }
 
 .kpi-row {
   display: grid; gap: 12px; margin-bottom: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
 }
-.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; }
-.tile-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; }
-.tile-value { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.kpi-row-3col {
+  grid-template-columns: repeat(3, 1fr);
+}
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 9px 11px; }
+.tile-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+.tile-value { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .tile-unit { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
 .tile-note { font-size: 12px; margin-top: 5px; color: var(--text-muted); }
 .tile-note.good { color: var(--status-good); }

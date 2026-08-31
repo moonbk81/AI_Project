@@ -7,28 +7,30 @@ import {
   lineTrace, section, sectionAnalysisQuestion, seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
 } from "../viz.js";
 
+// An empty slot already says "N/A" in the value — repeating it in the note is noise.
+const noteText = (value) => (value && value !== "N/A" ? value : "");
+
 function kpiBand(kpi) {
   const dropped = kpi.call_drop_count > 0;
   const outOfService = kpi.oos_count > 0;
   const wrap = el("div");
   const ctx = kpi.device_context || {};
-  wrap.append(tileRow([
+  const firstRow = tileRow([
     tile("모델", ctx.model_name || "N/A", "", ctx.build_id || ""),
     tile("Radio", ctx.radio || "N/A"),
     tile("Build Network", ctx.network || "N/A"),
-  ]));
+  ]);
+  firstRow.classList.add("kpi-row-3col");
+  wrap.append(firstRow);
 
+  // One row per SIM slot: the SIM's own properties, then the network it is on.
   for (const sim of ctx.sim_slots || []) {
+    const net = (ctx.network_slots || []).find((n) => n.slot === sim.slot) || {};
     wrap.append(tileRow([
-      tile(`SIM Slot ${sim.slot}`, sim.state || "N/A", "", sim.carrier || ""),
-      tile("SIM MCC/MNC", sim.mcc_mnc || "N/A", "", [sim.mcc, sim.mnc].filter((v) => v && v !== "N/A").join(" / ")),
-    ]));
-  }
-
-  for (const net of ctx.network_slots || []) {
-    wrap.append(tileRow([
-      tile(`망 Slot ${net.slot}`, net.rat || "N/A", "", `${net.voice_reg || "N/A"} / ${net.data_reg || "N/A"}`),
-      tile("Network PLMN", net.plmn || net.mcc_mnc || "N/A", "", net.network_name || net.operator || ""),
+      tile(`SIM ${sim.slot}`, sim.state || "N/A", "", noteText(sim.carrier)),
+      tile(`SIM ${sim.slot} MCC/MNC`, sim.mcc_mnc || "N/A"),
+      tile(`SIM ${sim.slot} Network PLMN`, net.plmn || "N/A"),
+      tile(`SIM ${sim.slot} Network Alpha`, net.network_name || "N/A"),
     ]));
   }
 
