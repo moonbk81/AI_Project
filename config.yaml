@@ -229,16 +229,16 @@ prompts:
     7. [검색 결과 선별 원칙]: 검색된 결과 중 질문의 대상 시간대, 프로세스, 장애 유형과 직접 관련된 ERROR/FAILURE/WARNING만 답변에 포함하라. 관련성이 낮은 주변 이벤트는 Root Cause처럼 확대 해석하지 마라.
     7-1. [DataCall Setup 실패 우선 규칙]: 사용자가 SetupDataCall, 데이터 호 연결 실패, E-PDN, NO CARRIER, User authentication failed, NOT_SPECIFIED를 묻는 경우 `SetupDataCall_Failed`를 최우선 근거로 사용하라. 성공 상태의 `DataCall_Event`, `Network_DNS_Issue`, `Internet_Stall_Analysis`가 함께 검색되더라도 명시적인 데이터 호 설정 실패 사유가 있으면 DNS/Validation/Stall을 Root Cause로 확장하지 마라.
     7-2. [Call 분석 보수 판정 규칙]: 통화 실패/종료 분석에서는 `Call_Session`의 `status`, `fail_reason`, `is_user_reject`, `callFailCause`, `vendorCause`, `IMS Reason`, `SIP Code`만 직접 근거로 사용하라. 명시 근거 없이 망 혼잡, 커버리지, 기지국 장애, NW 장애, IMS 망 장애를 추정하지 마라.
-    8. [단말 강제 종료 분석 규칙 (am_kill)]: `System_Kill_Wtf_Event`의 SYSTEM_KILL / am_kill 이력이 발견되었다면, 단순 앱 크래시나 Native Crash로 판단하지 마라. 강제 종료 사유가 `Too many Binders sent to SYSTEM`이거나 동시간대 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`가 검색된 경우에는 바인더 프록시 누수에 따른 시스템 리소스 고갈을 최우선 Root Cause 후보로 판단하라.
+    8. [단말 강제 종료 분석 규칙 (am_kill)]: `System_Kill_Wtf_Event`의 SYSTEM_KILL / am_kill 이력이 발견되었다면, 단순 앱 크래시나 Native Crash로 판단하지 마라. 강제 종료 사유가 `Too many Binders sent to SYSTEM`이거나 동시간대 `BINDER_PROXY_HISTOGRAM`/`BINDER_PROXY_LEAK_RCA`/`BINDER_PROXY_LIMIT`가 검색된 경우에는 바인더 프록시 누수에 따른 시스템 리소스 고갈을 최우선 Root Cause 후보로 판단하라.
     9. [SystemUI 환각 절대 금지]: 안드로이드 시스템 에러(Crash, am_kill 등)를 분석할 때, 검색된 로그에 명시되지 않은 'SystemUI', '안드로이드 OS 오류', '소프트웨어 충돌' 등의 추상적이고 일반적인 단어로 뭉뚱그려 요약하지 마라.
     10. [다중 에러 나열 규칙]: 여러 프로세스가 동시에 강제 종료(am_kill)된 로그가 검색되었다면, 임의로 하나만 고르거나 요약하지 말고 "com.android.phone, com.samsung.crane 등 N개의 프로세스가 종료되었습니다"라고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
     11. [RCA_Event 우선 규칙]: 검색 결과에 `log_type: RCA_Event`가 포함되면, 해당 RCA_Event의 `rca_type`, `process`, `root_cause`, `kill_event`, `kill_reason`, `leaked_descriptor`, `max_proxy_count`, `developer_action`을 최우선 근거로 사용하라. 특히 `rca_type: BINDER_PROXY_LEAK_RCA`가 있으면 `System_Kill_Wtf_Event`의 am_wtf/am_kill 원본보다 RCA_Event를 우선하고, Binder proxy leak, 누수 인터페이스명, 최대 누수 개수, kill 사유, 개발자 조치를 반드시 포함하라. 단, 사용자가 Crash/ANR/Native Crash/Java Crash/Crash_Event/ANR_Context의 존재 여부만 묻거나 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 RCA_Event를 Crash_Event나 ANR_Context의 대체 근거로 사용하지 마라. RCA_Event와 충돌하지 않는 한 주변 Raw Event보다 RCA_Event 결론을 우선하며, OS 업데이트/캐시 삭제/안전 모드/공장 초기화 같은 일반 사용자 조치 설명은 금지하라.
-    12. [Negative Binder Leak 판정 규칙]: 사용자가 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 존재 여부를 묻고 "없으면 없다고", "확인되지 않으면"처럼 부재 확인을 요구한 경우, `System_Kill_Wtf_Event`의 am_wtf 원본만으로 Binder proxy leak이나 am_kill을 추론하지 마라. `BINDER_PROXY_HISTOGRAM`, `BINDER_PROXY_LEAK_RCA`, `kill_reason: Too many Binders sent to SYSTEM`, `kill_event: am_kill` 중 명확한 근거가 없으면 "Binder proxy leak 확인되지 않음", "Too many Binders sent to SYSTEM 없음", "am_kill 강제 종료 근거 없음"을 명시하라.
+    12. [Negative Binder Leak 판정 규칙]: 사용자가 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 존재 여부를 묻고 "없으면 없다고", "확인되지 않으면"처럼 부재 확인을 요구한 경우, `System_Kill_Wtf_Event`의 am_wtf 원본만으로 Binder proxy leak이나 am_kill을 추론하지 마라. `BINDER_PROXY_HISTOGRAM`, `BINDER_PROXY_LEAK_RCA`, `BINDER_PROXY_LIMIT`(BpBinder proxy 한계 경고), `kill_reason: Too many Binders sent to SYSTEM`, `kill_event: am_kill` 중 명확한 근거가 없으면 "Binder proxy leak 확인되지 않음", "Too many Binders sent to SYSTEM 없음", "am_kill 강제 종료 근거 없음"을 명시하라.
 
   root_cause_synthesis: |
     - [종합 진단]: 개별 로그 카운트가 0이더라도, 다른 로그 타입에서 관련 ERROR/FAILURE/EXHAUSTION이 감지되면 해당 이벤트를 참고하되, 질문 대상과 시간/프로세스/원인 연결성이 명확한 경우에만 Root Cause로 판단한다. Crash/ANR 존재 여부 확인 질문에서는 System_Kill_Wtf_Event, Binder_Warning, RCA_Event를 Crash/ANR의 대체 근거로 사용하지 않는다.
     - [로그 간 결합]: RILJ 트랜잭션 에러와 Binder 에러가 동시간대에 발생하더라도 자동으로 하나의 치명적 장애로 묶지 않는다. 동일 프로세스, 동일 시간대, RCA_Event, 또는 명확한 후속 장애 근거가 있을 때만 인과관계로 연결한다.
-    - [Binder transaction failure 보수 해석]: BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 단독 Root Cause가 아니라 후속/보조 증상으로 취급한다. thread starvation, buffer 부족, oneway spam, proxy histogram/leak, Too many Binders kill 근거가 없으면 Binder 병목 또는 리소스 고갈로 확정하지 않는다.
+    - [Binder transaction failure 보수 해석]: BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 단독 Root Cause가 아니라 후속/보조 증상으로 취급한다. thread starvation, buffer 부족, oneway spam, proxy histogram/leak, proxy 한계 경고(BINDER_PROXY_LIMIT), Too many Binders kill 근거가 없으면 Binder 병목 또는 리소스 고갈로 확정하지 않는다.
 
   # 대시보드 "현재 세션 리포트 생성" 질의. {health_kpi_json} 는 백엔드가 채웁니다.
   session_diagnostic_report: |
@@ -363,9 +363,9 @@ log_guidelines:
     System_Kill_Wtf_Event: |
       - SYSTEM_KILL(am_kill)은 일반 앱 크래시나 Native Crash가 아니라 시스템 서버(ActivityManager)에 의한 강제 종료 이벤트이다.
       - SYSTEM_WTF(am_wtf)는 심각한 시스템 상태 이상 신호이지만, 그 자체를 Crash/ANR로 단정하지 마라.
-      - SYSTEM_WTF(am_wtf) 단독 로그는 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 근거가 아니다. Binder proxy leak 여부를 묻는 부재 확인 질문에서는 BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/Too many Binders kill 근거가 없으면 없다고 답하라.
+      - SYSTEM_WTF(am_wtf) 단독 로그는 Binder proxy leak, Too many Binders sent to SYSTEM, am_kill 강제 종료의 근거가 아니다. Binder proxy leak 여부를 묻는 부재 확인 질문에서는 BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/BINDER_PROXY_LIMIT/Too many Binders kill 근거가 없으면 없다고 답하라.
       - 강제 종료 사유 문구(예: `Too many Binders sent to SYSTEM`)는 생략하거나 요약하지 말고 원문 그대로 답변에 포함하라.
-      - `Too many Binders sent to SYSTEM` 또는 동시간대 BINDER_PROXY_HISTOGRAM / BINDER_PROXY_LEAK_RCA가 있으면 Binder proxy leak을 최우선 Root Cause 후보로 판단하라.
+      - `Too many Binders sent to SYSTEM` 또는 동시간대 BINDER_PROXY_HISTOGRAM / BINDER_PROXY_LEAK_RCA / BINDER_PROXY_LIMIT가 있으면 Binder proxy leak을 최우선 Root Cause 후보로 판단하라. 단, 누수 근거만 있고 am_kill 이 없으면 강제 종료가 일어난 것처럼 쓰지 마라.
       - 여러 프로세스가 동시에 SYSTEM_KILL 되었다면 임의로 하나만 고르지 말고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
       - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 System_Kill_Wtf_Event를 답변에 언급하지 말고 Crash_Event/ANR_Context의 대체 근거로도 사용하지 마라.
 
@@ -375,7 +375,7 @@ log_guidelines:
       - THREAD_EXHAUSTION이 검색 결과에 있으면 절대 단답으로 답하지 말고, Binder_Warning, THREAD_EXHAUSTION, Binder thread pool 고갈, Starvation 대기 시간(ms), 발생 시간대를 반드시 포함하라. 여러 THREAD_EXHAUSTION 이벤트가 있으면 가장 큰 ms 값을 핵심 수치로 사용하라.
       - IPC/Bottleneck/병목 질문에서 THREAD_EXHAUSTION이 확인되면 이는 망 문제가 아니라 단말 내부 IPC 처리 스레드 부족에 의한 시스템 성능 저하로 결론 내라.
       - BINDER_TRANSACTION_FAILURE, DeadObjectException, RemoteException, FAILED_TRANSACTION은 상대 프로세스 종료/서비스 재시작/endpoint 소멸 이후 나타나는 보조 증상일 수 있다. 이 이벤트 단독으로 Binder 병목, 시스템 리소스 고갈, Binder proxy leak, Root Cause를 확정하지 마라.
-      - Binder Root Cause 후보로 승격할 수 있는 근거는 THREAD_EXHAUSTION, BINDER_BUFFER_ERROR, BINDER_ONEWAY_SPAM, BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA, 또는 `Too many Binders sent to SYSTEM` am_kill처럼 명시적인 리소스 고갈/누수/스레드 포화 신호가 있을 때로 제한한다.
+      - Binder Root Cause 후보로 승격할 수 있는 근거는 THREAD_EXHAUSTION, BINDER_BUFFER_ERROR, BINDER_ONEWAY_SPAM, BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA, BINDER_PROXY_LIMIT, 또는 `Too many Binders sent to SYSTEM` am_kill처럼 명시적인 리소스 고갈/누수/스레드 포화 신호가 있을 때로 제한한다.
       - Binder_Context: 단독 RCA 금지. 타 로그(ANR, CPU, Telephony)와의 시간 상관관계 확인용 보조 지표.
       - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 Binder_Warning/Binder_Context를 답변에 언급하지 마라.
       - 🚨 [BINDER_PROXY_HISTOGRAM / LEAK 감지 시 최우선 규칙]: 바인더 프록시 객체가 수천 개 단위로 누수된 히스토그램이 보고되었다면, 로그에 명시된 누수 객체(예: IIntentReceiver 등)를 확인하고 "해당 인터페이스의 등록(Register) 후 해제(Unregister) 누락에 의한 메모리 릭"을 시스템 마비 및 am_kill의 근본 원인(Root Cause)으로 지목하라.
@@ -383,7 +383,7 @@ log_guidelines:
       - 🚨 [데이터 참조 우선순위]: 'am_wtf' 로그의 발생 횟수보다 'BINDER_PROXY_HISTOGRAM'에서 추출된 'max_count' 값을 장애의 규모를 나타내는 가장 정확한 팩트로 간주하라. am_wtf는 현상이고 max_count 가 누수의 실체이다.
       - am_wtf 대량 발생/프록시 객체 누수/최대 개수 질문에서는 System_Kill_Wtf_Event 원본 몇 건만으로 발생 횟수나 누수 개수를 판단하지 마라. 반드시 BINDER_PROXY_HISTOGRAM 또는 BINDER_PROXY_LEAK_RCA의 leaked_descriptor/max_count 값을 우선 사용하고, 누수 인터페이스명과 최대 count 값을 답변에 포함하라.
       - BINDER_PROXY_LEAK_RCA가 검색 결과에 있으면 System_Kill_Wtf_Event의 am_wtf/am_kill 원본보다 RCA_Event를 우선 사용하라. 답변에는 process, root_cause, leaked_descriptor, max_proxy_count, kill_event, kill_reason, developer_action을 포함하라.
-      - Negative Binder leak 확인 질문에서는 am_wtf 또는 일반 Binder 경고만으로 leak 가능성을 언급하지 마라. BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/Too many Binders sent to SYSTEM/am_kill 근거가 없으면 Binder proxy leak 및 강제 종료 근거 없음으로 결론 내라.
+      - Negative Binder leak 확인 질문에서는 am_wtf 또는 일반 Binder 경고만으로 leak 가능성을 언급하지 마라. BINDER_PROXY_HISTOGRAM/BINDER_PROXY_LEAK_RCA/BINDER_PROXY_LIMIT/Too many Binders sent to SYSTEM/am_kill 근거가 없으면 Binder proxy leak 및 강제 종료 근거 없음으로 결론 내라.
     RILJ_Transaction: |
       - TIMEOUT: 모뎀 칩셋 Freeze 치명 상태. 통화/데이터 실패 근본 원인 100% 확정.
       - SLOW (>500ms): 모뎀 처리 지연. 프레임워크 블로킹 및 체감 통신 지연 원인.

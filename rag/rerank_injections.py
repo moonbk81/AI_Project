@@ -251,6 +251,7 @@ def apply_rerank_injections(
             ) or any(k in text for k in [
                 "binder_proxy_histogram", "binder proxy histogram", "biner_proxy_histogram",
                 "binder_proxy_leak_rca", "too many binders sent to system",
+                "binder_proxy_limit", "proxies held", "sent too many binders to uid",
                 "leaked_descriptor", "max_proxy_count", "max_count", "iintentreceiver",
                 "am_kill", "system_kill"
             ]):

@@ -133,15 +133,26 @@ def try_build_guardrail_answer(user_query: str, results, tool_facts=None) -> str
         process = rca.get("process") or _guess_requested_process(query_lower) or "확인된 프로세스"
         leaked_descriptor = rca.get("leaked_descriptor") or rca.get("descriptor") or "Binder proxy"
         max_count = rca.get("max_proxy_count", rca.get("max_count", "확인 필요"))
+        # 누수 근거는 kill 없이도 성립한다. 없는 강제 종료를 지어내지 않도록 나눈다.
         kill_event = rca.get("kill_event", "am_kill")
         kill_reason = rca.get("kill_reason", "Too many Binders sent to SYSTEM")
         developer_action = rca.get("developer_action", "동적 BroadcastReceiver register 후 unregister 누락 여부를 점검해야 함")
 
         if any(k in query_lower for k in ["연관", "관련", "가이드", "고쳐", "개발자", "root cause", "근본 원인", "죽", "강제 종료", "am_kill"]):
+            leak = (
+                f"`{process}`에서 `{leaked_descriptor}` Binder proxy leak이 발생했고, "
+                f"최대 {max_count}개까지 누수되었습니다. "
+            )
+            if kill_event and kill_reason:
+                return (
+                    f"네, 서로 연관되어 있습니다. {leak}이 누수로 인해 시스템 리소스가 고갈되었고, "
+                    f"ActivityManager가 `{kill_reason}` 사유로 `{kill_event}` 강제 종료를 수행한 것으로 판단됩니다. "
+                    f"개발자는 {developer_action}."
+                )
             return (
-                f"네, 서로 연관되어 있습니다. `{process}`에서 `{leaked_descriptor}` Binder proxy leak이 발생했고, "
-                f"최대 {max_count}개까지 누수되었습니다. 이 누수로 인해 시스템 리소스가 고갈되었고, "
-                f"ActivityManager가 `{kill_reason}` 사유로 `{kill_event}` 강제 종료를 수행한 것으로 판단됩니다. "
+                f"Binder proxy 누수 근거는 확인됩니다. {leak}"
+                f"다만 이 로그에는 `Too many Binders sent to SYSTEM` 강제 종료가 남아 있지 않아, "
+                f"누수가 프로세스 종료까지 이어졌다고 볼 근거는 없습니다. "
                 f"개발자는 {developer_action}."
             )
 

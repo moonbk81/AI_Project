@@ -893,3 +893,101 @@ class TestBinderPayloadDoesNotInflateSeverity:
         assert payloads[0]["metadata"]["kill_reason"] == "isolated not needed,0"
         assert payloads[0]["metadata"]["rca_candidate"] is False
         assert "Root Cause 근거로 인용하지 마십시오" in payloads[0]["document"]
+
+
+class TestBinderLeakRcaAnchors:
+    """kill 을 필수로 요구하면 kill 없는 누수는 RCA 문서가 통째로 없어진다."""
+
+    def _docs(self, warnings):
+        from rag_builders.binder_builder import build_binder_leak_rca_docs
+
+        return build_binder_leak_rca_docs({"binder_warnings": warnings}, "dumpState_0.log")
+
+    HISTOGRAM = {
+        "type": "BINDER_PROXY_HISTOGRAM",
+        "time": "06-01 15:13:16.733",
+        "max_count": 7262,
+        "rca_candidate": True,
+        "desc": "Binder Proxy 객체 상태 덤프: android.content.IIntentReceiver (7262개)",
+        "raw": "  android.content.IIntentReceiver x7262",
+    }
+    KILL = {
+        "type": "SYSTEM_KILL",
+        "time": "06-01 15:13:17.000",
+        "process": "com.android.phone",
+        "desc": "사유: Too many Binders sent to SYSTEM",
+        "raw": "am_kill : [0,4529,com.android.phone,-800,Too many Binders sent to SYSTEM,0]",
+        "rca_candidate": True,
+    }
+    LIMIT = {
+        "type": "BINDER_PROXY_LIMIT",
+        "time": "06-01 15:13:16.733",
+        "process": "android.uid.phone:1001",
+        "from_uid": "1001",
+        "to_uid": "1000",
+        "max_count": 6000,
+        "desc": "Binder proxy 한계 경고",
+        "raw": "Too many binder proxy objects sent to uid 1000 from uid 1001 (6000 proxies held)",
+        "rca_candidate": True,
+    }
+
+    def test_the_kill_still_anchors_the_document_when_it_is_there(self):
+        meta = self._docs([self.HISTOGRAM, self.KILL])[0]["metadata"]
+
+        assert meta["evidence_anchor"] == "am_kill"
+        assert meta["kill_reason"] == "Too many Binders sent to SYSTEM"
+        assert meta["process"] == "com.android.phone"
+        assert meta["max_proxy_count"] == 7262
+
+    def test_a_histogram_alone_still_produces_a_document(self):
+        docs = self._docs([self.HISTOGRAM])
+
+        assert docs, "kill 이 없다고 누수 RCA 문서가 통째로 사라졌다"
+        meta = docs[0]["metadata"]
+        assert meta["evidence_anchor"] == "BINDER_PROXY_HISTOGRAM"
+        assert meta["kill_event"] == "", "일어나지 않은 강제 종료를 적었다"
+        assert "강제 종료나 한계 경고 없이" in docs[0]["document"]
+
+    def test_the_proxy_limit_warning_outranks_a_bare_histogram(self):
+        meta = self._docs([self.HISTOGRAM, self.LIMIT])[0]["metadata"]
+
+        assert meta["evidence_anchor"] == "BINDER_PROXY_LIMIT"
+        assert meta["proxy_limit_uid_pair"] == "1001 -> 1000"
+        assert meta["process"] == "android.uid.phone:1001"
+
+    def test_a_histogram_under_the_threshold_is_not_a_leak(self):
+        quiet = {**self.HISTOGRAM, "max_count": 120, "rca_candidate": False}
+
+        assert self._docs([quiet]) == []
+
+
+class TestBinderLeakGuardrailDoesNotInventAKill:
+    def _answer(self, meta):
+        from rag.answer_guardrails import try_build_guardrail_answer
+
+        return try_build_guardrail_answer(
+            "이 누수 근본 원인이 뭐야?", {"metadatas": [[meta]]}
+        )
+
+    BASE = {
+        "log_type": "RCA_Event",
+        "rca_type": "BINDER_PROXY_LEAK_RCA",
+        "process": "com.android.phone",
+        "leaked_descriptor": "android.content.IIntentReceiver",
+        "max_proxy_count": 7262,
+        "developer_action": "unregister 누락 여부를 점검해야 함",
+    }
+
+    def test_a_kill_is_reported_when_one_happened(self):
+        answer = self._answer(
+            {**self.BASE, "kill_event": "am_kill", "kill_reason": "Too many Binders sent to SYSTEM"}
+        )
+
+        assert "강제 종료를 수행한 것으로 판단됩니다" in answer
+
+    def test_no_kill_means_no_kill_in_the_sentence(self):
+        answer = self._answer({**self.BASE, "kill_event": "", "kill_reason": ""})
+
+        assert "7262" in answer
+        assert "강제 종료가 남아 있지 않아" in answer
+        assert "강제 종료를 수행한 것으로 판단됩니다" not in answer

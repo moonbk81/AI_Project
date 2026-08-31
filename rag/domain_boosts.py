@@ -151,6 +151,7 @@ def apply_domain_boosts(hybrid_score: float, log_type: str, meta: dict, combined
         positive_leak_evidence_hit = any(k in combined_text for k in [
             "binder_proxy_histogram", "binder proxy histogram", "biner_proxy_histogram",
             "binder_proxy_leak_rca", "too many binders sent to system",
+            "binder_proxy_limit", "proxies held", "sent too many binders to uid",
             "leaked_descriptor", "max_proxy_count", "max_count", "iintentreceiver"
         ])
         am_kill_hit = "am_kill" in combined_text or "system_kill" in combined_text
