@@ -228,6 +228,8 @@ main { padding: 22px 24px 64px; }
 .row-name.active { font-weight: 600; }
 .row-meta { font-size: 12px; color: var(--text-muted); }
 .job-progress { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+/* 진행 메시지와 % 를 한 줄에. 테두리 없는 줄이라 .row 와는 따로 둔다. */
+.job-line { display: flex; align-items: center; gap: 10px; }
 .row button, .job button { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
 /* 첨부 선택 칸. 압축이 아닌 첨부는 빈 자리로 두어 이름 열을 맞춘다. */
 .row > input[type="checkbox"], .row-pick { flex: none; width: 13px; margin: 0; }

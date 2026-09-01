@@ -642,20 +642,29 @@ def _run_analyze_job(
     end_t: str,
     owner: str = "",
     defect_code: str = "",
+    base_progress: int = 0,
 ):
+    """`base_progress` 는 분석 전에 이미 끝난 몫(PLM 첨부 내려받기 같은).
+
+    파이프라인은 자기 진행을 늘 0~100 으로 세므로, 앞 단계가 있었으면 그 위
+    구간으로 눌러 넣어야 화면의 % 가 뒤로 물러나지 않는다.
+    """
     from core.analysis_pipeline import run_analysis_core
+
+    base = max(0, min(99, int(base_progress)))
 
     def progress(message, value=None):
         updates: Dict[str, Any] = {}
         if message:
             updates["message"] = message
         if value is not None:
-            updates["progress"] = int(value)
+            scaled = base + int(max(0, min(100, int(value))) * (100 - base) / 100)
+            updates["progress"] = scaled
         if updates:
             _set_job(job_id, **updates)
 
     try:
-        _set_job(job_id, status="running", message="분석 작업을 시작합니다.", progress=0)
+        _set_job(job_id, status="running", message="분석 작업을 시작합니다.", progress=base)
         with _analysis_slot(job_id):
             result = run_analysis_core(
                 file_paths,
@@ -902,7 +911,7 @@ def _run_plm_selected_logs_job(
             message=(f"{len(file_paths)}개 LOG 파일 분석 시작"
                      + (f" ({len(skipped)}개는 건너뜀)" if skipped else "")),
         )
-        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code)
+        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code, base_progress=10)
 
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="선택한 로그 분석 실패")
@@ -967,7 +976,7 @@ def _run_plm_attachment_job(
             return
 
         _set_job(job_id, message=f"{len(file_paths)}개 LOG 파일 분석 시작", progress=10)
-        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code)
+        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code, base_progress=10)
 
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="첨부 로그 분석 실패")

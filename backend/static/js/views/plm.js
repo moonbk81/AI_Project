@@ -355,18 +355,35 @@ export async function renderPlm(mount, sourceFile, ctx) {
     host.replaceChildren(fold);
   };
 
-  const drawJobProgress = (job, progressHost) => {
-    const bar = el("div", "bar");
-    const fill = el("div", "bar-fill");
-    fill.style.width = `${Math.max(2, job.progress || 0)}%`;
+  const progressValue = (job) => Math.min(100, Math.max(0, Number(job.progress) || 0));
+
+  /** 진행률은 막대만으로는 읽기 어려워 숫자도 같이 적는다. */
+  const drawProgressBar = (job, fill, percent) => {
+    const value = progressValue(job);
+    fill.style.width = `${Math.max(2, value)}%`;
     fill.classList.toggle("done", job.status === "done");
     fill.classList.toggle("error", job.status === "error");
+    percent.textContent = `${value}%`;
+    fill.parentElement?.setAttribute("aria-valuenow", String(value));
+    fill.parentElement?.setAttribute("aria-label", `분석 진행률 ${value}%`);
+  };
+
+  const drawJobProgress = (job, progressHost) => {
+    const bar = el("div", "bar");
+    bar.setAttribute("role", "progressbar");
+    bar.setAttribute("aria-valuemin", "0");
+    bar.setAttribute("aria-valuemax", "100");
+    const fill = el("div", "bar-fill");
     bar.append(fill);
     const message = el("p", "card-note", job.display_message || job.error || job.message || job.status || "시작하는 중...");
+    const percent = el("span", "job-progress");
+    const head = el("div", "job-line");
+    head.append(message, percent);
+    drawProgressBar(job, fill, percent);
     const extra = el("div");
-    progressHost.replaceChildren(message, bar, extra);
+    progressHost.replaceChildren(head, bar, extra);
     drawSkipped(job, extra);
-    return { fill, message, extra };
+    return { fill, message, percent, extra };
   };
 
   /** 분석이 끝나면 그 로그를 활성 파일로 삼는다. 화면은 그대로 둔다. */
@@ -389,7 +406,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
       defect_code: defect.defectCode,
     };
 
-    const { fill, message, extra } = drawJobProgress(state.attachmentJobs[key], progressHost);
+    const { fill, message, percent, extra } = drawJobProgress(state.attachmentJobs[key], progressHost);
     setBusy?.(!JOB_DONE.has(state.attachmentJobs[key].status));
 
     const poll = async () => {
@@ -397,9 +414,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         const job = await api.job(jobId);
         state.attachmentJobs[key] = { ...state.attachmentJobs[key], ...job };
         message.textContent = state.attachmentJobs[key].display_message || job.error || job.message || job.status;
-        fill.style.width = `${Math.max(2, job.progress || 0)}%`;
-        fill.classList.toggle("done", job.status === "done");
-        fill.classList.toggle("error", job.status === "error");
+        drawProgressBar(job, fill, percent);
         drawSkipped(job, extra);
 
         if (!JOB_DONE.has(job.status)) {
