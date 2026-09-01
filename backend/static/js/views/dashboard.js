@@ -19,6 +19,52 @@ function mobileDataNote(ctx) {
   return by ? `${at} · ${by}` : at;
 }
 
+function validDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function timeMs(row) {
+  const date = validDate(row.time_dt);
+  return date ? date.getTime() : null;
+}
+
+function timeRange(rows, minPadMs = 2000) {
+  const values = rows.map(timeMs).filter((value) => value !== null);
+  if (!values.length) return undefined;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1000, max - min);
+  const pad = Math.max(minPadMs, Math.min(30000, Math.round(span * 0.12)));
+  return [min - pad, max + pad];
+}
+
+function fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "N/A";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.round(ms / 60000)} min`;
+}
+
+function airplaneWindows(events) {
+  const rows = [...(events || [])]
+    .filter((event) => validDate(event.time_dt))
+    .sort((a, b) => validDate(a.time_dt) - validDate(b.time_dt));
+  const windows = [];
+  let open = null;
+
+  for (const event of rows) {
+    if (event.event === "AIRPLANE_MODE_ON") {
+      open = event;
+    } else if (event.event === "AIRPLANE_MODE_OFF" && open) {
+      windows.push({ on: open, off: event });
+      open = null;
+    }
+  }
+  return windows;
+}
+
 function kpiBand(kpi) {
   const dropped = kpi.call_drop_count > 0;
   const outOfService = kpi.oos_count > 0;
@@ -58,8 +104,8 @@ const CARDS = [
   {
     chart: "service-state",
     title: "망 등록 상태 전이",
-    sub: "등록 상태와 RAT/망 세부 변화, 비행모드 ON/OFF",
-    prompt: "Voice/Data 등록 상태, RAT/operator 변화, 비행모드 ON/OFF 시점을 함께 보고 OOS나 재등록 반복의 원인을 짚어줘.",
+    sub: "Voice/Data 등록 상태 변화와 비행모드 ON/OFF",
+    prompt: "Voice/Data 등록 상태 변화와 비행모드 ON/OFF 시점을 함께 보고 OOS나 재등록 반복의 원인을 짚어줘.",
     render(series, panel) {
       const colors = seriesColors();
       const traces = [...groupBy(series.points, (p) => `${p.slot} · ${p.conn_type}`)].map(
@@ -83,30 +129,61 @@ const CARDS = [
       const airplane = series.airplane_events || [];
       const deviceAirplane = airplane.filter((p) => p.slot === "Slot device");
       const plottedAirplane = deviceAirplane.length ? deviceAirplane : airplane;
-      const airplaneShapes = plottedAirplane.map((p) => ({
+      const windows = airplaneWindows(plottedAirplane);
+      if (plottedAirplane.length) {
+        const onColor = getComputedStyle(document.body).getPropertyValue("--status-critical").trim();
+        const offColor = getComputedStyle(document.body).getPropertyValue("--status-good").trim();
+        traces.push({
+          type: "scatter",
+          mode: "markers",
+          name: "비행모드",
+          x: plottedAirplane.map((p) => p.time_dt),
+          y: plottedAirplane.map(() => 0.96),
+          yaxis: "y2",
+          marker: {
+            symbol: "x",
+            size: 14,
+            color: plottedAirplane.map((p) => (p.event === "AIRPLANE_MODE_ON" ? onColor : offColor)),
+            line: { width: 3 },
+          },
+          text: plottedAirplane.map((p) => `${p.label} · ${p.slot}`),
+          customdata: plottedAirplane.map((p) => [p.event, p.radio_power]),
+          hovertemplate: [
+            "<b>%{text}</b>",
+            "%{x}",
+            "Event: %{customdata[0]}",
+            "Radio Power: %{customdata[1]}",
+            "<extra>비행모드</extra>",
+          ].join("<br>"),
+        });
+      }
+      const airplaneShapes = [
+        ...windows.map((window) => ({
+          type: "rect", xref: "x", yref: "paper",
+          x0: timeMs(window.on), x1: timeMs(window.off), y0: 0, y1: 1,
+          fillcolor: "rgba(239, 68, 68, 0.12)",
+          line: { width: 0 },
+          layer: "below",
+        })),
+        ...plottedAirplane.map((p) => ({
         type: "line", xref: "x", yref: "paper",
-        x0: p.time_dt, x1: p.time_dt, y0: 0, y1: 1,
+        x0: timeMs(p), x1: timeMs(p), y0: 0, y1: 1,
         line: {
-          width: 2,
+          width: 1.5,
           dash: p.event === "AIRPLANE_MODE_ON" ? "solid" : "dot",
           color: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#22c55e",
         },
-      }));
-      const airplaneAnnotations = plottedAirplane.map((p, index) => ({
-        x: p.time_dt,
-        y: 1,
-        xref: "x",
-        yref: "paper",
-        text: `${p.label} · ${p.slot}`,
-        showarrow: true,
-        arrowhead: 2,
-        ax: index % 2 === 0 ? -28 : 28,
-        ay: -38,
-        font: { size: 12, color: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#16a34a" },
-        bgcolor: "rgba(255,255,255,0.85)",
-        bordercolor: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#22c55e",
-        borderpad: 4,
-      }));
+      })),
+      ];
+      if (windows.length) {
+        const first = windows[0];
+        const duration = validDate(first.off.time_dt) - validDate(first.on.time_dt);
+        panel.prepend(tileRow([
+          tile("비행모드", `${first.on.time} → ${first.off.time}`, "", `${fmtDuration(duration)} · ${first.on.slot}`),
+          tile("상태 전이", fmt.count(series.points.length), "건", "Voice/Data reg 변경"),
+          tile("Radio Power", fmt.count(airplane.filter((p) => p.radio_power).length), "건", "slot별 request"),
+        ]));
+      }
       const tableRows = [
         ...airplane.map((p) => ({
           time: p.time,
@@ -127,8 +204,20 @@ const CARDS = [
         hovermode: "x unified",
         margin: { l: 136, r: 96, t: 8, b: 44 },
         yaxis: axis({ type: "category", categoryorder: "array", categoryarray: series.state_order }),
+        yaxis2: {
+          overlaying: "y",
+          range: [0, 1],
+          visible: false,
+          showgrid: false,
+          zeroline: false,
+        },
+        xaxis: axis({
+          type: "date",
+          tickformat: "%H:%M<br>%b %-d",
+          range: timeRange([...series.points, ...plottedAirplane]),
+        }),
         shapes: airplaneShapes,
-        annotations: endLabels(traces).concat(airplaneAnnotations),
+        annotations: [],
       }), frameTable(tableRows, ["time", "slot", "conn_type", "state", "event", "radio_power", "change_reason", "cause", "operator", "radio_tech"]));
     },
   },

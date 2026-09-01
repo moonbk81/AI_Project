@@ -48,7 +48,7 @@ def test_initial_out_of_service_is_oos_enter():
     assert session["data_reg"] == "OUT_OF_SERVICE"
 
 
-def test_in_service_rat_changes_are_kept_as_registration_detail_changes():
+def test_in_service_rat_changes_do_not_create_oos_events():
     lines = [
         "08-25 10:00:00.000 radio  1000  1000 D SST-0   : Poll ServiceState done: newSS={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), getRilVoiceRadioTechnology=14(LTE), mOperatorAlphaLong=SKT, mOperatorAlphaShort=SKT, mIsEmergencyOnly=false, mReasonDataDenied=0}",
         "08-25 10:00:05.000 radio  1000  1000 D SST-0   : Poll ServiceState done: newSS={mVoiceRegState=0(IN_SERVICE), mDataRegState=0(IN_SERVICE), getRilVoiceRadioTechnology=20(NR), mOperatorAlphaLong=SKT, mOperatorAlphaShort=SKT, mIsEmergencyOnly=false, mReasonDataDenied=0}",
@@ -56,11 +56,7 @@ def test_in_service_rat_changes_are_kept_as_registration_detail_changes():
 
     events = OosParser().analyze(lines)
 
-    assert [event["event_type"] for event in events] == ["OOS_RECOVER", "REG_DETAIL_CHANGE"]
-    assert events[1]["voice_reg"] == "IN_SERVICE"
-    assert events[1]["data_reg"] == "IN_SERVICE"
-    assert events[1]["rat"] == "20(NR)"
-    assert events[1]["change_reason"] == "rat"
+    assert [event["event_type"] for event in events] == ["OOS_RECOVER"]
 
 
 def test_radio_power_requests_mark_airplane_mode_boundaries():

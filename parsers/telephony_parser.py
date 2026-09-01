@@ -336,10 +336,6 @@ class OosParser(BaseParser):
         names = {
             "v": "voice_reg",
             "d": "data_reg",
-            "rat": "rat",
-            "operator": "operator",
-            "rej_cause": "rej_cause",
-            "emergency": "emergency",
         }
         return [label for key, label in names.items() if prev.get(key) != current.get(key)]
 
@@ -468,11 +464,8 @@ class OosParser(BaseParser):
                         prev_unknown = prev.get("v") is None and prev.get("d") is None
                         prev_in_service = self._is_in_service(prev.get("v"), prev.get("d"))
                         now_in_service = self._is_in_service(v_reg, d_reg)
-                        reg_state_changed = prev_unknown or "voice_reg" in changed_fields or "data_reg" in changed_fields
 
-                        if not reg_state_changed:
-                            event_type = "REG_DETAIL_CHANGE"
-                        elif prev_unknown and not now_in_service: event_type = "OOS_ENTER"
+                        if prev_unknown and not now_in_service: event_type = "OOS_ENTER"
                         elif not prev_in_service and now_in_service: event_type = "OOS_RECOVER"
                         elif prev_in_service and not now_in_service: event_type = "OOS_ENTER"
                         else: event_type = "OOS_STATE_CHANGE"

@@ -72,7 +72,7 @@ def test_repeated_states_collapse_to_transitions():
     ]
 
 
-def test_registration_detail_changes_survive_when_service_state_is_same():
+def test_registration_detail_changes_do_not_add_service_state_points():
     df = pd.DataFrame(
         [
             _oos_row(time="08-25 10:00:00.000", rat="LTE"),
@@ -85,8 +85,6 @@ def test_registration_detail_changes_survive_when_service_state_is_same():
     assert [(p.time, p.conn_type, p.state, p.radio_tech, p.change_reason) for p in series.points] == [
         ("08-25 10:00:00.000", "Data", "IN_SERVICE", "LTE", ""),
         ("08-25 10:00:00.000", "Voice", "IN_SERVICE", "LTE", ""),
-        ("08-25 10:00:05.000", "Data", "IN_SERVICE", "NR", "rat"),
-        ("08-25 10:00:05.000", "Voice", "IN_SERVICE", "NR", "rat"),
     ]
 
 

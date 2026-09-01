@@ -210,24 +210,10 @@ def _airplane_records(oos_df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 
 def _keep_transitions(state_df: pd.DataFrame) -> pd.DataFrame:
-    """Drop repeats: a point survives when state or key registration detail changes.
-
-    Compared within a (slot, connection type) track, ordered by the raw log
-    time, so Voice repeating IN_SERVICE does not hide a Data drop. RAT/operator
-    changes also survive because they are meaningful registration notifications.
-    """
+    """Drop repeats: a point survives only when Voice/Data registration changes."""
     state_df = state_df.sort_values(by=["slot", "conn_type", "time"]).reset_index(drop=True)
     tracks = state_df.groupby(["slot", "conn_type"])
-    signature_columns = [
-        "state",
-        "raw_reg",
-        "event",
-        "cause",
-        "operator",
-        "radio_tech",
-        "change_reason",
-        "radio_power",
-    ]
+    signature_columns = ["state", "raw_reg"]
     keep = pd.Series(False, index=state_df.index)
     for column in signature_columns:
         keep |= state_df[column].astype(str) != tracks[column].shift(1).astype(str)

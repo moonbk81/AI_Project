@@ -132,7 +132,7 @@ def test_call_history_reads_report_artifact_not_stale_metadata(client, tmp_path,
     assert body["series"]["table"][0]["id"] == "TC@4_1"
 
 
-def test_service_state_reads_the_full_report_instead_of_limited_metadata(tmp_path, monkeypatch):
+def test_service_state_reads_report_but_keeps_only_registration_changes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "result").mkdir()
     (tmp_path / "result" / "radio_report.json").write_text(
@@ -167,7 +167,7 @@ def test_service_state_reads_the_full_report_instead_of_limited_metadata(tmp_pat
     body = TestClient(backend_main.app).get("/charts/service-state", params={"source_file": "radio_payload.json"}).json()
 
     assert body["series"]["status"] == "ok"
-    assert {point["radio_tech"] for point in body["series"]["points"]} == {"LTE", "NR"}
+    assert {point["radio_tech"] for point in body["series"]["points"]} == {"LTE"}
 
 
 def test_asking_for_a_chart_that_does_not_exist(client):
