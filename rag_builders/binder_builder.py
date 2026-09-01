@@ -134,7 +134,7 @@ def build_binder_leak_rca_docs(report_data, input_file):
         trigger = kill.get("raw", kill.get("raw_info", ""))
         kill_event, kill_reason = "am_kill", "Too many Binders sent to SYSTEM"
         headline = (
-            f"{process} 프로세스가 am_kill(SYSTEM_KILL)로 강제 종료됨. "
+            f"{process} 프로세스가 am_kill 로 강제 종료됨. "
             f"강제 종료 사유는 '{kill_reason}'. "
         )
     elif limit:
@@ -198,7 +198,7 @@ def build_binder_leak_rca_docs(report_data, input_file):
         else ""
     )
     document = (
-        f"[RCA: BINDER_PROXY_LEAK] 폰이 갑자기 죽음/강제 종료/시스템 크래시처럼 보이는 증상과 관련된 RCA 문서. "
+        f"[원인 분석: 바인더 프록시 누수] 폰이 갑자기 죽음/강제 종료/시스템 크래시처럼 보이는 증상과 관련된 원인 분석 문서. "
         f"{headline}{evidence}"
         f"따라서 근본 원인은 단순 앱 크래시나 Native Crash가 아니라 {root_cause}에 따른 시스템 리소스 고갈로 판단됨. "
         f"개발 조치: {developer_action}."

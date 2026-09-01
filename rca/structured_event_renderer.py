@@ -63,7 +63,7 @@ class StructuredEventRenderer:
                 time = event.get("time") or "Unknown"
                 desc = event.get("desc") or event.get("raw_info") or "상세 사유 확인 필요"
                 kill_texts.append(f"{time} {process}: {desc}")
-            parts.append("SYSTEM_KILL(am_kill) 이벤트가 확인됨. " + " / ".join(kill_texts))
+            parts.append("am_kill 강제 종료 이벤트가 확인됨. " + " / ".join(kill_texts))
 
         if wtfs:
             wtf_texts = []
@@ -72,7 +72,7 @@ class StructuredEventRenderer:
                 time = event.get("time") or "Unknown"
                 desc = event.get("desc") or event.get("raw_info") or "상세 사유 확인 필요"
                 wtf_texts.append(f"{time} {process}: {desc}")
-            parts.append("SYSTEM_WTF(am_wtf) 이벤트가 확인됨. " + " / ".join(wtf_texts))
+            parts.append("am_wtf 이상 징후 이벤트가 확인됨. " + " / ".join(wtf_texts))
 
         if not parts:
             return None

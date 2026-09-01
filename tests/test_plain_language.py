@@ -51,6 +51,21 @@ def test_a_longer_name_is_not_eaten_by_a_shorter_one():
     assert answer == "무선 전원 이벤트 를 봤습니다."
 
 
+def test_event_type_labels_are_replaced_but_their_log_anchor_is_not():
+    # SYSTEM_KILL 은 우리가 붙인 분류 이름이고, am_kill 은 단말이 남긴 문자열이다.
+    answer = humanize("am_kill 강제 종료가 SYSTEM_KILL 로 분류되었습니다.")
+
+    assert "SYSTEM_KILL" not in answer
+    assert "am_kill" in answer, "로그 원문 앵커까지 지워졌다"
+
+
+def test_a_summary_label_is_not_eaten_by_its_shorter_prefix():
+    # SYSTEM_WTF 가 먼저 걸리면 "시스템 이상 징후_SUMMARY" 가 된다.
+    assert humanize("SYSTEM_WTF_SUMMARY") == "시스템 이상 징후 요약"
+    assert humanize("BINDER_PROXY_LEAK_SUMMARY") == "바인더 프록시 누수 요약"
+    assert humanize("BINDER_PROXY_LEAK_RCA") == "바인더 프록시 누수 원인 분석"
+
+
 def test_what_the_device_wrote_is_left_alone():
     original = (
         "am_kill 사유는 'Too many Binders sent to SYSTEM' 이고, "

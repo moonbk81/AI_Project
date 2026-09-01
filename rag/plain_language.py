@@ -85,9 +85,17 @@ TOOL_WORDS = {
     "get_recent_data_usage_analytics": "최근 데이터 사용량 분석",
 }
 
-# 우리가 만든 RCA 문서 이름. 로그에 찍힌 문자열이 아니라 이 저장소의 라벨이다.
+# 우리가 만든 RCA 문서 이름과 이벤트 분류 라벨. 로그에 찍힌 문자열이 아니라 이
+# 저장소가 붙인 이름이므로 번역 대상이다. 반대로 이것들이 가리키는 로그 원문
+# (am_kill, am_wtf, Too many Binders sent to SYSTEM) 은 근거이므로 손대지 않는다.
 RCA_TYPE_WORDS = {
+    "BINDER_PROXY_HISTOGRAM": "바인더 프록시 보유량 통계",
     "BINDER_PROXY_LEAK_RCA": "바인더 프록시 누수 원인 분석",
+    "BINDER_PROXY_LEAK_SUMMARY": "바인더 프록시 누수 요약",
+    "BINDER_PROXY_LEAK": "바인더 프록시 누수",
+    "SYSTEM_KILL": "시스템 강제 종료",
+    "SYSTEM_WTF_SUMMARY": "시스템 이상 징후 요약",
+    "SYSTEM_WTF": "시스템 이상 징후",
 }
 
 DISPLAY_NAMES = {**LOG_TYPE_WORDS, **INTENT_WORDS, **TOOL_WORDS, **RCA_TYPE_WORDS}

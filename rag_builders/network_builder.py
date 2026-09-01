@@ -239,12 +239,12 @@ def build_dns_health_warnings_payloads(report_data, input_file):
         meta.update({
             "source_file": source_file,
             "log_type": "DNS_Health_Warning",
-            "time": "DNS_DUMP" # 타임스탬프가 없으므로 식별자로 대체
+            "time": "시간 미상"  # DNS 덤프에는 타임스탬프가 없다
         })
 
         # LLM이 읽고 즉각적으로 장애 원인으로 파악할 수 있도록 텍스트 구성
         text_content = (
-            f"[DNS_DUMP] DNS 라우팅 장애 경고: NetId={warning.get('net_id')} 망의 "
+            f"[DNS 서버 상태 덤프] DNS 라우팅 장애 경고: NetId={warning.get('net_id')} 망의 "
             f"DNS 서버({warning.get('server_ip')})가 응답 불량 상태입니다. "
             f"(점수={warning.get('score')}점, 타임아웃={warning.get('timeout_count')}회). "
             f"상세 원인: {warning.get('description')}"
