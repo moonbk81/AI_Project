@@ -52,10 +52,11 @@ export const api = {
 
   files: () => get("/files").then((body) => body.files || []),
 
-  /** 파일 목록과 올린 사람({이름: knox id})을 함께. */
+  /** 파일 목록과 이름표: 올린 사람({이름: knox id})과 PLM 결함번호({이름: 결함번호}). */
   filesWithOwners: () => get("/files").then((body) => ({
     files: body.files || [],
     uploadedBy: body.uploaded_by || {},
+    defectCode: body.defect_code || {},
   })),
 
   quickPrompts: () => get("/quick-prompts").then((body) => body.prompts || {}),

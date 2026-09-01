@@ -157,7 +157,7 @@ def test_files_and_metadata_endpoints(client):
     metadata_response = client.get("/metadata", params={"source_file": "radio.log"})
 
     assert files_response.status_code == 200
-    assert files_response.json() == {"files": ["radio.log"], "uploaded_by": {}}
+    assert files_response.json() == {"files": ["radio.log"], "uploaded_by": {}, "defect_code": {}}
     assert metadata_response.status_code == 200
     assert metadata_response.json() == {
         "ids": ["meta-1"],
@@ -191,7 +191,7 @@ def test_files_endpoint_does_not_wake_the_full_rag_engine(monkeypatch):
     response = TestClient(backend_main.app).get("/files")
 
     assert response.status_code == 200
-    assert response.json() == {"files": ["fast.log"], "uploaded_by": {}}
+    assert response.json() == {"files": ["fast.log"], "uploaded_by": {}, "defect_code": {}}
     assert backend_main._engine is None
 
 

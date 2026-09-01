@@ -143,6 +143,7 @@ def run_analysis_core(
     temp_dir="./temp_logs",
     result_dir="./result",
     owner="",
+    defect_code="",
 ):
     """Run the reusable analysis pipeline without any UI dependency.
 
@@ -202,7 +203,7 @@ def run_analysis_core(
     builder.build_payload(payload_name)
 
     payload_path = os.path.join("./payloads", payload_name)
-    ai_engine.ingest_file(payload_path, force=True, uploaded_by=owner)
+    ai_engine.ingest_file(payload_path, force=True, uploaded_by=owner, defect_code=defect_code)
     if progress_callback:
         progress_callback("", 100)
 

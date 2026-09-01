@@ -29,13 +29,18 @@ def _log_error(msg):
     print(f"❌ {msg}")
 
 
-def ingest_file(collection, embed_model, file_path, force=False, model_name="default", uploaded_by=""):
+def ingest_file(collection, embed_model, file_path, force=False, model_name="default", uploaded_by="", defect_code=""):
     """
     RAG 페이로드를 임베딩하여 Vector DB에 저장합니다.
 
     ``uploaded_by`` 는 올린 사람의 Knox ID 로, "내가 올린 로그만 보기" 를 위한
     표시다. 접근 제어가 아니라 보기 필터이며 값은 자기 신고값이다. 비어 있으면
     키 자체를 넣지 않아 "예전에 올려 주인을 모르는 것" 과 구분된다.
+
+    ``defect_code`` 는 PLM 결함번호다. PLM 에서 로그를 받아 분석하면 올린 사람
+    화면에만 그 번호가 남고 파일에는 남지 않아서, 다른 사람이 열면 어느 결함의
+    로그인지 알 수 없었다. 여기 찍어 두면 누가 열어도 따라갈 수 있다. 직접
+    업로드한 로그는 결함이 없으므로 비어 있고, 그때는 키를 넣지 않는다.
 
     Returns:
         dict: {"added": int, "skipped": int, "errors": int}
@@ -113,6 +118,8 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
         meta["source_file"] = filename
         if uploaded_by:
             meta["uploaded_by"] = uploaded_by
+        if defect_code:
+            meta["defect_code"] = defect_code
 
         # Store only a compact pointer to global metadata for debugging/filtering,
         # without bloating every Chroma metadata row.
@@ -232,13 +239,15 @@ def get_all_files(collection):
     return sorted(list(files))
 
 
-def get_files_with_owners(collection):
-    """적재된 파일과 올린 사람: ``{source_file: uploaded_by}``.
+def get_file_labels(collection):
+    """적재된 파일에 붙은 이름표: ``{source_file: {"uploaded_by", "defect_code"}}``.
 
-    주인을 모르는 파일은 빈 문자열로 나온다. 한 파일에 여러 주인이 찍히는 일은
-    없지만(같은 이름은 통째로 지우고 다시 넣는다) 그렇더라도 마지막 것을 쓴다.
+    모르는 값은 빈 문자열로 나온다. 한 파일에 값이 여럿 찍히는 일은 없지만(같은
+    이름은 통째로 지우고 다시 넣는다) 그렇더라도 채워진 마지막 것을 쓴다.
+
+    컬렉션을 통째로 훑는 함수이므로 이름표 종류마다 따로 돌리지 않는다.
     """
-    owners = {}
+    labels = {}
     offset = 0
     limit = 5000
 
@@ -251,10 +260,13 @@ def get_files_with_owners(collection):
             for meta in results["metadatas"]:
                 if not meta or "source_file" not in meta:
                     continue
-                name = meta["source_file"]
-                owner = str(meta.get("uploaded_by") or "")
-                if owner or name not in owners:
-                    owners[name] = owner
+                entry = labels.setdefault(
+                    meta["source_file"], {"uploaded_by": "", "defect_code": ""}
+                )
+                for key in entry:
+                    value = str(meta.get(key) or "")
+                    if value:
+                        entry[key] = value
 
             if len(results["metadatas"]) < limit:
                 break
@@ -264,7 +276,12 @@ def get_files_with_owners(collection):
             _log_error(f"파일 목록 조회 중 에러: {e}")
             break
 
-    return owners
+    return labels
+
+
+def get_files_with_owners(collection):
+    """적재된 파일과 올린 사람: ``{source_file: uploaded_by}``."""
+    return {name: entry["uploaded_by"] for name, entry in get_file_labels(collection).items()}
 
 
 def reset_db(collection):

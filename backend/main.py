@@ -62,6 +62,9 @@ class FilesResponse(BaseModel):
     # {파일 이름: 올린 사람 Knox ID}. 예전에 올려 주인을 모르는 파일은 빠져 있다.
     # 접근 제어가 아니라 "내가 올린 것만 보기" 를 위한 표시다.
     uploaded_by: Dict[str, str] = Field(default_factory=dict)
+    # {파일 이름: PLM 결함번호}. PLM 에서 받아 분석한 로그만 들어 있다. 직접
+    # 업로드한 로그는 결함이 없으므로 빠져 있다.
+    defect_code: Dict[str, str] = Field(default_factory=dict)
 
 
 class QuickPromptsResponse(BaseModel):
@@ -581,16 +584,26 @@ def _metadata_collection():
     )
 
 
-def _file_owners() -> Dict[str, str]:
-    """적재된 파일의 주인. 엔진이 아직 안 떠 있으면 메타데이터 컬렉션만 본다."""
+def _file_labels() -> Dict[str, Dict[str, str]]:
+    """적재된 파일의 이름표(주인·결함번호). 빈 값은 키째로 빠진다.
+
+    엔진이 아직 안 떠 있으면 메타데이터 컬렉션만 본다. 컬렉션을 통째로 훑으므로
+    이름표 종류마다 따로 부르지 않고 한 번에 받아 나눈다.
+    """
+    empty: Dict[str, Dict[str, str]] = {"uploaded_by": {}, "defect_code": {}}
     try:
-        from rag.ingest import get_files_with_owners
+        from rag.ingest import get_file_labels
 
         collection = _engine.collection if _engine is not None else _metadata_collection()
-        return {name: owner for name, owner in get_files_with_owners(collection).items() if owner}
+        labels = get_file_labels(collection)
     except Exception as exc:
-        print(f"[FILES] owner listing failed: {exc}", file=sys.stderr)
-        return {}
+        print(f"[FILES] label listing failed: {exc}", file=sys.stderr)
+        return empty
+
+    return {
+        key: {name: entry[key] for name, entry in labels.items() if entry.get(key)}
+        for key in empty
+    }
 
 
 def _list_files_without_loading_engine() -> List[str]:
@@ -628,6 +641,7 @@ def _run_analyze_job(
     start_t: str,
     end_t: str,
     owner: str = "",
+    defect_code: str = "",
 ):
     from core.analysis_pipeline import run_analysis_core
 
@@ -651,6 +665,7 @@ def _run_analyze_job(
                 ai_engine=get_engine(),
                 progress_callback=progress,
                 owner=owner,
+                defect_code=defect_code,
             )
         _set_job(
             job_id,
@@ -802,6 +817,7 @@ def _run_plm_selected_logs_job(
     division_code: str,
     defect_code: str,
     selections: List[Dict[str, Any]],
+    owner: str = "",
 ):
     """사용자가 고른 로그만 압축에서 꺼내 분석한다."""
     from core.log_archive import read_by_route
@@ -869,7 +885,7 @@ def _run_plm_selected_logs_job(
             message=(f"{len(file_paths)}개 LOG 파일 분석 시작"
                      + (f" ({len(skipped)}개는 건너뜀)" if skipped else "")),
         )
-        _run_analyze_job(job_id, file_paths, False, "", "")
+        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code)
 
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="선택한 로그 분석 실패")
@@ -880,6 +896,7 @@ def _run_plm_attachment_job(
     division_code: str,
     defect_code: str,
     file_ids: Optional[List[str]] = None,
+    owner: str = "",
 ):
     """Fetch a defect's ZIP attachments, pull the logs out, then analyze them.
 
@@ -933,7 +950,7 @@ def _run_plm_attachment_job(
             return
 
         _set_job(job_id, message=f"{len(file_paths)}개 LOG 파일 분석 시작", progress=10)
-        _run_analyze_job(job_id, file_paths, False, "", "")
+        _run_analyze_job(job_id, file_paths, False, "", "", owner, defect_code)
 
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="첨부 로그 분석 실패")
@@ -1027,9 +1044,11 @@ def ask(req: AskRequest) -> AskResponse:
 
 @app.get("/files", response_model=FilesResponse)
 def files() -> FilesResponse:
+    labels = _file_labels()
     return FilesResponse(
         files=_list_files_without_loading_engine(),
-        uploaded_by=_file_owners(),
+        uploaded_by=labels["uploaded_by"],
+        defect_code=labels["defect_code"],
     )
 
 
@@ -1444,16 +1463,21 @@ def plm_attachment_analyze(
 
     `logs` 가 오면 그 파일들만 꺼낸다(사용자가 목록에서 고른 경우).
     """
-    job_id = _new_job("PLM 첨부 처리 대기 중", owner=_caller(request))
+    # 올린 사람과 결함번호를 분석까지 들고 간다. 예전에는 여기서 끊겨서, PLM 에서
+    # 받은 로그는 주인도 출처도 없이 적재됐다(파일명 이름표가 없어 남의 것을
+    # 덮어쓸 수도 있었다).
+    caller = _caller(request)
+    job_id = _new_job("PLM 첨부 처리 대기 중", owner=caller)
     if req.logs:
         _executor.submit(
             _run_plm_selected_logs_job, job_id, req.division_code, req.defect_code,
-            [item.model_dump() for item in req.logs],
+            [item.model_dump() for item in req.logs], caller,
         )
         return AnalyzeJobResponse(job_id=job_id)
 
     _executor.submit(
-        _run_plm_attachment_job, job_id, req.division_code, req.defect_code, req.file_ids
+        _run_plm_attachment_job, job_id, req.division_code, req.defect_code, req.file_ids,
+        caller,
     )
     return AnalyzeJobResponse(job_id=job_id)
 

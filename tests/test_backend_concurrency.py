@@ -240,7 +240,9 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "LogOrchestrator", FakeOrchestrator)
     monkeypatch.setattr(pipeline, "RagPayloadBuilder", FakeBuilder)
 
-    engine = SimpleNamespace(ingest_file=lambda path, force=False, uploaded_by="": True)
+    engine = SimpleNamespace(
+        ingest_file=lambda path, force=False, uploaded_by="", defect_code="": True
+    )
     made = [
         pipeline.run_analysis_core(
             ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine, owner=owner
@@ -257,6 +259,23 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
         ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine
     )
     assert os.path.basename(alone.report_path) == "dumpstate_report.json"
+
+    # 결함번호는 적재까지 내려가되 파일 이름은 건드리지 않는다. 파일명은 사람
+    # 이름표만 붙는 자리다.
+    seen = {}
+
+    def capture(path, force=False, uploaded_by="", defect_code=""):
+        seen.update(uploaded_by=uploaded_by, defect_code=defect_code)
+        return True
+
+    from_plm = pipeline.run_analysis_core(
+        ["dumpstate.log"], use_slice=False, start_t="", end_t="",
+        ai_engine=SimpleNamespace(ingest_file=capture),
+        owner="bongki.moon", defect_code="P260711-LOCAL01",
+    )
+
+    assert seen == {"uploaded_by": "bongki.moon", "defect_code": "P260711-LOCAL01"}
+    assert os.path.basename(from_plm.report_path) == "dumpstate__bongki.moon_report.json"
 
 
 # ---------------------------------------------------- 로그인(이름표)과 쓰기
@@ -326,11 +345,50 @@ def test_the_file_list_says_who_uploaded_each_log():
 
 def test_files_endpoint_carries_the_owners(client, monkeypatch):
     monkeypatch.setattr(backend_main, "_list_files_without_loading_engine", lambda: ["a_payload.json"])
-    monkeypatch.setattr(backend_main, "_file_owners", lambda: {"a_payload.json": "bongki.moon"})
+    monkeypatch.setattr(backend_main, "_file_labels", lambda: {
+        "uploaded_by": {"a_payload.json": "bongki.moon"},
+        "defect_code": {},
+    })
 
     assert client.get("/files").json() == {
         "files": ["a_payload.json"],
         "uploaded_by": {"a_payload.json": "bongki.moon"},
+        "defect_code": {},
+    }
+
+
+def test_files_endpoint_says_which_plm_defect_a_log_came_from(client, monkeypatch):
+    """PLM 에서 받은 로그는 올린 사람 화면 밖에서도 출처를 알 수 있어야 한다."""
+    monkeypatch.setattr(backend_main, "_list_files_without_loading_engine",
+                        lambda: ["from_plm_payload.json", "hand_upload_payload.json"])
+    monkeypatch.setattr(backend_main, "_file_labels", lambda: {
+        "uploaded_by": {"from_plm_payload.json": "bongki.moon"},
+        "defect_code": {"from_plm_payload.json": "P260711-LOCAL01"},
+    })
+
+    body = client.get("/files").json()
+
+    assert body["defect_code"] == {"from_plm_payload.json": "P260711-LOCAL01"}
+    # 직접 올린 로그는 결함이 없으므로 키가 아예 없어야 한다.
+    assert "hand_upload_payload.json" not in body["defect_code"]
+
+
+def test_file_labels_are_read_in_one_pass_and_drop_the_blanks():
+    from rag.ingest import get_file_labels
+
+    collection = FakeCollection([
+        # 같은 파일의 여러 행: 채워진 값이 빈 값을 이겨야 한다.
+        {"source_file": "plm_payload.json", "uploaded_by": "", "defect_code": ""},
+        {"source_file": "plm_payload.json", "uploaded_by": "bongki.moon",
+         "defect_code": "P260711-LOCAL01"},
+        {"source_file": "hand_payload.json", "uploaded_by": "other.kim"},
+        {"source_file": "old_payload.json"},  # 이름표가 붙기 전에 올린 것
+    ])
+
+    assert get_file_labels(collection) == {
+        "plm_payload.json": {"uploaded_by": "bongki.moon", "defect_code": "P260711-LOCAL01"},
+        "hand_payload.json": {"uploaded_by": "other.kim", "defect_code": ""},
+        "old_payload.json": {"uploaded_by": "", "defect_code": ""},
     }
 
 

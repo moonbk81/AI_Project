@@ -861,6 +861,24 @@ export async function renderPlm(mount, sourceFile, ctx) {
   await loadGroups();
   drawTarget();
   drawResults();
+
+  // PLM 검색을 거치지 않고 온 사람에게도 이 로그가 어느 결함의 것인지 보여준다.
+  // 번호는 분석할 때 적재 행에 찍어 둔 것이라 누가 열어도 따라온다. 결함이
+  // 닫혔는지 열렸는지는 보지 않는다 -- 출처는 상태와 무관하다.
+  //
+  // 파일이 바뀐 때만 짚는다. 매번 짚으면 사용자가 손으로 고른 결함을 덮어쓴다.
+  if (sourceFile && state.autoDefectFor !== sourceFile) {
+    state.autoDefectFor = sourceFile;
+    const code = await api.filesWithOwners()
+      .then(({ defectCode }) => defectCode[sourceFile] || "")
+      .catch(() => "");
+    // 번호가 없으면(직접 올린 로그) 보고 있던 것을 그대로 둔다.
+    if (code && code !== state.selected?.defectCode) {
+      state.selected = { defectCode: code };
+      state.analysis = null;
+    }
+  }
+
   if (state.selected) {
     await selectDefect(state.selected);
   } else {
