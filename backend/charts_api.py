@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 import pandas as pd
 
 from core.charts import (
+    build_active_default_network,
     build_boot_sequence,
     build_binder_proxy_histograms,
     build_call_history_summary,
@@ -100,6 +101,9 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     "rilj": ChartSpec(build_rilj_overview, source="report"),
     "rf-timeline": ChartSpec(build_rf_call_timeline, source="report"),
     "nitz": ChartSpec(build_nitz_timeline, source="report", field="nitz_history"),
+    "active-network": ChartSpec(
+        build_active_default_network, source="report", field="network_timeseries"
+    ),
     "binder-proxy": ChartSpec(
         build_binder_proxy_histograms, source="report", field="binder_warnings", as_items=True
     ),

@@ -178,6 +178,38 @@ class NetworkTimelineStats:
     spike_threshold_ms: int = DNS_SPIKE_THRESHOLD_MS
 
 
+@dataclass(frozen=True)
+class ActiveDefaultNetwork:
+    """The netId the device routes through by default, and its transport.
+
+    `status` is `"ok"` or `"no_data"` — the log prints the line once, so a
+    session that never printed it has nothing to show. `transport` stays None
+    when the netId never appeared in a statistics block to read it from.
+    """
+
+    status: str
+    net_id: Optional[str] = None
+    transport: Optional[str] = None
+
+
+def build_active_default_network(
+    data: Optional[Dict[str, Any]],
+) -> ActiveDefaultNetwork:
+    # A session with no `network_timeseries` key reaches here as the registry's
+    # empty-list default, not as a dict.
+    if not isinstance(data, dict):
+        return ActiveDefaultNetwork(status="no_data")
+
+    net_id = data.get("active_network_id")
+    if net_id in (None, ""):
+        return ActiveDefaultNetwork(status="no_data")
+    return ActiveDefaultNetwork(
+        status="ok",
+        net_id=str(net_id),
+        transport=data.get("active_network_type") or None,
+    )
+
+
 def _timeline_metrics(ts_df: pd.DataFrame) -> List[MetricOption]:
     candidates = [
         MetricOption("DNS 평균 응답 시간(ms)", "dns_avg", "ms"),

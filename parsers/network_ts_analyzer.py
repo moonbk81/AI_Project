@@ -27,6 +27,9 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
             r'tcp\s+avg_loss=(\d+(?:\.\d+)?)%', re.I
         )
 
+        # 3. Active default network 패턴
+        self.re_active_network = re.compile(r'Active\s+default\s+network:\s*(\d+)', re.I)
+
     def analyze(self, lines):
         in_stats = False
         dns_issues = []
@@ -39,6 +42,8 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
 
         current_netid = None
         private_dns_status = {}
+        active_network_id = None
+        active_network_type = None
 
         # 1단계: UID별 blocked_state 및 패키지명 정보 사전 수집
         for line in lines:
@@ -65,6 +70,11 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
                     pkg_name = m_pkg_csv.group(1)
                     uid_val = m_pkg_csv.group(2)
                     uid_map[uid_val] = pkg_name
+
+            # (C) Active default network 정보 추출
+            active_m = self.re_active_network.search(clean_line)
+            if active_m and active_network_id is None:
+                active_network_id = active_m.group(1)
 
         # 2단계: 메인 분석 루프
         for line in lines:
@@ -157,8 +167,21 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
             if self.stats_end.search(clean_line):
                 in_stats = False
 
+        # 활성 네트워크의 transport는 같은 netId의 통계 블록에서 가져온다.
+        if active_network_id is not None:
+            for window in timeline.values():
+                match = next(
+                    (stat for stat in window["net_stats"] if stat["netId"] == active_network_id),
+                    None,
+                )
+                if match:
+                    active_network_type = match["transport"]
+                    break
+
         return {
             "sorted_timeline": dict(sorted(timeline.items())),
             "dns_issues": dns_issues,
             "private_dns_status": private_dns_status,
+            "active_network_id": active_network_id,
+            "active_network_type": active_network_type,
         }

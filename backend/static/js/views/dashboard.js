@@ -248,7 +248,7 @@ const CARDS = [
     title: "네트워크 품질 추이",
     sub: "구간별 DNS/TCP 통계",
     prompt: "DNS/TCP 지연 spike와 netId별 품질 변화를 보고 인터넷 먹통이나 지연 구간의 계층별 원인을 정리해줘.",
-    render(series, panel) {
+    render(series, panel, sourceFile) {
       if (!series.metrics?.length) {
         panel.empty("no_data");
         return;
@@ -276,6 +276,23 @@ const CARDS = [
           annotations: endLabels(traces),
         }), frameTable(series.spikes));
       };
+
+      // The default route is one value for the whole session, so it comes from
+      // its own endpoint instead of riding along on every timeline row. The
+      // slot is placed now to keep it above the picker; the answer fills it in.
+      const defaultNet = el("p", "card-note");
+      panel.prepend(defaultNet);
+      api.chart("active-network", sourceFile)
+        .then((active) => {
+          if (active.status !== "ok") {
+            defaultNet.remove();
+            return;
+          }
+          defaultNet.textContent = active.transport
+            ? `기본설정 Network: ${active.transport}(${active.net_id})`
+            : `기본설정 Network: netId ${active.net_id}`;
+        })
+        .catch(() => defaultNet.remove());
 
       picker.addEventListener("change", () => drawMetric(picker.value));
       panel.prepend(picker);
@@ -534,7 +551,7 @@ export async function renderDashboard(mount, sourceFile, ctx) {
 
   for (const { spec, panel } of panels) {
     api.chart(spec.chart, sourceFile)
-      .then((series) => (series.status === "ok" ? spec.render(series, panel) : panel.empty(series.status)))
+      .then((series) => (series.status === "ok" ? spec.render(series, panel, sourceFile) : panel.empty(series.status)))
       .catch((error) => {
         console.error(spec.chart, error);
         panel.empty("load_failed");

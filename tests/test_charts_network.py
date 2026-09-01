@@ -3,6 +3,7 @@ import pandas as pd
 from core.charts import (
     DNS_SPIKE_THRESHOLD_MS,
     INTERNET_STALL_LAYER_TABS,
+    build_active_default_network,
     build_data_usage_profile,
     build_data_usage_top_by_time,
     build_dns_error_breakdown,
@@ -189,6 +190,30 @@ def test_timeline_stats_without_usable_time():
     df = pd.DataFrame([_stat("nonsense", 10)])
     assert build_network_timeline_stats(df).status == "unparsable_time"
     assert build_network_timeline_stats(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+
+
+# --------------------------------------------------------- active default net
+
+
+def test_active_default_network_carries_the_transport_it_was_matched_to():
+    active = build_active_default_network(
+        {"active_network_id": "160", "active_network_type": "Cellular"}
+    )
+    assert (active.status, active.net_id, active.transport) == ("ok", "160", "Cellular")
+
+
+def test_active_default_network_without_a_transport_still_reports_the_id():
+    # The netId never appeared in a statistics block, so only the id is known.
+    active = build_active_default_network({"active_network_id": 160, "active_network_type": None})
+    assert (active.status, active.net_id, active.transport) == ("ok", "160", None)
+
+
+def test_active_default_network_states():
+    assert build_active_default_network({}).status == "no_data"
+    assert build_active_default_network({"active_network_id": None}).status == "no_data"
+    assert build_active_default_network(None).status == "no_data"
+    # The chart registry hands a missing report field over as an empty list.
+    assert build_active_default_network([]).status == "no_data"
 
 
 # ------------------------------------------------------------------ data usage
