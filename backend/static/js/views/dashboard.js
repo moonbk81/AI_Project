@@ -58,8 +58,8 @@ const CARDS = [
   {
     chart: "service-state",
     title: "망 등록 상태 전이",
-    sub: "Voice / Data 등록 상태가 바뀐 시점만",
-    prompt: "Voice/Data 등록 상태가 바뀐 시점, cause, operator 변화를 보고 OOS나 재등록 반복의 원인을 짚어줘.",
+    sub: "등록 상태와 RAT/망 세부 변화, 비행모드 ON/OFF",
+    prompt: "Voice/Data 등록 상태, RAT/operator 변화, 비행모드 ON/OFF 시점을 함께 보고 OOS나 재등록 반복의 원인을 짚어줘.",
     render(series, panel) {
       const colors = seriesColors();
       const traces = [...groupBy(series.points, (p) => `${p.slot} · ${p.conn_type}`)].map(
@@ -67,16 +67,69 @@ const CARDS = [
           lineTrace(name, points.map((p) => p.time_dt), points.map((p) => p.state),
                     colors[index % colors.length], {
             line: { width: 2, shape: "hv", color: colors[index % colors.length] },
-            hovertemplate: "<b>%{y}</b><br>%{x}<extra>" + name + "</extra>",
+            customdata: points.map((p) => [p.event, p.radio_tech, p.operator, p.change_reason, p.radio_power]),
+            hovertemplate: [
+              "<b>%{y}</b>",
+              "%{x}",
+              "Event: %{customdata[0]}",
+              "RAT: %{customdata[1]}",
+              "Operator: %{customdata[2]}",
+              "Change: %{customdata[3]}",
+              "Radio Power: %{customdata[4]}",
+              "<extra>" + name + "</extra>",
+            ].join("<br>"),
           }),
       );
+      const airplane = series.airplane_events || [];
+      const deviceAirplane = airplane.filter((p) => p.slot === "Slot device");
+      const plottedAirplane = deviceAirplane.length ? deviceAirplane : airplane;
+      const airplaneShapes = plottedAirplane.map((p) => ({
+        type: "line", xref: "x", yref: "paper",
+        x0: p.time_dt, x1: p.time_dt, y0: 0, y1: 1,
+        line: {
+          width: 2,
+          dash: p.event === "AIRPLANE_MODE_ON" ? "solid" : "dot",
+          color: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#22c55e",
+        },
+      }));
+      const airplaneAnnotations = plottedAirplane.map((p, index) => ({
+        x: p.time_dt,
+        y: 1,
+        xref: "x",
+        yref: "paper",
+        text: `${p.label} · ${p.slot}`,
+        showarrow: true,
+        arrowhead: 2,
+        ax: index % 2 === 0 ? -28 : 28,
+        ay: -38,
+        font: { size: 12, color: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#16a34a" },
+        bgcolor: "rgba(255,255,255,0.85)",
+        bordercolor: p.event === "AIRPLANE_MODE_ON" ? "#ef4444" : "#22c55e",
+        borderpad: 4,
+      }));
+      const tableRows = [
+        ...airplane.map((p) => ({
+          time: p.time,
+          slot: p.slot,
+          conn_type: "Radio",
+          state: "",
+          event: p.event,
+          radio_power: p.radio_power,
+          change_reason: "radio_power",
+          cause: "",
+          operator: "",
+          radio_tech: "",
+        })),
+        ...series.points,
+      ];
       panel.draw(traces, baseLayout({
         showlegend: traces.length > 1,
         hovermode: "x unified",
         margin: { l: 136, r: 96, t: 8, b: 44 },
         yaxis: axis({ type: "category", categoryorder: "array", categoryarray: series.state_order }),
-        annotations: endLabels(traces),
-      }), frameTable(series.points, ["time", "slot", "conn_type", "state", "event", "cause", "operator"]));
+        shapes: airplaneShapes,
+        annotations: endLabels(traces).concat(airplaneAnnotations),
+      }), frameTable(tableRows, ["time", "slot", "conn_type", "state", "event", "radio_power", "change_reason", "cause", "operator", "radio_tech"]));
     },
   },
   {

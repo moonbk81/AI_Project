@@ -68,13 +68,16 @@ class ChartSpec:
     source: str = METADATA
     field: Optional[str] = None
     as_items: bool = False
+    fallback_metadata: bool = False
     # Frames to slim down before they go over the wire: {contract field: columns}.
     project: Dict[str, List[str]] = dataclass_field(default_factory=dict)
 
 
 CHART_BUILDERS: Dict[str, ChartSpec] = {
     # From the session's metadata rows.
-    "service-state": ChartSpec(build_service_state_series),
+    "service-state": ChartSpec(
+        build_service_state_series, source="report", field="oos_events", fallback_metadata=True
+    ),
     "signal-level": ChartSpec(build_signal_level_series),
     "call-history": ChartSpec(build_call_history_summary, source="report", field="call_sessions"),
     # The timeline frame carries every metadata column of every usage row; the
@@ -231,9 +234,14 @@ def chart_input(spec: ChartSpec, source_file: Optional[str]) -> Any:
         return session_frame(source_file)
 
     data = artifact(source_file, spec.source)
+    if spec.fallback_metadata and not data:
+        return session_frame(source_file)
     if spec.field is None:
         return data
-    return (data or {}).get(spec.field, [])
+    value = (data or {}).get(spec.field, [])
+    if spec.fallback_metadata and not value:
+        return session_frame(source_file)
+    return value
 
 
 @router.get("")

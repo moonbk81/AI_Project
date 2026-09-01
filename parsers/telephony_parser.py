@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import re
 from collections import deque
-from core.constants import RE_TIME, RE_TAG, TEL_PATTERNS, VALID_TAGS, SST_FIELDS, NETWORK_EXCLUDE_TAGS
+from core.constants import DIAG_PATTERNS, RE_TIME, RE_TAG, TEL_PATTERNS, VALID_TAGS, SST_FIELDS, NETWORK_EXCLUDE_TAGS
 
 from parsers.base import BaseParser
 from parsers.call import ImsCallParser, CsCallStateMachine
@@ -251,7 +253,9 @@ class OosParser(BaseParser):
 
     def __init__(self, context_getter=None):
         super().__init__(context_getter)
-        self.last_slot_states = {"0": {"v": None, "d": None}, "1": {"v": None, "d": None}}
+        self.last_slot_states = {"0": {}, "1": {}}
+        self.last_radio_power_states = {}
+        self.last_airplane_mode_state = None
         self.pre_context = deque(maxlen=50)
 
     def _parse_sst_val(self, content, key):
@@ -316,6 +320,86 @@ class OosParser(BaseParser):
     def _is_power_off(self, voice_state: str, data_state: str) -> bool:
         return voice_state == "POWER_OFF" or data_state == "POWER_OFF"
 
+    def _registration_signature(self, voice_state, data_state, ss_data):
+        return {
+            "v": voice_state,
+            "d": data_state,
+            "rat": self._parse_sst_val(ss_data, 'rat'),
+            "operator": f"{self._parse_sst_val(ss_data, 'op_long')} ({self._parse_sst_val(ss_data, 'op_short')})",
+            "rej_cause": self._parse_sst_val(ss_data, 'rej_cause'),
+            "emergency": self._parse_sst_val(ss_data, 'is_emergency'),
+        }
+
+    def _changed_fields(self, prev, current):
+        if not prev:
+            return ["initial"]
+        names = {
+            "v": "voice_reg",
+            "d": "data_reg",
+            "rat": "rat",
+            "operator": "operator",
+            "rej_cause": "rej_cause",
+            "emergency": "emergency",
+        }
+        return [label for key, label in names.items() if prev.get(key) != current.get(key)]
+
+    def _radio_power_event(self, match, clean_line, lines):
+        slot_id = match.group('phone').replace("PHONE", "") or "0"
+        on = match.group('on').lower() == 'true'
+        state = "ON" if on else "OFF"
+        if self.last_radio_power_states.get(slot_id) == state:
+            return None
+        self.last_radio_power_states[slot_id] = state
+
+        event_type = "AIRPLANE_MODE_OFF" if on else "AIRPLANE_MODE_ON"
+        recent_logs = [l for l in list(self.pre_context) if not any(t in l for t in NETWORK_EXCLUDE_TAGS)]
+        event = {
+            "time": match.group('timestamp'),
+            "slotId": slot_id,
+            "event_type": event_type,
+            "rat": "Unknown",
+            "root_cause_candidate": "AIRPLANE_MODE_OR_RADIO_POWER_OFF",
+            "operator": "Unknown",
+            "rej_cause": "Unknown",
+            "emergency": match.group('for_emergency'),
+            "radio_power": state,
+            "change_reason": "radio_power",
+            "context_snapshot": (recent_logs + [clean_line])[-15:],
+        }
+        if not on and self.get_context_fn:
+            event["cross_context_logs"] = self.get_context_fn(lines, match.group('timestamp'))
+        return event
+
+    def _airplane_mode_event(self, clean_line, lines):
+        match = re.search(r'AirplaneModeStats:\s+Airplane mode change\.\s+Value:\s+(true|false)', clean_line, re.I)
+        if not match:
+            return None
+        on = match.group(1).lower() == "true"
+        state = "ON" if on else "OFF"
+        if self.last_airplane_mode_state == state:
+            return None
+        self.last_airplane_mode_state = state
+
+        ts_m = RE_TIME.search(clean_line)
+        ts = ts_m.group(0) if ts_m else "00-00 00:00:00.000"
+        recent_logs = [l for l in list(self.pre_context) if not any(t in l for t in NETWORK_EXCLUDE_TAGS)]
+        event = {
+            "time": ts,
+            "slotId": "device",
+            "event_type": "AIRPLANE_MODE_ON" if on else "AIRPLANE_MODE_OFF",
+            "rat": "Unknown",
+            "root_cause_candidate": "AIRPLANE_MODE_OR_RADIO_POWER_OFF",
+            "operator": "Unknown",
+            "rej_cause": "Unknown",
+            "emergency": "false",
+            "radio_power": "",
+            "change_reason": "airplane_mode",
+            "context_snapshot": (recent_logs + [clean_line])[-15:],
+        }
+        if on and self.get_context_fn:
+            event["cross_context_logs"] = self.get_context_fn(lines, ts)
+        return event
+
     def _infer_reason(self, voice_state: str, data_state: str, ss_data: str, context_summary: str):
         if self._is_in_service(voice_state, data_state):
             return "None"
@@ -354,6 +438,13 @@ class OosParser(BaseParser):
                 continue
 
             if in_radio or self._is_radio_log_line(clean_line):
+                if airplane_mode := self._airplane_mode_event(clean_line, lines):
+                    oos_history.append(airplane_mode)
+
+                if radio_power := DIAG_PATTERNS['RADIO_REQ'].search(clean_line):
+                    if event := self._radio_power_event(radio_power, clean_line, lines):
+                        oos_history.append(event)
+
                 tag_m = RE_TAG.search(line)
                 tag = tag_m.group(1).strip() if tag_m else None
                 ss_data = self._extract_service_state_data(clean_line)
@@ -367,16 +458,21 @@ class OosParser(BaseParser):
                     d_reg = self._canonical_service_state(raw_d_reg)
 
                     slot_id = self._extract_slot_id(clean_line, tag)
-                    prev = self.last_slot_states[slot_id]
-                    if (v_reg != prev["v"] or d_reg != prev["d"]):
+                    prev = self.last_slot_states.setdefault(slot_id, {})
+                    current = self._registration_signature(v_reg, d_reg, ss_data)
+                    changed_fields = self._changed_fields(prev, current)
+                    if changed_fields:
                         recent_logs = [l for l in list(self.pre_context) if not any(t in l for t in NETWORK_EXCLUDE_TAGS)]
                         context_summary = " ".join(recent_logs[-20:]).lower()
 
-                        prev_unknown = prev["v"] is None and prev["d"] is None
-                        prev_in_service = self._is_in_service(prev["v"], prev["d"])
+                        prev_unknown = prev.get("v") is None and prev.get("d") is None
+                        prev_in_service = self._is_in_service(prev.get("v"), prev.get("d"))
                         now_in_service = self._is_in_service(v_reg, d_reg)
+                        reg_state_changed = prev_unknown or "voice_reg" in changed_fields or "data_reg" in changed_fields
 
-                        if prev_unknown and not now_in_service: event_type = "OOS_ENTER"
+                        if not reg_state_changed:
+                            event_type = "REG_DETAIL_CHANGE"
+                        elif prev_unknown and not now_in_service: event_type = "OOS_ENTER"
                         elif not prev_in_service and now_in_service: event_type = "OOS_RECOVER"
                         elif prev_in_service and not now_in_service: event_type = "OOS_ENTER"
                         else: event_type = "OOS_STATE_CHANGE"
@@ -385,12 +481,13 @@ class OosParser(BaseParser):
 
                         oos_event = {
                             "time": ts, "slotId": slot_id, "event_type": event_type,
-                            "voice_reg": v_reg, "data_reg": d_reg, "rat": self._parse_sst_val(ss_data, 'rat'),
+                            "voice_reg": v_reg, "data_reg": d_reg, "rat": current["rat"],
                             "raw_voice_reg": raw_v_reg, "raw_data_reg": raw_d_reg,
                             "root_cause_candidate": reason,
-                            "operator": f"{self._parse_sst_val(ss_data, 'op_long')} ({self._parse_sst_val(ss_data, 'op_short')})",
-                            "rej_cause": self._parse_sst_val(ss_data, 'rej_cause'),
-                            "emergency": self._parse_sst_val(ss_data, 'is_emergency'),
+                            "operator": current["operator"],
+                            "rej_cause": current["rej_cause"],
+                            "emergency": current["emergency"],
+                            "change_reason": ",".join(changed_fields),
                             "context_snapshot": recent_logs[-15:]
                         }
 
@@ -398,7 +495,7 @@ class OosParser(BaseParser):
                             oos_event["cross_context_logs"] = self.get_context_fn(lines, ts)
 
                         oos_history.append(oos_event)
-                        self.last_slot_states[slot_id] = {"v": v_reg, "d": d_reg}
+                        self.last_slot_states[slot_id] = current
 
             self.pre_context.append(clean_line)
 

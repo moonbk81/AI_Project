@@ -45,6 +45,8 @@ _FRAME_COLUMNS = {
     "cause": "Cause",
     "operator": "Operator",
     "radio_tech": "Radio_Tech",
+    "change_reason": "Change_Reason",
+    "radio_power": "Radio_Power",
     "label": "Label",
 }
 
@@ -83,7 +85,21 @@ class ServiceStatePoint:
     cause: str
     operator: str
     radio_tech: str
+    change_reason: str
+    radio_power: str
     label: str  # operator/RAT caption, only on IN_SERVICE points
+
+
+@dataclass(frozen=True)
+class AirplaneModeMarker:
+    """A radio-power boundary, rendered separately from service state."""
+
+    time: str
+    time_dt: Optional[pd.Timestamp]
+    slot: str
+    event: str
+    radio_power: str
+    label: str
 
 
 @dataclass(frozen=True)
@@ -100,6 +116,7 @@ class ServiceStateSeries:
 
     status: str
     points: List[ServiceStatePoint] = field(default_factory=list)
+    airplane_events: List[AirplaneModeMarker] = field(default_factory=list)
     state_order: List[str] = field(default_factory=lambda: list(SERVICE_STATE_ORDER))
     slot_count: int = 0
 
@@ -116,20 +133,45 @@ class ServiceStateSeries:
         return frame
 
 
+def _oos_frame(data: Any) -> pd.DataFrame:
+    if isinstance(data, pd.DataFrame):
+        return data
+    if isinstance(data, list):
+        frame = pd.DataFrame(data)
+        if frame.empty:
+            return frame
+        frame["log_type"] = "OOS_Event"
+        return frame
+    return pd.DataFrame()
+
+
 def _transition_records(oos_df: pd.DataFrame) -> List[Dict[str, Any]]:
     """One record per (event, connection type): every OOS row carries both."""
     records: List[Dict[str, Any]] = []
+
+    def value(row, column, default=""):
+        item = row.get(column, default)
+        return default if pd.isna(item) else item
+
+    def event_value(row):
+        return value(row, "event_type", value(row, "event", "Unknown"))
+
     for _, row in oos_df.iterrows():
+        event = event_value(row)
+        if event in {"AIRPLANE_MODE_ON", "AIRPLANE_MODE_OFF"}:
+            continue
         shared = {
-            "time": row.get("time"),
-            "slot": f"Slot {str(row.get('slot', row.get('slotId', '0')))}",
-            "event": row.get("event", row.get("event_type", "Unknown")),
-            "cause": row.get("candidate_reason", row.get("root_cause_candidate", "None")),
-            "operator": row.get("operator", "Unknown"),
-            "radio_tech": row.get("rat", "Unknown"),
+            "time": value(row, "time", ""),
+            "slot": f"Slot {str(value(row, 'slot', value(row, 'slotId', '0')))}",
+            "event": event,
+            "cause": value(row, "candidate_reason", value(row, "root_cause_candidate", "None")),
+            "operator": value(row, "operator", "Unknown"),
+            "radio_tech": value(row, "rat", "Unknown"),
+            "change_reason": value(row, "change_reason", ""),
+            "radio_power": value(row, "radio_power", ""),
         }
         for conn_type, column in (("Voice", "voice_reg"), ("Data", "data_reg")):
-            raw_reg = str(row.get(column, "Unknown"))
+            raw_reg = str(value(row, column, "Unknown"))
             records.append(
                 {
                     **shared,
@@ -141,15 +183,54 @@ def _transition_records(oos_df: pd.DataFrame) -> List[Dict[str, Any]]:
     return records
 
 
+def _airplane_records(oos_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+
+    def value(row, column, default=""):
+        item = row.get(column, default)
+        return default if pd.isna(item) else item
+
+    def event_value(row):
+        return value(row, "event_type", value(row, "event", "Unknown"))
+
+    for _, row in oos_df.iterrows():
+        event = event_value(row)
+        if event not in {"AIRPLANE_MODE_ON", "AIRPLANE_MODE_OFF"}:
+            continue
+        records.append(
+            {
+                "time": value(row, "time", ""),
+                "slot": f"Slot {str(value(row, 'slot', value(row, 'slotId', '0')))}",
+                "event": event,
+                "radio_power": value(row, "radio_power", ""),
+                "label": "비행모드 ON" if event == "AIRPLANE_MODE_ON" else "비행모드 OFF",
+            }
+        )
+    return records
+
+
 def _keep_transitions(state_df: pd.DataFrame) -> pd.DataFrame:
-    """Drop repeats: a point survives only when it changes its own state.
+    """Drop repeats: a point survives when state or key registration detail changes.
 
     Compared within a (slot, connection type) track, ordered by the raw log
-    time, so Voice repeating IN_SERVICE does not hide a Data drop.
+    time, so Voice repeating IN_SERVICE does not hide a Data drop. RAT/operator
+    changes also survive because they are meaningful registration notifications.
     """
     state_df = state_df.sort_values(by=["slot", "conn_type", "time"]).reset_index(drop=True)
     tracks = state_df.groupby(["slot", "conn_type"])
-    keep = state_df["state"] != tracks["state"].shift(1)
+    signature_columns = [
+        "state",
+        "raw_reg",
+        "event",
+        "cause",
+        "operator",
+        "radio_tech",
+        "change_reason",
+        "radio_power",
+    ]
+    keep = pd.Series(False, index=state_df.index)
+    for column in signature_columns:
+        keep |= state_df[column].astype(str) != tracks[column].shift(1).astype(str)
     keep.loc[tracks.head(1).index] = True  # each track's first sample is a transition
     return state_df[keep].copy()
 
@@ -164,6 +245,7 @@ def build_service_state_series(
     Log timestamps carry no year, so one is prefixed before parsing; pass
     `year` to keep the result deterministic.
     """
+    df = _oos_frame(df)
     if not _has_columns(df) or "log_type" not in df.columns:
         return ServiceStateSeries(status="unavailable")
 
@@ -171,17 +253,27 @@ def build_service_state_series(
     if oos_df.empty:
         return ServiceStateSeries(status="no_events")
 
-    clean_df = _keep_transitions(pd.DataFrame(_transition_records(oos_df)))
-    if clean_df.empty:
+    records = _transition_records(oos_df)
+    clean_df = _keep_transitions(pd.DataFrame(records)) if records else pd.DataFrame()
+    airplane_df = pd.DataFrame(_airplane_records(oos_df))
+    if clean_df.empty and airplane_df.empty:
         return ServiceStateSeries(status="no_changes")
 
     year = _log_year(year)
-    clean_df["time_dt"] = pd.to_datetime(
-        str(year) + "-" + clean_df["time"].astype(str),
-        format="%Y-%m-%d %H:%M:%S.%f",
-        errors="coerce",
-    )
-    clean_df = clean_df.sort_values(by=["time_dt", "slot", "conn_type"]).reset_index(drop=True)
+    if not clean_df.empty:
+        clean_df["time_dt"] = pd.to_datetime(
+            str(year) + "-" + clean_df["time"].astype(str),
+            format="%Y-%m-%d %H:%M:%S.%f",
+            errors="coerce",
+        )
+        clean_df = clean_df.sort_values(by=["time_dt", "slot", "conn_type"]).reset_index(drop=True)
+    if not airplane_df.empty:
+        airplane_df["time_dt"] = pd.to_datetime(
+            str(year) + "-" + airplane_df["time"].astype(str),
+            format="%Y-%m-%d %H:%M:%S.%f",
+            errors="coerce",
+        )
+        airplane_df = airplane_df.sort_values(by=["time_dt", "slot", "event"]).reset_index(drop=True)
 
     points = [
         ServiceStatePoint(
@@ -195,17 +287,32 @@ def build_service_state_series(
             cause=row["cause"],
             operator=row["operator"],
             radio_tech=row["radio_tech"],
+            change_reason=row["change_reason"],
+            radio_power=row["radio_power"],
             # Only a registered point can name the network it registered on.
             label=f"[{row['radio_tech']}] {row['operator']}" if row["state"] == "IN_SERVICE" else "",
         )
         for _, row in clean_df.iterrows()
-    ]
+    ] if not clean_df.empty else []
+
+    airplane_events = [
+        AirplaneModeMarker(
+            time=row["time"],
+            time_dt=None if pd.isna(row["time_dt"]) else row["time_dt"],
+            slot=row["slot"],
+            event=row["event"],
+            radio_power=row["radio_power"],
+            label=row["label"],
+        )
+        for _, row in airplane_df.iterrows()
+    ] if not airplane_df.empty else []
 
     return ServiceStateSeries(
         status="ok",
         points=points,
+        airplane_events=airplane_events,
         state_order=list(SERVICE_STATE_ORDER),
-        slot_count=int(clean_df["slot"].nunique()),
+        slot_count=int(pd.concat([clean_df.get("slot", pd.Series(dtype=str)), airplane_df.get("slot", pd.Series(dtype=str))]).nunique()),
     )
 
 

@@ -72,6 +72,50 @@ def test_repeated_states_collapse_to_transitions():
     ]
 
 
+def test_registration_detail_changes_survive_when_service_state_is_same():
+    df = pd.DataFrame(
+        [
+            _oos_row(time="08-25 10:00:00.000", rat="LTE"),
+            _oos_row(time="08-25 10:00:05.000", rat="NR", event="REG_DETAIL_CHANGE", change_reason="rat"),
+        ]
+    )
+
+    series = build_service_state_series(df, year=2026)
+
+    assert [(p.time, p.conn_type, p.state, p.radio_tech, p.change_reason) for p in series.points] == [
+        ("08-25 10:00:00.000", "Data", "IN_SERVICE", "LTE", ""),
+        ("08-25 10:00:00.000", "Voice", "IN_SERVICE", "LTE", ""),
+        ("08-25 10:00:05.000", "Data", "IN_SERVICE", "NR", "rat"),
+        ("08-25 10:00:05.000", "Voice", "IN_SERVICE", "NR", "rat"),
+    ]
+
+
+def test_airplane_mode_events_are_markers_not_service_state_points():
+    df = pd.DataFrame(
+        [
+            _oos_row(
+                time="08-25 10:00:00.000",
+                slotId="0",
+                event_type="AIRPLANE_MODE_ON",
+                radio_power="OFF",
+                voice_reg=None,
+                data_reg=None,
+            ),
+            _oos_row(time="08-25 10:00:05.000", slotId="0", voice_reg="3", data_reg="3"),
+        ]
+    )
+
+    series = build_service_state_series(df, year=2026)
+
+    assert [(m.time, m.slot, m.event, m.radio_power, m.label) for m in series.airplane_events] == [
+        ("08-25 10:00:00.000", "Slot 0", "AIRPLANE_MODE_ON", "OFF", "비행모드 ON")
+    ]
+    assert [(p.time, p.conn_type, p.state, p.event) for p in series.points] == [
+        ("08-25 10:00:05.000", "Data", "POWER_OFF", "REG_STATE_CHANGED"),
+        ("08-25 10:00:05.000", "Voice", "POWER_OFF", "REG_STATE_CHANGED"),
+    ]
+
+
 def test_points_carry_parsed_time_and_registered_label():
     df = pd.DataFrame([_oos_row(voice_reg="0", data_reg="1")])
 
@@ -125,6 +169,8 @@ def test_frame_uses_the_column_names_plotly_shows():
         "Cause",
         "Operator",
         "Radio_Tech",
+        "Change_Reason",
+        "Radio_Power",
         "Label",
     ]
     assert str(frame["time_dt"].dtype).startswith("datetime64")
