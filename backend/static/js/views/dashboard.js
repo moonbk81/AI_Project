@@ -15,13 +15,13 @@ function kpiBand(kpi) {
   const outOfService = kpi.oos_count > 0;
   const wrap = el("div");
   const ctx = kpi.device_context || {};
-  const firstRow = tileRow([
+  // 네 개라 기본 4열 그대로 쓴다(3col 오버라이드 없음).
+  wrap.append(tileRow([
     tile("모델", ctx.model_name || "N/A", "", ctx.build_id || ""),
     tile("Radio", ctx.radio || "N/A"),
     tile("Build Network", ctx.network || "N/A"),
-  ]);
-  firstRow.classList.add("kpi-row-3col");
-  wrap.append(firstRow);
+    tile("모바일 데이터", ctx.mobile_data || "N/A"),
+  ]));
 
   // One row per SIM slot: the SIM's own properties, then the network it is on.
   for (const sim of ctx.sim_slots || []) {

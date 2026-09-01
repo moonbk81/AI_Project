@@ -61,6 +61,7 @@ def test_empty_session_reports_neutral_numbers():
             "build_id": "N/A",
             "radio": "N/A",
             "network": "N/A",
+            "mobile_data": "N/A",
             "sim_slots": [],
             "network_slots": [],
         },
@@ -111,6 +112,7 @@ def test_unparseable_data_usage_counts_as_zero_mb():
             "build_id": "N/A",
             "radio": "N/A",
             "network": "N/A",
+            "mobile_data": "N/A",
             "sim_slots": [],
             "network_slots": [],
         },
@@ -153,3 +155,19 @@ def test_single_sim_property_has_no_comma():
     assert len(ctx["network_slots"]) == 1
     assert ctx["network_slots"][0]["plmn"] == "310260"
     assert ctx["network_slots"][0]["network_name"] == "T-Mobile"
+
+
+def test_mobile_data_setting_is_read_as_words():
+    """로그의 0/1 을 그대로 타일에 띄우면 무슨 뜻인지 알 수 없다."""
+    on = compute_session_kpi([{"log_type": "System_Property", "mobile_data": "1"}])
+    off = compute_session_kpi([{"log_type": "System_Property", "mobile_data": "0"}])
+
+    assert on["device_context"]["mobile_data"] == "사용"
+    assert off["device_context"]["mobile_data"] == "사용 안 함"
+
+
+def test_a_session_without_the_setting_says_nothing_about_it():
+    # 설정이 찍히기 전에 적재한 세션. 0 으로 읽어 "꺼져 있었다"고 하면 안 된다.
+    kpi = compute_session_kpi([{"log_type": "Build_Info", "model_name": "q7q"}])
+
+    assert kpi["device_context"]["mobile_data"] == "N/A"
