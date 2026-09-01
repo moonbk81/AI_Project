@@ -2,11 +2,14 @@
 import gc
 import json
 import os
+from typing import Callable, Optional
 from tqdm import tqdm
 
 from core.config import get_model_config
 
 from rag.chroma_utils import sanitize_chroma_metadata
+
+ProgressCallback = Optional[Callable[[int, int], None]]
 
 
 def _log_info(msg):
@@ -29,7 +32,16 @@ def _log_error(msg):
     print(f"❌ {msg}")
 
 
-def ingest_file(collection, embed_model, file_path, force=False, model_name="default", uploaded_by="", defect_code=""):
+def ingest_file(
+    collection,
+    embed_model,
+    file_path,
+    force=False,
+    model_name="default",
+    uploaded_by="",
+    defect_code="",
+    progress_callback: ProgressCallback = None,
+):
     """
     RAG 페이로드를 임베딩하여 Vector DB에 저장합니다.
 
@@ -170,7 +182,8 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
         metas = [metas[j] for j in deduplicated_indices]
         ids = [ids[j] for j in deduplicated_indices]
 
-    for i in tqdm(range(0, len(docs), ADD_BATCH_SIZE), desc=f"임베딩 진행 중 ({filename})"):
+    total_docs = len(docs)
+    for i in tqdm(range(0, total_docs, ADD_BATCH_SIZE), desc=f"임베딩 진행 중 ({filename})"):
         batch_docs = docs[i:i+ADD_BATCH_SIZE]
         batch_metas = metas[i:i+ADD_BATCH_SIZE]
         batch_ids = ids[i:i+ADD_BATCH_SIZE]
@@ -200,6 +213,8 @@ def ingest_file(collection, embed_model, file_path, force=False, model_name="def
             stats["errors"] += len(batch_ids)
 
         gc.collect()
+        if progress_callback:
+            progress_callback(min(i + len(batch_docs), total_docs), total_docs)
 
     _log_success(f"'{filename}' 임베딩 완료 - 추가됨: {stats['added']}, 스킵됨: {stats['skipped']}, 에러: {stats['errors']}")
     return stats

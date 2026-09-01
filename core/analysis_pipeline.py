@@ -7,6 +7,7 @@ even now that the only front end is the browser UI served from ``backend/``.
 """
 
 from dataclasses import dataclass
+import inspect
 import os
 import re
 from typing import Callable, Iterable, Optional
@@ -185,7 +186,19 @@ def run_analysis_core(
         progress_callback("통신 스택 로그 교차 분석 진행 중...", None)
     orchestrator = LogOrchestrator(target_log_path)
     report_path = os.path.join(result_dir, f"{base_name}_report.json")
-    success = orchestrator.run_batch(report_path)
+
+    def analysis_progress(message: str, value: int):
+        if progress_callback:
+            progress_callback(message, value)
+
+    try:
+        accepts_analysis_progress = "progress_callback" in inspect.signature(orchestrator.run_batch).parameters
+    except (TypeError, ValueError):
+        accepts_analysis_progress = False
+    if accepts_analysis_progress:
+        success = orchestrator.run_batch(report_path, progress_callback=analysis_progress)
+    else:
+        success = orchestrator.run_batch(report_path)
     if progress_callback:
         progress_callback("", 50)
 
@@ -200,10 +213,40 @@ def run_analysis_core(
         progress_callback("RAG 데이터셋 구성 및 Vector DB 임베딩 진행 중...", None)
     builder = RagPayloadBuilder(report_path)
     payload_name = f"{base_name}_payload.json"
-    builder.build_payload(payload_name)
+
+    def payload_progress(done: int, total: int, label: str):
+        if not progress_callback or total <= 0:
+            return
+        share = min(1.0, max(0.0, done / total))
+        progress_callback(f"RAG payload 생성 중... ({label}, {done}/{total})", 50 + int(15 * share))
+
+    try:
+        accepts_payload_progress = "progress_callback" in inspect.signature(builder.build_payload).parameters
+    except (TypeError, ValueError):
+        accepts_payload_progress = False
+    if accepts_payload_progress:
+        builder.build_payload(payload_name, progress_callback=payload_progress)
+    else:
+        builder.build_payload(payload_name)
+    if progress_callback:
+        progress_callback("RAG payload 생성 완료. Vector DB 임베딩 시작...", 65)
 
     payload_path = os.path.join("./payloads", payload_name)
-    ai_engine.ingest_file(payload_path, force=True, uploaded_by=owner, defect_code=defect_code)
+
+    def embedding_progress(done: int, total: int):
+        if not progress_callback or total <= 0:
+            return
+        share = min(1.0, max(0.0, done / total))
+        progress_callback(f"Vector DB 임베딩 진행 중... ({done}/{total})", 65 + int(34 * share))
+
+    ingest_kwargs = {"force": True, "uploaded_by": owner, "defect_code": defect_code}
+    try:
+        accepts_progress = "progress_callback" in inspect.signature(ai_engine.ingest_file).parameters
+    except (TypeError, ValueError):
+        accepts_progress = False
+    if accepts_progress:
+        ingest_kwargs["progress_callback"] = embedding_progress
+    ai_engine.ingest_file(payload_path, **ingest_kwargs)
     if progress_callback:
         progress_callback("", 100)
 

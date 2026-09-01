@@ -143,6 +143,8 @@ function jobCard() {
   const body = el("div", "stack");
   panel.append(body);
 
+  const progressValue = (job) => Math.min(100, Math.max(0, Number(job.progress) || 0));
+
   const draw = (jobs) => {
     body.replaceChildren();
     if (!jobs.length) {
@@ -156,9 +158,17 @@ function jobCard() {
       if (job.owner) row.append(el("span", "row-meta", job.owner));
       row.append(el("span", "row-meta", job.message || job.status));
 
+      const progress = progressValue(job);
+      row.append(el("span", "job-progress", `${progress}%`));
+
       const bar = el("div", "bar");
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      bar.setAttribute("aria-valuenow", String(progress));
+      bar.setAttribute("aria-label", `분석 진행률 ${progress}%`);
       const fill = el("div", "bar-fill");
-      fill.style.width = `${Math.max(2, job.progress || 0)}%`;
+      fill.style.width = `${Math.max(2, progress)}%`;
       if (job.status === "error") fill.classList.add("error");
       if (job.status === "done") fill.classList.add("done");
       bar.append(fill);

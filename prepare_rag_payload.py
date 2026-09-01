@@ -1,8 +1,11 @@
 import json
 import os
 import argparse
+from typing import Callable, Optional
 
 from rag_builders.builder import build_all_payloads
+
+ProgressCallback = Optional[Callable[[int, int, str], None]]
 
 class RagPayloadBuilder:
     def __init__(self, input_file):
@@ -137,7 +140,7 @@ class RagPayloadBuilder:
             for key in repeated_keys:
                 metadata.pop(key, None)
 
-    def build_payload(self, output_filename=None):
+    def build_payload(self, output_filename=None, progress_callback: ProgressCallback = None):
         if not os.path.exists(self.input_file):
             print(f"❌ 파일을 찾을 수 없습니다: {self.input_file}")
             return
@@ -158,6 +161,7 @@ class RagPayloadBuilder:
                 self.input_file,
                 self._build_markdown_doc,
                 self._extract_metadata,
+                progress_callback=progress_callback,
             )
         )
 
@@ -179,4 +183,3 @@ class RagPayloadBuilder:
 
         with open(final_output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=4, ensure_ascii=False)
-

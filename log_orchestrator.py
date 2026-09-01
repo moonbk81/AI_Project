@@ -3,6 +3,7 @@ import json
 import argparse
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Optional
 
 from datetime import datetime, timedelta
 from parsers.telephony_parser import TelephonyParser, OosParser
@@ -22,6 +23,9 @@ from parsers.diagnostic_parser import BinderWarningParser
 from parsers.rilj_parser import RiljParser
 from parsers.system_property_parser import SystemPropertyParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
+
+ProgressCallback = Optional[Callable[[str, int], None]]
+
 
 class LogOrchestrator:
     def __init__(self, file_path):
@@ -128,12 +132,18 @@ class LogOrchestrator:
             query["suspected_reason"] = issue.get("suspected_reason", query.get("suspected_reason"))
         return dns_queries
 
-    def run_batch(self, output_path):
+    def run_batch(self, output_path, progress_callback: ProgressCallback = None):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
+            def report_progress(message, progress):
+                if progress_callback:
+                    progress_callback(message, progress)
+
+            report_progress("로그 파일 읽는 중...", 3)
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
 
+            report_progress(f"{len(lines)}개 로그 라인 시간 인덱스 생성 중...", 6)
             self._build_time_index(lines)
 
             # ==========================================
@@ -157,10 +167,20 @@ class LogOrchestrator:
                         if match:
                             global_uid_map[match.group(1)] = match.group(2).strip()
 
+            report_progress("파서 후보 라인 분류 중...", 10)
             # 1. 1회 스캔 기반 parser별 후보 라인 버킷 생성
             buckets = self.bucket_builder.build(lines)
+            report_progress("파서 후보 라인 분류 완료. 병렬 분석 시작...", 15)
 
             result = {}
+            total_steps = 24
+            completed_steps = 0
+
+            def mark_step(label):
+                nonlocal completed_steps
+                completed_steps += 1
+                progress = 15 + int(35 * min(completed_steps, total_steps) / total_steps)
+                report_progress(f"로그 분석 중... ({label}, {completed_steps}/{total_steps})", progress)
 
             # ========== 1단계: 병렬 처리 가능한 parser들 실행 ==========
             # 의존성이 없는 파서들을 ThreadPoolExecutor로 병렬 실행
@@ -205,16 +225,21 @@ class LogOrchestrator:
                     if key == 'binder_warnings' and value is not None:
                         if binder_ctx := self.binder_parser.build_context_summary(buckets.get('binder_context', [])):
                             result['binder_context_summary'] = binder_ctx
+                    mark_step(futures[future])
 
             # ========== 2단계: full lines 필요한 순차 파서들 ==========
             result['call_sessions'] = self.tel_parser.analyze(lines)
+            mark_step("call")
             result['oos_events'] = self.oos_parser.analyze(lines)
+            mark_step("oos")
             result['network_timeseries'] = self.net_ts_analyzer.analyze(lines)
+            mark_step("network_timeseries")
 
             # ========== 3단계: 의존성 있는 parser들 (순차) ==========
             datacall_lines = buckets.get('datacall') or lines
             internet_stall_lines = buckets.get('internet_stall') or lines
             result['datacall_data'] = self.datacall_parser.analyze(datacall_lines)
+            mark_step("datacall")
 
             if dns_res := self.dns_parser.analyze(
                 buckets['dns'],
@@ -226,12 +251,14 @@ class LogOrchestrator:
                 )
                 if health_warnings := dns_res.get('health_warnings', []):
                     result['dns_health_warnings'] = health_warnings
+            mark_step("dns")
 
             result['internet_stall'] = self.internet_stall_parser.analyze(
                 internet_stall_lines,
                 data_call_events=result.get('datacall_data', []),
                 dns_events=result.get('dns_queries', []),
                 report_data=result)
+            mark_step("internet_stall")
 
             # ========== 4단계: UI 리포트 생성 (병렬) ==========
             with ThreadPoolExecutor(max_workers=4) as executor:
@@ -241,10 +268,12 @@ class LogOrchestrator:
                 executor.submit(self.ntn_processor.build_and_save_payloads, "./payloads")
                 executor.submit(self.internet_stall_parser.save_ui_report, "./result", self.base_name, result['internet_stall'])
                 # 모든 작업 완료 대기
+            mark_step("ui_report")
 
             # 4. JSON 저장
             with open(output_path, "w", encoding="utf-8") as j:
                 json.dump(result, j, indent=4, ensure_ascii=False)
+            report_progress("로그 분석 리포트 생성 완료.", 50)
             return True
 
         except Exception as e:
