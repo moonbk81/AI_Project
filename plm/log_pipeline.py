@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from core.log_archive import extract_logs_from_archive, is_archive_name, list_archive_contents
+from core.log_archive import (
+    extract_logs_from_archive,
+    is_archive_name,
+    is_plain_log_name,
+    list_archive_contents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +88,20 @@ def inspect_attachment(filename: str, content: bytes) -> AttachmentOutcome:
 
 
 def select_archive_attachments(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """Attachments worth opening: a device log arrives inside an archive."""
+    """Attachments worth opening: an archive that may hold a device log."""
     return [f for f in (files or []) if is_archive_name(f.get("title", ""))]
+
+
+def select_analyzable_attachments(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """분석할 수 있는 첨부: 압축과, 압축 없이 그대로 올라온 로그.
+
+    로그가 늘 압축 안에 온다고 보고 압축만 골랐더니, dumpState 를 그대로 올린
+    결함에서는 고를 것이 하나도 없어 분석을 시작할 수조차 없었다.
+    """
+    return [
+        f for f in (files or [])
+        if is_archive_name(f.get("title", "")) or is_plain_log_name(f.get("title", ""))
+    ]
 
 
 def _attachment_ids(attachment: Dict[str, Any]):
@@ -105,7 +122,7 @@ def extract_logs_from_attachments(
     The caller registers each `LOG_READY` event's file; this function keeps no
     state of its own, so a failure on one attachment never stops the rest.
     """
-    archives = select_archive_attachments(files)
+    archives = select_analyzable_attachments(files)
     if not archives:
         yield LogExtractionEvent(NO_ARCHIVE_ATTACHMENTS)
         return
@@ -136,6 +153,13 @@ def extract_logs_from_attachments(
             if not file_data:
                 logger.error("No data returned for %s", title)
                 yield LogExtractionEvent(DOWNLOAD_EMPTY, title=title)
+                continue
+
+            # 압축이 아니면 열어 볼 안쪽이 없다. 내려받은 것이 곧 그 로그다.
+            if is_plain_log_name(title):
+                logger.info("%s is a log file itself", title)
+                yield LogExtractionEvent(LOGS_EXTRACTED, title=title, count=1)
+                yield LogExtractionEvent(LOG_READY, title=title, filename=title, content=file_data)
                 continue
 
             yield LogExtractionEvent(EXTRACTING, title=title)

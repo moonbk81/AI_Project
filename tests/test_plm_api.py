@@ -212,12 +212,12 @@ def test_a_plm_failure_lands_on_the_job_rather_than_the_request(monkeypatch, tmp
     assert job["status"] == "error" and job["error"] == "권한 없음"
 
 
-def _one_attachment(monkeypatch, payload, downloads=None):
+def _one_attachment(monkeypatch, payload, downloads=None, title="bugreport.zip"):
     monkeypatch.setattr(
         "plm.service.list_attached_files",
         lambda **kwargs: {
             "success": True,
-            "files": [{"title": "bugreport.zip", "docId": "D", "fileId": "F1"}],
+            "files": [{"title": title, "docId": "D", "fileId": "F1"}],
         },
     )
 
@@ -249,6 +249,55 @@ def test_scanning_lists_the_logs_a_user_can_pick(monkeypatch, tmp_path):
         "ap_silentlog/SILENT_LOG_01.log": "ap_silentlog",
         "ap_silentlog/SILENT_LOG_02.log": "ap_silentlog",
     }
+
+
+def test_a_log_attached_without_an_archive_is_offered_as_one_candidate(monkeypatch, tmp_path):
+    """압축 없이 dumpState 를 그대로 올린 결함. 열어 볼 안쪽이 없다.
+
+    압축만 후보로 삼던 동안에는 이 결함에서 고를 것이 하나도 없어 분석 버튼까지
+    사라졌다. 첨부 자체가 후보 하나이고, 빈 route 가 "이것을 그대로 쓴다" 는 뜻이다.
+    """
+    monkeypatch.chdir(tmp_path)
+    downloads = []
+    _one_attachment(monkeypatch, b"log body", downloads, title="dumpState_1787.log")
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_log_scan_job(job_id, "25", "D-1", ["F1"])
+
+    job = backend_main._get_job(job_id)
+    assert job["status"] == "done"
+    assert job["log_candidates"] == [{
+        "file_id": "F1",
+        "title": "dumpState_1787.log",
+        "path": "dumpState_1787.log",
+        "route": [],
+        "size": 0,
+        "group": False,
+        "kind": "log",
+    }]
+    # 안을 훑을 것이 없으니 목록을 만드는 동안 내려받지도 않는다.
+    assert downloads == []
+
+
+def test_a_plain_log_is_written_out_without_being_unpacked(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _one_attachment(monkeypatch, b"whole dumpstate", title="dumpState_1787.log")
+
+    analyzed = {}
+    monkeypatch.setattr(
+        backend_main,
+        "_run_analyze_job",
+        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+    )
+
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_selected_logs_job(
+        job_id, "25", "D-1",
+        [{"file_id": "F1", "title": "dumpState_1787.log", "route": []}],
+    )
+
+    assert [path.rsplit("/", 1)[-1] for path in analyzed["paths"]] == ["dumpState_1787.log"]
+    assert open(analyzed["paths"][0], "rb").read() == b"whole dumpstate"
 
 
 def test_only_the_picked_logs_are_pulled_out_of_the_archive(monkeypatch, tmp_path):
@@ -526,3 +575,29 @@ def test_registering_an_answer_without_a_knox_id_is_refused(client):
 
     assert response.status_code == 400
     assert "Knox ID" in response.json()["detail"]
+
+
+def test_the_file_list_says_what_can_be_analyzed(monkeypatch):
+    """무엇이 로그인지 아는 것은 LOG_PATTERNS 뿐이고 그 목록은 계속 자란다.
+
+    그 판단을 화면에 복제해 두면 목록이 자랄 때 한쪽만 자라므로, 서버가 붙여 준다.
+    """
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {"success": True, "files": [
+            {"title": "logs.zip", "docId": "D", "fileId": "F1"},
+            {"title": "dumpState_1787.log", "docId": "D", "fileId": "F2"},
+            {"title": "결함내용.txt", "docId": "D", "fileId": "F3"},
+        ]},
+    )
+
+    body = backend_main.plm_files(
+        backend_main.PlmFileListRequest(division_code="25", defect_code="D-1")
+    )
+    flags = {f["title"]: (f["analyzable"], f["is_archive"]) for f in body.files}
+
+    assert flags == {
+        "logs.zip": (True, True),
+        "dumpState_1787.log": (True, False),
+        "결함내용.txt": (False, False),
+    }

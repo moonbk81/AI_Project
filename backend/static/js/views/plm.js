@@ -10,9 +10,9 @@ const STATUSES = ["Open", "Resolve", "Close"];
 const SEARCH_METHODS = ["내 문제", "그룹", "사용자 ID", "PLM 번호"];
 const JOB_POLL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
-// core/log_archive.py 의 ARCHIVE_SUFFIXES 와 같은 목록. 로그는 압축 첨부 안에만
-// 들어 있으므로, 고를 수 있는 첨부도 이것들뿐이다.
-const ARCHIVE_SUFFIXES = [".zip", ".7z"];
+// 어떤 첨부를 분석할 수 있는지는 `/plm/files` 가 `analyzable`·`is_archive` 로
+// 알려 준다. 로그는 압축 안에 오기도 하고 dumpState 처럼 그대로 올라오기도
+// 하는데, 그 이름 규칙이 기기·빌드마다 자라서 여기 복제해 두면 한쪽만 자란다.
 
 const sizeText = (bytes) => {
   const value = Number(bytes) || 0;
@@ -21,8 +21,6 @@ const sizeText = (bytes) => {
     : `${(value / 1024).toFixed(1)} KB`;
 };
 
-const isArchiveName = (name) =>
-  ARCHIVE_SUFFIXES.some((suffix) => String(name || "").toLowerCase().endsWith(suffix));
 
 function input(placeholder, value = "") {
   const node = el("input", "text-input");
@@ -328,7 +326,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // ------------------------------------------------------------------ 첨부
   const attachments = panel(
     "첨부 파일",
-    "선택한 압축 파일(ZIP/7z)만 내려받아 안의 LOG 파일을 목록으로 보여 줍니다. 분석할 로그를 선택해 주세요.",
+    "고른 첨부만 내려받습니다. 압축이면 안의 LOG 파일을 목록으로 보여 주고, 로그 파일이면 그대로 씁니다. 분석할 로그를 선택해 주세요.",
   );
   const attachmentHost = el("div", "stack");
   attachments.body.append(attachmentHost);
@@ -465,12 +463,14 @@ export async function renderPlm(mount, sourceFile, ctx) {
     for (const file of files) {
       const row = el("div", "row");
       const fileId = String(file.fileId);
-      const analyzable = isArchiveName(file.title) && file.docId && file.fileId;
+      const analyzable = file.analyzable && file.docId && file.fileId;
 
       if (analyzable) {
         const box = el("input");
         box.type = "checkbox";
-        box.title = "이 압축 파일 안을 훑는다";
+        box.title = file.is_archive
+          ? "이 압축 파일 안을 훑는다"
+          : "이 로그 파일을 분석 대상에 넣는다";
         box.checked = picked.has(fileId);
         box.addEventListener("change", () => {
           if (box.checked) picked.add(fileId);
@@ -480,7 +480,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         boxes.push({ box, fileId });
         row.append(box);
       } else {
-        // 자리를 맞춰 두면 압축이 아닌 첨부도 목록에서 밀리지 않는다.
+        // 자리를 맞춰 두면 분석 대상이 아닌 첨부도 목록에서 밀리지 않는다.
         row.append(el("span", "row-pick"));
       }
 
@@ -496,7 +496,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
     }
 
     if (!boxes.length) {
-      attachmentHost.append(el("div", "empty", "안을 훑을 수 있는 압축 첨부(ZIP/7z)가 없습니다."));
+      attachmentHost.append(el("div", "empty",
+        "분석할 수 있는 첨부가 없습니다. (압축 ZIP/7z 또는 .log/.txt)"));
       return;
     }
 
@@ -512,10 +513,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
         }
         refresh();
       });
-      allRow.append(selectAll, el("span", "row-name", `전체 선택 (압축 첨부 ${boxes.length}개)`));
+      allRow.append(selectAll, el("span", "row-name", `전체 선택 (분석 가능 첨부 ${boxes.length}개)`));
       attachmentHost.prepend(allRow);
     } else if (!picked.size) {
-      // 압축 첨부가 하나뿐이면 고를 것이 없으므로 미리 체크해 둔다.
+      // 고를 수 있는 첨부가 하나뿐이면 고를 것이 없으므로 미리 체크해 둔다.
       boxes[0].box.checked = true;
       picked.add(boxes[0].fileId);
     }

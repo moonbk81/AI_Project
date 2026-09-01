@@ -412,7 +412,11 @@ def test_plm_file_endpoints(client, monkeypatch):
     )
 
     assert list_response.status_code == 200
-    assert list_response.json()["files"] == [{"title": "radio.zip", "fileId": "file-1", "docId": "doc-1"}]
+    # 무엇이 분석 대상인지는 서버가 판단해 붙여 준다. 화면은 이 플래그만 본다.
+    assert list_response.json()["files"] == [{
+        "title": "radio.zip", "fileId": "file-1", "docId": "doc-1",
+        "is_archive": True, "analyzable": True,
+    }]
     assert download_response.status_code == 200
     assert download_response.content == b"zip-bytes"
     assert download_response.headers["X-Filename"] == "radio.zip"

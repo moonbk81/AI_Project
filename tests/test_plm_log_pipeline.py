@@ -2,7 +2,11 @@ import io
 import zipfile
 
 from plm import log_pipeline
-from plm.log_pipeline import extract_logs_from_attachments, select_archive_attachments
+from plm.log_pipeline import (
+    extract_logs_from_attachments,
+    select_analyzable_attachments,
+    select_archive_attachments,
+)
 
 
 def make_zip(entries):
@@ -44,10 +48,57 @@ def test_only_zip_attachments_are_opened():
     assert select_archive_attachments(None) == []
 
 
-def test_defect_without_zip_attachments_stops_immediately():
-    events = list(extract_logs_from_attachments([{"title": "notes.txt"}], _downloader({})))
+def test_defect_without_anything_analyzable_stops_immediately():
+    events = list(extract_logs_from_attachments([{"title": "spec.pdf"}], _downloader({})))
 
     assert _kinds(events) == [log_pipeline.NO_ARCHIVE_ATTACHMENTS]
+
+
+def test_a_log_uploaded_without_an_archive_is_analyzable():
+    """로그가 늘 압축 안에 오지는 않는다. dumpState 를 그대로 올린 결함도 있다.
+
+    압축만 고르던 동안에는 이런 결함에서 고를 것이 없어 분석을 시작조차 못 했다.
+    """
+    files = [
+        _attachment("dumpState_1787.log"),
+        _attachment("logs.zip", 2),
+        _attachment("spec.pdf", 3),
+    ]
+
+    assert [f["title"] for f in select_analyzable_attachments(files)] == [
+        "dumpState_1787.log", "logs.zip",
+    ]
+    assert select_analyzable_attachments(None) == []
+
+
+def test_a_txt_that_is_not_a_known_log_name_is_left_alone():
+    """첨부 목록에는 결함 설명서 같은 .txt 가 그냥 붙어 있다.
+
+    압축 안에서는 아는 이름이 하나도 없을 때만 .txt 를 후보로 올리지만, 첨부
+    목록에 그 조건 없이 넓히면 로그가 아닌 것에도 체크박스가 생긴다.
+    """
+    files = [_attachment("결함내용.txt"), _attachment("dumpstate.txt", 2)]
+
+    # dumpstate 계열은 .txt 여도 LOG_PATTERNS 가 받는다.
+    assert [f["title"] for f in select_analyzable_attachments(files)] == ["dumpstate.txt"]
+
+
+def test_a_plain_log_attachment_is_used_as_it_is():
+    """압축이 아니면 열어 볼 안쪽이 없다. 내려받은 것이 곧 그 로그다."""
+    files = [_attachment("dumpState_1787.log")]
+    download = _downloader({"dumpState_1787.log": {"success": True, "data": b"log body"}})
+
+    events = list(extract_logs_from_attachments(files, download))
+
+    assert _kinds(events) == [
+        log_pipeline.ARCHIVE_ATTACHMENTS_FOUND,
+        log_pipeline.DOWNLOADING,
+        log_pipeline.LOGS_EXTRACTED,
+        log_pipeline.LOG_READY,
+    ]
+    ready = events[-1]
+    assert ready.filename == "dumpState_1787.log"
+    assert ready.content == b"log body"
 
 
 def test_extracted_logs_are_yielded_with_their_content():

@@ -91,6 +91,23 @@ def is_archive_name(filename: str) -> bool:
     return str(filename).lower().endswith(ARCHIVE_SUFFIXES)
 
 
+def is_plain_log_name(filename: str) -> bool:
+    """압축이 아니면서 아는 로그 이름인 첨부.
+
+    로그가 늘 압축 안에 오는 것은 아니다. dumpState 를 그대로 올린 첨부도 있고,
+    그때는 열어 볼 안쪽이 없다 -- 첨부 자체가 그 파일이다.
+
+    `MAYBE_LOG_SUFFIXES` 로 넓히지 않고 `LOG_PATTERNS` 만 본다. 압축 안에서는
+    아는 이름이 하나도 없을 때만 `.txt` 를 후보로 올리지만, 첨부 목록에는 결함
+    설명서 같은 `.txt` 가 그냥 붙어 있어 조건 없이 넓히면 로그가 아닌 것에도
+    체크박스가 생긴다. `LOG_PATTERNS` 는 이미 dumpstate 의 `.log`/`.txt` 를 모두
+    받는다.
+    """
+    if is_archive_name(filename):
+        return False
+    return is_log_file(os.path.basename(str(filename)))
+
+
 def archive_format(data: bytes) -> Optional[str]:
     """Which format the bytes are, or None when they are not an archive."""
     head = bytes(data or b"")[:8]

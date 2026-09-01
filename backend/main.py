@@ -754,18 +754,18 @@ def _run_plm_log_scan_job(
     본문은 꺼내지 않는다. 압축의 목록만 읽고, 이름에 로그 힌트가 붙은 중첩
     압축만 열어 본다. 실제 추출은 사용자가 고른 뒤에 그 파일만 한다.
     """
-    from core.log_archive import find_log_candidates, list_archive_contents
+    from core.log_archive import find_log_candidates, is_plain_log_name, list_archive_contents
     from plm import log_pipeline
 
     try:
         _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=3)
-        archives = log_pipeline.select_archive_attachments(
+        archives = log_pipeline.select_analyzable_attachments(
             _selected_attachments(division_code, defect_code, file_ids)
         )
         if not archives:
             _set_job(
                 job_id, status="done", progress=100, log_candidates=[],
-                message="압축 첨부(ZIP/7z)가 없습니다.",
+                message="분석할 수 있는 첨부가 없습니다. (압축 ZIP/7z 또는 .log/.txt)",
             )
             return
 
@@ -775,6 +775,22 @@ def _run_plm_log_scan_job(
         for index, attachment in enumerate(archives, 1):
             title = str(attachment.get("title") or "첨부")
             share = int(90 * index / len(archives))
+
+            # 압축이 아니면 안을 훑을 것이 없다. 첨부 자체가 후보 하나이고,
+            # 빈 route 는 "이 첨부를 그대로 쓴다" 는 뜻이다(read_by_route 가
+            # 받은 데이터를 그대로 돌려준다). 여기서는 내려받지도 않는다.
+            if is_plain_log_name(title):
+                candidates.append({
+                    "file_id": str(attachment.get("fileId")),
+                    "title": title,
+                    "path": title,
+                    "route": [],
+                    "size": int(attachment.get("fileSize") or 0),
+                    "group": False,
+                    "kind": "log",
+                })
+                continue
+
             try:
                 _set_job(job_id, message=f"[{index}/{len(archives)}] {title} 내려받는 중...", progress=5 + share)
                 data = _attachment_bytes(division_code, defect_code, attachment)
@@ -836,8 +852,9 @@ def _run_plm_selected_logs_job(
         skipped: List[str] = []
         for index, item in enumerate(selections, 1):
             route = list(item["route"])
-            label = "/".join(route)
-            name = os.path.basename(route[-1])
+            # 압축 없이 올라온 로그는 안쪽 경로가 없다. 그때 이름은 첨부 이름이다.
+            label = "/".join(route) or str(item.get("title") or "첨부")
+            name = os.path.basename(route[-1] if route else label)
 
             # 하나가 실패해도 나머지는 꺼낸다. 로그 스무 개를 고른 사람이 한
             # 파일 때문에 처음부터 다시 하게 둘 이유가 없다.
@@ -1327,6 +1344,25 @@ def plm_defect_details(req: PlmDefectDetailsRequest) -> PlmDefectDetailsResponse
     return PlmDefectDetailsResponse(**result)
 
 
+def _mark_analyzable(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """첨부마다 분석 대상인지, 압축인지 표시한다.
+
+    무엇이 로그인지 아는 것은 `LOG_PATTERNS` 뿐이고 그 목록은 기기·빌드마다
+    새 이름이 붙어 계속 자란다. 그래서 판단을 화면에 복제하지 않고 여기서 붙여
+    보낸다 -- 복제해 두면 목록이 자랄 때 한쪽만 자란다.
+    """
+    from core.log_archive import is_archive_name, is_plain_log_name
+
+    marked = []
+    for entry in files or []:
+        item = dict(entry)
+        title = item.get("title") or ""
+        item["is_archive"] = is_archive_name(title)
+        item["analyzable"] = item["is_archive"] or is_plain_log_name(title)
+        marked.append(item)
+    return marked
+
+
 @app.post("/plm/files", response_model=PlmFileListResponse)
 def plm_files(req: PlmFileListRequest) -> PlmFileListResponse:
     from plm.service import list_attached_files
@@ -1336,6 +1372,7 @@ def plm_files(req: PlmFileListRequest) -> PlmFileListResponse:
         defect_code=req.defect_code,
         attach_type=req.attach_type,
     )
+    result["files"] = _mark_analyzable(result.get("files"))
     return PlmFileListResponse(**result)
 
 
