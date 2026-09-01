@@ -62,6 +62,8 @@ def test_empty_session_reports_neutral_numbers():
             "radio": "N/A",
             "network": "N/A",
             "mobile_data": "N/A",
+            "mobile_data_changed_at": "",
+            "mobile_data_changed_by": "",
             "sim_slots": [],
             "network_slots": [],
         },
@@ -113,6 +115,8 @@ def test_unparseable_data_usage_counts_as_zero_mb():
             "radio": "N/A",
             "network": "N/A",
             "mobile_data": "N/A",
+            "mobile_data_changed_at": "",
+            "mobile_data_changed_by": "",
             "sim_slots": [],
             "network_slots": [],
         },
@@ -164,6 +168,21 @@ def test_mobile_data_setting_is_read_as_words():
 
     assert on["device_context"]["mobile_data"] == "사용"
     assert off["device_context"]["mobile_data"] == "사용 안 함"
+
+
+def test_mobile_data_carries_the_change_that_made_it_so():
+    """꺼져 있을 때 사용자 조작인지 앱이 바꾼 것인지가 갈린다."""
+    kpi = compute_session_kpi([{
+        "log_type": "System_Property",
+        "mobile_data": "0",
+        "mobile_data_changed_at": "08-23 10:01:51.098",
+        "mobile_data_changed_by": "com.android.phone",
+    }])
+    ctx = kpi["device_context"]
+
+    assert ctx["mobile_data"] == "사용 안 함"
+    assert ctx["mobile_data_changed_at"] == "08-23 10:01:51.098"
+    assert ctx["mobile_data_changed_by"] == "com.android.phone"
 
 
 def test_a_session_without_the_setting_says_nothing_about_it():

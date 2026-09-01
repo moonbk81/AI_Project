@@ -10,6 +10,15 @@ import {
 // An empty slot already says "N/A" in the value — repeating it in the note is noise.
 const noteText = (value) => (value && value !== "N/A" ? value : "");
 
+// 설정이 언제, 누구에 의해 지금 값이 됐는지. 데이터가 꺼져 있을 때 그게 사용자
+// 조작인지 앱이 바꾼 것인지가 갈리므로 바꾼 주체까지 적는다. 초 이하는 버린다.
+function mobileDataNote(ctx) {
+  const at = (ctx.mobile_data_changed_at || "").split(".")[0].trim();
+  const by = ctx.mobile_data_changed_by || "";
+  if (!at) return "";
+  return by ? `${at} · ${by}` : at;
+}
+
 function kpiBand(kpi) {
   const dropped = kpi.call_drop_count > 0;
   const outOfService = kpi.oos_count > 0;
@@ -20,7 +29,7 @@ function kpiBand(kpi) {
     tile("모델", ctx.model_name || "N/A", "", ctx.build_id || ""),
     tile("Radio", ctx.radio || "N/A"),
     tile("Build Network", ctx.network || "N/A"),
-    tile("모바일 데이터", ctx.mobile_data || "N/A"),
+    tile("모바일 데이터", ctx.mobile_data || "N/A", "", mobileDataNote(ctx)),
   ]));
 
   // One row per SIM slot: the SIM's own properties, then the network it is on.

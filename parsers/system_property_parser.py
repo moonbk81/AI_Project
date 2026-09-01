@@ -22,21 +22,27 @@ _SECTION_END = re.compile(r"duration of 'SYSTEM PROPERTIES'")
 # getprop 출력 한 줄: [key]: [value]
 _PROPERTY = re.compile(r'\[(.*?)\]:\s*\[(.*?)\]')
 
-# 설정값은 getprop 이 아니라 다른 섹션에, 다른 모양으로 찍힌다:
+# 설정값은 getprop 이 아니라 settings 덤프에, 다른 모양으로 찍힌다. 현재 값과
+# 변경 이력이 함께 나온다:
 #
-#   SettingsHelper state:
-#       ...
-#       mobile_data_question = 0
-#       ...
-#       mobile_data = 0
+#   _id:3267 name:mobile_data pkg:com.android.phone value:0 default:0 ...
+#     History (mobile_data)
+#       time:01-02 12:26:18.872 mode:insert oldValue:null newValue:1 package:android
+#       time:08-23 10:01:51.098 mode:update oldValue:1 newValue:0 package:com.android.phone
 #
-# 이 섹션은 수백 줄이라 통째로 담지 않고 필요한 것만 고른다. 그리고
-# `mobile_data_question` 처럼 이름이 앞부분을 공유하는 이웃이 실제로 있으므로
-# 키는 정확히 끊어서 봐야 한다.
-_SETTINGS_SECTION_START = "SettingsHelper state:"
-_SETTING_LINE = re.compile(r'^([A-Za-z0-9_.]+)\s*=\s*(.*)$')
+# 이름은 정확히 끊어서 본다. `mobile_data_question` 같은 이웃이 같은 모양으로
+# 찍히므로 앞부분만 맞춰 보면 엉뚱한 설정을 읽는다. 그리고 한 줄에 `value` 와
+# `default` 가 같이 있어 -- 서로 다를 수 있다 -- 지금 값은 `value` 쪽이다.
+_SETTING_ROW = re.compile(r'\bname:(?P<name>\S+)\b.*?\bvalue:(?P<value>\S*)')
 
-# 담을 설정과 그 뜻. 값은 로그에 찍힌 그대로 두고, 읽는 쪽에서 풀어 쓴다.
+# 이력 줄. 마지막 것이 지금 값을 만든 변경이다. time 은 공백을 품는다.
+_HISTORY_HEADER = re.compile(r'\bHistory\s*\((?P<name>[^)]+)\)')
+_HISTORY_ROW = re.compile(
+    r'\btime:(?P<time>\S+\s+\S+)\s+mode:(?P<mode>\S+)'
+    r'.*?\bnewValue:(?P<new>\S*)\s+package:(?P<package>\S*)'
+)
+
+# 담을 설정. settings 덤프는 수천 줄이라 관심 있는 것만 고른다.
 WANTED_SETTINGS = ("mobile_data",)
 
 
@@ -49,25 +55,33 @@ class SystemPropertyParser(BaseParser):
 
     def analyze(self, lines):
         is_prop_section = False  # 프로퍼티 구간 진입 여부를 알리는 플래그
-        in_settings = False
+        history_for = None       # 지금 어느 설정의 변경 이력을 읽고 있는지
 
         for line in lines:
             clean_line = line.strip()
 
-            # 설정 구간은 프로퍼티 구간과 별개로 흐른다. dumpstate 는 섹션을
-            # 뒤섞어 내보내므로 둘을 한 플래그로 묶지 않는다.
-            if _SETTINGS_SECTION_START in clean_line:
-                in_settings = True
+            # 설정 덤프는 프로퍼티 구간과 별개로 흐른다. dumpstate 는 섹션을
+            # 뒤섞어 내보내므로 둘을 한 플래그로 묶지 않는다. 설정 줄과 getprop
+            # 줄은 모양이 겹치지 않아 서로를 삼키지 않는다.
+            header = _HISTORY_HEADER.search(clean_line)
+            if header:
+                history_for = header.group("name").strip()
                 continue
-            if in_settings:
-                setting = _SETTING_LINE.match(clean_line)
-                if setting:
-                    key = setting.group(1)
-                    if key in WANTED_SETTINGS:
-                        self.properties[key] = setting.group(2).strip()
-                elif clean_line.startswith("---") or (clean_line and clean_line.endswith(":")):
-                    # 다음 섹션이 시작됐다. 빈 줄은 구간 안에서도 나오므로 끊지 않는다.
-                    in_settings = False
+
+            if history_for:
+                change = _HISTORY_ROW.search(clean_line)
+                if change:
+                    if history_for in WANTED_SETTINGS:
+                        # 이력은 시간순이라 덮어쓰며 흐르면 마지막 변경이 남는다.
+                        # 그게 지금 값을 만든 변경이다.
+                        self.properties[f"{history_for}_changed_at"] = change.group("time").strip()
+                        self.properties[f"{history_for}_changed_by"] = change.group("package").strip()
+                    continue
+                history_for = None  # 이력 줄이 끊겼다
+
+            setting = _SETTING_ROW.search(clean_line)
+            if setting and setting.group("name") in WANTED_SETTINGS:
+                self.properties[setting.group("name")] = setting.group("value").strip()
 
             # 1. 구간 밖에서는 시작 헤더만 찾는다.
             if not is_prop_section:

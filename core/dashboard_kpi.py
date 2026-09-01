@@ -187,14 +187,21 @@ def _network_slots(df: pd.DataFrame, props: Dict[str, str]) -> List[Dict[str, st
     return [by_slot[key] for key in sorted(by_slot.keys())]
 
 
-def _mobile_data(df: pd.DataFrame) -> str:
-    """모바일 데이터 사용 설정. 로그의 0/1 을 읽는 말로 바꾼다.
+def _mobile_data(props_df: pd.DataFrame) -> Dict[str, str]:
+    """모바일 데이터 사용 설정과 그 값을 만든 마지막 변경.
+
+    로그의 0/1 은 그대로 띄우면 뜻이 없어서 읽는 말로 바꾼다. 변경 시각과 바꾼
+    주체는 로그에 찍힌 그대로 넘기고, 문구는 화면에서 만든다.
 
     `_system_properties` 는 통신 프로퍼티 접두사만 통과시키므로 이 설정은
     거기서 오지 않는다. 적재 행에서 직접 읽는다.
     """
-    raw = _first_value(_slice(df, "System_Property"), "mobile_data", default="")
-    return {"1": "사용", "0": "사용 안 함"}.get(raw, _UNKNOWN)
+    raw = _first_value(props_df, "mobile_data", default="")
+    return {
+        "mobile_data": {"1": "사용", "0": "사용 안 함"}.get(raw, _UNKNOWN),
+        "mobile_data_changed_at": _first_value(props_df, "mobile_data_changed_at", default=""),
+        "mobile_data_changed_by": _first_value(props_df, "mobile_data_changed_by", default=""),
+    }
 
 
 def _device_context(df: pd.DataFrame) -> Dict[str, Any]:
@@ -205,7 +212,7 @@ def _device_context(df: pd.DataFrame) -> Dict[str, Any]:
         "build_id": _first_value(build_df, "build_id", "build_fingerprint"),
         "radio": _first_value(build_df, "radio"),
         "network": _first_value(build_df, "network"),
-        "mobile_data": _mobile_data(df),
+        **_mobile_data(_slice(df, "System_Property")),
         "sim_slots": _sim_slots(props),
         "network_slots": _network_slots(df, props),
     }

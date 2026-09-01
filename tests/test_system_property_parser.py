@@ -62,46 +62,53 @@ def test_no_property_section_yields_nothing():
     assert SystemPropertyParser().analyze(["[gsm.sim.state]: [LOADED]"]) == {}
 
 
-def test_mobile_data_setting_is_picked_out_of_the_settings_dump():
-    """설정값은 getprop 이 아니라 SettingsHelper 섹션에, key = value 로 찍힌다.
+def test_mobile_data_is_read_from_the_settings_dump_with_its_last_change():
+    """settings 덤프는 현재 값과 변경 이력을 함께 낸다.
 
-    `mobile_data_question` 처럼 앞부분을 공유하는 이웃이 실제 덤프에 있어서,
-    키를 정확히 끊지 않으면 엉뚱한 값을 읽는다.
+    이름이 앞부분을 공유하는 이웃(`mobile_data_question`)이 같은 모양으로 찍히고,
+    한 줄에 `value` 와 `default` 가 함께 있어 -- 서로 다를 수 있다 -- 지금 값은
+    `value` 쪽이다.
     """
     lines = [
-        "    SettingsHelper state:",
-        "        protect_battery = 3",
-        "        mobile_data_question = 1",
-        "        reduce_screen_running_info = null",
-        "",  # 구간 안의 빈 줄에서 끊기면 뒤가 안 읽힌다
-        "        mobile_data = 0",
+        "_id:3266 name:mobile_data_question pkg:com.android.phone value:1 default:1",
+        "_id:3267 name:mobile_data pkg:com.android.phone value:0 default:1 defaultSystemSet:true",
+        "  History (mobile_data_question)",
+        "    time:01-01 00:00:00.000 mode:insert oldValue:null newValue:1 package:android",
+        "  History (mobile_data)",
+        "    time:01-02 12:26:18.872 mode:insert oldValue:null newValue:1 package:android",
+        "    time:05-26 14:21:16.840 mode:update oldValue:1 newValue:0 package:com.android.phone",
+        "    time:08-23 10:01:51.098 mode:update oldValue:1 newValue:0 package:com.android.phone",
     ]
 
-    assert SystemPropertyParser().analyze(lines) == {"mobile_data": "0"}
+    assert SystemPropertyParser().analyze(lines) == {
+        "mobile_data": "0",
+        # 이력의 마지막 것이 지금 값을 만든 변경이다.
+        "mobile_data_changed_at": "08-23 10:01:51.098",
+        "mobile_data_changed_by": "com.android.phone",
+    }
 
 
-def test_settings_outside_the_dump_are_ignored():
-    lines = [
-        "    SettingsHelper state:",
-        "        mobile_data = 1",
-        "------ SYSTEM LOG (logcat) ------",
-        "        mobile_data = 0",
-    ]
+def test_a_setting_without_history_still_reports_its_value():
+    lines = ["_id:3267 name:mobile_data pkg:com.android.phone value:1 default:0"]
 
     assert SystemPropertyParser().analyze(lines) == {"mobile_data": "1"}
 
 
 def test_the_settings_dump_and_the_property_dump_are_read_independently():
-    """dumpstate 는 섹션을 뒤섞는다. 둘을 한 플래그로 묶으면 서로를 끊는다."""
+    """dumpstate 는 섹션을 뒤섞는다. 두 모양이 서로를 삼키면 안 된다."""
     lines = [
-        "    SettingsHelper state:",
-        "        mobile_data = 1",
+        "_id:3267 name:mobile_data pkg:com.android.phone value:1 default:0",
+        "  History (mobile_data)",
+        "    time:08-23 10:01:51.098 mode:update oldValue:0 newValue:1 package:com.android.phone",
         "------ SYSTEM PROPERTIES (getprop) ------",
         "[gsm.sim.state]: [LOADED]",
+        "[ro.build.id]: [IGNORED]",
         "------ 0.050s was the duration of 'SYSTEM PROPERTIES' ------",
     ]
 
     assert SystemPropertyParser().analyze(lines) == {
         "mobile_data": "1",
+        "mobile_data_changed_at": "08-23 10:01:51.098",
+        "mobile_data_changed_by": "com.android.phone",
         "gsm.sim.state": "LOADED",
     }
