@@ -50,7 +50,7 @@ from rag.ingest import (
 )
 from rag.prompt_builder import build_rag_prompt
 from rag.answer_guardrails import try_build_guardrail_answer
-from rag.plain_language import humanize
+from rag.plain_language import display_name, humanize
 from rag.prompt_template import get_domain_guidelines, format_system_wtf_stats
 from rag.llm_provider import get_default_llm_model, get_llm_runtime_label
 class RilRagChat:
@@ -269,7 +269,10 @@ class RilRagChat:
         # 2. 검색된 로그 기반 템플릿 주입 (자동화)
         for log_type in retrieved_log_types:
             if log_type in log_guidelines_dict:
-                guidelines.append(f"### [{log_type} 전용 출력 템플릿]\n{log_guidelines_dict[log_type]}")
+                # 본문은 log_type 이름으로 다른 자료를 지목하므로 손대지 않는다.
+                # 제목만 우리말로 바꾼다 -- "전용 출력 템플릿"은 답변에 쓰지 말라고
+                # 지시해 둔 말인데, 그 말을 제목으로 보여주고 있었다.
+                guidelines.append(f"### [{display_name(log_type)} 답변 형식]\n{log_guidelines_dict[log_type]}")
 
         # 3. SYSTEM_WTF 통계 주입
         if tool_facts:
@@ -571,7 +574,13 @@ class RilRagChat:
             except: pass
 
             meta_lines = "\n".join([f"  - {k}: {v}" for k, v in clean_meta.items()])
-            formatted.append(f"[자료 {i+1} - {meta.get('log_type')}]\n[메타정보]\n{meta_lines}\n\n[요약]\n{doc}\n\n[원본 로그 스니펫]\n{snippet}")
+            # 제목은 우리말로 준다. 모델은 프롬프트에서 본 말로 답하므로, 여기서
+            # log_type 을 그대로 보여주면 답변에도 그 이름이 그대로 나온다.
+            # 다만 log_type 자체는 메타정보에 남긴다 -- config.yaml 의 출력
+            # 템플릿이 "Binder_Warning 을 교차 확인하라"처럼 이 이름으로 다른
+            # 자료를 지목하고 있어서, 지우면 모델이 짚을 것을 못 짚는다.
+            label = display_name(meta.get("log_type"))
+            formatted.append(f"[자료 {i+1} - {label}]\n[메타정보]\n{meta_lines}\n\n[요약]\n{doc}\n\n[원본 로그 스니펫]\n{snippet}")
         return "\n\n".join(formatted)
 
     def _get_past_knowledge_context(self, query: str, top_k: int = 2) -> str:

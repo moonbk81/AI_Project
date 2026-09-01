@@ -110,6 +110,15 @@ _WRAPPED = re.compile(r"[`'\"]({0})[`'\"]".format(_ALTERNATION))
 _BARE = re.compile(r"(?<![A-Za-z0-9_])({0})(?![A-Za-z0-9_])".format(_ALTERNATION))
 
 
+def display_name(name):
+    """이름 하나를 사람이 읽는 말로. 모르는 이름은 그대로 돌려준다.
+
+    `humanize` 는 문장 안을 훑지만, 이건 라벨 자리에 이미 이름 하나만 있을 때
+    쓴다 -- 근거 자료의 제목 같은 곳.
+    """
+    return DISPLAY_NAMES.get(name, name)
+
+
 def humanize(text):
     """답변에서 내부 이름을 사람이 읽는 말로 바꾼다."""
     if not text:

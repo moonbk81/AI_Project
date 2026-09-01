@@ -211,3 +211,31 @@ def test_internal_names_are_gone_from_what_ask_returns(monkeypatch):
     # 단말이 남긴 문자열은 근거라 그대로 있어야 한다.
     assert "am_kill" in answer
     assert "Too many Binders sent to SYSTEM" in answer
+
+
+def test_retrieved_material_is_titled_in_korean_but_keeps_its_log_type(monkeypatch):
+    """모델은 프롬프트에서 본 말로 답한다. 그래서 제목부터 읽는 말로 준다.
+
+    다만 log_type 자체는 지울 수 없다. config.yaml 의 답변 형식이
+    "Binder_Warning 을 교차 확인하라"처럼 이 이름으로 다른 자료를 지목한다.
+    """
+    engine = make_engine(monkeypatch)
+    captured = _capture_prompt(engine)
+
+    engine.ask("통화 끊김 원인 분석", current_file="radio_payload.json")
+    prompt = captured["system_prompt"]
+
+    assert "[자료 1 - 통화 세션 기록]" in prompt
+    assert "[자료 1 - Call_Session]" not in prompt
+    assert "log_type: Call_Session" in prompt, "자료를 지목할 이름까지 지워졌다"
+
+
+def test_guideline_heading_drops_the_wording_the_answer_is_told_to_avoid(monkeypatch):
+    engine = make_engine(monkeypatch)
+    captured = _capture_prompt(engine)
+
+    engine.ask("통화 끊김 원인 분석", current_file="radio_payload.json")
+    prompt = captured["system_prompt"]
+
+    assert "### [통화 세션 기록 답변 형식]" in prompt
+    assert "Call_Session 전용 출력 템플릿" not in prompt
