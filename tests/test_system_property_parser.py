@@ -112,3 +112,48 @@ def test_the_settings_dump_and_the_property_dump_are_read_independently():
         "mobile_data_changed_by": "com.android.phone",
         "gsm.sim.state": "LOADED",
     }
+
+
+def test_active_subscriptions_say_which_slot_holds_an_esim():
+    """슬롯이 eSIM 인지 물리 SIM 인지는 getprop 에 없고 가입 정보의
+    `isEmbedded` 에만 있다. 옆에 붙은 `isRemovableEmbedded` 를 읽으면 안 된다.
+    """
+    lines = [
+        "Active subscriptions:",
+        "  [SubscriptionInfoInternal: id=2 iccId=898205150 simSlotIndex=0 portIndex=0"
+        " isEmbedded=0 isRemovableEmbedded=1 carrierId=1891 displayName=SIM 1"
+        " carrierName=SKTelecom]",
+        "  [SubscriptionInfoInternal: id=3 iccId=898205230 simSlotIndex=1 portIndex=0"
+        " isEmbedded=1 isRemovableEmbedded=0 carrierId=1891 displayName=eSIM 1"
+        " carrierName=SKTelecom]",
+    ]
+
+    assert SystemPropertyParser().analyze(lines) == {
+        "sim_slot0_type": "pSIM",
+        "sim_slot1_type": "eSIM",
+    }
+
+
+def test_subscriptions_outside_the_active_list_are_ignored():
+    """전체 목록에는 뽑아 버린 지난 SIM 도 같은 모양으로 들어 있다. 그것까지
+    읽으면 지금 꽂혀 있는 슬롯을 덮어쓴다. 슬롯이 없는(-1) 가입 정보도 마찬가지.
+    """
+    lines = [
+        "Active subscriptions:",
+        "  [SubscriptionInfoInternal: id=3 simSlotIndex=0 isEmbedded=1]",
+        "",
+        "All subscriptions:",
+        "  [SubscriptionInfoInternal: id=1 simSlotIndex=0 isEmbedded=0]",
+        "  [SubscriptionInfoInternal: id=9 simSlotIndex=-1 isEmbedded=0]",
+    ]
+
+    assert SystemPropertyParser().analyze(lines) == {"sim_slot0_type": "eSIM"}
+
+
+def test_older_dumps_write_the_embedded_flag_as_a_word():
+    lines = [
+        "Active subscriptions:",
+        "  [SubscriptionInfo: id=2 simSlotIndex=0 isEmbedded=true]",
+    ]
+
+    assert SystemPropertyParser().analyze(lines) == {"sim_slot0_type": "eSIM"}

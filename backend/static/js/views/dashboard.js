@@ -10,6 +10,14 @@ import {
 // An empty slot already says "N/A" in the value — repeating it in the note is noise.
 const noteText = (value) => (value && value !== "N/A" ? value : "");
 
+// 슬롯 상태에 eSIM/pSIM 을 붙인다 — "LOADED (eSIM)". 가입 정보가 없는 슬롯은
+// 종류를 알 수 없으므로 상태만 적는다.
+const simState = (sim) => {
+  const state = sim.state || "N/A";
+  const type = noteText(sim.sim_type);
+  return type ? `${state} (${type})` : state;
+};
+
 // 설정이 언제, 누구에 의해 지금 값이 됐는지. 데이터가 꺼져 있을 때 그게 사용자
 // 조작인지 앱이 바꾼 것인지가 갈리므로 바꾼 주체까지 적는다. 초 이하는 버린다.
 function mobileDataNote(ctx) {
@@ -82,7 +90,7 @@ function kpiBand(kpi) {
   for (const sim of ctx.sim_slots || []) {
     const net = (ctx.network_slots || []).find((n) => n.slot === sim.slot) || {};
     wrap.append(tileRow([
-      tile(`SIM ${sim.slot}`, sim.state || "N/A", "", noteText(sim.carrier)),
+      tile(`SIM ${sim.slot}`, simState(sim), "", noteText(sim.carrier)),
       tile(`SIM ${sim.slot} MCC/MNC`, sim.mcc_mnc || "N/A"),
       tile(`SIM ${sim.slot} Network PLMN`, net.plmn || "N/A"),
       tile(`SIM ${sim.slot} Network Alpha`, net.network_name || "N/A"),

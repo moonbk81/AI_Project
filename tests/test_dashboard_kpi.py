@@ -152,6 +152,8 @@ def test_single_sim_property_has_no_comma():
         "slot": "0",
         "state": "LOADED",
         "carrier": "T-Mobile",
+        # 가입 정보가 없는 덤프라 SIM 종류는 알 수 없다.
+        "sim_type": "N/A",
         "mcc": "310",
         "mnc": "260",
         "mcc_mnc": "310260",
@@ -190,3 +192,24 @@ def test_a_session_without_the_setting_says_nothing_about_it():
     kpi = compute_session_kpi([{"log_type": "Build_Info", "model_name": "q7q"}])
 
     assert kpi["device_context"]["mobile_data"] == "N/A"
+
+
+def test_sim_slots_carry_the_esim_flag_from_the_subscription_dump():
+    """LOADED 만으로는 그 슬롯이 eSIM 인지 알 수 없다. 가입 정보에서 온 종류를
+    슬롯 번호로 맞춰 붙인다.
+    """
+    kpi = compute_session_kpi(
+        [
+            {
+                "log_type": "System_Property",
+                "gsm.sim.state": "LOADED,LOADED",
+                "gsm.sim.operator.alpha": "SKTelecom,SKTelecom",
+                "sim_slot0_type": "pSIM",
+                "sim_slot1_type": "eSIM",
+            }
+        ]
+    )
+
+    sim0, sim1 = kpi["device_context"]["sim_slots"]
+    assert sim0["sim_type"] == "pSIM"
+    assert sim1["sim_type"] == "eSIM"

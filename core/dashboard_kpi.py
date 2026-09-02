@@ -136,7 +136,7 @@ def _slot_value(values: List[str], index: int) -> str:
     return _value(values[index], "") if index < len(values) else _UNKNOWN
 
 
-def _sim_slots(props: Dict[str, str]) -> List[Dict[str, str]]:
+def _sim_slots(props: Dict[str, str], props_df: pd.DataFrame) -> List[Dict[str, str]]:
     states = _prop_slots(props, "gsm.sim.state")
     operators = _prop_slots(props, "gsm.sim.operator.numeric")
     carriers = _prop_slots(props, "gsm.sim.operator.alpha")
@@ -149,6 +149,10 @@ def _sim_slots(props: Dict[str, str]) -> List[Dict[str, str]]:
             "slot": str(index),
             "state": _slot_value(states, index),
             "carrier": _slot_value(carriers, index),
+            # eSIM 인지 물리 SIM 인지. getprop 이 아니라 가입 정보에서 오므로
+            # `_system_properties` 가 아니라 적재 행에서 직접 읽는다. 빈 슬롯은
+            # 가입 정보가 없어 "N/A" 로 남는다.
+            "sim_type": _first_value(props_df, f"sim_slot{index}_type"),
             **_mcc_mnc(numeric),
         })
     return slots
@@ -206,14 +210,15 @@ def _mobile_data(props_df: pd.DataFrame) -> Dict[str, str]:
 
 def _device_context(df: pd.DataFrame) -> Dict[str, Any]:
     build_df = _slice(df, "Build_Info")
+    props_df = _slice(df, "System_Property")
     props = _system_properties(df)
     return {
         "model_name": _first_value(build_df, "model_name"),
         "build_id": _first_value(build_df, "build_id", "build_fingerprint"),
         "radio": _first_value(build_df, "radio"),
         "network": _first_value(build_df, "network"),
-        **_mobile_data(_slice(df, "System_Property")),
-        "sim_slots": _sim_slots(props),
+        **_mobile_data(props_df),
+        "sim_slots": _sim_slots(props, props_df),
         "network_slots": _network_slots(df, props),
     }
 
