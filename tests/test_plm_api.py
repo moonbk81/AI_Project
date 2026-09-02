@@ -122,7 +122,7 @@ def test_attachment_logs_are_extracted_then_handed_to_the_analyzer(monkeypatch, 
     monkeypatch.setattr(
         backend_main,
         "_run_analyze_job",
-        lambda job_id, paths, *args: analyzed.update(job_id=job_id, paths=list(paths)),
+        lambda job_id, paths, *args, **kwargs: analyzed.update(job_id=job_id, paths=list(paths)),
     )
 
     job_id = backend_main._new_job("test")
@@ -153,7 +153,7 @@ def test_only_the_picked_attachments_are_downloaded(monkeypatch, tmp_path):
         return {"success": True, "data": make_zip({"dumpstate.log": b"log body"})}
 
     monkeypatch.setattr("plm.service.download_attached_file", download)
-    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: None)
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args, **kwargs: None)
 
     job_id = backend_main._new_job("test")
     backend_main._run_plm_attachment_job(job_id, "25", "D-1", ["F2"])
@@ -189,7 +189,7 @@ def test_an_attachment_without_logs_finishes_without_an_analysis(monkeypatch, tm
         "plm.service.download_attached_file",
         lambda **kwargs: {"success": True, "data": make_zip({"screenshot.png": b"img"})},
     )
-    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: pytest.fail("분석을 시작하면 안 된다"))
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args, **kwargs: pytest.fail("분석을 시작하면 안 된다"))
 
     job_id = backend_main._new_job("test")
     backend_main._run_plm_attachment_job(job_id, "25", "D-1")
@@ -287,7 +287,7 @@ def test_a_plain_log_is_written_out_without_being_unpacked(monkeypatch, tmp_path
     monkeypatch.setattr(
         backend_main,
         "_run_analyze_job",
-        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+        lambda job_id, paths, *args, **kwargs: analyzed.update(paths=list(paths)),
     )
 
     job_id = backend_main._new_job("test")
@@ -311,7 +311,7 @@ def test_only_the_picked_logs_are_pulled_out_of_the_archive(monkeypatch, tmp_pat
     monkeypatch.setattr(
         backend_main,
         "_run_analyze_job",
-        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+        lambda job_id, paths, *args, **kwargs: analyzed.update(paths=list(paths)),
     )
 
     job_id = backend_main._new_job("test")
@@ -334,7 +334,7 @@ def test_a_log_that_cannot_be_pulled_out_does_not_stop_the_rest(monkeypatch, tmp
     monkeypatch.setattr(
         backend_main,
         "_run_analyze_job",
-        lambda job_id, paths, *args: analyzed.update(paths=list(paths)),
+        lambda job_id, paths, *args, **kwargs: analyzed.update(paths=list(paths)),
     )
 
     job_id = backend_main._new_job("test")
@@ -353,7 +353,7 @@ def test_a_log_that_cannot_be_pulled_out_does_not_stop_the_rest(monkeypatch, tmp
 def test_the_job_only_fails_when_no_log_could_be_pulled_out(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     _one_attachment(monkeypatch, make_zip({"dumpstate.log": b"main log"}))
-    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: pytest.fail("분석을 시작하면 안 된다"))
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args, **kwargs: pytest.fail("분석을 시작하면 안 된다"))
 
     job_id = backend_main._new_job("test")
     backend_main._run_plm_selected_logs_job(
@@ -369,7 +369,7 @@ def test_an_attachment_is_downloaded_once_for_both_steps(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     downloads = []
     _one_attachment(monkeypatch, make_zip({"dumpstate.log": b"main log"}), downloads)
-    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args: None)
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda *args, **kwargs: None)
 
     scan = backend_main._new_job("test")
     backend_main._run_plm_log_scan_job(scan, "25", "D-1", ["F1"])
