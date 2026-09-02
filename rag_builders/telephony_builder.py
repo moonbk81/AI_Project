@@ -67,6 +67,26 @@ def _emergency_call_document(attempt):
         f" (긴급 통화만 가능: {attempt.get('emergency_only') or '미확인'})",
     ]
 
+    if attempt.get("ecc_list_matched") or attempt.get("ecc_list"):
+        lines.append(
+            "- 긴급번호 확인: "
+            + ("단말 긴급번호 목록에서 확인됨" if attempt.get("ecc_list_matched") else "확인 로그 없음")
+            + (f" (목록: {attempt['ecc_list']})" if attempt.get("ecc_list") else "")
+        )
+    if search := attempt.get("search_result"):
+        determiner = attempt.get("rat_determiner")
+        lines.append(
+            f"- 모뎀 도메인 선택: {search}"
+            + (f" (RatDeterminer: {determiner})" if determiner else "")
+        )
+    if progressed := attempt.get("dialed_domain"):
+        lines.append(f"- 진행된 도메인: {progressed}")
+    if fallback := attempt.get("fallback"):
+        lines.append(f"- 도메인 이동(재발신): {fallback}")
+    if attempt.get("cs_dialed_at"):
+        lines.append(f"- CS 긴급 발신(EMERGENCY_DIAL): {attempt['cs_dialed_at']}")
+    if attempt.get("ims_emergency_barring"):
+        lines.append(f"- IMS 긴급호 barring 값: {attempt['ims_emergency_barring']}")
     if control := attempt.get("emergency_control"):
         lines.append(f"- 모뎀 긴급호 제어: {' → '.join(control)}")
     if progress := attempt.get("e911_progress"):
@@ -78,6 +98,8 @@ def _emergency_call_document(attempt):
             + (f", 요청 {pdn['requested_at']}" if pdn.get("requested_at") else "")
             + (f" → 응답 {pdn['answered_at']}" if pdn.get("answered_at") else "")
         )
+    if attempt.get("end_cause_text"):
+        lines.append(f"- 통화 종료 원인: {attempt['end_cause_text']}")
     if attempt.get("modem_reset"):
         lines.append("- 통화 도중 모뎀이 리셋되었습니다(All Service is closed, Modem Reset).")
     if attempt.get("ims_fail_reason"):

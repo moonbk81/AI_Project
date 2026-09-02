@@ -167,3 +167,185 @@ def test_marking_a_call_history_without_emergency_calls_changes_nothing():
     LogOrchestrator._mark_emergency_calls(sessions, None)
 
     assert sessions == [{"id": "TC@1_1 (objId:1)", "status": "FAIL"}]
+
+
+# ------------------------------------------------------- IMS → CS 폴백 긴급호
+
+CS_FALLBACK = [
+    "08-13 16:37:27.175  6288  6288 D SEM_RILJ: [1277]> EMERGENCY_SEARCH [PHONE1][GCCT1]",
+    "08-13 16:37:27.177  6288  6288 D SemCallTrackerHelper: [1] setImsCallList - {Total: 1, [state:DIALING, type:vounknown(0)_emergency, mo, norm, <MASKED>, objId:110917786 (0)]}",
+    "08-13 16:37:27.182  4896  4920 E RILD2   : SelectE911RatDeterminer - Type: QMI_SRCH (Reason: PS domain)",
+    "08-13 16:37:27.190  4896  4920 E RILD2   : EmergencySearch_FWREQ - Complete search request (result: CS)",
+    "08-13 16:37:27.191  6288  7036 D SEM_RILJ: [1277]< EMERGENCY_SEARCH {CS(1)} [PHONE1][GCCT1]",
+    "08-13 16:37:27.212  6288  6288 D ImsPhoneCallTracker: [1] EVENT_EMERGENCY_SEARCH_RESULT - search result: CS(1)",
+    "08-13 16:37:27.213  6288  6288 D ImsPhoneCallTracker: [1] CallRoute - Emergency Search: Route to CS call",
+    "08-13 16:37:27.213  6288  6288 D ImsPhoneCallTracker: [1] CallRoute - redialToCs - Redial [telecomCallID: TC@7_1 objId: 110917786 incoming: false state: DIALING isEmergencyCall: true (source: 10001000)] to CS. reasonInfo: ImsReasonInfo :: {0 : CODE_UNSPECIFIED, 0, null}",
+    "08-13 16:37:27.216  6288  6288 D GsmCdmaConnection: [GsmCdmaConn] New Connection (DialString):  callId: null objId: 195197401 isExternal: N incoming: false state: DIALING isEmergencyCall: true (source: 10001000)",
+    "08-13 16:37:27.220  6288  6288 D RILJ    : [1280]> EMERGENCY_DIAL [PHONE1][GCCT1]",
+    "08-13 16:37:27.225  6288  7024 D EmergencyNumberTracker: [0]Found in mEmergencyNumberList",
+    "08-13 16:37:33.826  6288  6288 D SemEmergencyNumberTracker: [1] cacheVendorEmergencyDatabase - withSim: true, Network: null, SIM: 310280, ecclistFromDatabase: 112,911",
+    "08-13 16:37:27.272  6288  6927 D SEM_RILJ: [UNSL]< UNSOL_EXTENDED_REGISTRATION_STATE SehExtendedRegStateResult{isValid: true, imsEmergencyCallBarring: 2, unprocessedVoiceRegState: REG_ROAMING, isPsOnlyReg: false} [PHONE1]",
+    "08-13 16:37:27.279  6288  6288 D SST-1   : updateCarrierDisplayName: isWifiCallingEnabled=false combinedRegState=IN_SERVICE {mVoiceRegState=0(IN_SERVICE), mIsEmergencyOnly=false}",
+    "08-13 16:37:41.207  6288  7024 D RILJ    : [1343]< GET_CURRENT_CALLS {[id=1,ACTIVE,toa=129,norm,mo,0,voc,noevp,,cli=1,,1,audioQuality=1] } [PHONE1][GCCT1]",
+    "08-13 16:38:10.474  6288  6288 D GsmCdmaConnection: onDisconnect: cause=36",
+    "08-13 16:38:10.474  6288  6934 D RILJ    : [1366]< LAST_CALL_FAIL_CAUSE com.android.internal.telephony.LastCallFailCause@d9e4f50 causeCode: 255 vendorCause: 22 [PHONE1][GCCT1]",
+]
+
+
+def test_the_attempt_starts_at_the_emergency_search_not_at_its_result():
+    """`> EMERGENCY_SEARCH` 가 발신의 첫 줄이다. 이걸 놓치면 시작 시각이 뒤로 밀린다."""
+    attempt = EmergencyCallParser().analyze(CS_FALLBACK)[0]
+
+    assert attempt["time"] == "08-13 16:37:27.175"
+    # RILJ 일련번호(`[1277]>`)를 슬롯으로 읽으면 안 된다.
+    assert attempt["slot"] == "1"
+
+
+def test_the_modem_domain_choice_and_the_cs_redial_are_kept():
+    attempt = EmergencyCallParser().analyze(CS_FALLBACK)[0]
+
+    assert attempt["search_result"] == "CS"
+    assert attempt["rat_determiner"] == "QMI_SRCH (PS domain)"
+    assert attempt["redials"] == ["CS"]
+    assert attempt["fallback"] == "IMS → CS"
+    assert attempt["cs_dialed_at"] == "08-13 16:37:27.220"
+    assert attempt["ims_emergency_barring"] == "2"
+
+
+def test_a_redial_reason_of_code_zero_is_not_an_ims_failure():
+    """`redialToCs` 의 `ImsReasonInfo {0 : CODE_UNSPECIFIED}` 는 사유 없음이다.
+    이것을 실패로 읽으면 CS 로 붙은 긴급호가 IMS 실패로 보고된다.
+    """
+    attempt = EmergencyCallParser().analyze(CS_FALLBACK)[0]
+
+    assert attempt["ims_fail_reason"] == ""
+    assert "IMS 실패" not in attempt["fail_reason"]
+
+
+def test_a_call_that_connected_then_dropped_is_a_drop_with_its_cause():
+    attempt = EmergencyCallParser().analyze(CS_FALLBACK)[0]
+
+    assert attempt["status"] == "CALL DROP"
+    assert attempt["end_cause"] == "255"
+    assert attempt["end_vendor_cause"] == "22"
+    # 숫자만 적어 두면 읽는 사람이 또 찾아야 한다.
+    assert "FADE" in attempt["end_cause_text"]
+    assert "통화 종료" in attempt["fail_reason"]
+    assert "CALL_END_255" in attempt["root_cause_candidate"]
+    assert "VENDOR_22" in attempt["root_cause_candidate"]
+
+
+def test_a_cs_emergency_call_is_marked_in_the_history_by_its_telecom_id():
+    """IMS 에서 CS 로 넘어간 긴급호는 CS 세션 하나로만 남는다."""
+    from log_orchestrator import LogOrchestrator
+
+    attempts = EmergencyCallParser().analyze(CS_FALLBACK)
+    sessions = [{"id": "TC@7_1", "status": "CALL DROP"}, {"id": "TC@9_1", "status": "SUCCESS"}]
+
+    LogOrchestrator._mark_emergency_calls(sessions, attempts)
+
+    assert sessions[0]["is_emergency"] is True
+    assert "is_emergency" not in sessions[1]
+
+
+def test_a_normal_release_after_connecting_is_not_a_drop():
+    lines = CS_FALLBACK[:-1] + [
+        "08-13 16:38:10.474  6288  6934 D RILJ    : [1366]< LAST_CALL_FAIL_CAUSE causeCode: 16 [PHONE1][GCCT1]",
+    ]
+
+    attempt = EmergencyCallParser().analyze(lines)[0]
+
+    assert attempt["status"] == "SUCCESS"
+    assert attempt["fail_reason"] == ""
+
+
+def _search(result, *extra):
+    """Search 결과만 바꾼 최소 시도. 모뎀은 CS 말고 VoLTE·VoWiFi 도 내려 준다."""
+    return [
+        "08-13 16:37:27.175  6288  6288 D SEM_RILJ: [1277]> EMERGENCY_SEARCH [PHONE1][GCCT1]",
+        f"08-13 16:37:27.191  6288  7036 D SEM_RILJ: [1277]< EMERGENCY_SEARCH {{{result}}} [PHONE1][GCCT1]",
+        *extra,
+    ]
+
+
+def test_the_search_answer_is_kept_whatever_domain_the_modem_picks():
+    for result in ("CS(1)", "VoLTE(0)", "VoWifi(2)"):
+        attempt = EmergencyCallParser().analyze(_search(result))[0]
+        assert attempt["search_result"] == result
+
+
+def test_a_search_result_that_carries_parentheses_is_not_cut_short():
+    """`(result: CS(1))` 를 `)` 에서 끊으면 `CS(1` 이 남는다."""
+    lines = _search(
+        "CS(1)",
+        "08-13 16:37:27.190  4896  4920 E RILD2   : EmergencySearch_FWREQ - Complete search request (result: CS(1))",
+    )
+    # 먼저 본 값을 남기므로 Search 응답이 앞이면 그것이 유지된다.
+    assert EmergencyCallParser().analyze(lines)[0]["search_result"] == "CS(1)"
+
+    only_complete = [
+        "08-13 16:37:27.175  6288  6288 D SEM_RILJ: [1277]> EMERGENCY_SEARCH [PHONE1][GCCT1]",
+        "08-13 16:37:27.190  4896  4920 E RILD2   : EmergencySearch_FWREQ - Complete search request (result: CS(1))",
+    ]
+    assert EmergencyCallParser().analyze(only_complete)[0]["search_result"] == "CS(1)"
+
+
+def test_a_redial_to_a_domain_other_than_cs_is_read_too():
+    """대상은 함수 이름에서 읽는다. CS 만 알아보면 다른 폴백이 통째로 빠진다."""
+    lines = _search(
+        "VoLTE(0)",
+        "08-13 16:37:27.213  6288  6288 D ImsPhoneCallTracker: [1] CallRoute - redialToIms - Redial [telecomCallID: TC@7_1 isEmergencyCall: true] to IMS. reasonInfo: ImsReasonInfo :: {0 : CODE_UNSPECIFIED, 0, null}",
+    )
+
+    attempt = EmergencyCallParser().analyze(lines)[0]
+
+    assert attempt["redials"] == ["IMS"]
+    # 어디서 옮겨 왔는지는 로그로 확인된 바가 없어 출발 도메인을 짐작하지 않는다.
+    assert attempt["fallback"] == "IMS"
+
+
+def test_the_fallback_chain_starts_at_the_domain_the_log_names():
+    lines = _search(
+        "CS(1)",
+        "08-13 16:37:27.213  6288  6288 D SemCallTrackerHelper: updateIntentExtras - new: ImsDialArgs(isEmergency: true, eccCategory: 0, intentExtras: Bundle[{latestDomain=PS}])",
+        "08-13 16:37:27.214  6288  6288 D ImsPhoneCallTracker: [1] CallRoute - redialToCs - Redial [isEmergencyCall: true] to CS. reasonInfo: ImsReasonInfo :: {0 : CODE_UNSPECIFIED, 0, null}",
+    )
+
+    assert EmergencyCallParser().analyze(lines)[0]["fallback"] == "PS → CS"
+
+
+def test_the_flow_is_read_end_to_end_from_the_ecc_check_to_the_domain_taken():
+    """흐름: 번호가 긴급번호인지 확인 -> Search -> 내려온 값대로 CS/PS 진행."""
+    attempt = EmergencyCallParser().analyze(CS_FALLBACK)[0]
+
+    assert attempt["ecc_list_matched"] is True
+    assert attempt["ecc_list"] == "112,911"
+    assert attempt["search_result"] == "CS"
+    # IMS 로 먼저 걸렸다가 CS 로 넘어갔다.
+    assert attempt["ims_dialed_at"] == "08-13 16:37:27.177"
+    assert attempt["cs_dialed_at"] == "08-13 16:37:27.220"
+    assert attempt["dialed_domain"] == "PS → CS"
+
+
+def test_a_ps_only_emergency_call_says_ps():
+    attempt = EmergencyCallParser().analyze(
+        _search(
+            "VoLTE(0)",
+            "08-13 16:37:27.220  6288  6288 D IPF     : [IPCT]> makeCall {911, { serviceType=2, callType=2 }}",
+        )
+    )[0]
+
+    assert attempt["dialed_domain"] == "PS"
+    assert attempt["cs_dialed_at"] == ""
+
+
+def test_the_ecc_check_repeats_do_not_stretch_the_attempt():
+    """긴급번호 확인은 통화 내내 다시 찍힌다. 그 반복이 시도의 끝 시각이 되면 안 된다."""
+    lines = _search("CS(1)") + [
+        "08-13 16:37:28.000  6288  6288 D EmergencyNumberTracker: [0]Found in mEmergencyNumberList",
+        "08-13 16:37:50.000  6288  6288 D EmergencyNumberTracker: [0]Found in mEmergencyNumberList",
+    ]
+
+    attempt = EmergencyCallParser().analyze(lines)[0]
+
+    assert attempt["end_time"] == "08-13 16:37:28.000"

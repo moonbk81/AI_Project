@@ -23,6 +23,7 @@ CALL_FAIL_REASON_MAP = {
     "65": "BEARER_NOT_IMPLEMENTED (네트워크 서비스 미지원)",
     "68": "ACM_LIMIT_EXCEEDED (과금 한도 초과)",
     "127": "INTERWORKING_UNSPECIFIED",
+    "255": "ERROR_UNSPECIFIED (원인 미지정 / 모뎀이 사유를 주지 않음)",
     "65535": "ERROR_UNSPECIFIED (알수 없는 에러)"
     # TODO: 추후 벤더별 특정 RIL 에러 코드가 발견되면 여기에 계속 추가
 }

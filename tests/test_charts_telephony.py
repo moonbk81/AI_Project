@@ -645,6 +645,32 @@ def test_emergency_calls_are_counted_and_shaped_for_the_table():
     assert row["progress"] == "RAT_READY(3) → DIALED_WITH_POSSIBLE_RETRY(5)"
 
 
+def test_the_search_answer_and_the_domain_taken_are_separate_columns():
+    """모뎀/RIL 이 내려 준 값과 실제로 진행된 도메인은 다를 수 있다."""
+    row = build_emergency_call_overview(
+        [_emergency_attempt(search_result="CS(1)", dialed_domain="PS → CS", fallback="IMS → CS")]
+    ).attempts[0]
+
+    assert row["search_result"] == "CS(1)"
+    assert row["progressed"] == "IMS → CS"
+
+    # 재발신이 없으면 발신이 걸린 쪽을, 그것도 없으면 발신 경로를 적는다.
+    only_dialed = _emergency_attempt(dialed_domain="PS")
+    assert build_emergency_call_overview([only_dialed]).attempts[0]["progressed"] == "PS"
+
+    row = build_emergency_call_overview([_emergency_attempt()]).attempts[0]
+    assert row["search_result"] == "-"
+    assert row["progressed"] == "VoLTE / PS"
+
+
+def test_a_dropped_emergency_call_counts_as_a_failure():
+    dropped = _emergency_attempt(status="CALL DROP", end_cause_text="causeCode 255, vendorCause 22(FADE)")
+    overview = build_emergency_call_overview([dropped])
+
+    assert overview.fail_count == 1
+    assert overview.attempts[0]["end_cause"] == "causeCode 255, vendorCause 22(FADE)"
+
+
 def test_an_emergency_call_with_no_pdn_attempt_says_so_rather_than_unknown():
     row = build_emergency_call_overview([_emergency_attempt(emergency_pdn={})]).attempts[0]
 

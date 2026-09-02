@@ -429,16 +429,38 @@ def _emergency_pdn(attempt: Dict[str, Any]) -> str:
     return f"{status} ({cause})" if cause else status
 
 
+def _emergency_progressed(attempt: Dict[str, Any]) -> str:
+    """실제로 어느 쪽으로 진행됐는지 한 칸으로.
+
+    Search 가 내려 준 값과 다를 수 있어 따로 적는다. 도메인을 옮겨 다시 걸었으면
+    그 흐름이 가장 많이 말해 주고, 없으면 발신이 걸린 쪽, 그것도 없으면 발신
+    경로/RAT 이다 -- `EMERGENCY_SEARCH` 를 남기지 않는 단말도 있다.
+    """
+    for key in ("fallback", "dialed_domain"):
+        if value := _value(attempt.get(key), ""):
+            return value
+    route = _emergency_route(attempt)
+    return route if route != _UNKNOWN else "-"
+
+
 def _emergency_row(attempt: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "time": _value(attempt.get("time"), ""),
         "number": _value(attempt.get("number")),
         "slot": _value(attempt.get("slot")),
         "route": _emergency_route(attempt),
+        # 모뎀/RIL 이 내려 준 도메인과, 실제로 진행된 도메인. 붙은 통화도 이 흐름을
+        # 봐야 뜻이 생긴다.
+        "search_result": _value(attempt.get("search_result"), "") or "-",
+        "progressed": _emergency_progressed(attempt),
+        "rat_determiner": _value(attempt.get("rat_determiner"), "") or "-",
+        "ecc_list_matched": bool(attempt.get("ecc_list_matched")),
+        "ecc_list": _value(attempt.get("ecc_list"), "") or "-",
         "service_state": _emergency_service_state(attempt),
         "pdn": _emergency_pdn(attempt),
         "progress": " → ".join(attempt.get("e911_progress") or []) or "-",
         "control": " → ".join(attempt.get("emergency_control") or []) or "-",
+        "end_cause": _value(attempt.get("end_cause_text"), "") or "-",
         "modem_reset": bool(attempt.get("modem_reset")),
         "status": _value(attempt.get("status")),
         "fail_reason": _value(attempt.get("fail_reason"), "") or "-",
@@ -456,7 +478,8 @@ def build_emergency_call_overview(data: Any) -> EmergencyCallOverview:
     return EmergencyCallOverview(
         status="ok",
         attempt_count=len(attempts),
-        fail_count=sum(1 for row in attempts if row["status"] == "FAIL"),
+        # 붙었다가 끊긴 긴급호(CALL DROP)도 실패로 센다 -- 통화가 안 된 것은 같다.
+        fail_count=sum(1 for row in attempts if row["status"] in {"FAIL", "CALL DROP"}),
         attempts=attempts,
     )
 

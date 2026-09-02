@@ -108,22 +108,26 @@ class LogOrchestrator:
     def _mark_emergency_calls(call_sessions, emergency_calls):
         """통화 이력에 긴급호 표시를 붙인다.
 
-        통화 목록만 보면 긴급호가 일반 MO 발신과 구분되지 않는다. IMS 세션 키
-        (`objId`)가 양쪽에 다 있으므로 그걸로 잇는다. 키를 못 찾은 긴급호는 통화
-        이력에 표시가 안 붙지만, 긴급호 자체는 따로 남으므로 잃지 않는다.
+        통화 목록만 보면 긴급호가 일반 MO 발신과 구분되지 않는다. 세션 키가 양쪽에
+        다 있으므로 그걸로 잇는다: IMS 는 `objId`, CS 는 telecom call id(`TC@7_1`).
+        IMS 로 걸어 보고 CS 로 다시 건 긴급호는 CS 세션 하나로만 남으므로 두 키를
+        다 봐야 한다. 키를 못 찾은 긴급호는 통화 이력에 표시가 안 붙지만, 긴급호
+        자체는 따로 남으므로 잃지 않는다.
         """
-        by_obj_id = {
-            str(attempt.get("ims_obj_id")): attempt
-            for attempt in (emergency_calls or [])
-            if attempt.get("ims_obj_id")
-        }
-        if not by_obj_id:
+        keyed = []
+        for attempt in emergency_calls or []:
+            keys = [f"objId:{attempt[field]}" for field in ("ims_obj_id", "cs_obj_id") if attempt.get(field)]
+            if attempt.get("telecom_call_id"):
+                keys.append(str(attempt["telecom_call_id"]))
+            if keys:
+                keyed.append((keys, attempt))
+        if not keyed:
             return
 
         for session in call_sessions or []:
             session_id = str(session.get("id") or "")
-            for obj_id, attempt in by_obj_id.items():
-                if f"objId:{obj_id}" in session_id:
+            for keys, attempt in keyed:
+                if any(key in session_id for key in keys):
                     session["is_emergency"] = True
                     session["emergency_number"] = attempt.get("number", "")
                     break

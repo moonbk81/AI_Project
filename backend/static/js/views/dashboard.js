@@ -373,11 +373,12 @@ const CARDS = [
              series.fail_count ? "critical" : "good"),
       ]));
       // 긴급호는 건수가 적고 볼 값이 많아 표가 그림보다 낫다.
+      // Search 가 내려 준 도메인과 실제로 진행된 도메인은 다를 수 있어 따로 적는다.
       panel.content(table(
-        ["시각", "번호", "경로", "발신 시 서비스", "긴급 PDN", "E911 진행", "결과", "실패 사유"],
+        ["시각", "번호", "Search 결과", "진행 도메인", "발신 시 서비스", "긴급 PDN", "종료 원인", "결과", "실패 사유"],
         series.attempts.map((attempt) => [
-          attempt.time, attempt.number, attempt.route, attempt.service_state,
-          attempt.pdn, attempt.progress, attempt.status, attempt.fail_reason,
+          attempt.time, attempt.number, attempt.search_result, attempt.progressed,
+          attempt.service_state, attempt.pdn, attempt.end_cause, attempt.status, attempt.fail_reason,
         ]),
       ));
     },
