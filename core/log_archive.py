@@ -13,7 +13,7 @@ import io
 import logging
 import os
 import re
-from typing import Dict, Iterable, List, NamedTuple, Optional
+from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 import zipfile
 
@@ -89,6 +89,32 @@ def is_log_file(filename: str) -> bool:
 
 def is_archive_name(filename: str) -> bool:
     return str(filename).lower().endswith(ARCHIVE_SUFFIXES)
+
+
+# 분할 압축의 조각 이름: `log.7z.001`, `log.7z.002`. 7-Zip 의 볼륨은 하나의 압축
+# 스트림을 바이트로 자른 것이라, 번호순으로 이어붙이면 원본 압축이 그대로 된다.
+# (`.z01` + `.zip` 형태의 spanned zip 은 이와 달라 이어붙여도 열리지 않는다.)
+_VOLUME_PART = re.compile(r'^(?P<base>.+)\.(?P<index>\d{2,3})$')
+
+
+def volume_part(filename: str) -> Optional[Tuple[str, int]]:
+    """`log.7z.001` -> `("log.7z", 1)`. 분할 압축의 조각이 아니면 None.
+
+    번호를 뗀 이름이 아는 압축이어야 한다 -- 그렇지 않으면 `report.2024.001`
+    같은 이름까지 조각으로 읽는다.
+    """
+    match = _VOLUME_PART.match(str(filename or "").strip())
+    if not match:
+        return None
+    base = match.group("base")
+    if not is_archive_name(base):
+        return None
+    return base, int(match.group("index"))
+
+
+def join_volumes(chunks: Iterable[bytes]) -> bytes:
+    """번호순 조각들을 원본 압축 바이트로. 볼륨은 바이트 분할이라 이어붙이면 된다."""
+    return b"".join(bytes(chunk or b"") for chunk in chunks)
 
 
 def is_plain_log_name(filename: str) -> bool:

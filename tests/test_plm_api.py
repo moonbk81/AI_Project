@@ -601,3 +601,72 @@ def test_the_file_list_says_what_can_be_analyzed(monkeypatch):
         "dumpState_1787.log": (True, False),
         "결함내용.txt": (False, False),
     }
+
+
+def test_a_split_archive_offers_one_row_and_says_how_many_pieces(monkeypatch):
+    """`log.7z.001`, `log.7z.002` ... 는 압축 하나가 조각으로 올라온 것이다.
+
+    조각 하나만 열면 압축이 아니므로 첫 조각에만 체크박스를 두고, 몇 조각인지와
+    어느 묶음인지 알려 준다 -- 나머지 조각은 그 하나를 고르면 함께 받는다.
+    """
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {"success": True, "files": [
+            {"title": "log.7z.002", "docId": "D", "fileId": "F2"},
+            {"title": "log.7z.001", "docId": "D", "fileId": "F1"},
+            {"title": "log.7z.003", "docId": "D", "fileId": "F3"},
+            {"title": "shots.zip", "docId": "D", "fileId": "F4"},
+        ]},
+    )
+
+    body = backend_main.plm_files(
+        backend_main.PlmFileListRequest(division_code="25", defect_code="D-1")
+    )
+    rows = {f["title"]: f for f in body.files}
+
+    assert rows["log.7z.001"]["analyzable"] is True
+    assert rows["log.7z.001"]["multipart_parts"] == 3
+    assert rows["log.7z.001"]["multipart_of"] == "log.7z"
+    # 목록 순서와 무관하게 번호가 가장 낮은 조각이 첫 조각이다.
+    for title in ("log.7z.002", "log.7z.003"):
+        assert rows[title]["analyzable"] is False
+        assert rows[title]["multipart_of"] == "log.7z"
+    assert rows["shots.zip"]["analyzable"] is True
+    assert "multipart_of" not in rows["shots.zip"]
+
+
+def test_a_split_archive_is_assembled_before_it_is_opened(monkeypatch, tmp_path):
+    """첫 조각만 골라도 나머지 조각을 목록에서 찾아 이어붙여야 열린다."""
+    monkeypatch.chdir(tmp_path)
+
+    archive = make_zip({"dumpstate.log": b"log body"})
+    cut = len(archive) // 2 + 1
+    chunks = {"log.zip.001": archive[:cut], "log.zip.002": archive[cut:]}
+    listing = [
+        {"title": title, "docId": "D", "fileId": title} for title in chunks
+    ]
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {"success": True, "files": listing},
+    )
+    downloaded = []
+
+    def download(**kwargs):
+        downloaded.append(kwargs["title"])
+        return {"success": True, "data": chunks[kwargs["title"]]}
+
+    monkeypatch.setattr("plm.service.download_attached_file", download)
+
+    analyzed = {}
+    monkeypatch.setattr(
+        backend_main,
+        "_run_analyze_job",
+        lambda job_id, paths, *args, **kwargs: analyzed.update(paths=list(paths)),
+    )
+
+    # 사용자가 고른 것은 첫 조각 하나뿐이다.
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_attachment_job(job_id, "25", "D-1", ["log.zip.001"])
+
+    assert downloaded == ["log.zip.001", "log.zip.002"]
+    assert [path.rsplit("/", 1)[-1] for path in analyzed["paths"]] == ["dumpstate.log"]

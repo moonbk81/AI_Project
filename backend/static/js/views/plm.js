@@ -480,12 +480,19 @@ export async function renderPlm(mount, sourceFile, ctx) {
       const fileId = String(file.fileId);
       const analyzable = file.analyzable && file.docId && file.fileId;
 
+      // 분할 압축(`log.7z.001`, `log.7z.002` ...)은 묶음 하나가 압축 하나다.
+      // 첫 조각에만 체크박스가 오고, 고르면 나머지 조각도 함께 받아 이어붙인다.
+      const parts = Number(file.multipart_parts) || 0;
+      const partOf = file.multipart_of || "";
+
       if (analyzable) {
         const box = el("input");
         box.type = "checkbox";
-        box.title = file.is_archive
-          ? "이 압축 파일 안을 훑는다"
-          : "이 로그 파일을 분석 대상에 넣는다";
+        box.title = parts > 1
+          ? `분할 압축 ${parts}개를 모두 받아 이어붙인 뒤 안을 훑는다`
+          : file.is_archive
+            ? "이 압축 파일 안을 훑는다"
+            : "이 로그 파일을 분석 대상에 넣는다";
         box.checked = picked.has(fileId);
         box.addEventListener("change", () => {
           if (box.checked) picked.add(fileId);
@@ -499,9 +506,14 @@ export async function renderPlm(mount, sourceFile, ctx) {
         row.append(el("span", "row-pick"));
       }
 
-      row.append(el("span", "row-name", file.title || "-"),
-                 el("span", "grow"),
-                 el("span", "row-meta", file.fileSize ? sizeText(file.fileSize) : "-"));
+      row.append(el("span", "row-name", file.title || "-"), el("span", "grow"));
+      if (parts > 1) {
+        row.append(el("span", "row-meta", `${partOf} · 분할 ${parts}개`));
+      } else if (partOf) {
+        // 조각 하나만 열면 압축이 아니다. 왜 못 고르는지 그 자리에서 말해 준다.
+        row.append(el("span", "row-meta", `${partOf} 의 조각 (첫 조각을 고르세요)`));
+      }
+      row.append(el("span", "row-meta", file.fileSize ? sizeText(file.fileSize) : "-"));
 
       const download = el("button", null, "다운로드");
       download.type = "button";

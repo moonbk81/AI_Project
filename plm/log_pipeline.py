@@ -17,7 +17,9 @@ from core.log_archive import (
     extract_logs_from_archive,
     is_archive_name,
     is_plain_log_name,
+    join_volumes,
     list_archive_contents,
+    volume_part,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,16 +94,81 @@ def select_archive_attachments(files: Optional[List[Dict[str, Any]]]) -> List[Di
     return [f for f in (files or []) if is_archive_name(f.get("title", ""))]
 
 
+def _title(attachment: Optional[Dict[str, Any]]) -> str:
+    return str((attachment or {}).get("title") or "")
+
+
+def volume_sets(files: Optional[List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """분할 압축 묶음. 원본 이름 -> 번호순으로 세운 조각 첨부들.
+
+    조각은 PLM 에 각각 별개 첨부로 올라오므로, 하나만 열어 보면 압축이 아니다.
+    """
+    grouped: Dict[str, List[tuple] ] = {}
+    for attachment in files or []:
+        part = volume_part(_title(attachment))
+        if part:
+            grouped.setdefault(part[0], []).append((part[1], attachment))
+    return {
+        base: [attachment for _, attachment in sorted(parts, key=lambda item: item[0])]
+        for base, parts in grouped.items()
+    }
+
+
+def volume_parts_for(
+    files: Optional[List[Dict[str, Any]]], attachment: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """이 첨부를 열려면 함께 내려받아야 하는 첨부들.
+
+    분할 압축의 조각이면 같은 묶음 전부를 번호순으로, 아니면 그 첨부 하나만.
+    사용자가 몇 번째 조각을 골랐든 묶음 전체로 되므로 고르는 쪽이 실수할 수 없다.
+    """
+    part = volume_part(_title(attachment))
+    if not part:
+        return [attachment]
+    return volume_sets(files).get(part[0]) or [attachment]
+
+
+def with_volume_siblings(
+    listing: Optional[List[Dict[str, Any]]], picked: Optional[List[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """고른 첨부에 분할 압축의 나머지 조각을 채워 넣는다.
+
+    사용자는 묶음의 첫 조각 하나만 고른다. 그 상태로 열려고 하면 조각 하나는
+    압축이 아니어서 아무것도 못 꺼낸다. 목록 전체를 아는 여기서 채워 준다.
+    """
+    filled: List[Dict[str, Any]] = []
+    seen = set()
+    for attachment in picked or []:
+        for part in volume_parts_for(listing, attachment):
+            key = str(part.get("fileId")) or _title(part)
+            if key in seen:
+                continue
+            seen.add(key)
+            filled.append(part)
+    return filled
+
+
 def select_analyzable_attachments(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """분석할 수 있는 첨부: 압축과, 압축 없이 그대로 올라온 로그.
 
     로그가 늘 압축 안에 온다고 보고 압축만 골랐더니, dumpState 를 그대로 올린
     결함에서는 고를 것이 하나도 없어 분석을 시작할 수조차 없었다.
+
+    분할 압축은 묶음 하나가 압축 하나다. 그래서 첫 조각만 남긴다 -- 조각마다
+    한 줄씩 세우면 같은 압축을 조각 수만큼 여는 셈이 된다.
     """
-    return [
-        f for f in (files or [])
-        if is_archive_name(f.get("title", "")) or is_plain_log_name(f.get("title", ""))
-    ]
+    sets = volume_sets(files)
+    firsts = {id(parts[0]) for parts in sets.values() if parts}
+    picked = []
+    for attachment in files or []:
+        title = _title(attachment)
+        if volume_part(title):
+            if id(attachment) in firsts:
+                picked.append(attachment)
+            continue
+        if is_archive_name(title) or is_plain_log_name(title):
+            picked.append(attachment)
+    return picked
 
 
 def _attachment_ids(attachment: Dict[str, Any]):
@@ -133,27 +200,63 @@ def extract_logs_from_attachments(
     for index, attachment in enumerate(archives, 1):
         title = str(attachment.get("title", "unknown"))
         try:
-            ids = _attachment_ids(attachment)
-            if ids is None:
-                logger.warning("Skipping file (missing docId/fileId/title): %s", title)
-                continue
-            doc_id, file_id, title = ids
+            parts = volume_parts_for(files, attachment)
+            # 분할 압축은 조각을 다 받아 이어붙여야 압축이 된다. 이름은 번호를 뗀
+            # 원본으로 적는다 -- 사용자가 아는 이름은 그쪽이다.
+            if len(parts) > 1:
+                base = volume_part(title)[0]
+                chunks = []
+                failure = None
+                for part_index, part in enumerate(parts, 1):
+                    ids = _attachment_ids(part)
+                    if ids is None:
+                        failure = f"{_title(part)} 의 PLM 정보가 비어 있습니다"
+                        break
+                    part_doc, part_file, part_title = ids
+                    yield LogExtractionEvent(
+                        DOWNLOADING,
+                        title=f"{base} ({part_index}/{len(parts)})",
+                        index=index,
+                        total=total,
+                    )
+                    response = download(doc_id=part_doc, title=part_title, file_id=part_file) or {}
+                    if not response.get("success"):
+                        failure = response.get("message", "Unknown error")
+                        break
+                    if not response.get("data"):
+                        failure = f"{part_title} 의 내용이 비어 있습니다"
+                        break
+                    chunks.append(response["data"])
 
-            yield LogExtractionEvent(DOWNLOADING, title=title, index=index, total=total)
-            logger.info("Auto-downloading %s", title)
+                if failure:
+                    logger.error("Failed to download a volume of %s: %s", base, failure)
+                    yield LogExtractionEvent(DOWNLOAD_FAILED, title=base, error=failure)
+                    continue
 
-            response = download(doc_id=doc_id, title=title, file_id=file_id) or {}
-            if not response.get("success"):
-                error = response.get("message", "Unknown error")
-                logger.error("Failed to download %s: %s", title, error)
-                yield LogExtractionEvent(DOWNLOAD_FAILED, title=title, error=error)
-                continue
+                title = base
+                file_data = join_volumes(chunks)
+            else:
+                ids = _attachment_ids(attachment)
+                if ids is None:
+                    logger.warning("Skipping file (missing docId/fileId/title): %s", title)
+                    continue
+                doc_id, file_id, title = ids
 
-            file_data = response.get("data")
-            if not file_data:
-                logger.error("No data returned for %s", title)
-                yield LogExtractionEvent(DOWNLOAD_EMPTY, title=title)
-                continue
+                yield LogExtractionEvent(DOWNLOADING, title=title, index=index, total=total)
+                logger.info("Auto-downloading %s", title)
+
+                response = download(doc_id=doc_id, title=title, file_id=file_id) or {}
+                if not response.get("success"):
+                    error = response.get("message", "Unknown error")
+                    logger.error("Failed to download %s: %s", title, error)
+                    yield LogExtractionEvent(DOWNLOAD_FAILED, title=title, error=error)
+                    continue
+
+                file_data = response.get("data")
+                if not file_data:
+                    logger.error("No data returned for %s", title)
+                    yield LogExtractionEvent(DOWNLOAD_EMPTY, title=title)
+                    continue
 
             # 압축이 아니면 열어 볼 안쪽이 없다. 내려받은 것이 곧 그 로그다.
             if is_plain_log_name(title):

@@ -702,8 +702,33 @@ def _attachment_cache_path(division_code: str, defect_code: str, file_id: str) -
     return os.path.join(_ATTACHMENT_CACHE_DIR, key)
 
 
-def _attachment_bytes(division_code: str, defect_code: str, attachment: Dict[str, Any]) -> bytes:
-    """첨부 원본 바이트. 한 번 받아 두면 목록 만들기와 분석이 다시 받지 않는다."""
+def _attachment_bytes(
+    division_code: str,
+    defect_code: str,
+    attachment: Dict[str, Any],
+    listing: Optional[List[Dict[str, Any]]] = None,
+) -> bytes:
+    """첨부를 열 수 있는 바이트.
+
+    분할 압축(`log.7z.001`, `log.7z.002` ...)이면 같은 묶음의 조각을 번호순으로
+    모두 받아 이어붙인다. 7-Zip 볼륨은 하나의 압축 스트림을 바이트로 자른 것이라
+    이어붙이면 원본이 되고, 조각 하나만으로는 압축으로 읽히지 않는다.
+    """
+    from core.log_archive import join_volumes
+    from plm import log_pipeline
+
+    parts = log_pipeline.volume_parts_for(listing, attachment) if listing else [attachment]
+    if len(parts) > 1:
+        return join_volumes(
+            _single_attachment_bytes(division_code, defect_code, part) for part in parts
+        )
+    return _single_attachment_bytes(division_code, defect_code, attachment)
+
+
+def _single_attachment_bytes(
+    division_code: str, defect_code: str, attachment: Dict[str, Any]
+) -> bytes:
+    """첨부 하나의 원본 바이트. 한 번 받아 두면 목록 만들기와 분석이 다시 받지 않는다."""
     from plm.service import download_attached_file
 
     title = str(attachment.get("title") or "첨부")
@@ -731,17 +756,24 @@ def _attachment_bytes(division_code: str, defect_code: str, attachment: Dict[str
     return data
 
 
-def _selected_attachments(
-    division_code: str, defect_code: str, file_ids: Optional[List[str]]
-) -> List[Dict[str, Any]]:
-    """결함의 첨부 목록에서 사용자가 고른 것만. 비어 있으면 전부."""
+def _attachment_listing(division_code: str, defect_code: str) -> List[Dict[str, Any]]:
+    """결함의 첨부 목록 전체.
+
+    고른 것만으로는 분할 압축을 열 수 없다 -- 첫 조각만 골라도 나머지 조각을
+    목록에서 찾아 함께 내려받아야 한다.
+    """
     from plm.service import list_attached_files
 
     listing = list_attached_files(division_code=division_code, defect_code=defect_code)
     if not listing.get("success"):
         raise RuntimeError(listing.get("message") or "첨부 파일 목록 조회 실패")
+    return listing.get("files") or []
 
-    files = listing.get("files") or []
+
+def _pick_attachments(
+    files: List[Dict[str, Any]], file_ids: Optional[List[str]]
+) -> List[Dict[str, Any]]:
+    """목록에서 사용자가 고른 것만. 비어 있으면 전부."""
     if not file_ids:
         return files
 
@@ -750,6 +782,13 @@ def _selected_attachments(
     if not picked:
         raise RuntimeError("선택한 첨부 파일을 목록에서 찾지 못했습니다.")
     return picked
+
+
+def _selected_attachments(
+    division_code: str, defect_code: str, file_ids: Optional[List[str]]
+) -> List[Dict[str, Any]]:
+    """결함의 첨부 목록에서 사용자가 고른 것만. 비어 있으면 전부."""
+    return _pick_attachments(_attachment_listing(division_code, defect_code), file_ids)
 
 
 def _run_plm_log_scan_job(
@@ -763,13 +802,20 @@ def _run_plm_log_scan_job(
     본문은 꺼내지 않는다. 압축의 목록만 읽고, 이름에 로그 힌트가 붙은 중첩
     압축만 열어 본다. 실제 추출은 사용자가 고른 뒤에 그 파일만 한다.
     """
-    from core.log_archive import find_log_candidates, is_plain_log_name, list_archive_contents
+    from core.log_archive import (
+        find_log_candidates,
+        is_plain_log_name,
+        list_archive_contents,
+        volume_part,
+    )
     from plm import log_pipeline
 
     try:
         _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=3)
+        # 목록 전체를 들고 있어야 분할 압축의 나머지 조각을 찾을 수 있다.
+        listing = _attachment_listing(division_code, defect_code)
         archives = log_pipeline.select_analyzable_attachments(
-            _selected_attachments(division_code, defect_code, file_ids)
+            _pick_attachments(listing, file_ids)
         )
         if not archives:
             _set_job(
@@ -801,8 +847,12 @@ def _run_plm_log_scan_job(
                 continue
 
             try:
+                # 분할 압축이면 사용자가 아는 이름은 번호를 뗀 쪽이다.
+                part = volume_part(title)
+                if part:
+                    title = part[0]
                 _set_job(job_id, message=f"[{index}/{len(archives)}] {title} 내려받는 중...", progress=5 + share)
-                data = _attachment_bytes(division_code, defect_code, attachment)
+                data = _attachment_bytes(division_code, defect_code, attachment, listing)
 
                 _set_job(job_id, message=f"{title} 안에서 로그 파일 찾는 중...")
                 found = find_log_candidates(data)
@@ -849,9 +899,8 @@ def _run_plm_selected_logs_job(
 
     try:
         _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=3)
-        files = _selected_attachments(
-            division_code, defect_code, [str(item["file_id"]) for item in selections]
-        )
+        listing = _attachment_listing(division_code, defect_code)
+        files = _pick_attachments(listing, [str(item["file_id"]) for item in selections])
         by_id = {str(f.get("fileId")): f for f in files}
 
         upload_dir = os.path.join("./temp_logs", "plm_attachments", job_id)
@@ -878,7 +927,7 @@ def _run_plm_selected_logs_job(
                     progress=3 + int(7 * index / len(selections)),
                 )
                 content = read_by_route(
-                    _attachment_bytes(division_code, defect_code, attachment), route
+                    _attachment_bytes(division_code, defect_code, attachment, listing), route
                 )
                 if not content:
                     raise RuntimeError("내용이 비어 있습니다")
@@ -939,7 +988,12 @@ def _run_plm_attachment_job(
     try:
         _set_job(job_id, status="running", message="첨부 파일 목록 조회 중...", progress=2)
 
-        files = _selected_attachments(division_code, defect_code, file_ids)
+        # 고른 것이 분할 압축의 첫 조각이면 나머지 조각도 함께 넘긴다 -- 조각
+        # 하나만으로는 압축이 아니어서 열 수 있는 것이 없다.
+        listing = _attachment_listing(division_code, defect_code)
+        files = log_pipeline.with_volume_siblings(
+            listing, _pick_attachments(listing, file_ids)
+        )
 
         def download(doc_id, title, file_id):
             return download_attached_file(
@@ -1360,14 +1414,32 @@ def _mark_analyzable(files: Optional[List[Dict[str, Any]]]) -> List[Dict[str, An
     새 이름이 붙어 계속 자란다. 그래서 판단을 화면에 복제하지 않고 여기서 붙여
     보낸다 -- 복제해 두면 목록이 자랄 때 한쪽만 자란다.
     """
-    from core.log_archive import is_archive_name, is_plain_log_name
+    from core.log_archive import is_archive_name, is_plain_log_name, volume_part
+    from plm.log_pipeline import volume_sets
+
+    sets = volume_sets(files)
+    first_ids = {
+        str(parts[0].get("fileId")): (base, len(parts))
+        for base, parts in sets.items()
+        if parts
+    }
 
     marked = []
     for entry in files or []:
         item = dict(entry)
         title = item.get("title") or ""
-        item["is_archive"] = is_archive_name(title)
-        item["analyzable"] = item["is_archive"] or is_plain_log_name(title)
+        part = volume_part(title)
+        if part:
+            # 분할 압축은 묶음 하나가 압축 하나다. 첫 조각에만 체크박스를 두고
+            # 몇 조각인지 알려 준다. 나머지 조각은 그 하나를 고르면 함께 받는다.
+            base, count = first_ids.get(str(item.get("fileId")), (part[0], 0))
+            item["is_archive"] = True
+            item["analyzable"] = bool(count)
+            item["multipart_of"] = base
+            item["multipart_parts"] = count
+        else:
+            item["is_archive"] = is_archive_name(title)
+            item["analyzable"] = item["is_archive"] or is_plain_log_name(title)
         marked.append(item)
     return marked
 

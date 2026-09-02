@@ -196,3 +196,87 @@ def test_a_plain_file_is_not_opened_at_all():
 
 def test_a_damaged_archive_reports_no_logs_rather_than_raising():
     assert log_pipeline.inspect_attachment("broken.zip", b"not a zip").kind == log_pipeline.NO_LOGS_IN_ARCHIVE
+
+
+# ------------------------------------------------------- 분할 압축 (.7z.001 ...)
+
+def _volume_attachments(base="log.7z", count=3):
+    """조각은 PLM 에 각각 별개 첨부로 올라온다."""
+    return [_attachment(f"{base}.{index:03d}", index) for index in range(1, count + 1)]
+
+
+def _split(data, count):
+    size = len(data) // count + 1
+    return [data[start:start + size] for start in range(0, len(data), size)]
+
+
+def test_volume_parts_are_grouped_by_the_name_without_the_number():
+    files = [*_volume_attachments(), _attachment("shots.zip", 9)]
+
+    sets = log_pipeline.volume_sets(files)
+
+    assert list(sets) == ["log.7z"]
+    assert [f["title"] for f in sets["log.7z"]] == ["log.7z.001", "log.7z.002", "log.7z.003"]
+
+
+def test_a_volume_set_is_offered_as_one_archive_not_as_its_pieces():
+    """조각마다 한 줄씩 세우면 같은 압축을 조각 수만큼 여는 셈이 된다."""
+    files = [*_volume_attachments(), _attachment("shots.zip", 9), _attachment("dumpstate.log", 8)]
+
+    assert [f["title"] for f in select_analyzable_attachments(files)] == [
+        "log.7z.001",
+        "shots.zip",
+        "dumpstate.log",
+    ]
+
+
+def test_any_piece_of_a_set_resolves_to_the_whole_set_in_order():
+    files = _volume_attachments()
+    shuffled = [files[2], files[0], files[1]]
+
+    for picked in shuffled:
+        assert [f["title"] for f in log_pipeline.volume_parts_for(shuffled, picked)] == [
+            "log.7z.001",
+            "log.7z.002",
+            "log.7z.003",
+        ]
+
+
+def test_a_lone_attachment_resolves_to_itself():
+    single = _attachment("shots.zip")
+    assert log_pipeline.volume_parts_for([single], single) == [single]
+
+
+def test_a_split_archive_is_downloaded_whole_and_opened():
+    parts = _split(LOG_ZIP, 3)
+    files = _volume_attachments(base="log.zip", count=3)
+    payloads = {
+        f["title"]: {"success": True, "data": chunk} for f, chunk in zip(files, parts)
+    }
+
+    events = list(extract_logs_from_attachments(files, _downloader(payloads)))
+
+    # 조각을 다 받아서 한 번 열었다.
+    downloads = [e for e in events if e.kind == log_pipeline.DOWNLOADING]
+    assert [e.title for e in downloads] == ["log.zip (1/3)", "log.zip (2/3)", "log.zip (3/3)"]
+    ready = [e for e in events if e.kind == log_pipeline.LOG_READY]
+    assert [(e.title, e.filename, e.content) for e in ready] == [
+        ("log.zip", "dumpstate.log", b"log body"),
+    ]
+
+
+def test_a_missing_piece_fails_the_set_rather_than_opening_a_fragment():
+    """조각 하나가 빠지면 이어붙인 것은 압축이 아니다. 그 사실을 그대로 말한다."""
+    parts = _split(LOG_ZIP, 3)
+    files = _volume_attachments(base="log.zip", count=3)
+    payloads = {
+        files[0]["title"]: {"success": True, "data": parts[0]},
+        files[1]["title"]: {"success": False, "message": "권한 없음"},
+        files[2]["title"]: {"success": True, "data": parts[2]},
+    }
+
+    events = list(extract_logs_from_attachments(files, _downloader(payloads)))
+
+    failed = [e for e in events if e.kind == log_pipeline.DOWNLOAD_FAILED]
+    assert [(e.title, e.error) for e in failed] == [("log.zip", "권한 없음")]
+    assert log_pipeline.LOG_READY not in _kinds(events)

@@ -13,6 +13,8 @@ from core.log_archive import (
     list_archive_contents,
     list_root_contents,
     read_by_route,
+    join_volumes,
+    volume_part,
 )
 
 
@@ -338,3 +340,42 @@ def test_a_repack_of_the_log_beside_it_is_still_left_shut():
     })
 
     assert [c.path for c in find_log_candidates(attachment)] == ["dumpstate.log"]
+
+
+# ---------------------------------------------------------------- 분할 압축
+
+@pytest.mark.parametrize(
+    "filename, expected",
+    [
+        ("log.7z.001", ("log.7z", 1)),
+        ("log.7z.002", ("log.7z", 2)),
+        ("log.zip.010", ("log.zip", 10)),
+        ("LOG.7Z.001", ("LOG.7Z", 1)),
+        # 번호를 뗀 이름이 압축이 아니면 조각이 아니다.
+        ("report.2026.001", None),
+        ("dumpState.log.001", None),
+        ("log.7z", None),
+        ("log.7z.abc", None),
+        ("", None),
+    ],
+)
+def test_volume_part_names(filename, expected):
+    assert volume_part(filename) == expected
+
+
+def test_volumes_joined_in_order_open_as_the_original_archive():
+    """7-Zip 볼륨은 압축 스트림을 바이트로 자른 것이라 이어붙이면 원본이 된다.
+
+    조각 하나만으로는 압축으로 읽히지 않는다 -- 그래서 첨부 하나씩 열어 보는
+    경로에서는 분할 압축을 통째로 놓쳤다.
+    """
+    original = make_zip({"dumpState_0.log": b"09-01 07:51:48.943 D emergency\n"})
+    cut = len(original) // 3 + 1
+    parts = [original[:cut], original[cut:2 * cut], original[2 * cut:]]
+
+    assert len(parts[0]) < len(original)
+    assert extract_logs_from_archive(parts[0]) == {}
+
+    joined = join_volumes(parts)
+    assert joined == original
+    assert list(extract_logs_from_archive(joined)) == ["dumpState_0.log"]
