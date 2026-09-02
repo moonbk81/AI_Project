@@ -75,6 +75,7 @@ const EMPTY_TEXT = {
   no_changes: "표시할 상태 변화가 없습니다.",
   no_errors: "실패/차단 기록이 없습니다 (정상).",
   no_calls: "통화 세션 로그가 없습니다.",
+  no_emergency_calls: "긴급호(911/112 등) 발신이 없습니다.",
   no_ntn_events: "NTN 관련 이벤트가 없습니다.",
   no_signal_history: "RF 신호 이력이 부족해 타임라인을 만들 수 없습니다.",
   unparsable_time: "시간 형식을 해석할 수 없어 시계열을 만들지 못했습니다.",

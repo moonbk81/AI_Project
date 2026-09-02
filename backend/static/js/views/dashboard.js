@@ -361,6 +361,28 @@ const CARDS = [
     },
   },
   {
+    chart: "emergency-call",
+    title: "긴급호",
+    sub: "발신 경로 · 발신 시 서비스 · 긴급 PDN",
+    prompt: "긴급호 시도별로 발신 경로(도메인/RAT), 발신 시점 서비스 상태, 긴급 PDN(sos) 결과, 모뎀 상태를 엮어서 긴급 통화가 왜 실패했는지 정리해줘.",
+    render(series, panel) {
+      panel.prepend(tileRow([
+        tile("긴급호 시도", fmt.count(series.attempt_count), "건"),
+        tile("실패", fmt.count(series.fail_count), "건",
+             series.fail_count ? "실패한 긴급호 있음" : "실패 없음",
+             series.fail_count ? "critical" : "good"),
+      ]));
+      // 긴급호는 건수가 적고 볼 값이 많아 표가 그림보다 낫다.
+      panel.content(table(
+        ["시각", "번호", "경로", "발신 시 서비스", "긴급 PDN", "E911 진행", "결과", "실패 사유"],
+        series.attempts.map((attempt) => [
+          attempt.time, attempt.number, attempt.route, attempt.service_state,
+          attempt.pdn, attempt.progress, attempt.status, attempt.fail_reason,
+        ]),
+      ));
+    },
+  },
+  {
     chart: "rilj",
     title: "RILJ transaction",
     sub: "무응답 · 오류 · 지연된 요청",

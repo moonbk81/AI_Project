@@ -47,6 +47,59 @@ def build_oos_payloads(report_data, build_markdown_doc, extract_metadata):
         append_callback_payload(rag_payload, oos, "OOS_Event", build_markdown_doc, extract_metadata)
     return rag_payload
 
+def _emergency_call_document(attempt):
+    """긴급호 한 건을 사람이 읽는 순서로 적는다.
+
+    실패 사유 한 줄만으로는 왜 못 걸렸는지 알 수 없다. 어디로 걸었고, 그때 망이
+    어땠고, 모뎀 상태 기계가 어디까지 갔고, 긴급 PDN 이 어떻게 됐는지를 함께
+    적어야 다음 질문("그럼 왜 PDN 이 안 올라왔나")으로 넘어갈 수 있다.
+    """
+    pdn = attempt.get("emergency_pdn") or {}
+    lines = [
+        f"### [Type: Emergency_Call] 긴급호 {attempt.get('number', 'Unknown')} "
+        f"({attempt.get('status', 'UNKNOWN')})",
+        f"- 시각: {attempt.get('time', '')} ~ {attempt.get('end_time', '')}"
+        f" (slot {attempt.get('slot', 'Unknown')})",
+        f"- 발신 경로: {attempt.get('route', 'Unknown')}"
+        f" (RAT: {attempt.get('rat', 'Unknown')}, 도메인: {attempt.get('domain', 'Unknown')})",
+        f"- 긴급 서비스 카테고리: {attempt.get('ecc_category') or '미확인'}",
+        f"- 발신 시점 서비스 상태: {attempt.get('service_state', 'Unknown')}"
+        f" (긴급 통화만 가능: {attempt.get('emergency_only') or '미확인'})",
+    ]
+
+    if control := attempt.get("emergency_control"):
+        lines.append(f"- 모뎀 긴급호 제어: {' → '.join(control)}")
+    if progress := attempt.get("e911_progress"):
+        lines.append(f"- E911 진행 상태: {' → '.join(progress)}")
+    if pdn:
+        lines.append(
+            f"- 긴급 PDN(APN {pdn.get('apn', 'sos')}): {pdn.get('status', 'Unknown')}"
+            + (f", cause={pdn['cause']}" if pdn.get("cause") else "")
+            + (f", 요청 {pdn['requested_at']}" if pdn.get("requested_at") else "")
+            + (f" → 응답 {pdn['answered_at']}" if pdn.get("answered_at") else "")
+        )
+    if attempt.get("modem_reset"):
+        lines.append("- 통화 도중 모뎀이 리셋되었습니다(All Service is closed, Modem Reset).")
+    if attempt.get("ims_fail_reason"):
+        lines.append(f"- IMS 실패 코드: {attempt['ims_fail_reason']}")
+    if attempt.get("volte_911_config"):
+        lines.append(f"- 단말 설정 VOLTE_911_CALL: {attempt['volte_911_config']}")
+    if attempt.get("fail_reason"):
+        lines.append(f"- 실패 사유: {attempt['fail_reason']}")
+    if attempt.get("root_cause_candidate"):
+        lines.append(f"- 원인 후보: {attempt['root_cause_candidate']}")
+
+    return "\n".join(lines)
+
+
+def build_emergency_call_payloads(report_data, extract_metadata):
+    rag_payload = []
+    for attempt in report_data.get("emergency_calls", []) or []:
+        meta = extract_metadata(attempt, "Emergency_Call")
+        append_payload(rag_payload, _emergency_call_document(attempt), meta)
+    return rag_payload
+
+
 def build_ims_sip_payloads(report_data, build_markdown_doc, extract_metadata):
     rag_payload = []
     sip_events = report_data.get("ims_sip_data", []) or []
@@ -111,6 +164,7 @@ def build_telephony_payloads(report_data, input_file, build_markdown_doc, extrac
     rag_payload = []
     rag_payload.extend(build_radio_power_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_call_session_payloads(report_data, build_markdown_doc, extract_metadata))
+    rag_payload.extend(build_emergency_call_payloads(report_data, extract_metadata))
     rag_payload.extend(build_oos_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_ims_sip_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_rilj_payloads(report_data, input_file))

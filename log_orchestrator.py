@@ -22,6 +22,7 @@ from parsers.native_crash_parser import NativeCrashParser
 from parsers.diagnostic_parser import BinderWarningParser
 from parsers.rilj_parser import RiljParser
 from parsers.system_property_parser import SystemPropertyParser
+from parsers.emergency_call_parser import EmergencyCallParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
 
 ProgressCallback = Optional[Callable[[str, int], None]]
@@ -57,6 +58,7 @@ class LogOrchestrator:
         self.rilj_parser = RiljParser()
         self.sys_prop_parser = SystemPropertyParser()
         self.build_info_parser = BuildInfoParser()
+        self.emergency_call_parser = EmergencyCallParser(self._get_surrounding_context_logs)
 
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
@@ -101,6 +103,30 @@ class LogOrchestrator:
         start = max(0, idx - window)
         end = min(len(lines), idx + window + 1)
         buckets[bucket_name].update(range(start, end))
+
+    @staticmethod
+    def _mark_emergency_calls(call_sessions, emergency_calls):
+        """통화 이력에 긴급호 표시를 붙인다.
+
+        통화 목록만 보면 긴급호가 일반 MO 발신과 구분되지 않는다. IMS 세션 키
+        (`objId`)가 양쪽에 다 있으므로 그걸로 잇는다. 키를 못 찾은 긴급호는 통화
+        이력에 표시가 안 붙지만, 긴급호 자체는 따로 남으므로 잃지 않는다.
+        """
+        by_obj_id = {
+            str(attempt.get("ims_obj_id")): attempt
+            for attempt in (emergency_calls or [])
+            if attempt.get("ims_obj_id")
+        }
+        if not by_obj_id:
+            return
+
+        for session in call_sessions or []:
+            session_id = str(session.get("id") or "")
+            for obj_id, attempt in by_obj_id.items():
+                if f"objId:{obj_id}" in session_id:
+                    session["is_emergency"] = True
+                    session["emergency_number"] = attempt.get("number", "")
+                    break
 
     def _enrich_dns_queries(self, dns_queries, network_timeseries):
         """Network_DNS_Issue에서 확인한 package/policy를 DNS_Query에도 반영한다."""
@@ -173,7 +199,7 @@ class LogOrchestrator:
             report_progress("파서 후보 라인 분류 완료. 병렬 분석 시작...", 15)
 
             result = {}
-            total_steps = 24
+            total_steps = 25
             completed_steps = 0
 
             def mark_step(label):
@@ -212,6 +238,10 @@ class LogOrchestrator:
                     executor.submit(run_parser_with_key, 'binder_warnings', self.binder_parser.analyze, buckets['binder']): 'binder',
                     executor.submit(run_parser_with_key, 'rilj_transactions', self.rilj_parser.analyze, buckets['rilj']): 'rilj',
                     executor.submit(run_parser_with_key, 'system_properties', self.sys_prop_parser.analyze, lines): 'sysprop',
+                    # 긴급호는 발신부터 긴급 PDN 응답까지 흐름을 따라가야 하므로
+                    # 버킷이 아니라 전체 lines 를 본다. 파서가 값싼 문자열 검사로
+                    # 볼 줄을 먼저 걸러 낸다.
+                    executor.submit(run_parser_with_key, 'emergency_calls', self.emergency_call_parser.analyze, lines): 'emergency',
                     executor.submit(run_parser_with_key, 'build_info', self.build_info_parser.analyze, lines): 'build',
                     executor.submit(run_parser_with_key, 'ims_sip_data', self.ims_sip_parser.analyze, buckets['ims_sip']): 'ims_sip',
                 }
@@ -229,6 +259,7 @@ class LogOrchestrator:
 
             # ========== 2단계: full lines 필요한 순차 파서들 ==========
             result['call_sessions'] = self.tel_parser.analyze(lines)
+            self._mark_emergency_calls(result['call_sessions'], result.get('emergency_calls'))
             mark_step("call")
             result['oos_events'] = self.oos_parser.analyze(lines)
             mark_step("oos")

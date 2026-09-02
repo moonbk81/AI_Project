@@ -309,6 +309,9 @@ _CALL_HISTORY_COLUMNS = [
     "time",
     "slot",
     "status",
+    # 긴급호는 일반 MO 발신과 구분되어야 한다. 긴급호가 없는 로그에는 이 열이
+    # 아예 없어 표에서 빠진다.
+    "is_emergency",
     "fail_reason",
     "release_reason",
     "call_id",
@@ -366,6 +369,95 @@ def build_call_history_summary(data: Any) -> CallHistorySummary:
         call_count=len(table),
         statuses=call_df["status"].tolist() if "status" in call_df.columns else None,
         table=table,
+    )
+
+
+# ------------------------------------------------------------ emergency calls
+
+_UNKNOWN = "Unknown"
+
+
+def _value(value: Any, default: str = _UNKNOWN) -> str:
+    """빈 값·`Unknown`·`None` 을 한 가지 표기로 모은다."""
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text and text.lower() not in {"unknown", "none", "nan"} else default
+
+
+@dataclass(frozen=True)
+class EmergencyCallOverview:
+    """긴급호 시도 목록.
+
+    `status` 는 `"ok"`, `"unavailable"`(리포트 없음),
+    `"no_emergency_calls"`(긴급호 발신 자체가 없음).
+    행은 화면에 적을 문장까지 여기서 만든다 -- 어느 도메인으로 걸었고 그때 망이
+    어땠는지를 붙여 읽어야 뜻이 생기는 값들이라, 조립을 화면에 두면 같은 규칙이
+    화면마다 갈라진다.
+    """
+
+    status: str
+    attempt_count: int = 0
+    fail_count: int = 0
+    attempts: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _emergency_route(attempt: Dict[str, Any]) -> str:
+    route = _value(attempt.get("route"))
+    rat = _value(attempt.get("rat"))
+    domain = _value(attempt.get("domain"))
+    # 경로와 RAT 은 같은 값(VoLTE)으로 찍히는 일이 많아 그때는 한 번만 적는다.
+    parts = [part for part in dict.fromkeys([route, rat]) if part != _UNKNOWN]
+    if domain != _UNKNOWN:
+        parts.append(domain)
+    return " / ".join(parts) if parts else _UNKNOWN
+
+
+def _emergency_service_state(attempt: Dict[str, Any]) -> str:
+    state = _value(attempt.get("service_state"))
+    if str(attempt.get("emergency_only")).lower() == "true":
+        return f"{state} · 긴급 통화만 가능" if state != _UNKNOWN else "긴급 통화만 가능"
+    return state
+
+
+def _emergency_pdn(attempt: Dict[str, Any]) -> str:
+    pdn = attempt.get("emergency_pdn") or {}
+    status = _value(pdn.get("status"), "")
+    if not status:
+        return "-"
+    cause = _value(pdn.get("cause"), "")
+    return f"{status} ({cause})" if cause else status
+
+
+def _emergency_row(attempt: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "time": _value(attempt.get("time"), ""),
+        "number": _value(attempt.get("number")),
+        "slot": _value(attempt.get("slot")),
+        "route": _emergency_route(attempt),
+        "service_state": _emergency_service_state(attempt),
+        "pdn": _emergency_pdn(attempt),
+        "progress": " → ".join(attempt.get("e911_progress") or []) or "-",
+        "control": " → ".join(attempt.get("emergency_control") or []) or "-",
+        "modem_reset": bool(attempt.get("modem_reset")),
+        "status": _value(attempt.get("status")),
+        "fail_reason": _value(attempt.get("fail_reason"), "") or "-",
+        "root_cause_candidate": _value(attempt.get("root_cause_candidate"), "") or "-",
+    }
+
+
+def build_emergency_call_overview(data: Any) -> EmergencyCallOverview:
+    if not isinstance(data, list):
+        return EmergencyCallOverview(status="unavailable")
+    if not data:
+        return EmergencyCallOverview(status="no_emergency_calls")
+
+    attempts = [_emergency_row(attempt) for attempt in data if isinstance(attempt, dict)]
+    return EmergencyCallOverview(
+        status="ok",
+        attempt_count=len(attempts),
+        fail_count=sum(1 for row in attempts if row["status"] == "FAIL"),
+        attempts=attempts,
     )
 
 

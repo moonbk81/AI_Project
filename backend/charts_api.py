@@ -25,6 +25,7 @@ from core.charts import (
     build_boot_sequence,
     build_binder_proxy_histograms,
     build_call_history_summary,
+    build_emergency_call_overview,
     build_crash_overview,
     build_data_call_summary,
     build_data_usage_profile,
@@ -80,6 +81,9 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     ),
     "signal-level": ChartSpec(build_signal_level_series),
     "call-history": ChartSpec(build_call_history_summary, source="report", field="call_sessions"),
+    "emergency-call": ChartSpec(
+        build_emergency_call_overview, source="report", field="emergency_calls"
+    ),
     # The timeline frame carries every metadata column of every usage row; the
     # chart needs three of them, and the difference is a quarter of a megabyte.
     "data-usage": ChartSpec(

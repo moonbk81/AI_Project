@@ -4,6 +4,7 @@ from core.charts import (
     RILJ_SLOW_THRESHOLD_MS,
     build_call_history_summary,
     build_data_call_summary,
+    build_emergency_call_overview,
     build_nitz_timeline,
     build_rf_call_timeline,
     build_rilj_overview,
@@ -600,3 +601,58 @@ def test_timeout_rows_leave_the_latency_cell_empty_not_nan():
     latency = overview.abnormal["Latency(ms)"]
     assert str(latency.dtype) == "Int64"  # a float column would print "NaN"
     assert latency.tolist()[1] == 501
+
+
+# --------------------------------------------------------------- 긴급호
+
+def _emergency_attempt(**overrides):
+    attempt = {
+        "time": "09-01 07:51:48.943",
+        "end_time": "09-01 07:51:57.195",
+        "slot": "0",
+        "number": "911",
+        "route": "VoLTE",
+        "rat": "VoLTE",
+        "domain": "PS",
+        "service_state": "OUT_OF_SERVICE",
+        "emergency_only": "true",
+        "e911_progress": ["RAT_READY(3)", "DIALED_WITH_POSSIBLE_RETRY(5)"],
+        "emergency_control": ["RAT_READY(3)/DIALED"],
+        "emergency_pdn": {"apn": "sos", "status": "FAIL", "cause": "NOT_SPECIFIED(0xfffffff9)"},
+        "modem_reset": True,
+        "status": "FAIL",
+        "fail_reason": "긴급 PDN(sos) 설정 실패",
+        "root_cause_candidate": "EMERGENCY_PDN_SETUP_FAILED",
+    }
+    attempt.update(overrides)
+    return attempt
+
+
+def test_emergency_calls_are_counted_and_shaped_for_the_table():
+    overview = build_emergency_call_overview(
+        [_emergency_attempt(), _emergency_attempt(number="112", status="SUCCESS", fail_reason="")]
+    )
+
+    assert overview.status == "ok"
+    assert overview.attempt_count == 2
+    assert overview.fail_count == 1
+
+    row = overview.attempts[0]
+    # 경로/RAT 이 같은 값으로 찍히면 한 번만 적는다.
+    assert row["route"] == "VoLTE / PS"
+    assert row["service_state"] == "OUT_OF_SERVICE · 긴급 통화만 가능"
+    assert row["pdn"] == "FAIL (NOT_SPECIFIED(0xfffffff9))"
+    assert row["progress"] == "RAT_READY(3) → DIALED_WITH_POSSIBLE_RETRY(5)"
+
+
+def test_an_emergency_call_with_no_pdn_attempt_says_so_rather_than_unknown():
+    row = build_emergency_call_overview([_emergency_attempt(emergency_pdn={})]).attempts[0]
+
+    assert row["pdn"] == "-"
+
+
+def test_a_session_without_emergency_calls_is_told_apart_from_a_missing_report():
+    # 긴급호를 안 걸었다는 것과 리포트가 없다는 것은 화면에서 다른 말이 된다.
+    assert build_emergency_call_overview([]).status == "no_emergency_calls"
+    assert build_emergency_call_overview({}).status == "unavailable"
+    assert build_emergency_call_overview(None).status == "unavailable"

@@ -18,6 +18,7 @@ exact 검색으로도 527위에서야 만났다.
 LOG_TYPE_ALIASES = {
     # 통화 / 음성
     "Call_Session": "통화 전화 콜 / 통화 끊김 콜드랍 / 통화 실패 / 발신 착신 수신 / 통화 종료 원인",
+    "Emergency_Call": "긴급호 긴급전화 / 911 112 119 / 긴급통화 실패 발신 불가 / E911 긴급 PDN",
     "IMS_SIP_Message": "VoLTE IMS 통화 신호 / SIP 메시지 / 통화 연결 거절 응답 코드",
     "RILJ_Transaction": "모뎀 요청 응답 / RIL 명령 실패 / 문자 SMS 전송 실패 / 통화 요청 / 모뎀 에러 코드",
     # 네트워크 / 데이터
