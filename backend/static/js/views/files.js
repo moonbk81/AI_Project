@@ -236,7 +236,16 @@ export async function renderFiles(mount, sourceFile, ctx) {
     for (const job of running) {
       if (JOB_DONE.has(job.status) && !settled.has(job.job_id)) {
         settled.add(job.job_id);
-        if (job.status === "done") await drawIngested({ select: job.current_file || undefined });
+        if (job.status !== "done") continue;
+        await drawIngested({ select: job.current_file || undefined });
+        // 분석이 끝나면 볼 곳은 대시보드다. 여기 남겨 두면 100% 짜리 진행 막대만
+        // 보고 사용자가 직접 탭을 옮겨야 한다. 활성 파일이 정해졌을 때만 옮긴다 --
+        // 대시보드는 파일 없이는 그릴 것이 없다. (PLM 탭은 그대로 둔다: 거기서는
+        // 분석 뒤에도 결함 화면에서 코멘트를 남기는 흐름이 이어진다.)
+        if (active) {
+          ctx.goTo("dashboard");
+          return;
+        }
       }
     }
 

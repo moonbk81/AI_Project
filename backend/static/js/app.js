@@ -242,13 +242,19 @@ function rerender() {
     invalidateDefect(division, code) {
       if (state.plmState) delete state.plmState.cache[defectCacheKey(division, code)];
     },
+    /** 다른 화면으로 옮긴다. 화면 안에서 일이 끝나 다음 화면이 정해질 때 쓴다. */
+    goTo(viewId) {
+      const target = VIEWS.find((view) => view.id === viewId);
+      if (!target) return;
+      state.view = target.id;
+      drawNav();
+      rerender();
+    },
     /** Hand a ready-made question to the chat view and go there. */
     startChat(question) {
       const conversation = this.chat;
       conversation.push({ question, pending: true, autoSend: true });
-      state.view = "chat";
-      drawNav();
-      rerender();
+      this.goTo("chat");
     },
     /**
       * A job finished, or the database was reset: refresh the file list and
