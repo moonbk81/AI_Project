@@ -496,9 +496,30 @@ def _candidates_here(data: bytes, route: tuple):
     return known, maybe
 
 
+def _repacks_a_known_log(archive_name: str, known_here: List[LogCandidate]) -> bool:
+    """이 압축이 옆에 있는 로그를 그대로 다시 압축한 것인지.
+
+    ``dumpstate.log`` 와 ``dumpstate.zip`` 이 나란히 든 첨부가 흔하다. 열어 봐야
+    같은 로그가 하나 더 나올 뿐이라 닫아 둔다. 안을 보기 전에 아는 단서는
+    이름뿐이므로 같은 폴더, 같은 이름(확장자만 다름)인 것만 그렇게 본다.
+    """
+    folder = os.path.dirname(archive_name)
+    stem = os.path.splitext(os.path.basename(archive_name))[0].lower()
+    for candidate in known_here:
+        member = candidate.route[-1]
+        if os.path.dirname(member) != folder:
+            continue
+        if os.path.splitext(os.path.basename(member))[0].lower() == stem:
+            return True
+    return False
+
+
 def _scan_for_logs(data: bytes, depth: int, route: tuple):
     """한 압축을 훑어 (아는 로그, 그 밖의 후보) 를 모은다."""
     known, maybe = _candidates_here(data, route)
+    # 재압축 판정은 이 층에서 바로 찾은 것끼리만 한다. 아래에서 중첩 압축을
+    # 열면 known 이 불어나므로 미리 떠 둔다.
+    known_here = list(known)
 
     if depth >= NESTED_ARCHIVE_MAX_DEPTH:
         return known, maybe
@@ -524,17 +545,23 @@ def _scan_for_logs(data: bytes, depth: int, route: tuple):
     if companion:
         descend(companion)
 
-    if known:
-        # 이 층에 아는 로그가 있으면 나머지 압축은 열지 않는다. dumpstate.log 와
-        # 그것을 다시 압축한 dumpstate.zip 이 함께 든 첨부가 흔하다.
-        return known, maybe
-
-    rest = [name for name in nested if name not in set(companion)]
+    rest = [
+        name for name in nested
+        if name not in set(companion) and not _repacks_a_known_log(name, known_here)
+    ]
     hinted = [name for name in rest if looks_like_log_archive(os.path.basename(name))]
     plain = [name for name in rest if name not in set(hinted)]
 
+    if known:
+        # 아는 로그를 이미 찾았어도 이름에 로그 힌트가 붙은 압축은 연다. 한 첨부에
+        # 서로 다른 로그가 나란히 드는 경우가 있다 -- MO/MT 폴더마다 log/ap_silentlog
+        # 와 <날짜>_dumpstate.zip 이 함께 들어오면, ap_silentlog 를 찾았다고 멈출 때
+        # 정작 dumpstate 를 고를 수 없다. 같은 로그의 재압축은 위에서 이미 뺐다.
+        descend(hinted)
+        return known, maybe
+
     # GalaxyDiagnostics_Bugreport.zip, SystemLog.zip 처럼 이름에 힌트가 붙은
-    # 것부터 연다. 그래도 아는 로그가 안 나오면 나머지 압축도 열어 본다 —
+    # 것부터 연다. 그래도 아는 로그가 안 나오면 나머지 압축도 열어 본다 --
     # 어차피 빈손인 첨부라 아낄 것이 없다.
     for wave in (hinted, plain):
         descend(wave)
