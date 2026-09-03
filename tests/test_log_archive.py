@@ -332,6 +332,51 @@ def test_the_watch_dump_reads_back_through_its_route():
     assert read_by_route(attachment, watch.route) == b"watch dumpstate body"
 
 
+def test_a_dumpstate_archive_beside_a_silentlog_folder_is_still_opened():
+    """한 첨부에 서로 다른 로그가 나란히 들어온다.
+
+    PLM 첨부는 MO/MT 폴더마다 log/ap_silentlog 와 <날짜>_dumpstate.zip 이 함께
+    들어오는 형태가 있다. ap_silentlog 를 찾았다고 멈추면 정작 dumpstate 를
+    고를 수 없다 -- 둘은 같은 로그의 재압축이 아니라 다른 로그다.
+    """
+    dump = make_zip({"dumpstate.txt": b"dumpstate body"})
+    attachment = make_zip({
+        "MO/log/ap_silentlog/SILENT_LOG_1.log": b"mo silent",
+        "MO/2026-08-27-19-39-21_dumpstate.zip": dump,
+        "MT/log/ap_silentlog/SILENT_LOG_1.log": b"mt silent",
+        "MT/2026-08-27-19-39-21_dumpstate.zip": dump,
+    })
+
+    paths = [c.path for c in find_log_candidates(attachment)]
+
+    assert "MO/2026-08-27-19-39-21_dumpstate.zip/dumpstate.txt" in paths
+    assert "MT/2026-08-27-19-39-21_dumpstate.zip/dumpstate.txt" in paths
+    # ap_silentlog 쪽도 그대로 남아 있어야 한다.
+    assert "MO/log/ap_silentlog/SILENT_LOG_1.log" in paths
+
+
+def test_that_dumpstate_reads_back_through_its_route():
+    dump = make_zip({"dumpstate.txt": b"dumpstate body"})
+    attachment = make_zip({
+        "MO/log/ap_silentlog/SILENT_LOG_1.log": b"mo silent",
+        "MO/2026-08-27-19-39-21_dumpstate.zip": dump,
+    })
+
+    route = ("MO/2026-08-27-19-39-21_dumpstate.zip", "dumpstate.txt")
+
+    assert read_by_route(attachment, route) == b"dumpstate body"
+
+
+def test_an_unhinted_archive_stays_shut_once_a_log_is_found():
+    """이름에 로그 단서가 없는 압축까지 열면 첨부마다 값이 커진다."""
+    attachment = make_zip({
+        "dumpstate.log": b"plain file",
+        "screenshots.zip": make_zip({"dumpstate.log": b"never opened"}),
+    })
+
+    assert [c.path for c in find_log_candidates(attachment)] == ["dumpstate.log"]
+
+
 def test_a_repack_of_the_log_beside_it_is_still_left_shut():
     """워치 예외가 재압축 중복 방지까지 풀어 버리면 안 된다."""
     attachment = make_zip({
