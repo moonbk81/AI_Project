@@ -195,3 +195,124 @@ def test_the_wtf_that_names_a_proxy_leak_is_not_a_plain_wtf():
     assert [event["type"] for event in events] == ["BINDER_PROXY_LIMIT", "SYSTEM_WTF"]
     assert events[0]["process"] == "android.uid.phone:1001"
     assert events[0]["rca_candidate"] is True
+
+
+# ------------------------------------------------------------- 프로세스 사망
+
+# 한 번의 죽음이 네 군데에 나눠 적힌다. 실제 dumpstate 에서 가져온 순서 그대로.
+DEATH_LINES = [
+    "08-27 19:39:21.205  root  1085  1085 I Zygote  : Process 10647 exited due to signal 6 (Aborted); core dumped",
+    "08-27 19:39:21.213  1000  1350  2059 I ActivityManager: Process com.android.phone (pid 10647) has died: pers PER (535,3264)",
+    "08-27 19:39:21.216  1000  1350  2059 I Watchdog: Interesting Java process com.android.phone died. Pid 10647",
+    "08-27 19:39:21.154  1000   652   652 I servicemanager: 'telephony_phone_number' died",
+    "08-27 19:39:21.160  1000   652   652 I servicemanager: 'phone' died",
+    "08-27 19:39:21.215  1000  1350  2059 W ActivityManager: Scheduling restart of crashed service com.android.phone/com.android.services.telephony.TelephonyConnectionService in 0ms for persistent",
+]
+
+
+def _deaths(lines):
+    return [w for w in BinderWarningParser().analyze(lines) if w["type"] == "PROCESS_DIED"]
+
+
+def test_four_scattered_lines_become_one_death():
+    """죽음은 Zygote·ActivityManager·Watchdog·servicemanager 에 나눠 적힌다."""
+    deaths = _deaths(DEATH_LINES)
+
+    assert len(deaths) == 1
+    death = deaths[0]
+    assert death["process"] == "com.android.phone"
+    assert death["pid"] == "10647"
+    assert death["signal"] == "6 (Aborted)"
+    assert death["core_dumped"] is True
+    assert death["persistent"] is True
+    assert death["rca_candidate"] is True
+
+
+def test_the_death_carries_what_went_down_with_it():
+    death = _deaths(DEATH_LINES)[0]
+
+    assert death["lost_services"] == ["phone", "telephony_phone_number"]
+    assert death["restarted_services"] == [
+        "com.android.phone/com.android.services.telephony.TelephonyConnectionService"
+    ]
+
+
+def test_the_death_points_at_the_tombstone_not_at_itself():
+    """시그널로 죽었으면 사인은 tombstone 에 있다. 여기서 단정하면 안 된다."""
+    desc = _deaths(DEATH_LINES)[0]["desc"]
+
+    assert "tombstone" in desc
+    assert "결과이지 원인이 아닙니다" in desc
+
+
+def test_a_service_death_far_from_the_process_death_is_not_attributed():
+    """servicemanager 줄에는 pid 가 없어 시간으로만 이을 수 있다. 창을 넘으면 남의 것이다."""
+    lines = DEATH_LINES + [
+        "08-27 19:45:00.000  1000   652   652 I servicemanager: 'unrelated_service' died",
+    ]
+
+    assert "unrelated_service" not in _deaths(lines)[0]["lost_services"]
+
+
+def test_a_restart_for_another_package_is_not_attributed():
+    """재시작 줄에는 패키지가 적혀 있어 시간이 아니라 이름으로 잇는다."""
+    lines = DEATH_LINES + [
+        "08-27 19:39:21.215  1000  1350  2059 W ActivityManager: Scheduling restart of crashed service com.samsung.sec.android.application.csc/.service.CscUpdateService in 10000ms for start-requested",
+    ]
+
+    restarted = _deaths(lines)[0]["restarted_services"]
+
+    assert all(component.startswith("com.android.phone/") for component in restarted)
+
+
+def test_two_processes_dying_stay_two_events():
+    lines = DEATH_LINES + [
+        "08-27 19:39:22.000  root  1085  1085 I Zygote  : Process 20001 exited due to signal 9 (Killed)",
+        "08-27 19:39:22.010  1000  1350  2059 I ActivityManager: Process com.example.other (pid 20001) has died: cch CRE",
+    ]
+
+    deaths = _deaths(lines)
+
+    assert {d["process"] for d in deaths} == {"com.android.phone", "com.example.other"}
+    other = next(d for d in deaths if d["process"] == "com.example.other")
+    assert other["persistent"] is False
+
+
+def test_binder_failures_around_the_death_stay_secondary():
+    """죽음이 원인 후보로 올라와도 그 결과들은 여전히 후속 증상이어야 한다."""
+    lines = DEATH_LINES + [
+        "08-27 19:39:21.202  1000  1350  1976 E libbinder.IPCThreadState: Binder transaction failure. id: 258690560, cmd: BR_DEAD_REPLY (29189), error: -3 (No such process)",
+        "08-27 19:39:21.141  1000  1976  1976 I binder_alloc: 10647: binder_alloc_buf, no vma",
+    ]
+
+    warnings = BinderWarningParser().analyze(lines)
+    fallout = [w for w in warnings if w["type"] != "PROCESS_DIED"]
+
+    assert fallout
+    assert all(w["evidence_role"] == "secondary_symptom" for w in fallout)
+    assert not any(w["type"] == "BINDER_PROXY_LIMIT" for w in warnings)
+
+
+def test_a_service_goes_to_the_nearest_death_not_to_every_one():
+    """잇따라 죽으면 시간 창이 겹친다.
+
+    창 안의 모든 죽음에 다 붙이면, 0.4초 뒤 죽은 남의 프로세스가 radio HAL
+    스무 개를 똑같이 가져간다. 실제 dumpstate 에서 그렇게 나왔다.
+    """
+    lines = [
+        "08-27 19:39:21.154  1000   652   652 I servicemanager: 'phone' died",
+        "08-27 19:39:21.205  root  1085  1085 I Zygote  : Process 10647 exited due to signal 6 (Aborted)",
+        "08-27 19:39:21.213  1000  1350  2059 I ActivityManager: Process com.android.phone (pid 10647) has died: pers PER",
+        "08-27 19:39:21.560  1000   652   652 I servicemanager: 'usim_manager' died",
+        "08-27 19:39:21.565  root  1085  1085 I Zygote  : Process 22161 exited due to signal 9 (Killed)",
+        "08-27 19:39:21.570  1000  1350  2059 I ActivityManager: Process com.kt.usim (pid 22161) has died: cch CRE",
+    ]
+
+    by_process = {d["process"]: d["lost_services"] for d in _deaths(lines)}
+
+    assert by_process["com.android.phone"] == ["phone"]
+    assert by_process["com.kt.usim"] == ["usim_manager"]
+
+
+def test_no_death_lines_yield_no_death_events():
+    assert _deaths(["08-27 19:39:21.202 D ActivityManager: nothing here"]) == []

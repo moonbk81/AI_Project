@@ -345,6 +345,11 @@ function systemEventsCard(series, panel) {
   const blocks = [];
   const push = (title, node) => blocks.push(el("h3", "sub-head", title), node);
 
+  // 죽음을 먼저 보여 준다. 아래 binder 실패들이 대부분 이것의 결과다.
+  if (series.process_deaths.length) {
+    push(`프로세스 종료 ${series.process_deaths.length}건 — 아래 Binder 실패의 원인`,
+         frameTable(series.process_deaths));
+  }
   if (series.system_kills.length) {
     push(`시스템 강제 종료(am_kill) ${series.system_kills.length}건`, frameTable(series.system_kills));
   }
@@ -368,7 +373,7 @@ function systemEventsCard(series, panel) {
   }
 
   if (!blocks.length) {
-    panel.note("표시할 시스템 강제 종료, am_wtf, Binder oneway spam 이벤트가 없습니다.");
+    panel.note("표시할 프로세스 종료, 시스템 강제 종료, am_wtf, Binder oneway spam 이벤트가 없습니다.");
     return;
   }
   const wrap = el("div", "stack");
@@ -566,9 +571,9 @@ const CARDS = [
   },
   {
     chart: "crash",
-    title: "시스템 강제 종료·이상 징후",
-    sub: "am_kill · am_wtf · Binder oneway spam",
-    prompt: "am_kill, am_wtf, Binder oneway spam 이벤트를 연결해 시스템 강제 종료나 이상 징후의 원인 후보를 정리해줘.",
+    title: "프로세스 종료·시스템 이상 징후",
+    sub: "프로세스 사망 · am_kill · am_wtf · Binder oneway spam",
+    prompt: "죽은 프로세스와 그 시각의 tombstone, 그리고 함께 내려간 바인더 서비스를 이어서 무엇이 원인이고 무엇이 결과인지 정리해줘. am_kill/am_wtf/Binder oneway spam 도 함께 봐줘.",
     render: systemEventsCard,
   },
   {

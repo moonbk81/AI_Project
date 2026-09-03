@@ -89,6 +89,11 @@ class AnalysisBucketBuilder:
         # am_kill 보다 먼저 뜨는데, 여기 없어서 파서까지 닿지 못했다.
         "binder proxy objects", "proxies held",
         "am_kill", "am_wtf",
+        # 프로세스가 죽으면 그와 통신하던 쪽에서 binder 실패가 쏟아진다. 죽음 자체가
+        # 여기 없으면 파서가 결과만 보고 원인을 못 짚는다. 한 번의 죽음이 네 군데에
+        # 나눠 적히므로 넷 다 받는다.
+        "exited due to signal", "has died", "Interesting Java process",
+        "servicemanager", "Scheduling restart of crashed service",
     ]
     BINDER_CONTEXT_KEYWORDS = [
         "ANR", "am_anr", "Application Not Responding", "Input dispatching timed out",
