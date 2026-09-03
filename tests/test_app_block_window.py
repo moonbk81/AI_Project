@@ -52,6 +52,19 @@ def test_freeze_sequence_builds_one_block_window():
     assert round(win["duration_sec"]) == 63
 
 
+def test_block_window_duration_uses_real_month_lengths():
+    """9/30 -> 10/1 must be one second, not a fake 31-day-month day later."""
+    lines = [
+        "pkg,com.calendar.edge,10297",
+        "09-30 23:59:59.500  1000  2761  6294 D ConnectivityService: Returning BLOCKED NetworkInfo to uid=10297",
+        "10-01 00:00:00.500  1000  2761  4789 D ConnectivityService: Returning UNBLOCKED NetworkInfo to uid=10297",
+    ]
+
+    win = analyze(lines)["app_block_windows"][0]
+
+    assert win["duration_sec"] == 1.0
+
+
 def test_frz_line_supplies_package_name_without_pkg_list():
     """pkg CSV 목록이 없어도 [FRZ] 라인만으로 App_UID_ 대신 실제 앱 이름이 나온다."""
     issues = analyze(FREEZE_SEQUENCE + [BLOCKED_DNS_LINE])["dns_issues"]

@@ -6,6 +6,7 @@ from core.charts import (
     build_binder_events,
     build_binder_proxy_histograms,
     build_crash_overview,
+    build_process_deaths,
     build_system_kills,
     build_system_wtf_summary,
     normalize_anr_list,
@@ -57,6 +58,43 @@ def test_wtf_events_are_grouped_per_process_with_a_first_and_last_time():
 def test_no_wtf_events():
     assert build_system_wtf_summary([]).total == 0
     assert build_system_wtf_summary([_warning("BINDER_DELAY")]).total == 0
+
+
+def test_process_death_table_points_to_the_matching_native_crash():
+    deaths = build_process_deaths(
+        [
+            _warning(
+                "PROCESS_DIED",
+                time="08-27 19:39:21.213",
+                process="com.android.phone",
+                pid="10647",
+                signal="6 (Aborted)",
+                lost_services=["phone"],
+            )
+        ],
+        [
+            {
+                "time": "08-27 19:39:20.735",
+                "process": "com.android.phone",
+                "pid": "10647",
+                "signal": "SIGABRT",
+                "abort_message": "Scudo ERROR: corrupted chunk header",
+            }
+        ],
+    )
+
+    row = deaths.iloc[0].to_dict()
+    assert row["관련 Native Crash"] == "Scudo ERROR: corrupted chunk header"
+    assert row["판단"] == "Native Crash 확인 — abort message가 직접 원인 단서"
+
+
+def test_process_death_native_match_accepts_full_report_datetimes():
+    deaths = build_process_deaths(
+        [_warning("PROCESS_DIED", time="08-27 19:39:21.213", process="com.android.phone", pid="10647", signal="6")],
+        [{"time": "2026-08-27 19:39:20.735", "process": "com.android.phone", "pid": "10647"}],
+    )
+
+    assert deaths.iloc[0]["관련 Native Crash"] == "Native Crash 확인"
 
 
 # --------------------------------------------------------------- binder events
@@ -433,6 +471,42 @@ def test_native_crash_event_includes_rule_based_triage():
     assert triage["signals"][0]["strength"] == "강함"
     assert triage["signals"][1]["strength"] == "근거 약함"
     assert "libsec-ril.so" in triage["next_check"]
+
+
+def test_process_death_and_native_crash_stay_linked_in_the_overview():
+    overview = build_crash_overview(
+        {
+            "binder_warnings": [
+                _warning(
+                    "PROCESS_DIED",
+                    time="08-27 19:39:21.213",
+                    process="com.android.phone",
+                    pid="10647",
+                    signal="6 (Aborted)",
+                    lost_services=["phone"],
+                )
+            ],
+            "native_crash_context": [
+                {
+                    "time": "08-27 19:39:20.735",
+                    "process": "com.android.phone",
+                    "pid": "10647",
+                    "signal": "SIGABRT",
+                    "abort_message": "Scudo ERROR: corrupted chunk header",
+                    "callstack": [
+                        {
+                            "frame_level": "00",
+                            "library": "libc.so",
+                            "function": "abort",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert overview.process_deaths.iloc[0]["관련 Native Crash"].startswith("Scudo ERROR")
+    assert overview.native_crashes[0].abort_message.startswith("Scudo ERROR")
 
 
 def test_a_session_with_nothing_wrong():

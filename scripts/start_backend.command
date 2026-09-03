@@ -29,4 +29,4 @@ conda activate "${CONDA_ENV}"
 echo "[AI_Project] Starting FastAPI backend on ${BACKEND_HOST}:${BACKEND_PORT}"
 echo "[AI_Project] Browser UI: ${UI_URL}"
 
-ADMIN_KNOX_IDS=bongki.moon python -m uvicorn backend.main:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}"
+ADMIN_KNOX_IDS="${ADMIN_KNOX_IDS:-bongki.moon}" python -m uvicorn backend.main:app --host "${BACKEND_HOST}" --port "${BACKEND_PORT}"

@@ -44,7 +44,7 @@ ANR_CONTEXT_LINES = 80
 _KILL_COLUMNS = ["발생 시간", "대상 프로세스", "종료 사유", "원본 로그"]
 _DEATH_COLUMNS = [
     "발생 시간", "죽은 프로세스", "PID", "시그널",
-    "함께 내려간 서비스", "재시작 예약", "판단",
+    "관련 Native Crash", "함께 내려간 서비스", "재시작 예약", "판단",
 ]
 _WTF_SUMMARY_COLUMNS = ["대상 프로세스", "발생 횟수", "최초 발생", "최근 발생"]
 _WTF_RECENT_COLUMNS = ["발생 시간", "대상 프로세스", "원본 로그"]
@@ -92,33 +92,83 @@ def build_system_kills(binder_warnings: Any) -> pd.DataFrame:
     )
 
 
-def build_process_deaths(binder_warnings: Any) -> pd.DataFrame:
+def _chart_time_seconds(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}\s", text):
+        text = f"2000-{text[5:]}"
+    elif len(text) > 5 and text[2] == "-" and text.count("-") == 1:
+        text = f"2000-{text}"
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    start = pd.Timestamp("2000-01-01")
+    return float((parsed - start).total_seconds())
+
+
+def _matching_native_crash(death: Dict[str, Any], native_crashes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    death_time = _chart_time_seconds(death.get("time"))
+    death_pid = str(death.get("pid") or "")
+    death_process = str(death.get("process") or "")
+
+    candidates = []
+    for crash in native_crashes:
+        same_pid = death_pid and str(crash.get("pid") or "") == death_pid
+        same_process = death_process and str(crash.get("process") or "") == death_process
+        if not same_pid and not same_process:
+            continue
+
+        crash_time = _chart_time_seconds(crash.get("timestamp", crash.get("time")))
+        gap = abs(crash_time - death_time) if crash_time is not None and death_time is not None else 0.0
+        if gap <= 5.0:
+            candidates.append((0 if same_pid else 1, gap, crash))
+
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def build_process_deaths(binder_warnings: Any, native_crashes: Any = None) -> pd.DataFrame:
     """죽은 프로세스와 그 죽음이 끌고 내려간 것들.
 
     이 표가 없으면 화면에는 그 프로세스와 통신하던 쪽의 binder 실패만 남아,
     "후속 증상만 있고 원인은 모름" 으로 읽힌다.
     """
     deaths = [w for w in _dicts(binder_warnings) if w.get("type") == "PROCESS_DIED"]
+    native_crashes = list(_dicts(native_crashes or []))
     return pd.DataFrame(
         [
-            {
-                "발생 시간": death.get("time", _UNKNOWN),
-                "죽은 프로세스": death.get("process", _UNKNOWN),
-                "PID": death.get("pid", ""),
-                "시그널": death.get("signal", "") or "기록 없음",
-                "함께 내려간 서비스": ", ".join(death.get("lost_services") or []) or "없음",
-                "재시작 예약": len(death.get("restarted_services") or []),
-                # 시그널로 죽었으면 사인은 tombstone 에 있다. 여기서 단정하지 않는다.
-                "판단": (
-                    "시그널 종료 — 같은 시각 tombstone(Native Crash) 확인"
-                    if death.get("signal")
-                    else "종료 사유 미기록"
-                ),
-            }
+            _process_death_row(death, _matching_native_crash(death, native_crashes))
             for death in deaths
         ],
         columns=_DEATH_COLUMNS,
     )
+
+
+def _process_death_row(death: Dict[str, Any], native_crash: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    abort_message = (native_crash or {}).get("abort_message") or ""
+    related = "없음"
+    if native_crash:
+        related = abort_message if abort_message and abort_message != "none" else "Native Crash 확인"
+
+    if native_crash and abort_message and abort_message != "none":
+        judgement = "Native Crash 확인 — abort message가 직접 원인 단서"
+    elif native_crash:
+        judgement = "Native Crash 확인 — tombstone backtrace 확인"
+    elif death.get("signal"):
+        judgement = "시그널 종료 — 같은 시각 tombstone(Native Crash) 확인 필요"
+    else:
+        judgement = "종료 사유 미기록"
+
+    return {
+        "발생 시간": death.get("time", _UNKNOWN),
+        "죽은 프로세스": death.get("process", _UNKNOWN),
+        "PID": death.get("pid", ""),
+        "시그널": death.get("signal", "") or "기록 없음",
+        "관련 Native Crash": related,
+        "함께 내려간 서비스": ", ".join(death.get("lost_services") or []) or "없음",
+        "재시작 예약": len(death.get("restarted_services") or []),
+        "판단": judgement,
+    }
 
 
 def build_system_wtf_summary(binder_warnings: Any) -> SystemWtfSummary:
@@ -861,7 +911,7 @@ def build_crash_overview(report_data: Optional[Dict[str, Any]]) -> CrashOverview
     return CrashOverview(
         status="ok",
         system_kills=build_system_kills(binder_warnings),
-        process_deaths=build_process_deaths(binder_warnings),
+        process_deaths=build_process_deaths(binder_warnings, native_crashes),
         system_wtf=build_system_wtf_summary(binder_warnings),
         binder=build_binder_events(report_data),
         native_crashes=[_native_crash(crash) for crash in _dicts(native_crashes)],

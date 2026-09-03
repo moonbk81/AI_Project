@@ -1,3 +1,4 @@
+import datetime
 import re
 from collections import defaultdict
 from parsers.base import BaseParser
@@ -469,12 +470,17 @@ class NetworkTimeSeriesAnalyzer(BaseParser):
         return pkg_to_uid.get(best_pkg) if best_pkg else None
 
     def _ts_seconds(self, ts):
-        """'MM-DD HH:MM:SS.mmm' → 초. 구간 길이 계산 전용이라 월 길이는 근사한다."""
+        """'MM-DD HH:MM:SS.mmm' -> 초. 구간 길이 계산 전용."""
         m = self.re_ts_parts.match(ts or '')
         if not m:
             return None
         month, day, hour, minute, sec, ms = (int(v) for v in m.groups())
-        return ((month * 31 + day) * 24 + hour) * 3600 + minute * 60 + sec + ms / 1000.0
+        try:
+            dt = datetime.datetime(2000, month, day, hour, minute, sec, ms * 1000)
+        except ValueError:
+            return None
+        start = datetime.datetime(2000, 1, 1)
+        return (dt - start).total_seconds()
 
     def _finalize_block_window(self, win):
         start = self._ts_seconds(win["blocked_at"])
