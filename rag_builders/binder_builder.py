@@ -2,6 +2,7 @@ import json
 import re
 
 from rag_builders.common import append_payload, source_file_name
+from core.charts.crash import SYSTEM_EVENT_TYPES
 
 BINDER_LEAK_TYPES = (
     "BINDER_PROXY_HISTOGRAM",
@@ -255,10 +256,10 @@ def build_binder_payloads(report_data, input_file):
         if isinstance(bw, dict) and bw.get("type") not in BINDER_LEAK_TYPES
     ]
 
-    # 2. 시스템 강제 종료 계열 (Kill / WTF)
+    # 2. 시스템 강제 종료 계열 (Kill / WTF / 프로세스 사망)
     system_kill_wtf_events = [
         bw for bw in remaining_warnings
-        if bw.get("type") in ("SYSTEM_KILL", "SYSTEM_WTF")
+        if bw.get("type") in SYSTEM_EVENT_TYPES
     ]
 
     # 3. 💡 핵심 단서 우선 처리 (Oneway Spam, Buffer Error 등)
@@ -267,7 +268,7 @@ def build_binder_payloads(report_data, input_file):
     # 4. 짜잘한 일반 지연 이벤트들 (최종 10개 제한용)
     normal_warnings = [
         bw for bw in remaining_warnings
-        if bw.get("type") not in ("SYSTEM_KILL", "SYSTEM_WTF") and not is_critical_binder_event(bw)
+        if bw.get("type") not in SYSTEM_EVENT_TYPES and not is_critical_binder_event(bw)
     ]
 
     # --- Payload 조립 시작 ---
@@ -287,6 +288,11 @@ def build_binder_payloads(report_data, input_file):
             "kill_reason": bw.get("kill_reason", ""),
             "desc": bw.get("desc", ""),
             "raw_info": raw_info,
+            # 사망 사건만 갖는 값들. 없는 유형에서는 빈 값으로 빠진다.
+            "pid": bw.get("pid", ""),
+            "signal": bw.get("signal", ""),
+            "lost_services": ", ".join(bw.get("lost_services") or []),
+            "restarted_services": ", ".join(bw.get("restarted_services") or []),
             "evidence_role": bw.get("evidence_role") or (
                 "rca_candidate" if is_too_many_binders_kill else "event"
             ),

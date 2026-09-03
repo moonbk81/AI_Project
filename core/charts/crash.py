@@ -16,7 +16,8 @@ import pandas as pd
 
 # System-level events travel in `binder_warnings` but describe process deaths,
 # so the crash list must not show them twice.
-SYSTEM_EVENT_TYPES = ("SYSTEM_KILL", "SYSTEM_WTF")
+# 앱 크래시 목록에 섞이면 안 되는 시스템 사건들. 각자 자기 섹션이 있다.
+SYSTEM_EVENT_TYPES = ("SYSTEM_KILL", "SYSTEM_WTF", "PROCESS_DIED")
 
 # Binder findings worth tabulating; anything else in `binder_warnings` is a
 # system event or a proxy histogram handled elsewhere.
@@ -41,6 +42,10 @@ PRE_ANR_LOGCAT_LINES = 120
 ANR_CONTEXT_LINES = 80
 
 _KILL_COLUMNS = ["발생 시간", "대상 프로세스", "종료 사유", "원본 로그"]
+_DEATH_COLUMNS = [
+    "발생 시간", "죽은 프로세스", "PID", "시그널",
+    "함께 내려간 서비스", "재시작 예약", "판단",
+]
 _WTF_SUMMARY_COLUMNS = ["대상 프로세스", "발생 횟수", "최초 발생", "최근 발생"]
 _WTF_RECENT_COLUMNS = ["발생 시간", "대상 프로세스", "원본 로그"]
 _BINDER_EVENT_COLUMNS = ["time", "type", "desc"]
@@ -84,6 +89,35 @@ def build_system_kills(binder_warnings: Any) -> pd.DataFrame:
             for kill in kills
         ],
         columns=_KILL_COLUMNS,
+    )
+
+
+def build_process_deaths(binder_warnings: Any) -> pd.DataFrame:
+    """죽은 프로세스와 그 죽음이 끌고 내려간 것들.
+
+    이 표가 없으면 화면에는 그 프로세스와 통신하던 쪽의 binder 실패만 남아,
+    "후속 증상만 있고 원인은 모름" 으로 읽힌다.
+    """
+    deaths = [w for w in _dicts(binder_warnings) if w.get("type") == "PROCESS_DIED"]
+    return pd.DataFrame(
+        [
+            {
+                "발생 시간": death.get("time", _UNKNOWN),
+                "죽은 프로세스": death.get("process", _UNKNOWN),
+                "PID": death.get("pid", ""),
+                "시그널": death.get("signal", "") or "기록 없음",
+                "함께 내려간 서비스": ", ".join(death.get("lost_services") or []) or "없음",
+                "재시작 예약": len(death.get("restarted_services") or []),
+                # 시그널로 죽었으면 사인은 tombstone 에 있다. 여기서 단정하지 않는다.
+                "판단": (
+                    "시그널 종료 — 같은 시각 tombstone(Native Crash) 확인"
+                    if death.get("signal")
+                    else "종료 사유 미기록"
+                ),
+            }
+            for death in deaths
+        ],
+        columns=_DEATH_COLUMNS,
     )
 
 
@@ -805,6 +839,7 @@ class CrashOverview:
 
     status: str
     system_kills: pd.DataFrame = field(default_factory=pd.DataFrame)
+    process_deaths: pd.DataFrame = field(default_factory=pd.DataFrame)
     system_wtf: SystemWtfSummary = field(default_factory=lambda: SystemWtfSummary(total=0))
     binder: BinderEvents = field(default_factory=lambda: BinderEvents(status="none"))
     native_crashes: List[NativeCrash] = field(default_factory=list)
@@ -826,6 +861,7 @@ def build_crash_overview(report_data: Optional[Dict[str, Any]]) -> CrashOverview
     return CrashOverview(
         status="ok",
         system_kills=build_system_kills(binder_warnings),
+        process_deaths=build_process_deaths(binder_warnings),
         system_wtf=build_system_wtf_summary(binder_warnings),
         binder=build_binder_events(report_data),
         native_crashes=[_native_crash(crash) for crash in _dicts(native_crashes)],

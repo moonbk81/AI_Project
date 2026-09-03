@@ -1094,6 +1094,7 @@ class BinderWarningParser(BaseParser):
         "SYSTEM_WTF",
         "BINDER_ONEWAY_SPAM", # 💡 신규 이벤트 타입 추가
         "BINDER_PROXY_LIMIT",
+        "PROCESS_DIED",
     }
     STARVATION_RCA_THRESHOLD_MS = 1000
     REPEATED_DELAY_WINDOW_SECONDS = 60
@@ -1130,6 +1131,30 @@ class BinderWarningParser(BaseParser):
         "watchdog",
         "depends on",
     )
+
+    # 프로세스가 죽으면 그 프로세스와 말하던 쪽에서 binder 실패가 쏟아진다. 실패
+    # 쪽만 읽으면 "후속 증상만 있고 원인은 모름" 으로 끝나므로, 죽음 자체를 사건으로
+    # 남긴다. 한 번의 죽음이 네 군데에 각각 다르게 적히고, 모아야 뜻이 된다.
+    #   Zygote          : 시그널과 core dump 여부
+    #   ActivityManager : 패키지 이름과 pid, persistent 여부
+    #   Watchdog        : 지켜보던 프로세스였다는 사실
+    #   servicemanager  : 함께 내려간 바인더 서비스 (영향 범위)
+    RE_ZYGOTE_EXIT = re.compile(
+        r'Process\s+(?P<pid>\d+)\s+exited due to signal\s+(?P<signal>\d+)\s*(?:\((?P<name>[^)]*)\))?'
+        r'(?P<core>;\s*core dumped)?', re.IGNORECASE)
+    RE_AM_DIED = re.compile(
+        r'Process\s+(?P<process>\S+)\s+\(pid\s+(?P<pid>\d+)\)\s+has died:?\s*(?P<detail>.*)',
+        re.IGNORECASE)
+    RE_WATCHDOG_DIED = re.compile(
+        r'Interesting Java process\s+(?P<process>\S+)\s+died\.\s*Pid\s+(?P<pid>\d+)', re.IGNORECASE)
+    RE_SERVICE_DIED = re.compile(r"servicemanager:\s*'(?P<service>[^']+)'\s+died", re.IGNORECASE)
+    RE_SERVICE_RESTART = re.compile(
+        r'Scheduling restart of crashed service\s+(?P<component>\S+)', re.IGNORECASE)
+
+    # servicemanager 줄에는 pid 도 패키지도 없다. 시간으로만 죽음과 이을 수 있어
+    # 창을 좁게 잡는다 -- 실제 로그에서 서비스 등록 해제는 죽음과 같은 초에 몰린다.
+    SERVICE_DEATH_WINDOW_SECONDS = 5.0
+    MAX_LISTED_SERVICES = 20
 
     def _extract_time(self, line_str):
         ts_m = re.search(r'\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.\d{3}', line_str)
@@ -1226,10 +1251,16 @@ class BinderWarningParser(BaseParser):
         histogram_time = ""
         histogram_line_count = 0
 
+        deaths = {}          # pid -> 모아 둔 사망 신호
+        service_deaths = []  # (초, 서비스명, 원본) — pid 가 없어 시간으로만 잇는다
+        service_restarts = []
+
         for line in lines:
             line_str = line.strip()
             if not line_str or line_str in seen_raw:
                 continue
+
+            self._collect_death_signals(line_str, deaths, service_deaths, service_restarts)
             seen_raw.add(line_str)
             lower = line_str.lower()
             event_time = self._extract_time(line_str)
@@ -1517,8 +1548,144 @@ class BinderWarningParser(BaseParser):
                     "rca_candidate": False
                 })
 
+        warnings.extend(self._build_process_death_events(deaths, service_deaths, service_restarts))
+
         self._promote_corroborated_buffer_errors(warnings, anr_seconds)
         return warnings
+
+    def _collect_death_signals(self, line_str, deaths, service_deaths, service_restarts):
+        """한 줄에서 프로세스 사망 관련 신호를 뽑아 pid 별로 모은다."""
+        event_time = self._extract_time(line_str)
+
+        if "exited due to signal" in line_str:
+            match = self.RE_ZYGOTE_EXIT.search(line_str)
+            if match:
+                record = deaths.setdefault(match.group("pid"), {})
+                record.setdefault("time", event_time)
+                record.setdefault("raw", line_str)
+                signal_name = match.group("name")
+                record["signal"] = (
+                    f"{match.group('signal')} ({signal_name})" if signal_name else match.group("signal")
+                )
+                record["core_dumped"] = bool(match.group("core"))
+                return
+
+        if "has died" in line_str:
+            match = self.RE_AM_DIED.search(line_str)
+            if match:
+                record = deaths.setdefault(match.group("pid"), {})
+                record.setdefault("time", event_time)
+                record.setdefault("raw", line_str)
+                record["process"] = match.group("process")
+                detail = (match.group("detail") or "").strip()
+                if detail:
+                    record["detail"] = detail
+                    # `pers PER` 는 죽어도 곧바로 되살아나는 persistent 프로세스라는 뜻이다.
+                    if "pers" in detail.lower():
+                        record["persistent"] = True
+                return
+
+        if "Interesting Java process" in line_str:
+            match = self.RE_WATCHDOG_DIED.search(line_str)
+            if match:
+                record = deaths.setdefault(match.group("pid"), {})
+                record.setdefault("time", event_time)
+                record.setdefault("raw", line_str)
+                record.setdefault("process", match.group("process"))
+                record["watchdog_noticed"] = True
+                return
+
+        if "servicemanager" in line_str and "died" in line_str:
+            match = self.RE_SERVICE_DIED.search(line_str)
+            if match:
+                service_deaths.append((self._time_to_sec(event_time), match.group("service")))
+                return
+
+        if "Scheduling restart of crashed service" in line_str:
+            match = self.RE_SERVICE_RESTART.search(line_str)
+            if match:
+                service_restarts.append(match.group("component"))
+
+    def _build_process_death_events(self, deaths, service_deaths, service_restarts):
+        """모아 둔 신호를 pid 하나에 사건 하나로 만든다."""
+        # 서비스 등록 해제 줄에는 pid 도 패키지도 없어 시간으로만 이을 수 있다.
+        # 여러 프로세스가 잇따라 죽으면 창이 겹치므로, 각 서비스를 가장 가까운
+        # 죽음 하나에만 준다. 안 그러면 0.4초 뒤에 죽은 남의 프로세스가 radio HAL
+        # 스무 개를 똑같이 가져간다.
+        claimed_services = self._claim_services_by_nearest_death(deaths, service_deaths)
+
+        events = []
+        for pid, record in deaths.items():
+            process = record.get("process") or f"pid {pid}"
+            death_seconds = self._time_to_sec(record.get("time", ""))
+
+            lost = sorted(claimed_services.get(pid, set()))
+
+            # 재시작 줄에는 패키지가 적혀 있어 시간이 아니라 이름으로 정확히 잇는다.
+            restarted = sorted({
+                component for component in service_restarts
+                if component.split("/")[0] == process
+            })
+
+            events.append({
+                "time": record.get("time", ""),
+                "type": "PROCESS_DIED",
+                "process": process,
+                "pid": pid,
+                "signal": record.get("signal", ""),
+                "core_dumped": record.get("core_dumped", False),
+                "persistent": record.get("persistent", False),
+                "lost_services": lost[: self.MAX_LISTED_SERVICES],
+                "restarted_services": restarted[: self.MAX_LISTED_SERVICES],
+                "desc": self._describe_process_death(process, pid, record, lost, restarted),
+                "raw": record.get("raw", ""),
+                "evidence_role": "rca_candidate",
+                "rca_candidate": True,
+            })
+        return events
+
+    def _claim_services_by_nearest_death(self, deaths, service_deaths):
+        """서비스 등록 해제를 시간상 가장 가까운 프로세스 사망에 하나씩 배정한다."""
+        anchors = [
+            (seconds, pid) for pid, record in deaths.items()
+            if (seconds := self._time_to_sec(record.get("time", ""))) is not None
+        ]
+        claimed = {}
+        if not anchors:
+            return claimed
+
+        for seconds, name in service_deaths:
+            if seconds is None:
+                continue
+            gap, pid = min((abs(seconds - at), pid) for at, pid in anchors)
+            if gap <= self.SERVICE_DEATH_WINDOW_SECONDS:
+                claimed.setdefault(pid, set()).add(name)
+        return claimed
+
+    def _describe_process_death(self, process, pid, record, lost, restarted):
+        parts = [f"{process}(pid {pid}) 프로세스가 종료되었습니다"]
+        if record.get("signal"):
+            core = ", core dump 생성" if record.get("core_dumped") else ""
+            parts[0] += f" (signal {record['signal']}{core})"
+
+        if record.get("signal"):
+            parts.append(
+                "시그널로 죽은 것이므로 같은 시각의 tombstone(Native Crash)에서 abort 사유와 "
+                "백트레이스를 확인해야 진짜 원인이 나옵니다"
+            )
+        if record.get("persistent"):
+            parts.append("persistent 프로세스라 곧바로 재시작되지만, 그 사이 해당 기능은 끊깁니다")
+        if lost:
+            shown = ", ".join(lost[:8])
+            more = f" 외 {len(lost) - 8}개" if len(lost) > 8 else ""
+            parts.append(f"같은 시각대에 내려간 바인더 서비스: {shown}{more} (시간으로 연결한 추정)")
+        if restarted:
+            parts.append(f"재시작 예약된 서비스 {len(restarted)}개")
+        parts.append(
+            "이 프로세스와 통신하던 쪽의 binder 실패(BR_DEAD_REPLY, DeadObjectException, "
+            "no vma)는 이 종료의 결과이지 원인이 아닙니다"
+        )
+        return ". ".join(parts) + "."
 
     def _promote_corroborated_buffer_errors(self, warnings, anr_seconds):
         """TransactionTooLarge 는 같은 구간에 실제 킬/ANR/starvation 이 있을 때만 원인 후보다."""

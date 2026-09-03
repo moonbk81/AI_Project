@@ -383,7 +383,10 @@ log_guidelines:
       - `Too many Binders sent to SYSTEM` 또는 동시간대 BINDER_PROXY_HISTOGRAM / BINDER_PROXY_LEAK_RCA / BINDER_PROXY_LIMIT가 있으면 Binder proxy leak을 최우선 Root Cause 후보로 판단하라. 단, 누수 근거만 있고 am_kill 이 없으면 강제 종료가 일어난 것처럼 쓰지 마라.
       - 여러 프로세스가 동시에 SYSTEM_KILL 되었다면 임의로 하나만 고르지 말고 로그에 적힌 정확한 패키지명(Process)을 그대로 나열하라.
       - Crash/ANR/Java Crash/Crash_Event/ANR_Context/Native Crash의 존재 여부만 묻거나, 사용자가 "Binder/IPC 경고로 원인을 확장하지 말라"고 범위를 제한한 질문에서는 System_Kill_Wtf_Event를 답변에 언급하지 말고 Crash_Event/ANR_Context의 대체 근거로도 사용하지 마라.
-
+      - `type` 이 `PROCESS_DIED` 인 항목은 프로세스가 죽었다는 사실 자체다. 같은 시각에 쏟아지는 binder 실패(BR_DEAD_REPLY, DeadObjectException, `binder_alloc_buf no vma`, `attemptIncStrongHandle: Not supported`)는 이 종료의 **결과**이므로 원인으로 인용하지 마라.
+      - 🚨 `PROCESS_DIED` 에 `signal` 이 있으면 그 자체가 근본 원인이 아니다. 같은 시각의 `Native_Crash_Event`(tombstone)에서 `abort_message` 와 백트레이스를 찾아 그것을 원인으로 답하라. tombstone 이 없으면 "시그널로 종료됨, 사인은 로그에 없음" 까지만 말하라.
+      - `lost_services` 는 시간으로 이은 추정이다. 영향 범위를 설명할 때만 쓰고 "이 서비스가 원인" 으로 뒤집어 읽지 마라.
+      - `PROCESS_DIED` 는 `am_kill` 과 다르다. am_kill 은 시스템이 의도적으로 회수한 것이고, 이쪽은 프로세스가 스스로 죽은 것이다. 둘을 같은 사건으로 묶지 마라.
     Binder_Warning: |
       - TRANSACTION_DELAY (1000ms 이상 지연): 동시간대 ANR, Watchdog, 사망 여부 결합 분석.
       - THREAD_EXHAUSTION: Binder thread pool 포화(Starvation). ANR/Freezing 원인으로 지목하되 선행 transaction 확인.
