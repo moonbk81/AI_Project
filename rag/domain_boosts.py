@@ -202,4 +202,20 @@ def apply_domain_boosts(hybrid_score: float, log_type: str, meta: dict, combined
             if dns_policy_query:
                 hybrid_score -= 0.25
 
+    # 프리즈 차단 구간은 "앱만 인터넷이 안돼요" 신고의 결론 그 자체라, 같은
+    # 시간대의 DNS 실패 낱개 로그보다 먼저 읽혀야 한다.
+    if log_type == "App_Network_Block_Window":
+        if any(k in query_lower for k in [
+            "인터넷", "안돼", "안됨", "안 됨", "느려", "차단", "블록", "blocked", "프리즈",
+            "freeze", "frozen", "얼", "백그라운드", "background", "절전", "policy", "정책",
+            "dns", "앱만", "다시 켜"
+        ]):
+            hybrid_score += 0.70
+
+        if dns_policy_query:
+            hybrid_score += 0.40
+
+        if (meta or {}).get("app_frozen") is True:
+            hybrid_score += 0.30
+
     return hybrid_score

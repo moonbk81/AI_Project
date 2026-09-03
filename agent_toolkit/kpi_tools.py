@@ -231,6 +231,23 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
     # LLM 프롬프트가 매 실행마다 바뀌었다. 분석 재현성을 위해 정렬한다.
     blocked_packages = sorted(set([d.get("package") for d in dns_issues if d.get("package")])) if dns_issues else []
 
+    # 앱 프리즈로 UID가 통째로 차단된 구간. "인터넷 안돼요"가 망 장애인지
+    # 백그라운드 절전 동작인지 가르는 핵심 근거라 KPI에 직접 노출한다.
+    block_windows = net_ts.get("app_block_windows", []) or []
+    frozen_windows = [w for w in block_windows if isinstance(w, dict) and w.get("app_frozen")]
+    # 프리즈 사유(Bg)가 실제로 남은 것만 '백그라운드 전환'으로 센다.
+    background_windows = [
+        w for w in frozen_windows if w.get("cause") == "APP_BACKGROUND_FREEZE"
+    ]
+    frozen_block_apps = sorted({
+        w.get("package") for w in frozen_windows if w.get("package")
+    })
+    longest_block = max(
+        (w for w in block_windows if isinstance(w.get("duration_sec"), (int, float))),
+        key=lambda w: w["duration_sec"],
+        default=None
+    )
+
     dot_failures = []
     for net_id, info in private_dns.items():
         if info.get("fail_count", 0) > 0:
@@ -248,7 +265,19 @@ def get_device_health_kpi(base_name: str, result_dir: str = "./result") -> str:
         "max_dns_max_ms": max_dns_max_ms,
         "max_dns_delayed_cnt": max_dns_delayed_cnt,
         "max_dns_blocked_cnt": max_dns_blocked_cnt,
-        "critical_dns_timeline_spikes": critical_dns_timeline_spikes if critical_dns_timeline_spikes else "없음"
+        "critical_dns_timeline_spikes": critical_dns_timeline_spikes if critical_dns_timeline_spikes else "없음",
+        "app_block_window_count": len(block_windows),
+        "app_freeze_block_count": len(frozen_windows),
+        "app_background_freeze_count": len(background_windows),
+        "app_freeze_reason_unlogged_count": len(frozen_windows) - len(background_windows),
+        "frozen_block_apps": frozen_block_apps if frozen_block_apps else "없음",
+        "longest_app_block": (
+            f"{longest_block.get('package')} {longest_block.get('duration_sec')}초 "
+            f"({longest_block.get('blocked_at')} ~ "
+            f"{longest_block.get('unblocked_at') or longest_block.get('unfreeze_at')}, "
+            f"cause={longest_block.get('cause')})"
+            if longest_block else "없음"
+        ),
     }
 
     # ==========================================

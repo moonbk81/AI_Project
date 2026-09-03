@@ -29,6 +29,7 @@ LOG_TYPE_ALIASES = {
     "DataCall_Event": "데이터 호 연결 / 데이터 접속 / APN PDN 연결",
     "SetupDataCall_Failed": "데이터 호 연결 실패 / 데이터 접속 실패 사유 / APN 인증 실패",
     "Network_DNS_Issue": "DNS 문제 도메인 조회 실패 / 사설 DNS 차단 / 주소 못 찾음",
+    "App_Network_Block_Window": "백그라운드 앱 인터넷 안됨 / 앱 얼림 프리즈로 네트워크 차단 / 앱 다시 켜니 되는 증상 / 절전 정책 앱 통신 차단",
     "DNS_Query": "DNS 도메인 조회 / 주소 질의 응답 시간",
     "DNS_Health_Warning": "DNS 응답 지연 경고 / 도메인 조회 느림",
     "Network_Timeline_Stat": "시간대별 네트워크 상태 / 통신 품질 추이",

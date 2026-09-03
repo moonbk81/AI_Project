@@ -3,8 +3,8 @@
 import { api, baseName } from "../api.js";
 import { reportCard } from "../report.js";
 import {
-  axis, barTrace, baseLayout, card, el, endLabels, fmt, frameTable, groupBy,
-  lineTrace, section, sectionAnalysisQuestion, seriesColors, sequentialRamp, stepColor, table, tile, tileRow,
+  axis, barTrace, baseLayout, card, el, endLabels, field, fmt, frameTable, groupBy,
+  lineTrace, section, sectionAnalysisQuestion, seriesColors, sequentialRamp, stepColor, table, tile, tileRow, token,
 } from "../viz.js";
 
 // An empty slot already says "N/A" in the value — repeating it in the note is noise.
@@ -594,6 +594,135 @@ const CARDS = [
         margin: { l: 176, r: 72, t: 8, b: 44 },
         yaxis: axis({ gridcolor: "rgba(0,0,0,0)" }),
       }), frameTable(series.table));
+    },
+  },
+  {
+    chart: "app-block-windows",
+    title: "앱 네트워크 차단 구간",
+    sub: "앱이 얼면서 UID 통신이 막힌 시간대",
+    prompt: "앱별 네트워크 차단 구간과 프리즈 정황을 보고, 사용자가 겪은 '인터넷 안됨'이 망 장애인지 백그라운드 절전 동작인지 구분해줘.",
+    render(series, panel) {
+      panel.prepend(tileRow([
+        tile("차단 구간", fmt.count(series.window_count), "건",
+             `앱 ${fmt.count(series.app_count)}개`),
+        // 얼린 사실과 '왜' 얼렸는지는 다르다. 사유(Bg)가 남은 건만 따로 밝힌다.
+        tile("프리즈 확인", fmt.count(series.freeze_count), "건",
+             series.freeze_count ? `망 장애 아님 · 사유 확인 ${fmt.count(series.background_freeze_count)}건` : "",
+             series.freeze_count ? "good" : ""),
+        tile("최장 차단", series.longest_sec === null ? "N/A" : fmt.fixed(series.longest_sec), "초"),
+        tile("해제 미확인", fmt.count(series.unrecovered_count), "건",
+             series.unrecovered_count ? "로그 구간 내 해제 없음" : "",
+             series.unrecovered_count ? "critical" : ""),
+      ]));
+
+      // 안드로이드는 시스템 앱 수십 개를 상시로 얼린다. 전부 한 카드에 그리면
+      // 막대가 실선이 되고 라벨이 겹쳐서, 정작 신고 대상 앱이 묻힌다.
+      // 기본은 "DNS 실패·차단" 카드와 같은 기준으로 실제 요청이 막힌 앱만
+      // 보여 주고, 나머지는 선택기로 넘긴다.
+      const ALL = "__all__";
+      const byDns = series.default_basis === "dns_issues";
+      const picker = el("select", "metric-picker");
+      // 제목이 기준을 밝혀야 "왜 이것만 나오지" 로 읽히지 않는다.
+      picker.append(new Option(
+        byDns
+          ? `DNS 요청이 막힌 앱 ${series.default_apps.length}개`
+          : `오래 차단된 상위 ${series.default_apps.length}개`,
+        ALL));
+      for (const app of series.apps) {
+        const longest = app.longest_sec === null ? "해제 미확인" : `${fmt.fixed(app.longest_sec)}초`;
+        const count = app.window_count > 1 ? ` · ${app.window_count}구간` : "";
+        // DNS 건수를 앞에 둬야 이 정렬이 무슨 기준인지 목록에서 바로 읽힌다.
+        const dns = app.dns_issue_count ? `DNS ${fmt.count(app.dns_issue_count)}건 · ` : "";
+        picker.append(new Option(`${app.package} (${dns}${longest}${count})`, app.package));
+      }
+
+      // 색은 원인마다 고정한다. 걸러낸 목록 안에서 순번으로 칠하면 앱을 하나
+      // 고르는 순간 살아남은 막대의 색이 바뀌어 버린다.
+      const colors = seriesColors();
+      const causeColor = new Map(
+        [...new Set(series.windows.map((w) => w.cause_label))]
+          .map((cause, index) => [cause, colors[index % colors.length]]),
+      );
+
+      const drawApps = (packages) => {
+        const rows = series.windows.filter((w) => packages.includes(w.package));
+        // 줄 순서는 고른 순위(=DNS 차단 많은 순) 그대로다. 시간순으로 그리면
+        // 1순위 앱이 맨 아래로 밀려서 왜 이 열 개인지가 안 읽힌다.
+        // plotly 는 배열 첫 항목을 맨 아래에 그리므로 뒤집어 넘긴다.
+        const drawn = new Set(rows.map((w) => w.package));
+        const labels = packages.filter((pkg) => drawn.has(pkg)).reverse();
+        const causes = [...new Set(rows.map((w) => w.cause_label))];
+
+        const traces = causes.map((cause) => {
+          const group = rows.filter((w) => w.cause_label === cause);
+          const color = causeColor.get(cause);
+          return barTrace(cause,
+            group.map((w) => new Date(w.end_dt) - new Date(w.start_dt)),
+            group.map((w) => w.package),
+            color, {
+            orientation: "h",
+            base: group.map((w) => w.start_dt),
+            // 해제 로그가 없는 구간은 색이 아니라 빗금으로 구분한다 — 색맹/흑백
+            // 출력에서도 "끝을 모르는 차단"이 구분돼야 한다.
+            marker: {
+              color,
+              cornerradius: 4,
+              line: { width: 2, color: token("--surface-1") },
+              pattern: {
+                shape: group.map((w) => (w.is_recovered ? "" : "/")),
+                size: 6,
+                solidity: 0.35,
+              },
+            },
+            text: group.map((w) => (w.duration_sec === null ? "해제 미확인" : `${fmt.fixed(w.duration_sec)}초`)),
+            textposition: "outside",
+            textfont: { size: 11 },
+            cliponaxis: false,
+            hovertext: group.map((w) => w.hover_text),
+            hovertemplate: "%{hovertext}<extra></extra>",
+          });
+        });
+
+        // 행 수에 맞춰 카드 높이를 준다. 고정 300px 에 열 줄을 넣으면 막대가
+        // 머리카락처럼 얇아지고, 한 줄만 남으면 반대로 띠처럼 두꺼워진다.
+        panel.plotHeight(Math.min(520, Math.max(180, labels.length * 34 + 90)));
+
+        panel.draw(traces, baseLayout({
+          barmode: "overlay",
+          bargap: 0.45,
+          // 한 종류만 걸러져도 범례는 남긴다. 색이 원인을 나타내는데 범례가
+          // 없으면 지금 보는 게 어느 쪽인지 알 길이 없다.
+          showlegend: causeColor.size > 1,
+          margin: { l: 184, r: 96, t: 8, b: 44 },
+          xaxis: axis({ type: "date" }),
+          yaxis: axis({
+            type: "category",
+            categoryorder: "array",
+            categoryarray: labels,
+            gridcolor: "rgba(0,0,0,0)",
+          }),
+        }), frameTable(series.table));
+      };
+
+      picker.addEventListener("change", () => {
+        drawApps(picker.value === ALL ? series.default_apps : [picker.value]);
+      });
+      // 고를 앱이 기본 목록을 넘지 않으면 선택기는 군더더기다.
+      if (series.apps.length > series.default_apps.length) {
+        panel.prepend(field("앱", picker));
+      }
+      drawApps(series.default_apps);
+
+      const notes = [];
+      // 기본 화면에서 빠진 앱이 사라진 게 아니라는 걸 밝혀야 한다.
+      const hiddenApps = series.apps.length - series.default_apps.length;
+      if (byDns && hiddenApps > 0) {
+        notes.push(`차단됐지만 그동안 DNS 요청이 없던 앱 ${fmt.count(hiddenApps)}개는 위 목록에서 고르세요.`);
+      }
+      if (series.hidden_count) {
+        notes.push(`1초 미만 차단 ${fmt.count(series.hidden_count)}건은 표에만 있습니다.`);
+      }
+      for (const note of notes) panel.prepend(el("p", "table-note", note));
     },
   },
   {

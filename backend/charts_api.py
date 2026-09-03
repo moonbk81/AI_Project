@@ -22,6 +22,7 @@ import pandas as pd
 
 from core.charts import (
     build_active_default_network,
+    build_app_block_windows,
     build_boot_sequence,
     build_binder_proxy_histograms,
     build_call_history_summary,
@@ -99,6 +100,7 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     ),
     "dns-errors": ChartSpec(build_dns_error_breakdown),
     "dns-issues": ChartSpec(build_dns_issue_summary),
+    "app-block-windows": ChartSpec(build_app_block_windows),
     "dns-health": ChartSpec(build_dns_health_warnings, as_items=True),
     "network-timeline": ChartSpec(build_network_timeline_stats),
     "power-thermal": ChartSpec(build_power_thermal_panel),

@@ -4,6 +4,7 @@ from core.charts import (
     DNS_SPIKE_THRESHOLD_MS,
     INTERNET_STALL_LAYER_TABS,
     build_active_default_network,
+    build_app_block_windows,
     build_data_usage_profile,
     build_data_usage_top_by_time,
     build_dns_error_breakdown,
@@ -101,6 +102,244 @@ def test_dns_issue_table_uses_display_headers():
 
 def test_no_dns_issues():
     assert build_dns_issue_summary(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+
+
+# ------------------------------------------------------------- app block windows
+
+
+def _block_window(package, blocked_at, unblocked_at, duration_sec, **overrides):
+    row = {
+        "log_type": "App_Network_Block_Window",
+        "package": package,
+        "uid": "10297",
+        "cause": "APP_BACKGROUND_FREEZE",
+        "blocked_at": blocked_at,
+        "unblocked_at": unblocked_at,
+        "unfreeze_at": None,
+        "duration_sec": duration_sec,
+        "is_recovered": unblocked_at is not None,
+        "freeze_reason": "Bg",
+        "sockets_destroyed_at": None,
+        "resumed_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_block_window_spans_become_gantt_rows():
+    df = pd.DataFrame(
+        [
+            _block_window("com.a", "09-01 16:12:42", "09-01 16:13:44", 62.7),
+            _block_window("com.b", "09-01 16:20:00", "09-01 16:20:30", 30.0),
+        ]
+    )
+
+    result = build_app_block_windows(df, year=2026)
+
+    assert result.status == "ok"
+    assert [w.package for w in result.windows] == ["com.a", "com.b"]  # drawn in time order
+    assert result.windows[0].end_dt > result.windows[0].start_dt
+    assert result.windows[0].cause_label == "백그라운드 프리즈"
+    assert result.window_count == 2
+    assert result.freeze_count == 2
+    assert result.app_count == 2
+    assert result.longest_sec == 62.7
+    assert result.unrecovered_count == 0
+
+
+def test_window_closed_only_by_unfreeze_still_has_an_end():
+    df = pd.DataFrame([
+        _block_window("com.a", "09-01 16:12:43", None, 61.0,
+                      unfreeze_at="09-01 16:13:44", is_recovered=True),
+    ])
+
+    window = build_app_block_windows(df, year=2026).windows[0]
+
+    assert window.is_recovered is True
+    assert (window.end_dt - window.start_dt).total_seconds() == 61
+
+
+def test_window_without_any_end_runs_to_the_horizon():
+    """해제 로그가 없는 구간은 '짧은 차단'이 아니라 '끝을 모르는 차단'이다."""
+    df = pd.DataFrame(
+        [
+            _block_window("com.a", "09-01 16:00:00", None, None, is_recovered=False),
+            _block_window("com.b", "09-01 16:10:00", "09-01 16:40:00", 1800.0),
+        ]
+    )
+
+    result = build_app_block_windows(df, year=2026)
+    open_window = next(w for w in result.windows if w.package == "com.a")
+
+    assert result.unrecovered_count == 1
+    assert open_window.is_recovered is False
+    assert open_window.duration_sec is None
+    # 마지막으로 관측된 시각까지 이어 그린다 — 짧은 꼬리로 축소하지 않는다.
+    assert open_window.end_dt == pd.Timestamp("2026-09-01 16:40:00")
+
+
+def test_a_lone_open_window_still_gets_a_visible_bar():
+    df = pd.DataFrame([
+        _block_window("com.a", "09-01 16:12:43", None, None, is_recovered=False),
+    ])
+
+    window = build_app_block_windows(df, year=2026).windows[0]
+
+    assert (window.end_dt - window.start_dt).total_seconds() == 30
+
+
+def test_the_last_open_window_is_wide_enough_to_read_on_a_long_session():
+    """관측 구간이 길면 30초 막대는 안 보인다 — 전체 폭의 일정 비율은 준다."""
+    df = pd.DataFrame(
+        [
+            _block_window("com.a", "09-01 16:00:00", "09-01 16:01:00", 60.0),
+            _block_window("com.b", "09-01 17:00:00", None, None, is_recovered=False),
+        ]
+    )
+
+    open_window = next(
+        w for w in build_app_block_windows(df, year=2026).windows if w.package == "com.b"
+    )
+
+    span = 3600  # 16:00 → 17:00
+    assert (open_window.end_dt - open_window.start_dt).total_seconds() == span * 0.05
+
+
+def _dns_issue(package):
+    return {"log_type": "Network_DNS_Issue", "package": package}
+
+
+def test_the_picker_lists_apps_by_blocked_dns_requests_first():
+    """오래 얼려 있어도 통신을 시도하지 않았으면 사용자에게는 증상이 없다.
+
+    "DNS 실패·차단" 카드와 같은 집계를 1순위로 쓴다.
+    """
+    df = pd.DataFrame(
+        [
+            _block_window("com.quiet", "09-01 16:03:00", "09-01 16:28:00", 1500.0),
+            _block_window("com.noisy", "09-01 16:00:00", "09-01 16:01:00", 60.0),
+        ]
+        + [_dns_issue("com.noisy")] * 24
+    )
+
+    result = build_app_block_windows(df, year=2026)
+
+    # 25분 얼려 있던 com.quiet 보다 DNS 24건이 막힌 com.noisy 가 먼저다.
+    assert [app.package for app in result.apps] == ["com.noisy", "com.quiet"]
+    assert result.apps[0].dns_issue_count == 24
+    assert result.apps[1].dns_issue_count == 0
+
+
+def test_blocked_duration_breaks_ties_when_no_dns_failed():
+    """DNS 실패가 없는 앱끼리는 예전처럼 오래 막힌 순이다."""
+    df = pd.DataFrame(
+        [
+            _block_window("com.short", "09-01 16:00:00", "09-01 16:00:10", 10.0),
+            _block_window("com.short", "09-01 16:01:00", "09-01 16:01:10", 10.0),
+            _block_window("com.short", "09-01 16:02:00", "09-01 16:02:10", 10.0),
+            _block_window("com.long", "09-01 16:03:00", "09-01 16:28:00", 1500.0),
+        ]
+    )
+
+    result = build_app_block_windows(df, year=2026)
+
+    assert [app.package for app in result.apps] == ["com.long", "com.short"]
+    assert result.apps[0].longest_sec == 1500.0
+    assert result.apps[1].window_count == 3
+    assert result.apps[1].total_sec == 30.0
+
+
+def test_an_app_with_no_known_end_sorts_to_the_front_of_the_picker():
+    df = pd.DataFrame(
+        [
+            _block_window("com.long", "09-01 16:00:00", "09-01 16:25:00", 1500.0),
+            _block_window("com.open", "09-01 16:30:00", None, None, is_recovered=False),
+        ]
+    )
+
+    result = build_app_block_windows(df, year=2026)
+
+    # 끝을 모르는 차단이 1500초보다 짧다고 볼 근거가 없다.
+    assert result.apps[0].package == "com.open"
+    assert result.apps[0].longest_sec is None
+
+
+def test_the_default_view_holds_only_apps_whose_requests_were_blocked():
+    """오래 막혔어도 통신 시도가 없었으면 증상이 없다 — 기본 화면에서 뺀다."""
+    rows = [
+        _block_window(f"com.app{i:02d}", "09-01 16:00:00", "09-01 16:00:30", float(i))
+        for i in range(1, 16)
+    ]
+    # 가장 짧게 막힌 앱이지만 DNS 가 실패한 유일한 앱이다.
+    rows += [_dns_issue("com.app01")] * 3
+
+    result = build_app_block_windows(pd.DataFrame(rows), year=2026)
+
+    assert result.default_basis == "dns_issues"
+    assert result.default_apps == ["com.app01"]
+    # 나머지 열네 개도 선택기로는 고를 수 있어야 한다.
+    assert len(result.apps) == 15
+    assert len(result.windows) == 15
+
+
+def test_the_default_view_caps_at_ten_apps():
+    rows = []
+    for i in range(1, 16):
+        rows.append(_block_window(f"com.app{i:02d}", "09-01 16:00:00", "09-01 16:00:30", 30.0))
+        rows += [_dns_issue(f"com.app{i:02d}")] * i
+
+    result = build_app_block_windows(pd.DataFrame(rows), year=2026)
+
+    assert len(result.default_apps) == 10
+    assert result.default_apps[0] == "com.app15"  # DNS 가 가장 많이 막힌 앱
+
+
+def test_a_session_with_no_dns_failures_falls_back_to_the_longest_blocks():
+    """DNS 실패가 하나도 없는 로그에서 그래프가 통째로 비면 안 된다."""
+    rows = [
+        _block_window("com.short", "09-01 16:00:00", "09-01 16:00:30", 30.0),
+        _block_window("com.long", "09-01 16:01:00", "09-01 16:26:00", 1500.0),
+    ]
+
+    result = build_app_block_windows(pd.DataFrame(rows), year=2026)
+
+    assert result.default_basis == "block_duration"
+    assert result.default_apps == ["com.long", "com.short"]
+
+
+def test_sub_second_blocks_are_counted_but_not_drawn():
+    df = pd.DataFrame(
+        [
+            _block_window("com.a", "09-01 16:12:42", "09-01 16:12:42", 0.2),
+            _block_window("com.b", "09-01 16:20:00", "09-01 16:20:30", 30.0),
+        ]
+    )
+
+    result = build_app_block_windows(df, year=2026)
+
+    assert result.window_count == 2
+    assert result.hidden_count == 1
+    assert [w.package for w in result.windows] == ["com.b"]
+    assert len(result.table) == 2  # 표에는 그대로 남는다
+
+
+def test_block_window_hover_names_the_evidence():
+    df = pd.DataFrame([
+        _block_window("com.a", "09-01 16:12:42", "09-01 16:13:44", 62.7,
+                      sockets_destroyed_at="09-01 16:12:43", resumed_at="09-01 16:13:44"),
+    ])
+
+    hover = build_app_block_windows(df, year=2026).windows[0].hover_text
+
+    assert "com.a" in hover
+    assert "백그라운드 프리즈" in hover
+    assert "TCP 소켓 강제 종료" in hover
+    assert "앱 복귀" in hover
+
+
+def test_no_block_windows():
+    assert build_app_block_windows(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+    assert build_app_block_windows(pd.DataFrame()).status == "no_data"
 
 
 # ------------------------------------------------------- network timeline stat

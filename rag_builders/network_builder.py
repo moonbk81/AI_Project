@@ -44,7 +44,22 @@ def build_network_timeseries_payloads(report_data, build_markdown_doc, extract_m
             f"was blocked. Effective Policy: {dns_issue.get('effective_policy', 'Unknown')}. "
             f"Time: {dns_issue['time']}"
         )
+        # 프리즈 구간 안에서 난 차단이면 사유를 문서 본문에 같이 실어 준다.
+        # 메타데이터에만 넣어두면 검색 단계에서 근거로 잡히지 않는다.
+        if dns_issue.get("block_evidence"):
+            doc += f"\n차단 정황: {dns_issue['block_evidence']}"
         append_payload(rag_payload, doc, dns_issue)
+
+    for window in net_data.get("app_block_windows", []) or []:
+        meta = dict(window)
+        meta["log_type"] = "App_Network_Block_Window"
+        meta["time"] = window.get("blocked_at") or "시간 미상"
+        doc = (
+            f"[{meta['time']}] 앱 UID 네트워크 차단 구간: {window.get('package')} "
+            f"(UID: {window.get('uid')}, cause={window.get('cause')}).\n"
+            f"{window.get('summary', '')}"
+        )
+        append_payload(rag_payload, doc, meta)
 
     if net_data.get("sorted_timeline"):
         summary = {"timeline_count": len(net_data["sorted_timeline"])}
