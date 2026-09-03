@@ -19,6 +19,7 @@ import re
 # 검색 문서 분류 이름 -> 사람이 읽는 말
 LOG_TYPE_WORDS = {
     "ANR_Context": "앱 응답 없음(ANR) 기록",
+    "App_Network_Block_Window": "앱 프리즈로 인한 네트워크 차단 구간",
     "Battery_Drain_Report": "배터리 소모 리포트",
     "Binder_Context": "바인더 주변 상황 기록",
     "Binder_Warning": "바인더 경고",

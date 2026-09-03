@@ -35,6 +35,7 @@ router_prompt: |
   - 단, 질문이 Crash/ANR/Native Crash의 원인, Root Cause, RCA, 왜 발생했는지, 관련성/상관관계 분석을 묻는 경우에는 Crash_ANR과 함께 RCA_Event를 포함하라.
   - "강제 종료"가 am_kill/System Kill 문맥이면 System_Kill_WTF, Java/Fatal Exception 문맥이면 Crash_ANR로 분리하라.
   - 질문에 DNS 정책 차단, effective_policy, is_blocked, BATTERY_SAVER, REJECT, APP_STANDBY, APP_BACKGROUND, 절전 정책, 백그라운드 데이터 제한이 포함되면 DNS_Latency로 라우팅하고 Network_DNS_Issue를 포함하라.
+  - 질문에 특정 앱만 인터넷이 안됨/느림, 앱 프리즈, am_freeze, am_unfreeze, FRZ, Returning BLOCKED NetworkInfo, ConnectivityService 차단, 백그라운드 앱 통신 차단, 앱을 다시 켜니까 된다가 포함되면 DNS_Latency로 라우팅하고 App_Network_Block_Window를 Network_DNS_Issue와 함께 포함하라.
   - 질문에 SetupDataCall, SETUP_DATA_CALL, 데이터 호 연결 실패, 데이터 호 설정 실패, E-PDN, EPDN, NO CARRIER, User authentication failed, NOT_SPECIFIED가 포함되면 Data_Call_Setup으로 라우팅하고 log_types는 SetupDataCall_Failed만 포함하라. 이 경우 DNS_Latency나 Internet_Stall보다 Data_Call_Setup을 우선하고, 성공 DataCall_Event나 RILJ_Transaction은 섞지 마라.
   - 질문에 NITZ, UTC, timezone, 타임존, 시간대, 시간 보정, 핑퐁, ping-pong이 포함되면 Nitz_Time_Analysis로 라우팅하고 Nitz_Time_Event를 포함하라.
   - 질문에 SIP_480, 504_CODE_USER_DECLINE, is_user_reject, 수신 거부, user reject, NORMAL_RELEASE만 보고 Call Drop/망 장애인지 묻는 경우 Call_Drop_Trap으로 라우팅하고 log_types는 Call_Session만 포함하라.
@@ -82,12 +83,13 @@ routing_map:
       - RILJ_Transaction
       - Device_Property_State
   DNS_Latency:
-    desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, DNS 정책 차단, effective_policy, is_blocked, BATTERY_SAVER, REJECT, APP_STANDBY, APP_BACKGROUND, 절전 정책, 백그라운드 데이터 제한, 앱 차단, 앱 네트워크 차단, 도메인 차단, name resolution 실패, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
+    desc: "인터넷 안됨, 데이터 안됨, 네트워크 차단, DNS 에러, DNS 실패, DNS timeout, DNS query fail, DNS 정책 차단, effective_policy, is_blocked, BATTERY_SAVER, REJECT, APP_STANDBY, APP_BACKGROUND, 절전 정책, 백그라운드 데이터 제한, 앱 차단, 앱 네트워크 차단, 앱 프리즈, am_freeze, am_unfreeze, FRZ, 백그라운드 앱 얼림, ConnectivityService BLOCKED, Returning BLOCKED NetworkInfo, 앱 다시 켜니까 됨, 도메인 차단, name resolution 실패, 네트워크 지연, 핑 튀김, 패킷 로스, 데이터 느림, NW 지연, 데이터 멈춤, 데이터 먹통, 스톨 났어요, 스톨 감지, 리커버리 액션"
     tools:
       - get_dns_latency_analytics
       - get_data_stall_and_recovery_analytics
     log_types:
       - Network_DNS_Issue
+      - App_Network_Block_Window
       - DNS_Query
       - Network_Timeline_Stat
       - Data_Stall_Recovery
@@ -108,6 +110,7 @@ routing_map:
     log_types:
       - Internet_Stall_Analysis
       - Network_DNS_Issue
+      - App_Network_Block_Window
       - DNS_Query
       - Network_Timeline_Stat
       - Data_Stall_Recovery
@@ -310,6 +313,18 @@ log_guidelines:
     Network_DNS_Issue: |
       - 🚨 [정책 차단 최우선 판별]: 특정 앱의 접속 실패 원인을 물을 때, `effective_policy`에 `BATTERY_SAVER`, `REJECT`, `APP_STANDBY`, `APP_BACKGROUND` 등이 하나라도 포함되어 있다면, 절대 망(네트워크) 장애나 DNS 서버 에러로 분석하지 마라.
       - 이는 "단말 내부의 절전 모드나 백그라운드 데이터 제한 정책에 의한 정상적인 DNS 강제 차단 동작"으로 100% 확정하여 답변하라.
+      - `app_frozen`이 true이면 같은 시각의 `App_Network_Block_Window`가 차단 사유의 원본 근거다. 그쪽 시간선(freeze → 소켓 종료 → unfreeze → 복귀)을 인용하라.
+
+    App_Network_Block_Window: |
+      - 앱이 백그라운드로 내려가 프리즈(am_freeze / `[FRZ] [Bg ...]`)되면서 UID 통째로 네트워크가 차단된 구간이다.
+      - 근거 시간선은 다음 순서로 구성된 것이다: ConnectivityService `Returning BLOCKED NetworkInfo to uid=` → `am_freeze` → `InetDiagMessage: Destroyed live tcp sockets` → `am_unfreeze` → `Returning UNBLOCKED NetworkInfo` → `wm_on_resume_called`.
+      - 🚨 `cause`가 `APP_BACKGROUND_FREEZE`이면 망(기지국) 장애, DNS 서버 장애, 데이터 호 실패로 분석하지 마라. 단말 절전 정책에 의한 정상 동작이다. 이 단정은 로그에 프리즈 사유(`freeze_reason: Bg`)가 실제로 남은 경우에만 쓴다.
+      - `cause`가 `APP_PROCESS_FREEZE`이면 "앱이 얼면서 차단된 것은 맞고 망 장애는 아니다"까지만 말하라. 프리즈 사유가 로그에 없으므로 절전 정책/백그라운드 전환이라고 단정하지 마라. 근거는 `freeze_evidence`(`am_freeze` 또는 `FRZ CAO`)다.
+      - 답변에는 반드시 앱 패키지명, UID, 차단 시작/해제 시각, `duration_sec`(차단 지속 시간)을 명시하라.
+      - `sockets_destroyed_at`이 있으면 "이미 연결돼 있던 TCP 세션까지 끊겨서 진행 중이던 다운로드/스트리밍이 멈춘 것처럼 보였다"고 설명할 수 있다.
+      - `resumed_at`이 있으면 "앱을 다시 열자 차단이 풀리고 통신이 정상 복귀했다"는 사실까지 이어서 설명하라. 사용자가 체감한 "앱 다시 켜니까 되더라"와 정확히 일치하는 근거다.
+      - `is_recovered`가 false이면 차단 해제 로그가 없는 것이므로, 회복되었다고 단정하지 말고 "해당 로그 구간 내에서는 해제 확인 안 됨"으로 표현하라.
+      - 단말 전체 인터넷 장애로 확대 해석 금지. 이 로그는 해당 UID 한 개의 차단만 증명한다. 전체 장애를 주장하려면 Internet_Stall_Analysis, OOS_Event, Network_Timeline_Stat의 근거가 따로 있어야 한다.
 
     DNS_Query: |
       - NetdEventListenerService의 DNS 요청 단위 로그를 구조화한 데이터이다.

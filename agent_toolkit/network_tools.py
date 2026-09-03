@@ -106,8 +106,33 @@ def get_dns_latency_analytics(base_name: str, result_dir: str = "./result") -> s
         reverse=True
     )[:20]
 
+    # 차단된 앱이 그 시각에 프리즈 상태였는지까지 넘겨야, LLM이 망 장애와
+    # 백그라운드 절전 동작을 섞지 않는다.
+    app_block_windows = [
+        {
+            "package": w.get("package"),
+            "uid": w.get("uid"),
+            "cause": w.get("cause"),
+            "blocked_at": w.get("blocked_at"),
+            "unblocked_at": w.get("unblocked_at") or w.get("unfreeze_at"),
+            "duration_sec": w.get("duration_sec"),
+            "freeze_reason": w.get("freeze_reason"),
+            "sockets_destroyed": bool(w.get("sockets_destroyed_at")),
+            "summary": w.get("summary"),
+        }
+        for w in (net_ts.get("app_block_windows") or [])
+        if isinstance(w, dict)
+    ]
+    app_block_windows = sorted(
+        app_block_windows,
+        key=lambda w: w.get("duration_sec") or 0,
+        reverse=True
+    )[:20]
+
     return json.dumps({
         "dns_blocked_apps_count": len(net_ts.get("dns_issues", [])),
+        "app_block_window_count": len(net_ts.get("app_block_windows") or []),
+        "app_block_windows": app_block_windows,
         "critical_dns_latency_spikes": critical_latencies,
         "dns_query_count": len(dns_queries),
         "max_dns_latency_ms": max_dns_latency_ms,

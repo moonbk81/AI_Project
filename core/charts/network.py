@@ -13,7 +13,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from .common import has_columns, slice_log_type as _slice, with_parsed_times
+from .common import (
+    has_columns,
+    parse_log_times,
+    slice_log_type as _slice,
+    with_parsed_times,
+)
 
 # A DNS answer that is neither of these is a failure or a block.
 DNS_SUCCESS_CODES = ("0", "SUCCESS")
@@ -124,6 +129,305 @@ def build_dns_issue_summary(df: pd.DataFrame) -> DnsIssueSummary:
         reasons=dns_df["suspected_reason"].tolist(),
         package_counts=package_counts,
         table=table,
+    )
+
+
+# --------------------------------------------------------- app block windows
+
+# Bars this short are a blip the reader cannot act on; they still count in the
+# tiles, they just do not earn a row on the timeline.
+_BLOCK_WINDOW_MIN_SECONDS = 1.0
+
+# 한 세션이 앱 서른 개를 얼리는 일은 흔하다(안드로이드가 상시로 하는 일이다).
+# 서른 줄을 한 카드에 밀어 넣으면 막대가 실선이 되고 라벨이 겹쳐 아무것도
+# 못 읽는다. 그래서 전부 넘기되, 기본 화면은 오래 차단된 앱 위주로 자른다.
+# 나머지는 카드의 앱 선택기로 골라 본다.
+_BLOCK_DEFAULT_TOP_APPS = 10
+_BLOCK_WINDOW_LIMIT = 200
+
+# A window with no unblock line is still blocked as far as the log knows, so its
+# bar runs to the last event in view rather than stopping at an invented end.
+# When it *is* the last event there is nothing to run to, so it gets a floor —
+# a share of the plotted span, because a fixed 30s is an invisible sliver on a
+# long session and the whole point is that this row is the alarming one.
+_OPEN_WINDOW_MIN_SECONDS = 30.0
+_OPEN_WINDOW_MIN_SPAN_SHARE = 0.05
+
+_BLOCK_TABLE_COLUMNS = {
+    "package": "앱",
+    "uid": "UID",
+    "blocked_at": "차단 시작",
+    "end_at": "차단 해제",
+    "duration_sec": "지속(초)",
+    "cause_label": "원인",
+    "freeze_reason": "Freeze 사유",
+}
+
+
+@dataclass(frozen=True)
+class AppBlockWindow:
+    """One app's network-blocked span, as the Gantt row draws it."""
+
+    package: str
+    uid: str
+    cause: str
+    cause_label: str
+    start_dt: Any
+    end_dt: Any
+    duration_sec: Optional[float]
+    is_recovered: bool
+    sockets_destroyed: bool
+    resumed: bool
+    hover_text: str
+
+
+@dataclass(frozen=True)
+class AppBlockedApp:
+    """One app in the picker: how much of the session it spent blocked."""
+
+    package: str
+    window_count: int
+    longest_sec: Optional[float]
+    total_sec: float
+    frozen: bool
+    # 차단된 동안 실제로 막힌 DNS 요청 수. 이 앱의 차단이 사용자에게
+    # 증상으로 보였는지를 가르는 값이라 선택기의 정렬 기준이 된다.
+    dns_issue_count: int = 0
+
+
+@dataclass(frozen=True)
+class AppBlockWindows:
+    """Per-app UID network blocks: when, how long, and whether a freeze caused it.
+
+    `status` is `"ok"`, `"no_data"` (the session logged no block) or
+    `"unparsable_time"`. `windows` carries every drawable span; `apps` is the
+    picker's list and `default_apps` is the subset the card opens on. The tiles
+    count every window, including the sub-second ones the timeline drops.
+    """
+
+    status: str
+    windows: List[AppBlockWindow] = field(default_factory=list)
+    apps: List[AppBlockedApp] = field(default_factory=list)
+    default_apps: List[str] = field(default_factory=list)
+    # 기본 화면을 무슨 기준으로 골랐는지: "dns_issues" 또는 "block_duration".
+    # 카드가 제목을 그에 맞게 붙여야 독자가 목록을 오해하지 않는다.
+    default_basis: str = "block_duration"
+    table: pd.DataFrame = field(default_factory=pd.DataFrame)
+    window_count: int = 0
+    # 얼린 게 확인된 구간 전부와, 그중 사유(Bg)까지 남은 구간.
+    freeze_count: int = 0
+    background_freeze_count: int = 0
+    app_count: int = 0
+    longest_sec: Optional[float] = None
+    unrecovered_count: int = 0
+    # Rows dropped from the timeline for being too short to see.
+    hidden_count: int = 0
+
+
+# 프리즈 사유가 로그에 남은 경우와, 얼린 사실만 확인되는 경우를 구분한다.
+_FROZEN_CAUSES = ("APP_BACKGROUND_FREEZE", "APP_PROCESS_FREEZE")
+
+_CAUSE_LABELS = {
+    "APP_BACKGROUND_FREEZE": "백그라운드 프리즈",
+    "APP_PROCESS_FREEZE": "프로세스 프리즈(사유 미상)",
+    "UID_NETWORK_BLOCK": "UID 네트워크 차단",
+}
+
+
+def _block_hover(row: pd.Series, duration: Optional[float], recovered: bool) -> str:
+    lines = [
+        f"<b>{row.get('package', 'Unknown')}</b> (UID {row.get('uid', '?')})",
+        _CAUSE_LABELS.get(row.get("cause"), row.get("cause") or "차단"),
+        f"시작 {row.get('blocked_at', '?')}",
+    ]
+    if recovered:
+        lines.append(f"해제 {row.get('end_at', '?')}")
+        if duration is not None:
+            lines.append(f"지속 {duration:.1f}초")
+    else:
+        lines.append("해제 로그 없음")
+    if row.get("freeze_reason"):
+        lines.append(f"Freeze 사유 {row['freeze_reason']}")
+    if row.get("sockets_destroyed_at"):
+        lines.append("연결돼 있던 TCP 소켓 강제 종료")
+    if row.get("resumed_at"):
+        lines.append(f"앱 복귀 {row['resumed_at']}")
+    return "<br>".join(lines)
+
+
+def _dns_issue_counts(df: pd.DataFrame) -> Dict[str, int]:
+    """차단당한 DNS 요청의 패키지별 건수.
+
+    `Network_DNS_Issue` 에는 정책 차단(`is_blocked`)과 단순 응답 실패(NODATA
+    타임아웃)가 같이 들어 있다. 이 카드가 설명하려는 건 차단이므로 타임아웃은
+    빼고 센다. 안 그러면 타임아웃만 난 앱이 "요청이 막힌 앱" 목록에 올라온다.
+    """
+    dns_df = _slice(df, "Network_DNS_Issue")
+    if dns_df.empty or "package" not in dns_df.columns:
+        return {}
+    if "is_blocked" in dns_df.columns:
+        blocked = dns_df["is_blocked"].astype(object).where(
+            lambda values: values.notna(), False
+        ).astype(bool)
+        dns_df = dns_df[blocked]
+    if dns_df.empty:
+        return {}
+    return {str(pkg): int(n) for pkg, n in dns_df["package"].value_counts().items()}
+
+
+def _blocked_apps(drawable: pd.DataFrame, dns_counts: Dict[str, int]) -> List[AppBlockedApp]:
+    """선택기에 채울 앱 목록. 막힌 DNS 요청이 많은 앱이 앞으로 온다.
+
+    안드로이드는 시스템 앱을 상시로 얼리기 때문에 차단 '시간'으로 줄을 세우면
+    25분씩 얼려 있던 scpm·dkey 같은 앱이 위를 다 차지한다. 그런데 그 앱들은
+    차단되는 동안 통신을 시도하지도 않아서 사용자에게는 아무 증상이 없다.
+    실제 신고로 이어지는 건 "막힌 동안 접속을 시도했다가 실패한" 앱이므로,
+    같은 시간대의 DNS 실패 건수를 1순위로 놓고 차단 길이를 동점 처리에 쓴다.
+    """
+    apps = []
+    for package, rows in drawable.groupby("package", sort=False):
+        durations = rows["duration_sec"].dropna()
+        apps.append(
+            AppBlockedApp(
+                package=str(package),
+                window_count=len(rows),
+                longest_sec=float(durations.max()) if not durations.empty else None,
+                total_sec=float(durations.sum()),
+                frozen=bool(rows["cause"].isin(_FROZEN_CAUSES).any())
+                if "cause" in rows.columns
+                else False,
+                dns_issue_count=dns_counts.get(str(package), 0),
+            )
+        )
+    # 길이를 모르는(해제 로그 없는) 구간은 끝을 알 수 없으니 동점에서 앞에 둔다.
+    return sorted(
+        apps,
+        key=lambda app: (
+            app.dns_issue_count,
+            app.longest_sec is None,
+            app.longest_sec or 0,
+        ),
+        reverse=True,
+    )
+
+
+def build_app_block_windows(
+    df: pd.DataFrame,
+    *,
+    year: Optional[int] = None,
+) -> AppBlockWindows:
+    block_df = _slice(df, "App_Network_Block_Window")
+    if block_df.empty:
+        return AppBlockWindows(status="no_data")
+
+    block_df = block_df.copy()
+    # A window closed by am_unfreeze alone still has a real end; prefer the
+    # ConnectivityService line when both are present.
+    unblocked = block_df.get("unblocked_at", pd.Series(dtype=object))
+    unfreeze = block_df.get("unfreeze_at", pd.Series(dtype=object))
+    block_df["end_at"] = unblocked.where(unblocked.notna() & (unblocked != ""), unfreeze)
+
+    block_df = with_parsed_times(block_df, "blocked_at", year=year)
+    if block_df.empty:
+        return AppBlockWindows(status="unparsable_time")
+
+    block_df = block_df.rename(columns={"time_dt": "start_dt"})
+    block_df["end_dt"] = parse_log_times(block_df["end_at"], year=year)
+    block_df["duration_sec"] = pd.to_numeric(
+        block_df.get("duration_sec", pd.Series(dtype=float)), errors="coerce"
+    )
+    block_df["cause_label"] = block_df.get("cause", pd.Series(dtype=object)).map(
+        lambda value: _CAUSE_LABELS.get(value, value or "차단")
+    )
+
+    # An open window runs to the horizon: the last moment any window covers.
+    # Drawing it as a short stub would read as a short block, which is the one
+    # thing it is not. The flag is kept because end_dt stops being empty below.
+    open_rows = block_df["end_dt"].isna()
+    block_df["end_is_open"] = open_rows
+    horizon = max(
+        [value for value in (block_df["end_dt"].max(), block_df["start_dt"].max()) if pd.notna(value)],
+        default=None,
+    )
+    if open_rows.any() and horizon is not None:
+        span = (horizon - block_df["start_dt"].min()).total_seconds()
+        stub = max(_OPEN_WINDOW_MIN_SECONDS, span * _OPEN_WINDOW_MIN_SPAN_SHARE)
+        floor = block_df.loc[open_rows, "start_dt"] + pd.Timedelta(seconds=stub)
+        block_df.loc[open_rows, "end_dt"] = floor.clip(lower=horizon)
+
+    drawable = block_df[
+        block_df["duration_sec"].isna()
+        | (block_df["duration_sec"] >= _BLOCK_WINDOW_MIN_SECONDS)
+    ]
+    hidden_count = len(block_df) - len(drawable)
+    # 긴 차단부터 남긴다 — 한도에 걸려 잘려나가는 건 짧은 쪽이어야 한다.
+    drawable = drawable.sort_values("duration_sec", ascending=False).head(_BLOCK_WINDOW_LIMIT)
+
+    windows = []
+    for _, row in drawable.sort_values("start_dt").iterrows():
+        # "해제됨"은 파서가 그렇게 봤고 실제로 끝 시각이 읽힌 경우만이다.
+        recovered = bool(row.get("is_recovered")) and not row["end_is_open"]
+        duration = None if pd.isna(row["duration_sec"]) else float(row["duration_sec"])
+        windows.append(
+            AppBlockWindow(
+                package=str(row.get("package", "Unknown")),
+                uid=str(row.get("uid", "")),
+                cause=str(row.get("cause", "")),
+                cause_label=str(row["cause_label"]),
+                start_dt=row["start_dt"],
+                end_dt=row["end_dt"],
+                duration_sec=duration,
+                is_recovered=recovered,
+                sockets_destroyed=bool(row.get("sockets_destroyed_at")),
+                resumed=bool(row.get("resumed_at")),
+                hover_text=_block_hover(row, duration, recovered),
+            )
+        )
+
+    apps = _blocked_apps(drawable, _dns_issue_counts(df))
+
+    # 차단됐어도 그동안 통신을 시도하지 않았으면 사용자에게 보이는 증상이 없다.
+    # 기본 화면은 실제로 요청이 막힌 앱만 담는다. 다만 그런 앱이 하나도 없는
+    # 세션(=DNS 실패 자체가 없는 로그)에서는 그래프가 통째로 비어버리므로,
+    # 그때만 예전처럼 오래 막힌 순으로 되돌린다.
+    symptomatic = [app for app in apps if app.dns_issue_count > 0]
+    if symptomatic:
+        default_apps = [app.package for app in symptomatic[:_BLOCK_DEFAULT_TOP_APPS]]
+        default_basis = "dns_issues"
+    else:
+        default_apps = [app.package for app in apps[:_BLOCK_DEFAULT_TOP_APPS]]
+        default_basis = "block_duration"
+
+    columns = [column for column in _BLOCK_TABLE_COLUMNS if column in block_df.columns]
+    table = (
+        block_df.sort_values("start_dt")[columns].rename(columns=_BLOCK_TABLE_COLUMNS)
+    )
+
+    durations = block_df["duration_sec"].dropna()
+    freeze_mask = block_df.get("cause", pd.Series(dtype=object)).isin(_FROZEN_CAUSES)
+    recovered_flags = (
+        block_df.get("is_recovered", pd.Series(dtype=bool))
+        .astype(object)
+        .where(lambda values: values.notna(), False)
+        .astype(bool)
+    )
+
+    return AppBlockWindows(
+        status="ok",
+        windows=windows,
+        apps=apps,
+        default_apps=default_apps,
+        default_basis=default_basis,
+        table=table,
+        window_count=len(block_df),
+        freeze_count=int(freeze_mask.sum()),
+        background_freeze_count=int(
+            (block_df.get("cause", pd.Series(dtype=object)) == "APP_BACKGROUND_FREEZE").sum()
+        ),
+        app_count=int(block_df["package"].nunique()) if "package" in block_df.columns else 0,
+        longest_sec=float(durations.max()) if not durations.empty else None,
+        unrecovered_count=int((~recovered_flags).sum()),
+        hidden_count=hidden_count,
     )
 
 

@@ -407,6 +407,10 @@ export function card(title, subtitle) {
         toggle.textContent = "표";
       }
     },
+    /** 행 수가 들쭉날쭉한 차트용. CSS 의 고정 높이(300px)를 이 카드만 덮는다. */
+    plotHeight(px) {
+      plotHost.style.height = px ? `${px}px` : "";
+    },
     /** A card whose content is a table (or any node) rather than a plot. */
     content(node) {
       plotHost.classList.add("content-host");
