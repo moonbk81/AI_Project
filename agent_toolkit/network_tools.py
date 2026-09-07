@@ -3,6 +3,7 @@ import json
 import os
 
 from agent_toolkit.common import _load_json, _load_report_json
+from parsers.pcap_parser import capture_caveats
 from agent_toolkit.correlation import _check_native_crash_correlation, _check_radio_power_correlation, _check_rf_correlation
 
 def get_network_oos_analytics(base_name: str, result_dir: str = "./result") -> str:
@@ -343,6 +344,89 @@ def get_internet_stall_analytics(base_name: str, result_dir: str = "./result") -
         "root_cause_summary": root_summary,
         "highest_risk_windows": window_facts
     }, ensure_ascii=False)
+
+def get_pcap_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """패킷 캡처(pcap) 분석 결과를 LLM이 사용하기 좋은 JSON으로 요약합니다.
+
+    로그는 프레임워크가 무엇을 봤는지를, pcap은 선로에 실제로 무엇이 흘렀는지를
+    말해 줍니다. 둘의 차이가 곧 답이므로 판정 문장과 함께 근거 이벤트를 싣습니다.
+    """
+    path = os.path.join(result_dir, f"{base_name}_pcap.json")
+    data = _load_json(path, {})
+
+    if not data:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "이 로그와 함께 올라온 패킷 캡처가 없습니다. pcap 없이 답해야 합니다.",
+            "expected_file": path
+        }, ensure_ascii=False)
+
+    captures = [item for item in (data.get("captures") or []) if isinstance(item, dict)]
+    analyzed = [item for item in captures if item.get("status") == "OK"]
+
+    if not analyzed:
+        first = captures[0] if captures else {}
+        return json.dumps({
+            # 분석을 못 한 것과 이상이 없는 것은 다르다. 섞이면 "패킷상 정상" 이
+            # 근거로 쓰이는데, 실제로는 아무것도 못 본 것이다.
+            "status": data.get("status") or first.get("status") or "NO_DATA",
+            "message": data.get("message") or first.get("message") or "패킷 캡처를 분석하지 못했습니다.",
+            "reading_guidance": "패킷 분석에 실패했으므로 '패킷상 이상 없음'을 근거로 쓰면 안 됩니다.",
+            "capture_count": len(captures)
+        }, ensure_ascii=False)
+
+    capture_facts = []
+    for capture in analyzed:
+        meta = capture.get("capture") or {}
+        kpi = capture.get("kpi") or {}
+        dns = capture.get("dns") or {}
+        tcp = capture.get("tcp") or {}
+        capture_facts.append({
+            "file": meta.get("file"),
+            "window": [meta.get("start_time"), meta.get("end_time")],
+            "duration_sec": meta.get("duration_sec"),
+            "packet_count": meta.get("packet_count"),
+            "verdict": kpi.get("verdict"),
+            "kpi": kpi,
+            "timebase": {
+                "source": (capture.get("timebase") or {}).get("source"),
+                "confidence": (capture.get("timebase") or {}).get("confidence"),
+                "alignment": (capture.get("timebase") or {}).get("alignment"),
+            },
+            "caveats": capture_caveats(capture),
+            "evidence": {
+                "dns_unanswered": (dns.get("unanswered") or [])[:10],
+                "dns_errors": (dns.get("errors") or [])[:10],
+                "tcp_connect_failures": (tcp.get("connect_failures") or [])[:10],
+                "tls_handshake_failures": ((capture.get("tls") or {}).get("handshake_failures") or [])[:10],
+                "longest_silence_gaps": (capture.get("silence_gaps") or [])[:5],
+                "top_flows": (capture.get("top_flows") or [])[:5],
+            },
+        })
+
+    caveats = [caveat for capture in analyzed for caveat in capture_caveats(capture)]
+    misaligned = [
+        capture for capture in analyzed
+        if ((capture.get("timebase") or {}).get("alignment") or {}).get("checked")
+        and not ((capture.get("timebase") or {}).get("alignment") or {}).get("overlaps")
+    ]
+
+    return json.dumps({
+        "status": "OK",
+        "capture_count": len(captures),
+        "analyzed_count": len(analyzed),
+        "tshark_version": data.get("tshark_version"),
+        "captures": capture_facts,
+        "caveats": caveats,
+        "reading_guidance": (
+            "캡처 구간이 로그 구간과 겹치지 않습니다. 패킷 쪽 수치는 '이상 없음'이 아니라 "
+            "'비교 불가'로 읽고, 시간대(UTC 오프셋)부터 확인해야 합니다."
+            if misaligned else
+            "로그가 선언한 증상과 패킷의 사실을 맞춰 보십시오. 프레임워크가 stall을 선언했는데 "
+            "패킷이 정상적으로 오갔다면 원인은 망보다 위쪽에 있습니다."
+        ),
+    }, ensure_ascii=False)
+
 
 def get_recent_data_usage_analytics(base_name: str, hours: int = 3, result_dir: str = "./result") -> str:
     """최근 N시간 동안의 앱별 데이터 사용량을 합산하여 상위 앱을 추출합니다."""

@@ -232,6 +232,43 @@ def test_artifact_backed_charts_read_the_analysis_result(client, tmp_path, monke
     assert body["series"]["milestones"]["voice_ready_ms"] == 4200
 
 
+def test_the_packet_capture_chart_reads_its_own_artifact(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "result").mkdir()
+    (tmp_path / "result" / "radio_pcap.json").write_text(
+        json.dumps({
+            "status": "OK",
+            "tshark_version": "TShark 3.6.2",
+            "captures": [{
+                "status": "OK",
+                "capture": {"file": "tcpdump.pcap", "packet_count": 12, "duration_sec": 30.0},
+                "timebase": {"confidence": "high", "alignment": {"checked": True, "overlaps": True}},
+                "kpi": {"tcp_reset_count": 4, "verdict": "RST 가 반복됩니다."},
+                "throughput_timeline": {
+                    "bucket_sec": 10,
+                    "buckets": [{"time": "09-02 08:00:00.000", "packets": 12, "bytes": 1250}],
+                },
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    body = client.get("/charts/pcap", params={"source_file": "radio_payload.json"}).json()
+
+    assert body["series"]["status"] == "ok"
+    assert body["series"]["captures"][0]["verdict"] == "RST 가 반복됩니다."
+    assert body["series"]["timeline"][0]["kbps"] == 1.0
+    assert {row["label"]: row["count"] for row in body["series"]["anomalies"]}["TCP RST"] == 4
+
+
+def test_a_log_uploaded_without_a_capture_has_no_packet_section(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    body = client.get("/charts/pcap", params={"source_file": "radio_payload.json"}).json()
+
+    assert body["series"]["status"] == "no_data"
+
+
 def test_a_missing_artifact_reads_as_no_data_rather_than_an_error(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

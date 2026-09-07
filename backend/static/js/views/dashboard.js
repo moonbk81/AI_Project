@@ -121,6 +121,9 @@ function kpiBand(kpi) {
   return wrap;
 }
 
+// 처리량 차트에 음영으로 칠할 조용한 구간의 개수.
+const GAP_BANDS = 5;
+
 const CARDS = [
   {
     chart: "service-state",
@@ -897,6 +900,125 @@ const CARDS = [
           gridcolor: "rgba(0,0,0,0)",
         }),
       }), frameTable(series.table, ["month", "rank", "app_name", "total_mb", "share_pct"]));
+    },
+  },
+  {
+    chart: "pcap",
+    title: "패킷 캡처 처리량",
+    sub: "선로에 실제로 흐른 트래픽과 조용한 구간",
+    prompt: "패킷 처리량과 조용한 구간을 로그가 선언한 증상(data stall, validation fail)과 맞춰 보고, 원인이 망인지 그 위쪽인지 정리해줘.",
+    render(series, panel) {
+      // 시간대를 추정했거나 캡처가 로그 구간을 벗어났다면, 아래 숫자는 "이상
+      // 없음" 이 아니라 "비교 불가" 다. 차트보다 먼저 읽혀야 한다.
+      for (const warning of series.warnings || []) {
+        panel.prepend(el("p", "table-note", warning));
+      }
+
+      const captures = series.captures;
+      const packets = captures.reduce((sum, row) => sum + (row.packet_count || 0), 0);
+      const seconds = Math.max(...captures.map((row) => row.duration_sec || 0), 0);
+      const longest = Math.max(...captures.map((row) => row.longest_silence_sec || 0), 0);
+
+      // 판정은 파서가 패킷만 보고 낸 1차 소견이다. 카드의 결론이 아니라 출발점.
+      for (const row of captures) {
+        if (row.verdict) panel.prepend(el("p", "table-note", `${row.file}: ${row.verdict}`));
+      }
+      panel.prepend(tileRow([
+        tile("캡처", fmt.count(series.analyzed_count), "개",
+             series.capture_count > series.analyzed_count
+               ? `분석 실패 ${fmt.count(series.capture_count - series.analyzed_count)}개` : ""),
+        tile("패킷", fmt.count(packets), "개"),
+        tile("캡처 길이", fmtDuration(seconds * 1000)),
+        tile("최장 침묵", fmt.fixed(longest), "초",
+             longest >= 30 ? "30초 이상 무통신" : "", longest >= 30 ? "critical" : ""),
+      ]));
+
+      const rows = series.timeline || [];
+      if (!rows.length) {
+        panel.note("캡처의 시각을 해석할 수 없어 처리량 시계열을 만들지 못했습니다.");
+        return;
+      }
+
+      // 색은 돌려쓰지 않는다. 캡처가 팔레트보다 많으면 같은 색 두 개가 서로
+      // 다른 파일이 되어, 범례를 봐도 어느 선이 어느 캡처인지 알 수 없다.
+      const colors = seriesColors();
+      const perFile = [...groupBy(rows, (row) => row.file).entries()];
+      if (perFile.length > colors.length) {
+        panel.prepend(el("p", "table-note",
+          `캡처 ${fmt.count(perFile.length)}개 중 ${colors.length}개만 그렸습니다. 나머지는 표를 보세요.`));
+      }
+      const traces = perFile.slice(0, colors.length).map(([file, points], index) => (
+        lineTrace(file, points.map((point) => point.time_dt), points.map((point) => point.kbps),
+                  colors[index], {
+          hovertemplate: "<b>%{y:.1f} kbps</b><br>%{x}<extra>" + file + "</extra>",
+        })
+      ));
+
+      // 조용한 구간은 이 카드가 답해야 하는 바로 그 질문("언제 멈췄나")이다.
+      // 다만 서버는 5초 넘는 간격을 다 준다. 버스트가 잦은 캡처에서 그걸 전부
+      // 깔면 차트가 줄무늬가 되어 아무 구간도 가리키지 못한다. 가장 긴 것만
+      // 칠하고 나머지는 표로 보낸다.
+      const shaded = (series.gaps || []).filter((gap) => gap.start_dt && gap.end_dt);
+      if (shaded.length > GAP_BANDS) {
+        panel.prepend(el("p", "table-note",
+          `조용한 구간 ${fmt.count(shaded.length)}건 중 가장 긴 ${GAP_BANDS}건만 음영으로 표시했습니다. 전체는 표에 있습니다.`));
+      }
+      const bands = shaded
+        .slice(0, GAP_BANDS)
+        .map((gap) => ({
+          type: "rect",
+          xref: "x",
+          yref: "paper",
+          x0: gap.start_dt,
+          x1: gap.end_dt,
+          y0: 0,
+          y1: 1,
+          line: { width: 0 },
+          fillcolor: token("--status-warning") + "26",
+          layer: "below",
+        }));
+
+      panel.draw(traces, baseLayout({
+        showlegend: traces.length > 1,
+        margin: { l: 64, r: 24, t: 8, b: 44 },
+        shapes: bands,
+        xaxis: axis({ type: "date" }),
+        yaxis: axis({ title: { text: "kbps", font: { size: 11 } }, rangemode: "tozero" }),
+      }), frameTable(series.gaps, ["file", "start_time", "end_time", "duration_sec"]));
+    },
+  },
+  {
+    chart: "pcap",
+    title: "패킷 이상 징후",
+    sub: "tshark 판정 기준 건수와 그 근거",
+    prompt: "패킷 이상 징후 건수와 근거 이벤트를 보고 이름 해석 / 연결 수립 / 무선 품질 중 어느 단계에서 막혔는지 정리해줘.",
+    render(series, panel) {
+      // 서버는 읽는 순서(이름 해석 -> 연결 수립 -> 링크 품질)로 준다. 가로
+      // 막대는 아래에서 위로 쌓이므로 뒤집어야 그 순서로 읽힌다.
+      const rows = [...(series.anomalies || [])].reverse();
+      const ramp = sequentialRamp();
+      const max = Math.max(...rows.map((row) => row.count), 1);
+      const total = rows.reduce((sum, row) => sum + row.count, 0);
+
+      if (!total) {
+        panel.prepend(el("p", "table-note",
+          "tshark 가 판정한 이상 징후가 없습니다. 로그가 증상을 말하고 있다면 원인은 패킷 아래가 아니라 위쪽입니다."));
+      }
+
+      panel.draw([barTrace("건수", rows.map((row) => row.count), rows.map((row) => row.label),
+                           rows.map((row) => stepColor(row.count, max, ramp)), {
+        orientation: "h",
+        text: rows.map((row) => fmt.count(row.count)),
+        textposition: "outside",
+        textfont: { size: 11 },
+        cliponaxis: false,
+        hovertemplate: "<b>%{x}건</b><extra>%{y}</extra>",
+      })], baseLayout({
+        bargap: 0.4,
+        margin: { l: 152, r: 72, t: 8, b: 44 },
+        xaxis: axis({ title: { text: "건수", font: { size: 11 } }, rangemode: "tozero" }),
+        yaxis: axis({ gridcolor: "rgba(0,0,0,0)" }),
+      }), frameTable(series.events, ["time", "kind", "detail", "file"]));
     },
   },
   {

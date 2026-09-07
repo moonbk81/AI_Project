@@ -498,6 +498,7 @@ _RESULT_ARTIFACTS = {
     "ims_sip",
     "ntn",
     "internet_stall",
+    "pcap",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
 UPLOAD_CHUNK_BYTES = 1024 * 1024

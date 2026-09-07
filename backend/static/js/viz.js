@@ -81,6 +81,12 @@ const EMPTY_TEXT = {
   unparsable_time: "시간 형식을 해석할 수 없어 시계열을 만들지 못했습니다.",
   clean: "Crash / ANR / Binder 이벤트가 감지되지 않았습니다.",
   load_failed: "데이터를 불러오지 못했습니다.",
+  // 패킷 캡처는 실패 이유를 상태로 돌려준다. "데이터 없음" 으로 뭉개면 분석을
+  // 못 한 것이 "패킷상 이상 없음" 으로 읽힌다 -- 이 분석에서 가장 비싼 오독이다.
+  TSHARK_MISSING: "tshark 가 설치돼 있지 않아 패킷 캡처를 분석하지 못했습니다 (sudo apt install -y tshark).",
+  PARSE_FAILED: "패킷 캡처를 읽지 못했습니다. 파일이 손상됐거나 지원하지 않는 형식입니다.",
+  FILE_NOT_FOUND: "패킷 캡처 파일을 찾지 못했습니다.",
+  EMPTY: "캡처에 읽을 수 있는 패킷이 없습니다.",
 };
 
 export const emptyText = (status) => EMPTY_TEXT[status] || `표시할 데이터가 없습니다 (${status}).`;

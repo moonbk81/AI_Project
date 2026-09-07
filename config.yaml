@@ -107,6 +107,7 @@ routing_map:
       - get_data_stall_and_recovery_analytics
       - get_network_oos_analytics
       - get_recent_data_usage_analytics
+      - get_pcap_analytics
     log_types:
       - Internet_Stall_Analysis
       - Network_DNS_Issue
@@ -166,6 +167,16 @@ routing_map:
       - get_recent_data_usage_analytics
     log_types:
       - Data_Usage
+  Packet_Capture:
+    desc: "pcap, pcapng, 패킷 캡처, 패킷 덤프, tcpdump, wireshark, tshark, 패킷상으로 확인, 실제 패킷, 선로에 흐른 패킷, 패킷 유실, 패킷 손실, 재전송, retransmission, RST, reset, SYN, SYN/ACK, 3-way handshake, 핸드셰이크 실패, TLS handshake 실패, ClientHello, ServerHello, zero window, ICMP unreachable, DNS 응답 없음, 처리량, throughput, 캡처 구간, 캡처 시간대"
+    tools:
+      - get_pcap_analytics
+      - get_internet_stall_analytics
+    log_types:
+      - Internet_Stall_Analysis
+      - Network_DNS_Issue
+      - DNS_Query
+      - Data_Stall_Recovery
   Nitz_Time_Analysis:
     desc: "NITZ, nitz, 타임존, timezone, time zone, 시간 변경, 시간 보정, 시간 동기화, 로밍 시간, 시간대, UTC, utc_offset, offset, 핑퐁 현상, ping-pong, pingpong, 시간 정보 수신, NITZ 타임존 수신, 네트워크 시간"
     tools: []
