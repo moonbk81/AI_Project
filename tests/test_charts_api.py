@@ -262,6 +262,33 @@ def test_heavy_frames_are_projected_to_the_columns_the_chart_draws(client, monke
     assert list(timeline[0]) == ["time_dt", "app_name", "total_mb"]
 
 
+def test_monthly_usage_reaches_the_browser_with_readable_months(client, monkeypatch):
+    usage = [
+        {
+            "source_file": "radio.log",
+            "log_type": "Data_Usage",
+            "app_name": app,
+            "total_mb": total_mb,
+            "rat": "LTE",
+            "time": time,
+        }
+        for app, total_mb, time in [
+            ("YouTube", 100.0, "2026-07-02 22:00:00"),
+            ("Chrome", 20.0, "2026-08-01 00:00:00"),
+        ]
+    ]
+    monkeypatch.setattr(backend_main, "_engine", FakeEngine(usage))
+    charts_api.clear_frame_cache()
+
+    series = client.get("/charts/data-usage-monthly", params={"source_file": "radio.log"}).json()["series"]
+
+    assert series["status"] == "ok"
+    assert series["total_mb"] == 120.0
+    assert [month["month"] for month in series["months"]] == ["2026-07", "2026-08"]
+    assert series["top_apps"][0]["app_name"] == "YouTube"
+    assert series["months"][0]["month_dt"].startswith("2026-07-01")
+
+
 def test_the_session_frame_is_reused_across_a_dashboard_of_charts(client, monkeypatch):
     charts_api.clear_frame_cache()
     scans = []

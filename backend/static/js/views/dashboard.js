@@ -10,6 +10,19 @@ import {
 // An empty slot already says "N/A" in the value — repeating it in the note is noise.
 const noteText = (value) => (value && value !== "N/A" ? value : "");
 
+// 월 합계는 쉽게 수천 MB 가 되고, 그때 "45231.2 MB" 는 자릿수를 세게 만든다.
+// 1 GB 를 넘으면 GB 로 적는다. 축과 hover 는 MB 로 통일한다.
+const volume = (mb) =>
+  Number(mb) >= 1024 ? [(Number(mb) / 1024).toFixed(2), "GB"] : [Number(mb || 0).toFixed(1), "MB"];
+const volumeText = (mb) => volume(mb).join(" ");
+
+// 축과 hover 도 막대 라벨과 같은 단위로 그린다. MB 로만 그리면 월 합계 축이
+// "20k" 가 되는데 라벨은 GB 라, 같은 막대를 두 단위로 읽게 된다.
+const volumeScale = (maxMb) =>
+  Number(maxMb) >= 1024
+    ? { unit: "GB", digits: 2, of: (mb) => Number(mb || 0) / 1024 }
+    : { unit: "MB", digits: 1, of: (mb) => Number(mb || 0) };
+
 // 슬롯 상태에 eSIM/pSIM 을 붙인다 — "LOADED (eSIM)". 가입 정보가 없는 슬롯은
 // 종류를 알 수 없으므로 상태만 적는다.
 const simState = (sim) => {
@@ -788,6 +801,102 @@ const CARDS = [
         xaxis: axis({ tickangle: -35, nticks: Math.min(buckets.length, 10) }),
         yaxis: axis({ title: { text: "MB", font: { size: 11 } } }),
       }), frameTable(series.table, ["bucket", "rank", "app_name", "total_mb"]));
+    },
+  },
+  {
+    chart: "data-usage-monthly",
+    title: "월별 데이터 사용량",
+    sub: "로그에 남은 셀룰러 사용량의 월 합계",
+    prompt: "월별 데이터 사용량 합계를 보고 사용량이 튀는 달이 있는지, 그 달의 로밍/테더링/앱 이벤트와 관계가 있는지 정리해줘.",
+    render(series, panel) {
+      const months = series.months;
+      const ramp = sequentialRamp();
+      const max = Math.max(...months.map((m) => m.total_mb), 1);
+      const scale = volumeScale(max);
+      const peak = months.reduce((best, m) => (best && best.total_mb >= m.total_mb ? best : m), null);
+
+      panel.prepend(tileRow([
+        tile("총 사용량", ...volume(series.total_mb)),
+        tile("관측 개월", fmt.count(months.length), "개월"),
+        tile("최다 사용 월", peak ? peak.month : "N/A", "", peak ? volumeText(peak.total_mb) : ""),
+      ]));
+      panel.draw([barTrace("사용량", months.map((m) => m.month), months.map((m) => scale.of(m.total_mb)),
+                           months.map((m) => stepColor(m.total_mb, max, ramp)), {
+        text: months.map((m) => volumeText(m.total_mb)),
+        textposition: "outside",
+        textfont: { size: 11 },
+        cliponaxis: false,
+        customdata: months.map((m) => m.app_count),
+        // 로그가 한두 달치뿐인 경우가 흔하다. 분류 축은 달 하나에 폭을 전부 주니
+        // 간격만 손보면 그 달이 차트 절반을 덮는 덩어리가 된다. 달이 적을 때는
+        // 막대 폭을 직접 줄인다 (폭의 단위는 분류 한 칸).
+        width: months.map(() => Math.min(0.45, 0.18 * months.length)),
+        hovertemplate: `<b>%{y:.${scale.digits}f} ${scale.unit}</b><br>사용 앱 %{customdata}개<extra>%{x}</extra>`,
+      })], baseLayout({
+        margin: { l: 64, r: 24, t: 28, b: 44 },
+        xaxis: axis({ type: "category" }),
+        yaxis: axis({ title: { text: scale.unit, font: { size: 11 } } }),
+      }), table(["월", "합계(MB)", "상위 밖(MB)", "앱 수"],
+                months.map((m) => [m.month, m.total_mb, m.other_mb, m.app_count])));
+    },
+  },
+  {
+    chart: "data-usage-monthly",
+    title: "월별 앱 사용량 Top 7",
+    sub: "각 월에 셀룰러 데이터를 가장 많이 쓴 앱 7개",
+    prompt: "월별 상위 앱 사용량을 보고 특정 앱의 과다 트래픽이나 백그라운드 사용, 달마다 달라진 사용 패턴을 정리해줘.",
+    render(series, panel) {
+      // 서버는 월 오름차순·순위 오름차순으로 주는데, 가로 막대는 아래에서
+      // 위로 쌓인다. 뒤집어야 첫 달 1위가 맨 위에 온다.
+      const rows = [...series.top_apps].reverse();
+      const ramp = sequentialRamp();
+      const max = Math.max(...rows.map((row) => row.total_mb), 1);
+      const scale = volumeScale(max);
+
+      // 달을 축의 상위 묶음(multicategory)으로 두면 월 이름을 일곱 번 반복하지
+      // 않아도 되지만, plotly 는 안쪽 분류의 순서를 달끼리 공유한다. 같은 앱이
+      // 여러 달에 오르는 순간 달마다의 순위가 흐트러지므로 축은 평평하게 둔다.
+      const labels = rows.map((row) => `${row.month} · ${row.app_name}`);
+
+      // 달이 바뀌는 자리에 선을 하나 긋는다. 라벨의 월만으로는 일곱 줄이 어디서
+      // 끊기는지 세어야 한다.
+      const dividers = rows.flatMap((row, index) =>
+        index && rows[index - 1].month !== row.month
+          ? [{
+              type: "line",
+              xref: "paper",
+              x0: 0,
+              x1: 1,
+              yref: "y",
+              y0: index - 0.5,
+              y1: index - 0.5,
+              line: { color: token("--baseline"), width: 1 },
+            }]
+          : []);
+
+      // 달이 늘면 행도 7개씩 늘어난다. 카드의 고정 높이로는 뭉개진다.
+      panel.plotHeight(Math.max(300, rows.length * 26 + 64));
+      panel.draw([barTrace("사용량", rows.map((row) => scale.of(row.total_mb)), labels,
+                           rows.map((row) => stepColor(row.total_mb, max, ramp)), {
+        orientation: "h",
+        text: rows.map((row) => `${volumeText(row.total_mb)} · ${fmt.fixed(row.share_pct)}%`),
+        textposition: "outside",
+        textfont: { size: 11 },
+        cliponaxis: false,
+        customdata: rows.map((row) => row.rank),
+        hovertemplate: `<b>%{x:.${scale.digits}f} ${scale.unit}</b><br>rank %{customdata}<extra>%{y}</extra>`,
+      })], baseLayout({
+        bargap: 0.35,
+        margin: { l: 232, r: 132, t: 8, b: 44 },
+        shapes: dividers,
+        xaxis: axis({ title: { text: scale.unit, font: { size: 11 } } }),
+        yaxis: axis({
+          type: "category",
+          categoryorder: "array",
+          categoryarray: labels,
+          gridcolor: "rgba(0,0,0,0)",
+        }),
+      }), frameTable(series.table, ["month", "rank", "app_name", "total_mb", "share_pct"]));
     },
   },
   {

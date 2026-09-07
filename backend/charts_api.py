@@ -29,6 +29,7 @@ from core.charts import (
     build_emergency_call_overview,
     build_crash_overview,
     build_data_call_summary,
+    build_data_usage_monthly,
     build_data_usage_profile,
     build_data_usage_top_by_time,
     build_dns_error_breakdown,
@@ -91,6 +92,7 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
         build_data_usage_profile,
         project={"timeline": ["time_dt", "app_name", "total_mb"]},
     ),
+    "data-usage-monthly": ChartSpec(build_data_usage_monthly),
     "data-usage-top-time": ChartSpec(
         build_data_usage_top_by_time,
         project={
