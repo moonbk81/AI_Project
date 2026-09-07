@@ -232,6 +232,43 @@ def test_artifact_backed_charts_read_the_analysis_result(client, tmp_path, monke
     assert body["series"]["milestones"]["voice_ready_ms"] == 4200
 
 
+def test_the_packet_capture_chart_reads_its_own_artifact(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "result").mkdir()
+    (tmp_path / "result" / "radio_pcap.json").write_text(
+        json.dumps({
+            "status": "OK",
+            "tshark_version": "TShark 3.6.2",
+            "captures": [{
+                "status": "OK",
+                "capture": {"file": "tcpdump.pcap", "packet_count": 12, "duration_sec": 30.0},
+                "timebase": {"confidence": "high", "alignment": {"checked": True, "overlaps": True}},
+                "kpi": {"tcp_reset_count": 4, "verdict": "RST 가 반복됩니다."},
+                "throughput_timeline": {
+                    "bucket_sec": 10,
+                    "buckets": [{"time": "09-02 08:00:00.000", "packets": 12, "bytes": 1250}],
+                },
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    body = client.get("/charts/pcap", params={"source_file": "radio_payload.json"}).json()
+
+    assert body["series"]["status"] == "ok"
+    assert body["series"]["captures"][0]["verdict"] == "RST 가 반복됩니다."
+    assert body["series"]["timeline"][0]["kbps"] == 1.0
+    assert {row["label"]: row["count"] for row in body["series"]["anomalies"]}["TCP RST"] == 4
+
+
+def test_a_log_uploaded_without_a_capture_has_no_packet_section(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    body = client.get("/charts/pcap", params={"source_file": "radio_payload.json"}).json()
+
+    assert body["series"]["status"] == "no_data"
+
+
 def test_a_missing_artifact_reads_as_no_data_rather_than_an_error(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -260,6 +297,33 @@ def test_heavy_frames_are_projected_to_the_columns_the_chart_draws(client, monke
     timeline = client.get("/charts/data-usage", params={"source_file": "radio.log"}).json()["series"]["timeline"]
 
     assert list(timeline[0]) == ["time_dt", "app_name", "total_mb"]
+
+
+def test_monthly_usage_reaches_the_browser_with_readable_months(client, monkeypatch):
+    usage = [
+        {
+            "source_file": "radio.log",
+            "log_type": "Data_Usage",
+            "app_name": app,
+            "total_mb": total_mb,
+            "rat": "LTE",
+            "time": time,
+        }
+        for app, total_mb, time in [
+            ("YouTube", 100.0, "2026-07-02 22:00:00"),
+            ("Chrome", 20.0, "2026-08-01 00:00:00"),
+        ]
+    ]
+    monkeypatch.setattr(backend_main, "_engine", FakeEngine(usage))
+    charts_api.clear_frame_cache()
+
+    series = client.get("/charts/data-usage-monthly", params={"source_file": "radio.log"}).json()["series"]
+
+    assert series["status"] == "ok"
+    assert series["total_mb"] == 120.0
+    assert [month["month"] for month in series["months"]] == ["2026-07", "2026-08"]
+    assert series["top_apps"][0]["app_name"] == "YouTube"
+    assert series["months"][0]["month_dt"].startswith("2026-07-01")
 
 
 def test_the_session_frame_is_reused_across_a_dashboard_of_charts(client, monkeypatch):

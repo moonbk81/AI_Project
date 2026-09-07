@@ -570,6 +570,7 @@ def build_network_timeline_stats(
 
 _DATA_USAGE_TOP_APPS = 10
 _DATA_USAGE_TOP_APPS_BY_BUCKET = 7
+_DATA_USAGE_TOP_APPS_BY_MONTH = 7
 
 
 @dataclass(frozen=True)
@@ -602,11 +603,74 @@ class DataUsageTopByTime:
     table: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
+@dataclass(frozen=True)
+class DataUsageMonthly:
+    """Cellular volume per calendar month, and each month's biggest apps.
+
+    `status` is `"ok"`, `"unavailable"`, `"no_data"` or `"unparsable_time"`.
+
+    `total_mb` and the `months` totals are the sum of the usage rows that
+    survived parsing — the parser drops the small ones, so this is the
+    recorded volume and not the device's own data counter. A usage bucket is
+    counted in the month its bucket *starts* in, which is how Android's
+    netstats buckets are labelled to begin with.
+    """
+
+    status: str
+    top_n: int = _DATA_USAGE_TOP_APPS_BY_MONTH
+    total_mb: float = 0.0
+    # month, month_dt, total_mb, other_mb, app_count
+    months: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # month, month_dt, app_name, total_mb, rank, share_pct
+    top_apps: pd.DataFrame = field(default_factory=pd.DataFrame)
+    table: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+
 def _usage_frame(df: pd.DataFrame) -> pd.DataFrame:
     du_df = _slice(df, "Data_Usage").copy()
     if not du_df.empty:
         du_df["total_mb"] = pd.to_numeric(du_df["total_mb"], errors="coerce")
     return du_df
+
+
+def _timed_usage(df: pd.DataFrame, *, year: Optional[int] = None) -> Tuple[str, pd.DataFrame]:
+    """The usage rows carrying a parsed `time_dt`, or the status explaining why not.
+
+    Every time-bucketed usage chart needs the same four rejections before it can
+    group anything, so they are answered once here.
+    """
+    if not has_columns(df) or "log_type" not in df.columns:
+        return "unavailable", pd.DataFrame()
+
+    du_df = _usage_frame(df)
+    if du_df.empty:
+        return "no_data", pd.DataFrame()
+    if "time" not in du_df.columns:
+        return "unparsable_time", pd.DataFrame()
+
+    timed = with_parsed_times(du_df, "time", year=year)
+    if timed.empty:
+        return "unparsable_time", pd.DataFrame()
+
+    timed["app_name"] = timed["app_name"].fillna("UNKNOWN").astype(str)
+    return "ok", timed
+
+
+def _ranked_app_totals(timed: pd.DataFrame) -> pd.DataFrame:
+    """Per-bucket app volume, biggest first, with a 1-based rank per bucket.
+
+    `timed` must already carry `bucket_dt` and its `bucket` label. Ties break on
+    the app name so the same log always ranks the same way.
+    """
+    totals = (
+        timed.groupby(["bucket_dt", "bucket", "app_name"], as_index=False)["total_mb"]
+        .sum()
+        .sort_values(["bucket_dt", "total_mb", "app_name"], ascending=[True, False, True])
+    )
+    totals["rank"] = (
+        totals.groupby("bucket_dt")["total_mb"].rank(method="first", ascending=False).astype(int)
+    )
+    return totals
 
 
 def build_data_usage_profile(
@@ -652,29 +716,14 @@ def build_data_usage_top_by_time(
     bucket_minutes: int = 60,
     top_n: int = _DATA_USAGE_TOP_APPS_BY_BUCKET,
 ) -> DataUsageTopByTime:
-    if not has_columns(df) or "log_type" not in df.columns:
-        return DataUsageTopByTime(status="unavailable", bucket_minutes=bucket_minutes, top_n=top_n)
+    status, timed = _timed_usage(df, year=year)
+    if status != "ok":
+        return DataUsageTopByTime(status=status, bucket_minutes=bucket_minutes, top_n=top_n)
 
-    du_df = _usage_frame(df)
-    if du_df.empty:
-        return DataUsageTopByTime(status="no_data", bucket_minutes=bucket_minutes, top_n=top_n)
-    if "time" not in du_df.columns:
-        return DataUsageTopByTime(status="unparsable_time", bucket_minutes=bucket_minutes, top_n=top_n)
-
-    timed = with_parsed_times(du_df, "time", year=year)
-    if timed.empty:
-        return DataUsageTopByTime(status="unparsable_time", bucket_minutes=bucket_minutes, top_n=top_n)
-
-    timed["app_name"] = timed["app_name"].fillna("UNKNOWN").astype(str)
     timed["bucket_dt"] = timed["time_dt"].dt.floor(f"{bucket_minutes}min")
     timed["bucket"] = timed["bucket_dt"].dt.strftime("%m-%d %H:%M")
 
-    totals = (
-        timed.groupby(["bucket_dt", "bucket", "app_name"], as_index=False)["total_mb"]
-        .sum()
-        .sort_values(["bucket_dt", "total_mb", "app_name"], ascending=[True, False, True])
-    )
-    totals["rank"] = totals.groupby("bucket_dt")["total_mb"].rank(method="first", ascending=False).astype(int)
+    totals = _ranked_app_totals(timed)
     top = totals[totals["rank"] <= top_n].copy()
     top = top.sort_values(["bucket_dt", "rank"]).reset_index(drop=True)
 
@@ -685,6 +734,67 @@ def build_data_usage_top_by_time(
         top_n=top_n,
         frame=top[["bucket", "bucket_dt", "app_name", "total_mb", "rank"]],
         table=table,
+    )
+
+
+def build_data_usage_monthly(
+    df: pd.DataFrame,
+    *,
+    year: Optional[int] = None,
+    top_n: int = _DATA_USAGE_TOP_APPS_BY_MONTH,
+) -> DataUsageMonthly:
+    status, timed = _timed_usage(df, year=year)
+    if status != "ok":
+        return DataUsageMonthly(status=status, top_n=top_n)
+
+    timed["bucket_dt"] = timed["time_dt"].dt.to_period("M").dt.to_timestamp()
+    timed["bucket"] = timed["bucket_dt"].dt.strftime("%Y-%m")
+
+    totals = _ranked_app_totals(timed)
+    top = (
+        totals[totals["rank"] <= top_n]
+        .sort_values(["bucket_dt", "rank"])
+        .reset_index(drop=True)
+        .rename(columns={"bucket": "month", "bucket_dt": "month_dt"})
+    )
+
+    months = (
+        totals.groupby(["bucket_dt", "bucket"], as_index=False)
+        .agg(total_mb=("total_mb", "sum"), app_count=("app_name", "nunique"))
+        .sort_values("bucket_dt")
+        .reset_index(drop=True)
+        .rename(columns={"bucket": "month", "bucket_dt": "month_dt"})
+    )
+    # What the ranked apps leave behind. The month chart stacks it as "기타" so
+    # the bar height stays the month total instead of the top-N subtotal.
+    ranked_mb = top.groupby("month_dt")["total_mb"].sum()
+    months["other_mb"] = (
+        (months["total_mb"] - months["month_dt"].map(ranked_mb).fillna(0.0))
+        .clip(lower=0.0)
+        .round(2)
+    )
+    months["total_mb"] = months["total_mb"].round(2)
+
+    top["total_mb"] = top["total_mb"].round(2)
+    # A month whose rows all failed to parse as numbers totals zero; a share of
+    # it is not a number, and the chart would rather read 0 than "inf%".
+    month_total = months.set_index("month_dt")["total_mb"]
+    top["share_pct"] = (
+        top["total_mb"]
+        .div(top["month_dt"].map(month_total))
+        .mul(100)
+        .replace([float("inf"), float("-inf")], 0.0)
+        .round(1)
+        .fillna(0.0)
+    )
+
+    return DataUsageMonthly(
+        status="ok",
+        top_n=top_n,
+        total_mb=round(float(months["total_mb"].sum()), 2),
+        months=months[["month", "month_dt", "total_mb", "other_mb", "app_count"]],
+        top_apps=top[["month", "month_dt", "app_name", "total_mb", "rank", "share_pct"]],
+        table=top[["month", "rank", "app_name", "total_mb", "share_pct"]].copy(),
     )
 
 

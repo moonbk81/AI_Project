@@ -358,6 +358,14 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
+패킷 캡처(`.pcap` / `.pcapng` / `.cap`)를 함께 분석하려면 `tshark`가 필요합니다.
+pip 패키지가 아니라 외부 바이너리라 별도로 설치합니다. 없으면 로그 분석은 그대로
+진행되고, 패킷 항목만 `tshark 가 설치돼 있지 않아…` 상태로 남습니다.
+
+```bash
+sudo apt install -y tshark
+```
+
 임베딩 모델은 실행 환경에 따라 다르게 로드됩니다.
 
 - CUDA/CPU: 프로젝트 루트의 `bge-m3-offline/` 경로를 우선 사용

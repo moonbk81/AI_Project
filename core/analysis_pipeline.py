@@ -13,6 +13,7 @@ import re
 from typing import Callable, Iterable, Optional
 
 from log_orchestrator import LogOrchestrator
+from parsers.pcap_parser import is_pcap_name
 from prepare_rag_payload import RagPayloadBuilder
 
 
@@ -161,15 +162,27 @@ def run_analysis_core(
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs("./payloads", exist_ok=True)
 
-    if len(saved_paths) > 1:
-        if progress_callback:
-            progress_callback(f"{len(saved_paths)}개의 로그 파일을 시간순으로 병합 중...", None)
-        base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0] + "_merged"
+    # 패킷 캡처는 텍스트가 아니다. 로그와 함께 병합하면 바이너리가 로그 한가운데로
+    # 섞여 들어가 뒤쪽 파서가 전부 헛돈다. 여기서 갈라 놓고 따로 돌린다.
+    pcap_paths = [path for path in saved_paths if is_pcap_name(path)]
+    log_paths = [path for path in saved_paths if path not in set(pcap_paths)]
+
+    if not log_paths:
+        # 캡처만 올라온 경우. 로그가 없어도 파이프라인(리포트 -> payload -> 임베딩)은
+        # 그대로 돌아야 해서, 파서들이 읽을 빈 로그를 만들어 준다.
+        base_name = os.path.splitext(os.path.basename(pcap_paths[0]))[0] + "_pcap_only"
         target_log_path = os.path.join(temp_dir, f"{base_name}.txt")
-        merge_log_files(saved_paths, target_log_path)
+        with open(target_log_path, "w", encoding="utf-8"):
+            pass
+    elif len(log_paths) > 1:
+        if progress_callback:
+            progress_callback(f"{len(log_paths)}개의 로그 파일을 시간순으로 병합 중...", None)
+        base_name = os.path.splitext(os.path.basename(log_paths[0]))[0] + "_merged"
+        target_log_path = os.path.join(temp_dir, f"{base_name}.txt")
+        merge_log_files(log_paths, target_log_path)
     else:
-        target_log_path = saved_paths[0]
-        base_name = os.path.splitext(os.path.basename(saved_paths[0]))[0]
+        target_log_path = log_paths[0]
+        base_name = os.path.splitext(os.path.basename(log_paths[0]))[0]
 
     label = re.sub(r"[^A-Za-z0-9._-]", "_", str(owner or "").strip())
     if label:
@@ -181,10 +194,12 @@ def run_analysis_core(
         sliced_path = os.path.join(temp_dir, f"sliced_{base_name}.txt")
         slice_log_by_time(target_log_path, sliced_path, start_t, end_t)
         target_log_path = sliced_path
+        # 슬라이싱은 텍스트 로그에만 걸린다. 캡처는 통째로 분석되므로 pcap 쪽
+        # 집계는 지정한 구간보다 넓을 수 있다 -- 결과의 시각을 보고 판단해야 한다.
 
     if progress_callback:
         progress_callback("통신 스택 로그 교차 분석 진행 중...", None)
-    orchestrator = LogOrchestrator(target_log_path)
+    orchestrator = LogOrchestrator(target_log_path, pcap_paths=pcap_paths)
     report_path = os.path.join(result_dir, f"{base_name}_report.json")
 
     def analysis_progress(message: str, value: int):

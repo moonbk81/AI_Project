@@ -5,6 +5,7 @@ from core.charts import (
     INTERNET_STALL_LAYER_TABS,
     build_active_default_network,
     build_app_block_windows,
+    build_data_usage_monthly,
     build_data_usage_profile,
     build_data_usage_top_by_time,
     build_dns_error_breakdown,
@@ -544,6 +545,75 @@ def test_usage_top_by_time_states():
     assert build_data_usage_top_by_time(pd.DataFrame()).status == "unavailable"
     assert build_data_usage_top_by_time(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
     assert build_data_usage_top_by_time(pd.DataFrame([_usage("YouTube", 1, time="시간 미상")])).status == "unparsable_time"
+
+
+def test_monthly_totals_group_every_bucket_of_the_month():
+    rows = [
+        _usage("YouTube", 100, time="2026-07-02 22:00:00"),
+        _usage("YouTube", "50", time="2026-07-30 01:00:00"),  # Chroma hands numbers back as strings
+        _usage("Chrome", 30, time="2026-07-15 10:00:00"),
+        _usage("Chrome", 20, time="2026-08-01 00:00:00"),
+    ]
+
+    series = build_data_usage_monthly(pd.DataFrame(rows))
+
+    assert series.status == "ok"
+    assert series.total_mb == 200.0
+    assert series.months.to_dict("records") == [
+        {
+            "month": "2026-07",
+            "month_dt": pd.Timestamp("2026-07-01"),
+            "total_mb": 180.0,
+            "other_mb": 0.0,
+            "app_count": 2,
+        },
+        {
+            "month": "2026-08",
+            "month_dt": pd.Timestamp("2026-08-01"),
+            "total_mb": 20.0,
+            "other_mb": 0.0,
+            "app_count": 1,
+        },
+    ]
+    assert series.top_apps[series.top_apps["month"] == "2026-07"][
+        ["app_name", "total_mb", "rank", "share_pct"]
+    ].to_dict("records") == [
+        {"app_name": "YouTube", "total_mb": 150.0, "rank": 1, "share_pct": 83.3},
+        {"app_name": "Chrome", "total_mb": 30.0, "rank": 2, "share_pct": 16.7},
+    ]
+
+
+def test_monthly_keeps_seven_apps_and_banks_the_rest_as_other():
+    rows = [_usage(f"app{index:02d}", index, time=f"2026-07-0{index % 9 + 1} 10:00:00") for index in range(1, 11)]
+
+    series = build_data_usage_monthly(pd.DataFrame(rows))
+
+    assert series.top_apps["app_name"].tolist() == [f"app{index:02d}" for index in range(10, 3, -1)]
+    # 10 apps summing 55 MB, of which the top seven hold 49.
+    assert series.months.iloc[0]["total_mb"] == 55.0
+    assert series.months.iloc[0]["other_mb"] == 6.0
+    assert series.months.iloc[0]["app_count"] == 10
+
+
+def test_monthly_table_mirrors_the_ranked_apps():
+    series = build_data_usage_monthly(pd.DataFrame([_usage("YouTube", 10, time="2026-07-02 22:00:00")]))
+
+    assert series.table.to_dict("records") == [
+        {"month": "2026-07", "rank": 1, "app_name": "YouTube", "total_mb": 10.0, "share_pct": 100.0}
+    ]
+
+
+def test_monthly_states():
+    assert build_data_usage_monthly(pd.DataFrame()).status == "unavailable"
+    assert build_data_usage_monthly(pd.DataFrame([{"log_type": "DNS_Query"}])).status == "no_data"
+    assert build_data_usage_monthly(pd.DataFrame([_usage("YouTube", 1, time="시간 미상")])).status == "unparsable_time"
+
+
+def test_monthly_shares_are_zero_when_nothing_parsed_as_a_number():
+    series = build_data_usage_monthly(pd.DataFrame([_usage("YouTube", "N/A", time="2026-07-02 22:00:00")]))
+
+    assert series.total_mb == 0.0
+    assert series.top_apps["share_pct"].tolist() == [0.0]
 
 
 # -------------------------------------------------------------- internet stall

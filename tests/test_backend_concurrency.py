@@ -219,8 +219,9 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     (tmp_path / "dumpstate.log").write_text("log body")
 
     class FakeOrchestrator:
-        def __init__(self, path):
+        def __init__(self, path, pcap_paths=None):
             self.path = path
+            self.pcap_paths = pcap_paths or []
 
         def run_batch(self, report_path):
             with open(report_path, "w", encoding="utf-8") as handle:

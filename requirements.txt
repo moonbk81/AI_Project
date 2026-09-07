@@ -6,6 +6,10 @@ python-multipart>=0.0.9
 # PLM 첨부는 ZIP 또는 7z 로 온다 (7z 읽기용, 외부 바이너리 불필요)
 py7zr>=1.0
 
+# pcap 분석은 tshark(Wireshark) 바이너리에 맡긴다 -- pip 패키지가 아니므로
+# `sudo apt install -y tshark` 로 따로 설치한다. 없으면 패킷 항목만 비고
+# 로그 분석은 그대로 진행된다.
+
 # Data Processing & Visualization
 pandas>=2.1.0
 numpy>=1.24.0

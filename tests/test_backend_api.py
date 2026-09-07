@@ -257,13 +257,18 @@ def test_result_json_endpoint_reads_supported_artifact(client, tmp_path):
     result_dir.mkdir()
     artifact_path = result_dir / "radio_report.json"
     artifact_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+    # 패킷 분석도 다른 파서와 같은 규칙으로 떼어 두므로 같은 문으로 열려야 한다.
+    (result_dir / "radio_pcap.json").write_text(json.dumps({"status": "OK"}), encoding="utf-8")
 
     response = client.get("/results/radio/report")
+    pcap_response = client.get("/results/radio/pcap")
     unsupported_response = client.get("/results/radio/unknown")
     missing_response = client.get("/results/radio/datacall")
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+    assert pcap_response.status_code == 200
+    assert pcap_response.json() == {"status": "OK"}
     assert unsupported_response.status_code == 400
     assert missing_response.status_code == 404
 

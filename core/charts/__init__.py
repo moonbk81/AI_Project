@@ -68,6 +68,7 @@ from .network import (
     StallWindow,
     build_active_default_network,
     build_app_block_windows,
+    build_data_usage_monthly,
     build_data_usage_profile,
     build_data_usage_top_by_time,
     build_dns_error_breakdown,
@@ -75,6 +76,11 @@ from .network import (
     build_dns_issue_summary,
     build_internet_stall_report,
     build_network_timeline_stats,
+)
+from .pcap import (
+    ANOMALY_KINDS,
+    PcapOverview,
+    build_pcap_overview,
 )
 from .power import (
     THERMAL_WARNING_C,
@@ -161,6 +167,9 @@ __all__ = [
     "build_binder_proxy_histograms",
     "build_crash_overview",
     "build_ntn_overview",
+    "ANOMALY_KINDS",
+    "PcapOverview",
+    "build_pcap_overview",
     "build_power_thermal_panel",
     "build_process_deaths",
     "build_system_kills",
@@ -186,6 +195,7 @@ __all__ = [
     "AppBlockWindows",
     "build_active_default_network",
     "build_app_block_windows",
+    "build_data_usage_monthly",
     "build_data_usage_profile",
     "build_data_usage_top_by_time",
     "build_dns_error_breakdown",

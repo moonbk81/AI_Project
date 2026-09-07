@@ -24,14 +24,19 @@ from parsers.rilj_parser import RiljParser
 from parsers.system_property_parser import SystemPropertyParser
 from parsers.emergency_call_parser import EmergencyCallParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
+from parsers.pcap_parser import analyze_pcaps
+from parsers.pcap_timebase import log_time_window
 
 ProgressCallback = Optional[Callable[[str, int], None]]
 
 
 class LogOrchestrator:
-    def __init__(self, file_path):
+    def __init__(self, file_path, pcap_paths=None):
         self.file_path = file_path
         self.base_name = os.path.splitext(os.path.basename(file_path))[0]
+        # 같은 결함에 패킷 캡처가 함께 올라온 경우. 텍스트 로그와 나란히 놓고
+        # 봐야 의미가 있어서 여기서 함께 돌린다.
+        self.pcap_paths = list(pcap_paths or [])
 
         self.tel_parser = TelephonyParser(self._get_surrounding_context_logs)
         self.oos_parser = OosParser(self._get_surrounding_context_logs)
@@ -162,6 +167,21 @@ class LogOrchestrator:
             query["suspected_reason"] = issue.get("suspected_reason", query.get("suspected_reason"))
         return dns_queries
 
+    def _save_pcap_report(self, output_dir, analysis):
+        """패킷 분석을 따로 한 벌 더 저장한다.
+
+        통합 리포트 안에도 들어 있지만, 도구와 화면이 통합 리포트 전체를 읽지
+        않고 이것만 열 수 있게 다른 파서들과 같은 규칙(``<base>_pcap.json``)으로
+        떼어 둔다.
+        """
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            path = os.path.join(output_dir, f"{self.base_name}_pcap.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"⚠️ pcap 리포트 저장 실패: {e}")
+
     def run_batch(self, output_path, progress_callback: ProgressCallback = None):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
@@ -261,6 +281,20 @@ class LogOrchestrator:
                             result['binder_context_summary'] = binder_ctx
                     mark_step(futures[future])
 
+            # pcap 은 tshark 라는 별도 프로세스가 읽는다. GIL 을 잡지 않으니 아래
+            # 순차 파서들이 도는 동안 같이 돌려 둔다. NITZ(시간대)를 알아야 패킷
+            # 시각을 로그 시계로 옮길 수 있어서 1단계가 끝난 뒤에 띄운다.
+            pcap_executor = pcap_future = None
+            if self.pcap_paths:
+                report_progress(f"패킷 캡처 {len(self.pcap_paths)}개 분석 시작...", None)
+                pcap_executor = ThreadPoolExecutor(max_workers=1)
+                pcap_future = pcap_executor.submit(
+                    analyze_pcaps,
+                    self.pcap_paths,
+                    dict(result),
+                    log_time_window(self._time_index.keys()),
+                )
+
             # ========== 2단계: full lines 필요한 순차 파서들 ==========
             result['call_sessions'] = self.tel_parser.analyze(lines)
             self._mark_emergency_calls(result['call_sessions'], result.get('emergency_calls'))
@@ -295,6 +329,20 @@ class LogOrchestrator:
                 report_data=result)
             mark_step("internet_stall")
 
+            if pcap_future is not None:
+                try:
+                    if pcap_result := pcap_future.result():
+                        result['pcap_analysis'] = pcap_result
+                except Exception as e:
+                    # 캡처 하나 때문에 로그 분석 전체를 버리지 않는다. 대신 왜
+                    # 비었는지를 리포트에 남긴다 -- 안 그러면 "패킷상 이상 없음"
+                    # 으로 잘못 읽힌다.
+                    print(f"⚠️ pcap 분석 오류: {e}")
+                    result['pcap_analysis'] = {"status": "FAILED", "message": str(e)}
+                finally:
+                    pcap_executor.shutdown()
+                mark_step("pcap")
+
             # ========== 4단계: UI 리포트 생성 (병렬) ==========
             with ThreadPoolExecutor(max_workers=4) as executor:
                 executor.submit(self.ntn_processor.save_ui_report, "./result", self.base_name)
@@ -302,6 +350,8 @@ class LogOrchestrator:
                 executor.submit(self.datacall_parser.save_ui_report, "./result", self.base_name)
                 executor.submit(self.ntn_processor.build_and_save_payloads, "./payloads")
                 executor.submit(self.internet_stall_parser.save_ui_report, "./result", self.base_name, result['internet_stall'])
+                if 'pcap_analysis' in result:
+                    executor.submit(self._save_pcap_report, "./result", result['pcap_analysis'])
                 # 모든 작업 완료 대기
             mark_step("ui_report")
 
