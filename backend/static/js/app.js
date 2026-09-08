@@ -10,6 +10,7 @@ import { renderKnowledge } from "./views/knowledge.js";
 import { renderPlm } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
 import { defectCacheKey } from "./views/plm_data.js";
+import { forgetChat, forgetMissingChats } from "./chats.js";
 
 const VIEWS = [
   { id: "dashboard", label: "대시보드", render: renderDashboard, needsFile: true },
@@ -264,7 +265,12 @@ function rerender() {
       */
     async filesChanged({ select, redraw = false } = {}) {
       await loadFiles();
-      if (select && state.files.includes(select)) state.sourceFile = select;
+      if (select && state.files.includes(select)) {
+        // `select` 는 방금 분석이 끝난 파일이다. 같은 이름이면 적재분이 통째로
+        // 교체됐으므로, 그 이름에 달려 있던 대화는 이제 없는 로그 이야기다.
+        forgetChat(state.chats, select);
+        state.sourceFile = select;
+      }
       drawFilePicker();
       if (redraw) rerender();
       return state.sourceFile;
@@ -281,8 +287,10 @@ function rerender() {
 }
 
 async function loadFiles() {
-  state.files = await api.files().catch(() => []);
+  const loaded = await api.files().catch(() => null);
+  state.files = loaded || [];
   if (!state.files.includes(state.sourceFile)) state.sourceFile = state.files[0] || null;
+  forgetMissingChats(state.chats, loaded);
 }
 
 async function boot() {
