@@ -188,6 +188,8 @@ export async function renderChat(mount, sourceFile, ctx) {
   wrap.append(log);
 
   // The conversation lives in the shell, so switching views does not lose it.
+  // 그 사본 뒤에는 서버의 기록이 있다. 새로 열었거나 다른 PC 에서 열었으면
+  // 여기서 처음 붙는다 -- 붙기 전에 한 번 그려 두어야 화면이 비어 보이지 않는다.
   const turns = ctx.chat;
   const redraw = () => {
     log.replaceChildren();
@@ -261,6 +263,9 @@ export async function renderChat(mount, sourceFile, ctx) {
       delete turn.inflight;
       setBusy(false);
       redraw();
+      // 답이 나온 뒤에 남긴다. 실패한 답도 남는다 -- 무엇을 물어봤는지가 기록의
+      // 절반이고, 답이 안 온 것도 그 로그에 대해 알아 둘 일이다.
+      ctx.saveChat?.();
     }
   };
 
@@ -291,6 +296,10 @@ export async function renderChat(mount, sourceFile, ctx) {
   wrap.append(quick, form);
   redraw();
   input.focus?.();
+
+  // 서버에 남아 있던 대화를 붙인다. 그린 뒤에 부르므로 입력칸과 넘겨받은 질문이
+  // 이 요청을 기다리지 않는다 -- 기록은 도착하는 대로 위에 얹힌다.
+  ctx.restoreChat?.().then(redraw).catch(() => {});
 
   // 다른 탭에 다녀온 사이에 답이 오고 있었다면, 그 요청이 끝나는 대로 이 화면을
   // 갱신한다. 답 자체는 대화에 그대로 남으므로 다시 물을 필요는 없다.

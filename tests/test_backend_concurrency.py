@@ -320,6 +320,52 @@ def test_two_defects_carrying_the_same_log_name_do_not_overwrite_each_other(monk
     assert len({result.current_file for result in made}) == 2
 
 
+def test_re_analysing_a_log_voids_the_conversation_saved_beside_it(monkeypatch, tmp_path):
+    """적재분이 교체되면 그 로그를 두고 나눈 대화도 남을 이유가 없다."""
+    import core.analysis_pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dumpstate.log").write_text("log body")
+    _fake_analysis(monkeypatch, pipeline)
+    engine = SimpleNamespace(
+        ingest_file=lambda path, force=False, uploaded_by="", defect_code="": True
+    )
+
+    first = pipeline.run_analysis_core(
+        ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine,
+        owner="bongki.moon",
+    )
+    chat = os.path.join("./result", f"{first.base_name}_chat.json")
+    with open(chat, "w", encoding="utf-8") as handle:
+        handle.write('{"turns": [{"question": "q", "answer": "a"}]}')
+
+    pipeline.run_analysis_core(
+        ["dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine,
+        owner="bongki.moon",
+    )
+
+    # 남겨 두면 없는 로그를 근거로 이야기가 이어지고, 그것이 다음 질문의
+    # history 로 올라간다.
+    assert not os.path.exists(chat)
+
+
+def test_a_log_without_a_saved_conversation_analyses_the_same(monkeypatch, tmp_path):
+    import core.analysis_pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dumpstate.log").write_text("log body")
+    _fake_analysis(monkeypatch, pipeline)
+
+    result = pipeline.run_analysis_core(
+        ["dumpstate.log"], use_slice=False, start_t="", end_t="",
+        ai_engine=SimpleNamespace(
+            ingest_file=lambda path, force=False, uploaded_by="", defect_code="": True
+        ),
+    )
+
+    assert os.path.basename(result.report_path) == "dumpstate_report.json"
+
+
 # ---------------------------------------------------- 로그인(이름표)과 쓰기
 
 

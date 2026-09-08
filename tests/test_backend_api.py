@@ -273,6 +273,84 @@ def test_result_json_endpoint_reads_supported_artifact(client, tmp_path):
     assert missing_response.status_code == 404
 
 
+# ------------------------------------------------- payload 별 대화 기록
+
+
+def _analyzed(tmp_path, base="radio"):
+    """분석된 로그가 있는 것처럼 리포트를 놓는다. 대화는 그 옆에 붙는다."""
+    result_dir = tmp_path / "result"
+    result_dir.mkdir(exist_ok=True)
+    (result_dir / f"{base}_report.json").write_text("{}", encoding="utf-8")
+    return result_dir
+
+
+def test_a_log_nobody_asked_about_has_an_empty_history(client, tmp_path):
+    _analyzed(tmp_path)
+
+    response = client.get("/chats/radio")
+
+    # 아직 아무것도 묻지 않은 것은 오류가 아니다.
+    assert response.status_code == 200
+    assert response.json() == {"turns": []}
+
+
+def test_a_conversation_survives_the_browser_being_closed(client, tmp_path):
+    _analyzed(tmp_path)
+    turns = [
+        {"question": "왜 끊겼어?", "answer": "RST 가 반복됩니다.", "ids": ["row-1"]},
+        {"question": "그럼 망 문제야?", "answer": "패킷은 정상입니다."},
+    ]
+
+    saved = client.put("/chats/radio", json={"turns": turns})
+    reopened = client.get("/chats/radio")
+
+    assert saved.status_code == 200
+    assert reopened.json()["turns"] == turns
+
+
+def test_only_the_last_turns_are_kept(client, tmp_path):
+    _analyzed(tmp_path)
+    turns = [{"question": f"q{index}", "answer": f"a{index}"} for index in range(80)]
+
+    kept = client.put("/chats/radio", json={"turns": turns}).json()["turns"]
+
+    assert len(kept) == backend_main.CHAT_HISTORY_TURNS
+    # 자르는 쪽은 앞이다. 방금 물어본 것이 남아야 한다.
+    assert kept[-1]["question"] == "q79"
+
+
+def test_a_conversation_needs_a_log_that_was_actually_analyzed(client, tmp_path):
+    _analyzed(tmp_path)
+
+    unknown = client.put("/chats/never_analyzed", json={"turns": []})
+
+    # 아무 이름이나 받으면 ./result 가 남이 부르는 대로 채워진다.
+    assert unknown.status_code == 404
+    assert not list((tmp_path / "result").glob("never_analyzed*"))
+
+
+def test_a_name_cannot_reach_outside_the_result_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _analyzed(tmp_path, base="escaped")
+
+    # `..%2F` 는 HTTP 층에서 이미 걸리지만(경로가 쪼개져 라우트에 닿지 않는다),
+    # 받은 이름을 파일 경로로 쓰는 자리에서 스스로 확인해야 한다.
+    assert backend_main._analyzed_base("../../escaped") == "escaped"
+    assert Path(backend_main._chat_history_path("../../escaped")).resolve() == (
+        tmp_path / "result" / "escaped_chat.json"
+    )
+
+
+def test_a_corrupt_history_file_reads_as_empty_rather_than_failing(client, tmp_path):
+    result_dir = _analyzed(tmp_path)
+    (result_dir / "radio_chat.json").write_text("{ 반쯤 쓰인", encoding="utf-8")
+
+    response = client.get("/chats/radio")
+
+    assert response.status_code == 200
+    assert response.json() == {"turns": []}
+
+
 def test_create_and_list_analyze_job(client, fake_executor):
     response = client.post(
         "/jobs/analyze",
