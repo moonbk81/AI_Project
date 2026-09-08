@@ -305,6 +305,7 @@ td { color: var(--text-primary); max-width: 420px; overflow: hidden; text-overfl
 .fold > summary::before { content: "▸ "; color: var(--text-muted); }
 .fold[open] > summary::before { content: "▾ "; }
 .fold ul { margin: 8px 0 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); }
+.fold > .stack { margin-top: 8px; }
 .fold pre {
   margin: 8px 0 0; padding: 10px 12px; background: var(--plane);
   border: 1px solid var(--border); border-radius: 8px;

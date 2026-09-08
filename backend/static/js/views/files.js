@@ -6,6 +6,47 @@ import { el, fmt, tile, tileRow } from "../viz.js";
 const POLL_INTERVAL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
 
+// 목록이 길어지면 카드가 화면을 넘겨 한눈에 안 들어온다. 지금 볼 것만 펴 두고
+// 나머지는 접는다.
+export const INGESTED_PREVIEW = 5;
+
+/**
+ * 펴 둘 것과 접을 것으로 나눈다.
+ *
+ * `rank` 가 작을수록 앞에 온다. 같은 순위끼리는 이름순이라, 목록이 늘어도 같은
+ * 파일이 같은 자리에 남는다 -- 순서가 흔들리면 접어 둔 보람이 없다.
+ */
+export function splitForDisplay(items, rank, preview = INGESTED_PREVIEW) {
+  const ordered = [...items].sort(
+    (a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)),
+  );
+  return { shown: ordered.slice(0, preview), folded: ordered.slice(preview) };
+}
+
+/**
+ * 작업 목록을 펴 둘 것과 접을 것으로 나눈다.
+ *
+ * 돌고 있는 것은 지금 볼 것이라 전부 편다. 끝난 것은 이력이라 접되, 돌고 있는
+ * 것이 하나도 없으면 마지막 결과 하나는 편다 -- 방금 끝난 분석이 접힌 채로
+ * 있으면 화면이 비어 보인다. 들어온 순서(최신 우선)는 건드리지 않는다.
+ */
+export function splitJobs(jobs) {
+  const running = jobs.filter((job) => !JOB_DONE.has(job.status));
+  const finished = jobs.filter((job) => JOB_DONE.has(job.status));
+  const keep = running.length ? 0 : 1;
+  return { shown: [...running, ...finished.slice(0, keep)], folded: finished.slice(keep) };
+}
+
+/** 접어 둔 나머지. 프로젝트의 다른 화면과 같은 `<details class="fold">` 를 쓴다. */
+function foldRest(label, rows) {
+  const fold = el("details", "fold");
+  fold.append(el("summary", null, label));
+  const rest = el("div", "stack");
+  rest.append(...rows);
+  fold.append(rest);
+  return fold;
+}
+
 /** A card with no plot: title, optional subtitle, then whatever is appended. */
 function cardShell(title, subtitle) {
   const panel = el("section", "card");
@@ -36,6 +77,21 @@ function ingestedCard(files, uploadedBy, activeFile, onPick) {
   filterRow.append(onlyMine, el("span", null, knox ? `내가 올린 것만 (${knox})` : "내가 올린 것만 (로그인 필요)"));
   panel.append(filterRow);
 
+  const fileRow = (file) => {
+    const row = el("div", "row");
+    row.append(el("span", "row-name" + (file === activeFile ? " active" : ""), file));
+    row.append(el("span", "grow"),
+               el("span", "row-meta", uploadedBy[file] ? `올린 사람 ${uploadedBy[file]}` : "올린 사람 미상"));
+
+    const pick = el("button", null, file === activeFile ? "보는 중" : "이 파일 보기");
+    pick.type = "button";
+    pick.disabled = file === activeFile;
+    pick.addEventListener("click", () => onPick(file));
+
+    row.append(pick);
+    return row;
+  };
+
   const draw = () => {
     list.replaceChildren();
     const shown = onlyMine.checked ? files.filter((file) => uploadedBy[file] === knox) : files;
@@ -45,19 +101,16 @@ function ingestedCard(files, uploadedBy, activeFile, onPick) {
       return;
     }
 
-    for (const file of shown) {
-      const row = el("div", "row");
-      row.append(el("span", "row-name" + (file === activeFile ? " active" : ""), file));
-      row.append(el("span", "grow"),
-                 el("span", "row-meta", uploadedBy[file] ? `올린 사람 ${uploadedBy[file]}` : "올린 사람 미상"));
+    // 적재 시각이 메타데이터에 없어 "최근에 올린 순" 을 만들 수 없다. 대신 지금
+    // 찾을 확률이 높은 순서로 놓는다: 보는 중 -> 내가 올린 것 -> 나머지.
+    const { shown: head, folded } = splitForDisplay(
+      shown,
+      (file) => (file === activeFile ? 0 : uploadedBy[file] === knox ? 1 : 2),
+    );
 
-      const pick = el("button", null, file === activeFile ? "보는 중" : "이 파일 보기");
-      pick.type = "button";
-      pick.disabled = file === activeFile;
-      pick.addEventListener("click", () => onPick(file));
-
-      row.append(pick);
-      list.append(row);
+    list.append(...head.map(fileRow));
+    if (folded.length) {
+      list.append(foldRest(`나머지 ${fmt.count(folded.length)}개 보기`, folded.map(fileRow)));
     }
   };
 
@@ -145,15 +198,8 @@ function jobCard() {
 
   const progressValue = (job) => Math.min(100, Math.max(0, Number(job.progress) || 0));
 
-  const draw = (jobs) => {
-    body.replaceChildren();
-    if (!jobs.length) {
-      body.append(el("div", "empty", "실행 중이거나 최근에 끝난 작업이 없습니다."));
-      return;
-    }
-
-    for (const job of jobs) {
-      const row = el("div", "job");
+  const jobRow = (job) => {
+    const row = el("div", "job");
       row.append(el("span", "row-name", job.current_file || job.job_id.slice(0, 8)));
       if (job.owner) row.append(el("span", "row-meta", job.owner));
       row.append(el("span", "row-meta", job.message || job.status));
@@ -174,8 +220,22 @@ function jobCard() {
       bar.append(fill);
       row.append(bar);
 
-      if (job.error) row.append(el("p", "card-note", job.error));
-      body.append(row);
+    if (job.error) row.append(el("p", "card-note", job.error));
+    return row;
+  };
+
+  const draw = (jobs) => {
+    body.replaceChildren();
+    if (!jobs.length) {
+      body.append(el("div", "empty", "실행 중이거나 최근에 끝난 작업이 없습니다."));
+      return;
+    }
+
+    const { shown, folded } = splitJobs(jobs);
+
+    body.append(...shown.map(jobRow));
+    if (folded.length) {
+      body.append(foldRest(`지난 작업 ${fmt.count(folded.length)}개 보기`, folded.map(jobRow)));
     }
   };
 
@@ -231,7 +291,7 @@ export async function renderFiles(mount, sourceFile, ctx) {
 
   const pollJobs = async () => {
     const running = await api.jobs().catch(() => []);
-    jobs.draw(running.slice(0, 5));
+    jobs.draw(running);
 
     for (const job of running) {
       if (JOB_DONE.has(job.status) && !settled.has(job.job_id)) {
