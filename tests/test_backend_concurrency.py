@@ -211,12 +211,12 @@ def test_two_people_uploading_the_same_filename_do_not_overwrite_each_other(monk
     assert seen["owners"] == ["bongki.moon", "other.kim"]
 
 
-def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
-    """같은 파일명을 올린 두 사람의 리포트가 서로 다른 이름을 갖는다."""
-    import core.analysis_pipeline as pipeline
+def _fake_analysis(monkeypatch, pipeline):
+    """파서와 payload 빌더 자리에 빈 껍데기를 놓는다.
 
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "dumpstate.log").write_text("log body")
+    결과 파일의 *이름* 을 보는 테스트들이 쓴다. 이름을 정하는 것은 파이프라인
+    앞머리라, 그 뒤를 실제로 돌릴 이유가 없다.
+    """
 
     class FakeOrchestrator:
         def __init__(self, path, pcap_paths=None):
@@ -241,6 +241,16 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "LogOrchestrator", FakeOrchestrator)
     monkeypatch.setattr(pipeline, "RagPayloadBuilder", FakeBuilder)
 
+
+def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
+    """같은 파일명을 올린 두 사람의 리포트가 서로 다른 이름을 갖는다."""
+    import core.analysis_pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dumpstate.log").write_text("log body")
+
+    _fake_analysis(monkeypatch, pipeline)
+
     engine = SimpleNamespace(
         ingest_file=lambda path, force=False, uploaded_by="", defect_code="": True
     )
@@ -261,8 +271,9 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     )
     assert os.path.basename(alone.report_path) == "dumpstate_report.json"
 
-    # 결함번호는 적재까지 내려가되 파일 이름은 건드리지 않는다. 파일명은 사람
-    # 이름표만 붙는 자리다.
+    # 결함번호는 적재까지 내려가고, 파일 이름에도 붙는다. PLM 첨부 안의 로그는
+    # 결함이 아니라 자기 정체로 이름이 붙어서(`act_dumpstate`) 결함이 달라도
+    # 이름이 겹치는데, 이름표가 사람뿐이면 한 사람이 자기 것끼리 덮어쓴다.
     seen = {}
 
     def capture(path, force=False, uploaded_by="", defect_code=""):
@@ -276,7 +287,37 @@ def test_the_uploader_name_lands_in_the_result_paths(monkeypatch, tmp_path):
     )
 
     assert seen == {"uploaded_by": "bongki.moon", "defect_code": "P260711-LOCAL01"}
-    assert os.path.basename(from_plm.report_path) == "dumpstate__bongki.moon_report.json"
+    assert os.path.basename(from_plm.report_path) == (
+        "dumpstate__P260711-LOCAL01__bongki.moon_report.json"
+    )
+
+
+def test_two_defects_carrying_the_same_log_name_do_not_overwrite_each_other(monkeypatch, tmp_path):
+    """PLM 첨부의 로그 이름은 결함을 구분해 주지 않는다."""
+    import core.analysis_pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "act_dumpstate.log").write_text("log body")
+    _fake_analysis(monkeypatch, pipeline)
+
+    engine = SimpleNamespace(
+        ingest_file=lambda path, force=False, uploaded_by="", defect_code="": True
+    )
+    made = [
+        pipeline.run_analysis_core(
+            ["act_dumpstate.log"], use_slice=False, start_t="", end_t="", ai_engine=engine,
+            owner="bongki.moon", defect_code=code,
+        )
+        for code in ("P260814-02625", "P260907-01420")
+    ]
+
+    # 적재는 같은 이름을 통째로 갈아 넣으므로, 이름이 겹치면 앞 결함의 분석이
+    # 조용히 사라진다. 리포트도 payload 도 서로를 덮지 않아야 한다.
+    assert [os.path.basename(result.report_path) for result in made] == [
+        "act_dumpstate__P260814-02625__bongki.moon_report.json",
+        "act_dumpstate__P260907-01420__bongki.moon_report.json",
+    ]
+    assert len({result.current_file for result in made}) == 2
 
 
 # ---------------------------------------------------- 로그인(이름표)과 쓰기
