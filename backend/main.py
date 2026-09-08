@@ -21,6 +21,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime
+import json
 import logging
 import os
 import re
@@ -55,6 +56,17 @@ class AskResponse(BaseModel):
     # The retrieved rows, already shaped into the blocks a reader checks the
     # answer against, so every UI renders the same references.
     references: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatHistoryResponse(BaseModel):
+    """한 payload 를 두고 나눈 대화.
+
+    턴의 모양은 화면이 정한다(질문·답변·처리 과정·근거·사례용 id). 서버는 그
+    모양을 해석하지 않고 그 payload 이름 아래 보관만 하므로 열린 dict 다 --
+    화면이 필드를 하나 더 담게 될 때 서버를 같이 고쳐야 할 이유가 없다.
+    """
+
+    turns: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class FilesResponse(BaseModel):
@@ -501,6 +513,8 @@ _RESULT_ARTIFACTS = {
     "pcap",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
+# 같은 payload 의 대화를 두 요청이 동시에 저장하면 반쯤 쓰인 파일이 남는다.
+_chat_history_lock = threading.Lock()
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 # 계정 체계를 새로 만들지 않는다. 관리자를 알아보는 단서는 이미 있는 두 가지다:
@@ -1185,10 +1199,72 @@ def result_json(base_name: str, artifact: str):
     path = os.path.join("./result", f"{safe_base}_{artifact}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Result artifact not found: {artifact}")
-    import json
 
     with open(path, "r", encoding="utf-8") as f:
         return JSONResponse(content=json.load(f))
+
+
+# 대화가 무한정 자라면 파일도 그만큼 자란다. 오래된 턴은 다음 질문의 history
+# 로도 올라가지 않으므로(HISTORY_TURNS), 이만큼만 남긴다.
+CHAT_HISTORY_TURNS = 50
+
+
+def _chat_history_path(base_name: str) -> str:
+    """그 로그의 대화 파일. 다른 산출물과 같은 규칙(``<base>_chat.json``)이다."""
+    return os.path.join("./result", f"{os.path.basename(base_name)}_chat.json")
+
+
+def _analyzed_base(base_name: str) -> str:
+    """분석된 로그의 이름인지 확인하고, 경로가 아닌 이름만 돌려준다.
+
+    이 이름으로 ``./result`` 에 파일을 쓰게 되므로, 아무 이름이나 받으면 그
+    디렉터리가 남이 부르는 대로 채워진다. 리포트가 있는 이름만 통과시킨다.
+    """
+    safe = os.path.basename(str(base_name or ""))
+    if not safe or not os.path.exists(os.path.join("./result", f"{safe}_report.json")):
+        raise HTTPException(status_code=404, detail=f"분석된 로그가 아닙니다: {base_name}")
+    return safe
+
+
+@app.get("/chats/{base_name}", response_model=ChatHistoryResponse)
+def chat_history(base_name: str) -> ChatHistoryResponse:
+    """그 payload 를 두고 나눈 대화. 아직 없으면 빈 목록이다.
+
+    없는 것은 오류가 아니다 -- 아직 아무것도 묻지 않은 로그가 그렇다.
+    """
+    path = _chat_history_path(base_name)
+    if not os.path.exists(path):
+        return ChatHistoryResponse()
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            saved = json.load(handle)
+    except Exception as exc:
+        print(f"[CHAT] 대화 기록을 읽지 못했습니다 ({path}): {exc}", file=sys.stderr)
+        return ChatHistoryResponse()
+
+    turns = saved.get("turns") if isinstance(saved, dict) else saved
+    return ChatHistoryResponse(turns=[turn for turn in (turns or []) if isinstance(turn, dict)])
+
+
+@app.put("/chats/{base_name}", response_model=ChatHistoryResponse)
+def save_chat_history(base_name: str, req: ChatHistoryResponse) -> ChatHistoryResponse:
+    """대화를 그 로그 옆에 둔다. 화면이 보내 준 것을 그대로 덮어쓴다.
+
+    합치지 않고 덮는 이유: 한 payload 는 사실상 한 사람의 것이다(이름에 올린
+    사람과 결함번호가 들어간다). 같은 payload 를 둘이 동시에 보고 있으면 나중
+    저장이 이기는데, 그 경우 각자의 화면에는 자기 대화가 그대로 남아 있으므로
+    다음 저장이 다시 온전한 목록을 올린다.
+    """
+    safe = _analyzed_base(base_name)
+    turns = [turn for turn in (req.turns or []) if isinstance(turn, dict)][-CHAT_HISTORY_TURNS:]
+    path = _chat_history_path(safe)
+
+    os.makedirs("./result", exist_ok=True)
+    with _chat_history_lock:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"turns": turns}, handle, ensure_ascii=False)
+    return ChatHistoryResponse(turns=turns)
 
 
 def _health_kpi_for(current_file: str) -> str:

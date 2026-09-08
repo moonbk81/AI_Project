@@ -1,6 +1,6 @@
 // Shell: which view is on screen, which log it looks at, which theme.
 
-import { api, rememberKnoxId, rememberedKnoxId } from "./api.js";
+import { api, baseName, rememberKnoxId, rememberedKnoxId } from "./api.js";
 import { el } from "./viz.js";
 import { renderDashboard } from "./views/dashboard.js?v=20260828-data-stall-flow";
 import { renderBoot } from "./views/boot.js";
@@ -10,7 +10,7 @@ import { renderKnowledge } from "./views/knowledge.js";
 import { renderPlm } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
 import { defectCacheKey } from "./views/plm_data.js";
-import { forgetChat, forgetMissingChats } from "./chats.js";
+import { forgetChat, forgetMissingChats, restoreTurns, storableTurns } from "./chats.js";
 
 const VIEWS = [
   { id: "dashboard", label: "대시보드", render: renderDashboard, needsFile: true },
@@ -28,8 +28,10 @@ const state = {
   files: [],
   leaveHandlers: [],
   // Conversations, kept per file so switching views (or files and back) does
-  // not throw away what was asked.
+  // not throw away what was asked. 서버의 `<base>_chat.json` 앞에 놓인 사본이라,
+  // 어느 파일을 이미 가져왔는지도 함께 들고 있어야 매 렌더마다 다시 묻지 않는다.
   chats: new Map(),
+  chatsLoaded: new Set(),
   // The PLM defect the chat can register its answer against.
   activeDefect: null,
   // Search results and the selected PLM defect should survive view switches.
@@ -193,6 +195,29 @@ function rerender() {
       if (!state.chats.has(key)) state.chats.set(key, []);
       return state.chats.get(key);
     },
+    /**
+     * 서버에 남아 있는 이 파일의 대화를 붙인다. 채팅 화면이 그리기 전에 부른다.
+     *
+     * 실패해도 다시 시도하지 않는다: 화면은 렌더마다 이걸 부르므로, 서버가
+     * 대답하지 않을 때 재시도하면 매번 기다리게 된다. 대화는 그동안에도 이
+     * 브라우저 안에서는 그대로 이어진다.
+     */
+    async restoreChat() {
+      const key = state.sourceFile || "";
+      if (!key || state.chatsLoaded.has(key)) return;
+      state.chatsLoaded.add(key);
+
+      const turns = await api.chatHistory(baseName(key)).catch(() => null);
+      if (turns?.length) restoreTurns(this.chat, turns);
+    },
+    /** 이 파일의 대화를 서버에 남긴다. 실패는 조용히 넘긴다 -- 화면은 계속 쓴다. */
+    async saveChat() {
+      const key = state.sourceFile || "";
+      if (!key) return;
+      await api.saveChatHistory(baseName(key), storableTurns(this.chat)).catch((error) => {
+        console.error("대화 기록 저장 실패", error);
+      });
+    },
     setSourceFile(file) {
       state.sourceFile = file;
       drawFilePicker();
@@ -268,7 +293,7 @@ function rerender() {
       if (select && state.files.includes(select)) {
         // `select` 는 방금 분석이 끝난 파일이다. 같은 이름이면 적재분이 통째로
         // 교체됐으므로, 그 이름에 달려 있던 대화는 이제 없는 로그 이야기다.
-        forgetChat(state.chats, select);
+        forgetChat(state.chats, state.chatsLoaded, select);
         state.sourceFile = select;
       }
       drawFilePicker();
@@ -290,7 +315,7 @@ async function loadFiles() {
   const loaded = await api.files().catch(() => null);
   state.files = loaded || [];
   if (!state.files.includes(state.sourceFile)) state.sourceFile = state.files[0] || null;
-  forgetMissingChats(state.chats, loaded);
+  forgetMissingChats(state.chats, state.chatsLoaded, loaded);
 }
 
 async function boot() {

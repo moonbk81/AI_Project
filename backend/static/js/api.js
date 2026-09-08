@@ -40,6 +40,19 @@ async function post(path, body) {
   return response.json();
 }
 
+async function put(path, body) {
+  const response = await fetch(path, {
+    method: "PUT",
+    headers: headers({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || `${path} → ${response.status}`);
+  }
+  return response.json();
+}
+
 async function get(path, params) {
   const query = params ? "?" + new URLSearchParams(params).toString() : "";
   const response = await fetch(path + query, { headers: headers() });
@@ -51,6 +64,14 @@ export const api = {
   health: () => get("/health"),
 
   files: () => get("/files").then((body) => body.files || []),
+
+  /** 그 로그를 두고 물어본 것들. 아직 없으면 빈 배열. */
+  chatHistory: (baseName) =>
+    get(`/chats/${encodeURIComponent(baseName)}`).then((body) => body.turns || []),
+
+  /** 그 로그의 대화를 서버에 남긴다. 화면이 가진 목록으로 통째로 덮는다. */
+  saveChatHistory: (baseName, turns) =>
+    put(`/chats/${encodeURIComponent(baseName)}`, { turns }),
 
   /** 파일 목록과 이름표: 올린 사람({이름: knox id})과 PLM 결함번호({이름: 결함번호}). */
   filesWithOwners: () => get("/files").then((body) => ({

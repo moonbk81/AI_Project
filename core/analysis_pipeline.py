@@ -135,6 +135,17 @@ def save_uploaded_files(uploaded_files, temp_dir="./temp_logs"):
     return saved_paths
 
 
+def _discard_chat_history(result_dir: str, base_name: str) -> None:
+    """다시 분석하는 로그의 대화 기록을 지운다. 없으면 할 일이 없다."""
+    path = os.path.join(result_dir, f"{base_name}_chat.json")
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"[ANALYSIS] 대화 기록을 지우지 못했습니다 ({path}): {exc}")
+
+
 def run_analysis_core(
     file_paths: Iterable[str],
     use_slice,
@@ -210,6 +221,10 @@ def run_analysis_core(
         progress_callback("통신 스택 로그 교차 분석 진행 중...", None)
     orchestrator = LogOrchestrator(target_log_path, pcap_paths=pcap_paths)
     report_path = os.path.join(result_dir, f"{base_name}_report.json")
+    # 이 이름의 적재분은 통째로 교체된다. 그 로그를 두고 나눈 대화도 같이 버린다 --
+    # 남겨 두면 없는 로그를 근거로 이야기가 이어지고, 그 대화가 다음 질문의
+    # history 로 올라가 모델까지 물들인다.
+    _discard_chat_history(result_dir, base_name)
 
     def analysis_progress(message: str, value: int):
         if progress_callback:
