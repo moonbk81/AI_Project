@@ -153,6 +153,11 @@ def run_analysis_core(
     파일명만으로 정해지면 한 서버를 여럿이 쓸 때 같은 이름을 올린 사람이 남의
     리포트와 적재분을 조용히 덮어쓴다. 이름표가 붙으면 서로 섞이지 않고, 같은
     사람이 같은 파일을 다시 돌리면 예전처럼 자기 것만 갱신된다.
+
+    ``defect_code`` 도 같은 이유로 이름에 들어간다. PLM 첨부 안의 로그는 결함이
+    아니라 자기 정체로 이름이 붙어서(``act_dumpstate``, ``dumpstate``) 결함이
+    달라도 이름이 겹치는데, 그러면 한 사람이 자기 것끼리 덮어쓴다 -- 어제 본
+    결함의 분석이 오늘 결함을 분석한 자리에 없다.
     """
     saved_paths = list(file_paths or [])
     if not saved_paths:
@@ -184,9 +189,13 @@ def run_analysis_core(
         target_log_path = log_paths[0]
         base_name = os.path.splitext(os.path.basename(log_paths[0]))[0]
 
-    label = re.sub(r"[^A-Za-z0-9._-]", "_", str(owner or "").strip())
-    if label:
-        base_name = f"{base_name}__{label}"
+    # 이름표는 로그 이름 뒤에 붙는다: `<로그>__<결함번호>__<올린 사람>`. 없는
+    # 이름표는 자리도 차지하지 않아, 결함번호 없이 직접 올린 로그는 예전 이름
+    # 그대로다.
+    for part in (defect_code, owner):
+        label = re.sub(r"[^A-Za-z0-9._-]", "_", str(part or "").strip())
+        if label:
+            base_name = f"{base_name}__{label}"
 
     if use_slice:
         if progress_callback:
