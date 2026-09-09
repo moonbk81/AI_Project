@@ -1,4 +1,5 @@
 import io
+import os
 import zipfile
 
 import pytest
@@ -16,6 +17,7 @@ from core.log_archive import (
     join_volumes,
     volume_part,
 )
+from parsers.pcap_parser import is_pcap_name
 
 
 def make_zip(entries):
@@ -276,6 +278,100 @@ def test_files_that_only_look_like_logs_are_offered_when_nothing_is_recognised()
         ("SystemLog.zip/logcat_main.txt", "other"),
         ("SystemLog.zip/sec_log.log", "other"),
     ]
+
+
+# ------------------------------------------------------------- 패킷 캡처
+
+
+PCAP_BYTES = b"\xd4\xc3\xb2\xa1" + b"\x00" * 200
+
+
+def test_a_capture_is_offered_beside_the_logs():
+    attachment = make_zip({
+        "dumpstate.log": b"body",
+        "tcpdump_any_20260902084203.pcap": PCAP_BYTES,
+    })
+
+    found = find_log_candidates(attachment)
+
+    # 아는 로그가 있는 첨부에서도 캡처가 보여야 한다. `maybe` 로 내려가면
+    # 대부분의 첨부에서 화면에 아예 나오지 않는다.
+    assert sorted((c.path, c.kind) for c in found) == [
+        ("dumpstate.log", "log"),
+        ("tcpdump_any_20260902084203.pcap", "capture"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "filename", ["tcpdump_any.pcap", "capture.PCAPNG", "old.cap", "tcpdump_any.pcap.gz"]
+)
+def test_every_capture_extension_tshark_reads_is_offered(filename):
+    found = find_log_candidates(make_zip({filename: PCAP_BYTES}))
+
+    assert [(c.path, c.kind) for c in found] == [(filename, "capture")]
+
+
+def test_an_attachment_with_only_a_capture_is_not_empty_handed():
+    # 캡처만 올라와도 파이프라인은 돈다(빈 로그를 만들어 준다). 고를 수 있어야
+    # 거기까지 갈 수 있다.
+    found = find_log_candidates(make_zip({"tcpdump_any.pcap": PCAP_BYTES, "icon.png": b"x"}))
+
+    assert [(c.path, c.kind) for c in found] == [("tcpdump_any.pcap", "capture")]
+
+
+def test_a_capture_inside_its_own_archive_is_still_found():
+    inner = make_zip({"tcpdump_any_20260902084203.pcap": PCAP_BYTES})
+    attachment = make_zip({"dumpstate.log": b"body", "tcpdump.zip": inner})
+
+    found = find_log_candidates(attachment)
+
+    # 아는 로그를 이미 찾았어도 이름에 힌트가 붙은 압축은 연다. tcpdump 는
+    # 자기 이름의 압축으로 오는 일이 많다.
+    assert sorted((c.path, c.kind) for c in found) == [
+        ("dumpstate.log", "log"),
+        ("tcpdump.zip/tcpdump_any_20260902084203.pcap", "capture"),
+    ]
+
+
+def test_a_capture_in_a_grouped_folder_stays_its_own_choice():
+    attachment = make_zip({
+        "ap_silentlog/SILENT_LOG_1.log": b"a",
+        "ap_silentlog/tcpdump_any.pcap": PCAP_BYTES,
+    })
+
+    found = find_log_candidates(attachment)
+
+    # 묶음은 "이 폴더의 로그를 통째로" 라는 뜻이다. 캡처는 골라서 넣는 것이라
+    # 폴더에 섞지 않는다.
+    assert sorted((c.path, c.group) for c in found) == [
+        ("ap_silentlog/SILENT_LOG_1.log", "ap_silentlog"),
+        ("ap_silentlog/tcpdump_any.pcap", ""),
+    ]
+
+
+def test_the_capture_it_offers_is_the_capture_the_pipeline_splits_out():
+    """고른 캡처가 분석 쪽에서도 캡처로 인정돼야 한다.
+
+    두 판정이 갈라지면 여기서 내준 캡처가 텍스트 로그 한가운데로 병합되고,
+    뒤쪽 파서가 전부 헛돈다. 그 둘이 같은 함수를 쓰는지 여기서 지킨다.
+    """
+    inner = make_zip({"tcpdump_any.pcap": PCAP_BYTES})
+    attachment = make_zip({"dumpstate.log": b"body", "tcpdump.zip": inner})
+
+    found = find_log_candidates(attachment)
+    capture = next(item for item in found if item.kind == "capture")
+    log = next(item for item in found if item.kind == "log")
+
+    assert is_pcap_name(os.path.basename(capture.route[-1]))
+    assert not is_pcap_name(os.path.basename(log.route[-1]))
+    # 꺼낸 바이트가 그대로여야 tshark 가 읽는다.
+    assert read_by_route(attachment, capture.route) == PCAP_BYTES
+
+
+def test_an_empty_capture_is_not_worth_choosing():
+    found = find_log_candidates(make_zip({"dumpstate.log": b"body", "tcpdump_any.pcap": b""}))
+
+    assert [c.path for c in found] == ["dumpstate.log"]
 
 
 def test_a_known_log_wins_over_the_look_alikes():

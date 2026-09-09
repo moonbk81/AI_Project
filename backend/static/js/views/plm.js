@@ -10,6 +10,9 @@ const STATUSES = ["Open", "Resolve", "Close"];
 const SEARCH_METHODS = ["내 문제", "그룹", "사용자 ID", "PLM 번호"];
 const JOB_POLL_MS = 2000;
 const JOB_DONE = new Set(["done", "error"]);
+
+// 후보 목록에 붙는 꼬리표. "log"(아는 로그 이름)는 설명할 것이 없어 빠져 있다.
+const LOG_KIND_LABELS = { capture: "(패킷 캡처)", other: "(추정)" };
 // 어떤 첨부를 분석할 수 있는지는 `/plm/files` 가 `analyzable`·`is_archive` 로
 // 알려 준다. 로그는 압축 안에 오기도 하고 dumpState 처럼 그대로 올라오기도
 // 하는데, 그 이름 규칙이 기기·빌드마다 자라서 여기 복제해 두면 한쪽만 자란다.
@@ -598,13 +601,22 @@ export async function renderPlm(mount, sourceFile, ctx) {
       // 아는 로그 이름이 하나도 없으면 로그처럼 생긴 파일이 대신 온다. 확실한
       // 것과 섞이지 않게 말로 구분해 준다.
       const guessed = found.every((candidate) => candidate.kind === "other");
+      // 캡처는 로그와 함께 골라 한 번에 분석할 수 있다. 다만 로그로 세지 않는다 --
+      // "찾은 로그 4개" 안에 캡처가 섞여 있으면 로그가 하나 더 있는 줄 안다.
+      const captures = found.filter((candidate) => candidate.kind === "capture").length;
+      const logs = found.length - captures;
+      const counted = captures && logs ? `찾은 로그 ${logs}개, 패킷 캡처 ${captures}개`
+        : captures ? `찾은 패킷 캡처 ${captures}개`
+        : `찾은 로그 ${found.length}개`;
       logHost.append(el("p", "card-note", guessed
         ? `아는 로그 이름은 없었습니다. 로그일 수 있는 파일 ${found.length}개를 큰 것부터 보여 줍니다.`
-        : `찾은 로그 ${found.length}개. 분석할 것을 고르세요.`));
+        : `${counted}. 분석할 것을 고르세요.`));
 
       const rows = [];
       for (const candidate of singles) {
-        const label = candidate.kind === "other" ? `${candidate.path} (추정)` : candidate.path;
+        const label = LOG_KIND_LABELS[candidate.kind]
+          ? `${candidate.path} ${LOG_KIND_LABELS[candidate.kind]}`
+          : candidate.path;
         rows.push(addRow(`${candidate.file_id}::${candidate.path}`, label,
                          sizeText(candidate.size),
                          [{ file_id: candidate.file_id, route: candidate.route }]));

@@ -17,6 +17,11 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 import zipfile
 
+# 캡처인지 아닌지는 분석 파이프라인이 로그와 캡처를 갈라낼 때 쓰는 그 함수로
+# 판정한다. 여기서 따로 정의하면 두 규칙이 갈라지고, 그때 여기서 "로그" 로 내준
+# 캡처가 텍스트 로그 한가운데로 병합된다 -- 갈라내는 코드가 막으려는 바로 그것.
+from parsers.pcap_parser import is_pcap_name
+
 logger = logging.getLogger(__name__)
 
 # Attachment names that hold a device log. Matched case-insensitively against
@@ -39,7 +44,7 @@ MAX_TOTAL_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 
 # 중첩 압축을 열지 말지 정하는 힌트. 안을 열기 전에 아는 단서는 이름뿐이라,
 # 로그가 들어 있을 만한 이름만 골라 연다.
-LOG_ARCHIVE_HINTS = ("dumpstate", "bugreport", "systemlog", "log")
+LOG_ARCHIVE_HINTS = ("dumpstate", "bugreport", "systemlog", "log", "tcpdump", "pcap")
 
 # 같은 첨부에 폰과 웨어러블 로그가 함께 들어오는 경우가 있다. Galaxy Wearable 이
 # 워치 덤프를 G_MANAGER/gear_dump.zip 으로 넣어 주고, 그 안에 다시
@@ -440,7 +445,8 @@ class LogCandidate(NamedTuple):
     route: tuple
     size: int
     group: str = ""
-    # "log" 는 아는 이름, "other" 는 로그처럼 생겼을 뿐인 파일.
+    # "log" 는 아는 이름, "capture" 는 패킷 캡처, "other" 는 로그처럼 생겼을
+    # 뿐인 파일.
     kind: str = "log"
 
     @property
@@ -470,8 +476,14 @@ def _candidates_here(data: bytes, route: tuple):
         if not base_filename or is_archive_name(base_filename):
             continue
 
+        # 패킷 캡처는 이름 규칙을 모르는 파일이 아니라 분석할 수 있는 것이다.
+        # `maybe` 로 내리면 아는 로그가 하나라도 있는 첨부(대부분)에서는 화면에
+        # 아예 나오지 않는다.
+        capture = is_pcap_name(base_filename)
         folder = grouped_folder_of(entry.name)
-        if folder:
+        if capture:
+            looks_known = True
+        elif folder:
             looks_known = _is_grouped_log(base_filename)
         else:
             looks_known = is_log_file(base_filename)
@@ -488,8 +500,10 @@ def _candidates_here(data: bytes, route: tuple):
         candidate = LogCandidate(
             route=(*route, entry.name),
             size=entry.size,
-            group=f"{prefix}/{folder}" if prefix and folder else folder,
-            kind="log" if looks_known else "other",
+            # 캡처는 폴더로 묶지 않는다. 묶음은 "이 폴더의 로그를 통째로" 라는
+            # 뜻이고, 캡처는 골라서 넣는 것이다.
+            group="" if capture else (f"{prefix}/{folder}" if prefix and folder else folder),
+            kind="capture" if capture else ("log" if looks_known else "other"),
         )
         (known if looks_known else maybe).append(candidate)
 
