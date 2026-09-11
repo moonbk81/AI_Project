@@ -127,6 +127,22 @@ test("진행 상태와 요청 핸들은 저장하지 않는다", () => {
   assert.deepEqual(Object.keys(saved).sort(), ["answer", "ids", "question", "thinking"]);
 });
 
+test("사례로 쓰다 만 초안은 저장하지 않는다", () => {
+  // 대화 기록은 그 로그를 여는 사람이 다 같이 본다. 등록을 마쳤다는 사실은
+  // 남아야 하지만, 내가 쓰다 만 문장이 남의 화면에 들어앉으면 안 된다.
+  const turns = [{
+    question: "왜 끊겼어?",
+    answer: "RST 가 반복됩니다.",
+    filed: true,
+    caseDraft: "쓰다 만 분석 코멘트",
+    caseOpen: true,
+  }];
+
+  const [saved] = storableTurns(turns);
+
+  assert.deepEqual(Object.keys(saved).sort(), ["answer", "filed", "question"]);
+});
+
 test("오래된 턴은 잘라서 보낸다", () => {
   const turns = [...Array(CHAT_HISTORY_TURNS + 10).keys()]
     .map((index) => ({ question: `q${index}`, answer: `a${index}` }));

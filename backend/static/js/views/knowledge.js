@@ -2,8 +2,8 @@
 
 import { api } from "../api.js";
 import { el, field, fmt, panel, tile, tileRow } from "../viz.js";
+import { caseForm } from "./case_form.js";
 
-const SEVERITIES = ["Critical", "Major", "Minor", "Info"];
 const ANY = "전체";
 
 function picker(values) {
@@ -67,67 +67,7 @@ function registerCard(body, retrieval, onSaved) {
     body.append(el("div", "empty", "채팅에서 답변을 하나 받은 뒤에 그 결과를 사례로 등록할 수 있습니다."));
     return;
   }
-
-  const note = el("textarea", "text-input");
-  note.rows = 8;
-  note.placeholder = "예) RIL 에서 Modem Not Responding(MNR) 발생 후 Force CP CRASH. Radio 펌웨어 업데이트 필요.";
-
-  const category = el("select");
-  for (const value of retrieval.categories) category.append(new Option(value, value));
-
-  const severity = el("select");
-  for (const value of SEVERITIES) severity.append(new Option(value, value));
-
-  // The wording decides where the case is filed; the user can override.
-  let categoryTouched = false;
-  category.addEventListener("change", () => (categoryTouched = true));
-  note.addEventListener("change", async () => {
-    if (categoryTouched || !note.value.trim()) return;
-    const { category: recommended } = await api.recommendCategory(note.value, retrieval.categories);
-    if (recommended) category.value = recommended;
-  });
-
-  const save = el("button", "primary", "사례 등록");
-  save.type = "button";
-  const status = el("p", "card-note");
-
-  save.addEventListener("click", async () => {
-    if (!note.value.trim()) {
-      status.textContent = "분석 내용을 입력하세요.";
-      return;
-    }
-    save.disabled = true;
-    status.textContent = "등록 중...";
-    try {
-      const body = await api.saveKnowledge({
-        feedback: note.value,
-        severity: severity.value,
-        category: category.value,
-        ids: retrieval.ids,
-        metas: retrieval.metas,
-      });
-      status.textContent = body.success
-        ? `[${category.value}] 분류에 ${severity.value} 등급으로 등록했습니다.`
-        : "사례 등록에 실패했습니다.";
-      if (body.success) {
-        note.value = "";
-        onSaved();
-      }
-    } catch (error) {
-      status.textContent = String(error.message || error);
-    } finally {
-      save.disabled = false;
-    }
-  });
-
-  body.append(
-    el("p", "card-note", `최근 답변이 참조한 로그 ${retrieval.ids.length}건을 근거로 등록합니다.`),
-    field("분석 내용 및 조치", note),
-    field("분류", category),
-    field("중요도", severity),
-    save,
-    status,
-  );
+  body.append(caseForm(retrieval, { onSaved }));
 }
 
 export async function renderKnowledge(mount, sourceFile, ctx) {
@@ -138,7 +78,7 @@ export async function renderKnowledge(mount, sourceFile, ctx) {
   mount.append(wrap);
 
   const search = panel("사례 조회", "등록된 장애 분석과 조치 내용");
-  const register = panel("사례 등록", "채팅에서 받은 답변을 사례로 남깁니다.");
+  const register = panel("사례 등록", "채팅의 마지막 답변을 사례로 남깁니다. 다른 답변은 채팅에서 바로 등록하세요.");
   grid.append(search.section, register.section);
 
   const draw = async () => {

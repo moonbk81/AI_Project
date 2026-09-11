@@ -3,8 +3,10 @@
 import { api, rememberKnoxId, rememberedKnoxId } from "../api.js";
 import { setMarkdown } from "../markdown.js";
 import { el } from "../viz.js";
+import { caseForm } from "./case_form.js";
 
-// The engine gets the tail of the conversation as context.
+// The engine gets the tail of the conversation as context: the model is told
+// what was already said, so a follow-up ("그 MNR 말인데") lands on the right thing.
 const HISTORY_TURNS = 5;
 
 const QUICK_PROMPTS = [
@@ -121,6 +123,31 @@ function registerBlock(turn, ctx) {
   return fold;
 }
 
+/**
+ * File this answer as an analysis case, on the rows this answer read.
+ *
+ * 사례 탭은 마지막 답변만 집어 온다. 여기서는 대화 중 어느 답변이든 그 자리에서
+ * 남길 수 있고, 답변 본문이 초안으로 들어가 있으니 옮겨 적을 일이 없다.
+ */
+function caseFold(turn) {
+  // `filed` 는 대화와 함께 서버에 남으므로, 화면을 새로 열어도 이미 남긴 답변인 줄 안다.
+  const fold = details("이 답변을 분석 사례로 등록" + (turn.filed ? "  [등록됨]" : ""), turn.caseOpen);
+
+  // 질문을 하나 더 보내면 이 화면은 통째로 다시 그려진다. 쓰다 만 문장과 펼친
+  // 상태를 턴에 얹어 두어야 그 자리로 돌아온다 -- 초안은 화면의 사정이라 대화
+  // 기록에는 실리지 않는다(chats.js).
+  fold.addEventListener("toggle", () => {
+    turn.caseOpen = fold.open;
+  });
+  fold.append(caseForm(turn, {
+    draft: turn.caseDraft ?? turn.answer,
+    onDraft: (value) => {
+      turn.caseDraft = value;
+    },
+  }));
+  return fold;
+}
+
 function assistantBubble(turn, ctx) {
   const wrap = el("div", "msg assistant");
 
@@ -138,6 +165,8 @@ function assistantBubble(turn, ctx) {
 
   wrap.append(setMarkdown(el("div", "msg-body answer"), turn.answer));
   if (turn.answer) wrap.append(registerBlock(turn, ctx));
+  // 근거 로그가 없는 답변 -- 실패한 요청 -- 은 사례로 남길 것이 없다.
+  if (turn.ids?.length) wrap.append(caseFold(turn));
   return wrap;
 }
 
@@ -237,13 +266,16 @@ export async function renderChat(mount, sourceFile, ctx) {
 
   const run = async (turn, question) => {
     try {
+      // 자르는 단위는 턴이다. 폈다 접은 메시지 개수로 자르면 잘린 자리가 답변
+      // 쪽일 수 있고, 그러면 질문 없는 답부터 시작하는 기록이 모델에 간다.
       const history = turns
         .slice(0, -1)
+        .filter((past) => past.answer)
+        .slice(-HISTORY_TURNS)
         .flatMap((past) => [
           { role: "user", content: past.question },
-          { role: "assistant", content: past.answer || "" },
-        ])
-        .slice(-HISTORY_TURNS);
+          { role: "assistant", content: past.answer },
+        ]);
 
       const body = await api.ask(question, sourceFile, history);
       Object.assign(turn, {

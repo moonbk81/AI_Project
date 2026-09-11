@@ -58,7 +58,7 @@ def test_ask_prompt_includes_config_sections(monkeypatch):
     engine = make_engine(monkeypatch)
     captured = {}
 
-    def fake_call_llm(system_prompt, user_query, is_bench=False):
+    def fake_call_llm(system_prompt, user_query, is_bench=False, chat_history=None):
         captured["system_prompt"] = system_prompt
         captured["user_query"] = user_query
         return "answer", "thinking"
@@ -91,7 +91,7 @@ def test_ask_prompt_includes_config_sections(monkeypatch):
 def _capture_prompt(engine):
     captured = {}
 
-    def fake_call_llm(system_prompt, user_query, is_bench=False):
+    def fake_call_llm(system_prompt, user_query, is_bench=False, chat_history=None):
         captured["system_prompt"] = system_prompt
         return "answer", "thinking"
 
@@ -197,7 +197,7 @@ class TestParseToolFact:
 def test_internal_names_are_gone_from_what_ask_returns(monkeypatch):
     """규칙만으로는 새지 않는다는 보장이 없어서 내보내기 직전에 한 번 더 거른다."""
     engine = make_engine(monkeypatch)
-    engine._call_llm = lambda system_prompt, user_query, is_bench=False: (
+    engine._call_llm = lambda system_prompt, user_query, is_bench=False, chat_history=None: (
         "get_ps_ims_call_analytics 결과 `Call_Session` 2건에서 끊김이 확인됩니다. "
         "am_kill 사유는 'Too many Binders sent to SYSTEM' 입니다.",
         "thinking",

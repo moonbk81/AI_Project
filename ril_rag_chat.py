@@ -375,7 +375,11 @@ class RilRagChat:
 
         search_query = user_query
         if len(user_query) < 15 and chat_history:
-            last_msg = next((msg['content'] for msg in reversed(chat_history) if msg['role'] == 'user'), "")
+            last_msg = next(
+                (msg.get('content') for msg in reversed(chat_history)
+                 if isinstance(msg, dict) and msg.get('role') == 'user'),
+                "",
+            )
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
         if self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
@@ -524,7 +528,15 @@ class RilRagChat:
             except Exception as e: print(f"[RAG_DEBUG] failed: {e}")
 
         # 7. LLM 호출 및 결과 반환
-        answer, thinking = self._call_llm(system_prompt=system_prompt, user_query=user_query, is_bench=is_bench)
+        #
+        # 지난 대화를 함께 넘긴다. 검색은 이번 질문으로만 하지만(search_query),
+        # 답은 앞서 무슨 말이 오갔는지 알고 쓰는 것이 맞다.
+        answer, thinking = self._call_llm(
+            system_prompt=system_prompt,
+            user_query=user_query,
+            is_bench=is_bench,
+            chat_history=chat_history,
+        )
         # 프롬프트가 내부 이름으로 지시하니 모델은 그 이름 그대로 답한다. 규칙만으로는
         # 새지 않는다는 보장이 없어서, 내보내기 직전에 한 번 더 사람 말로 바꾼다.
         answer = humanize(answer)
@@ -621,13 +633,14 @@ class RilRagChat:
         return past_knowledge_context
 
     # 💡 [핵심 수정 3] 래퍼 함수 파라미터 분리 동기화
-    def _call_llm(self, system_prompt: str, user_query: str, is_bench=False) -> tuple[str, str]:
+    def _call_llm(self, system_prompt: str, user_query: str, is_bench=False, chat_history=None) -> tuple[str, str]:
         return call_llm(
             system_prompt=system_prompt,
             user_query=user_query,
             model_name=self.llm_model_name,
             model_config_registry=self.model_config_registry,
             is_bench=is_bench,
+            chat_history=chat_history,
         )
 
     def save_knowledge(self, target_ids, feedback, severity="Normal", build_info=None, **kwargs):

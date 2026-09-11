@@ -49,12 +49,16 @@ export function forgetMissingChats(chats, loaded, files) {
  * 상태(`pending`)와 요청 핸들(`inflight`)은 이 화면의 사정이라 빼는데, 특히
  * `inflight` 는 Promise 라서 그대로 두면 빈 객체로 저장돼 다음에 되살릴 때
  * 답을 기다리는 턴처럼 보인다.
+ *
+ * 사례로 쓰다 만 초안(`caseDraft`)과 그 칸을 펴 뒀는지(`caseOpen`)도 같은 부류다.
+ * 이 기록은 그 로그를 여는 사람이 다 같이 보는 것이라, 남의 화면에 내가 쓰다 만
+ * 문장이 들어앉으면 안 된다. 등록을 마쳤다는 `filed` 는 남는다 -- 그건 사실이다.
  */
 export function storableTurns(turns, limit = CHAT_HISTORY_TURNS) {
   return (turns || [])
     .filter((turn) => turn && turn.answer && !turn.pending)
     .slice(-limit)
-    .map(({ pending, autoSend, inflight, ...rest }) => rest);
+    .map(({ pending, autoSend, inflight, caseDraft, caseOpen, ...rest }) => rest);
 }
 
 /**
