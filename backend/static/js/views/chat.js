@@ -5,7 +5,8 @@ import { setMarkdown } from "../markdown.js";
 import { el } from "../viz.js";
 import { caseForm } from "./case_form.js";
 
-// The engine gets the tail of the conversation as context.
+// The engine gets the tail of the conversation as context: the model is told
+// what was already said, so a follow-up ("그 MNR 말인데") lands on the right thing.
 const HISTORY_TURNS = 5;
 
 const QUICK_PROMPTS = [
@@ -265,13 +266,16 @@ export async function renderChat(mount, sourceFile, ctx) {
 
   const run = async (turn, question) => {
     try {
+      // 자르는 단위는 턴이다. 폈다 접은 메시지 개수로 자르면 잘린 자리가 답변
+      // 쪽일 수 있고, 그러면 질문 없는 답부터 시작하는 기록이 모델에 간다.
       const history = turns
         .slice(0, -1)
+        .filter((past) => past.answer)
+        .slice(-HISTORY_TURNS)
         .flatMap((past) => [
           { role: "user", content: past.question },
-          { role: "assistant", content: past.answer || "" },
-        ])
-        .slice(-HISTORY_TURNS);
+          { role: "assistant", content: past.answer },
+        ]);
 
       const body = await api.ask(question, sourceFile, history);
       Object.assign(turn, {
