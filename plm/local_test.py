@@ -95,10 +95,17 @@ SAMPLE_COMMENTS: Dict[str, List[Dict[str, Any]]] = {
     ],
 }
 
-# A minimal log the extraction pipeline can actually pull out of the sample ZIP.
+# Synthetic SIP traffic in the format understood by the real IMS parser.
+# Include retry/failure/recovery evidence so the RAG integration can be exercised.
 _SAMPLE_LOG = b"""04-29 09:40:56.287  1234  5678 D RILJ    : [0123]< RIL_REQUEST_SETUP_DATA_CALL
 04-29 09:40:57.001  1234  5678 D ImsService: registration retry #3
+04-29 09:40:57.010  1234  5678 D reSIProcate: SipReq: REGISTER tid=local-reg-3 cseq=3 REGISTER to(tu) callId=local-ims-registration
+04-29 09:40:58.500  1234  5678 D reSIProcate: SipResp: 408 tid=local-reg-3 cseq=3 REGISTER from(wire) callId=local-ims-registration
 04-29 09:40:58.512  1234  5678 E ImsService: registration failed (timeout)
+04-29 09:41:00.010  1234  5678 D reSIProcate: SipReq: REGISTER tid=local-reg-4 cseq=4 REGISTER to(tu) callId=local-ims-registration
+04-29 09:41:01.500  1234  5678 D reSIProcate: SipResp: 503 tid=local-reg-4 cseq=4 REGISTER from(wire) callId=local-ims-registration
+04-29 09:41:03.010  1234  5678 D reSIProcate: SipReq: REGISTER tid=local-reg-5 cseq=5 REGISTER to(tu) callId=local-ims-registration
+04-29 09:41:03.200  1234  5678 D reSIProcate: SipResp: 200 tid=local-reg-5 cseq=5 REGISTER from(wire) callId=local-ims-registration
 """
 
 

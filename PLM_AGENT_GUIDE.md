@@ -134,6 +134,12 @@ conda run --no-capture-output -n ai python -m plm_agent --config plm_agent.json 
 conda run --no-capture-output -n ai python -m pytest tests/test_plm_agent.py tests/test_plm_log_pipeline.py tests/test_plm_api.py -q
 ```
 
+2026-09-12 로컬 통합 검증: `conda ai`, Ollama `gemma3:12b`, PLM 로컬 테스트
+모드에서 실제 샘플 다운로드·파싱·임베딩·초안 저장, 모의 등록, 재실행 중복 방지,
+첨부 없는 결함 건너뛰기를 확인했습니다. 이는 실행 경로 검증이며 분석 정확도나
+사내 PLM 접속 검증은 아닙니다. IMS 샘플 회귀 테스트는
+`tests/test_plm_local_sample.py`에 있습니다.
+
 실제 백엔드·모델을 포함한 오프라인 확인에는 백엔드를 `PLM_LOCAL_TEST=1`로
 실행하고, 에이전트 설정도 `local_test=true`, `mode=draft`로 맞춥니다.
 이는 샘플 PLM을 쓰지만 로그 분석용 모델과 임베딩 환경은 필요합니다.
