@@ -176,8 +176,9 @@ class RagPayloadBuilder:
             "payloads": rag_payload,
         }
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        payload_dir = os.path.join(base_dir, "payloads")
+        # The analysis pipeline and ingestion resolve artifacts from the working
+        # directory, including when a backend uses an isolated data directory.
+        payload_dir = os.path.abspath("./payloads")
         os.makedirs(payload_dir, exist_ok=True)
         final_output_path = os.path.join(payload_dir, os.path.basename(output_filename))
 

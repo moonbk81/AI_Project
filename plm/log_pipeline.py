@@ -239,6 +239,10 @@ def extract_logs_from_attachments(
                 ids = _attachment_ids(attachment)
                 if ids is None:
                     logger.warning("Skipping file (missing docId/fileId/title): %s", title)
+                    yield LogExtractionEvent(
+                        ATTACHMENT_FAILED, title=title,
+                        error="PLM 첨부의 docId/fileId/title 정보가 비어 있습니다",
+                    )
                     continue
                 doc_id, file_id, title = ids
 

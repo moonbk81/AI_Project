@@ -1,0 +1,21 @@
+{
+  "backend_url": "http://127.0.0.1:8080",
+  "knox_id": "",
+  "main_owner_id": "",
+  "division_code": "25",
+  "status": "open",
+  "search_type": "main",
+  "mode": "draft",
+  "local_test": false,
+  "system_code": "AI_ANALYSIS",
+  "state_dir": "agent_state",
+  "request_timeout_seconds": 900,
+  "job_timeout_seconds": 7200,
+  "poll_seconds": 5,
+  "schedule": {
+    "enabled": false,
+    "timezone": "Asia/Seoul",
+    "weekdays": [0, 1, 2, 3, 4],
+    "time": "09:00"
+  }
+}

@@ -6,6 +6,11 @@ Android RIL(Radio Interface Layer), Telephony, 시스템 로그를 파싱하고 
 
 ## 주요 기능
 
+- **독립 실행형 PLM 예약 에이전트**
+  - ChatGPT/브라우저 없이 별도 Python 프로세스에서 PLM 검색 → 첨부 분석 → RAG 질의 → 코멘트 초안/자동 등록을 실행합니다.
+  - 예약 시간·검색 대상 설정, SQLite 이력, 중복 방지, 초안 검토를 지원합니다.
+  - 실행 안내: [PLM_AGENT_GUIDE.md](PLM_AGENT_GUIDE.md), 진입점: `plm_agent.py`
+
 - **통합 로그 분석 파이프라인**
   - 다중 로그 업로드, 시간순 병합, 분석 리포트 생성, RAG payload 생성, ChromaDB 적재를 FastAPI backend job으로 실행합니다.
   - 진입점: `backend/main.py`, `core/analysis_pipeline.py`, `log_orchestrator.py`, `prepare_rag_payload.py`

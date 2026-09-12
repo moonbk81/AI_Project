@@ -1019,6 +1019,7 @@ def _run_plm_attachment_job(
         os.makedirs(upload_dir, exist_ok=True)
 
         file_paths: List[str] = []
+        skipped: List[str] = []
         for event in log_pipeline.extract_logs_from_attachments(files, download):
             if event.kind == log_pipeline.DOWNLOADING:
                 _set_job(
@@ -1029,11 +1030,24 @@ def _run_plm_attachment_job(
             elif event.kind == log_pipeline.EXTRACTING:
                 _set_job(job_id, message=f"{event.title} 에서 LOG 파일 추출 중...")
             elif event.kind == log_pipeline.LOG_READY:
-                path = os.path.join(upload_dir, os.path.basename(event.filename))
+                # Different archives may contain identically named dumpstates.
+                name = os.path.basename(event.filename)
+                path = os.path.join(upload_dir, name)
+                suffix = 1
+                while path in file_paths:
+                    path = os.path.join(upload_dir, f"{suffix:04d}_{name}")
+                    suffix += 1
                 with open(path, "wb") as handle:
                     handle.write(event.content)
                 file_paths.append(path)
                 _set_job(job_id, message=f"{event.filename} 추출 완료")
+            elif event.kind in (
+                log_pipeline.DOWNLOAD_FAILED, log_pipeline.DOWNLOAD_EMPTY,
+                log_pipeline.ATTACHMENT_FAILED, log_pipeline.NO_LOGS_MATCHED,
+            ):
+                skipped.append(f"{event.title}: {event.error or event.kind}")
+
+        _set_job(job_id, skipped_logs=skipped)
 
         if not file_paths:
             _set_job(

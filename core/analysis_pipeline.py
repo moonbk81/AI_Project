@@ -271,6 +271,8 @@ def run_analysis_core(
         progress_callback("RAG payload 생성 완료. Vector DB 임베딩 시작...", 65)
 
     payload_path = os.path.join("./payloads", payload_name)
+    if not os.path.isfile(payload_path):
+        raise FileNotFoundError(f"Payload 파일 누락: {payload_path}")
 
     def embedding_progress(done: int, total: int):
         if not progress_callback or total <= 0:
@@ -285,7 +287,11 @@ def run_analysis_core(
         accepts_progress = False
     if accepts_progress:
         ingest_kwargs["progress_callback"] = embedding_progress
-    ai_engine.ingest_file(payload_path, **ingest_kwargs)
+    ingest_result = ai_engine.ingest_file(payload_path, **ingest_kwargs)
+    if isinstance(ingest_result, dict) and (
+        ingest_result.get("errors", 0) or not ingest_result.get("added", 0)
+    ):
+        raise RuntimeError(f"Vector DB 적재 실패 또는 분석 근거 없음: {ingest_result}")
     if progress_callback:
         progress_callback("", 100)
 

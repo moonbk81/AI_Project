@@ -211,6 +211,27 @@ def test_two_people_uploading_the_same_filename_do_not_overwrite_each_other(monk
     assert seen["owners"] == ["bongki.moon", "other.kim"]
 
 
+def test_payload_builder_uses_the_backend_working_directory(monkeypatch, tmp_path):
+    from prepare_rag_payload import RagPayloadBuilder
+
+    monkeypatch.chdir(tmp_path)
+    report = tmp_path / "sample_report.json"
+    report.write_text("{}")
+    RagPayloadBuilder(str(report)).build_payload("isolated_payload.json")
+    assert (tmp_path / "payloads" / "isolated_payload.json").is_file()
+
+
+def test_analysis_rejects_failed_ingestion(monkeypatch, tmp_path):
+    import core.analysis_pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dumpstate.log").write_text("sample")
+    _fake_analysis(monkeypatch, pipeline)
+    engine = SimpleNamespace(ingest_file=lambda *a, **kw: {"added": 0, "errors": 1, "skipped": 0})
+    with pytest.raises(RuntimeError, match="적재 실패"):
+        pipeline.run_analysis_core(["dumpstate.log"], False, "", "", engine)
+
+
 def _fake_analysis(monkeypatch, pipeline):
     """파서와 payload 빌더 자리에 빈 껍데기를 놓는다.
 

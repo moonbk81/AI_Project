@@ -1,6 +1,7 @@
 """PLM endpoints a browser talks to: groups, form-shaped writes, attachment jobs."""
 
 import io
+from pathlib import Path
 import zipfile
 
 import pytest
@@ -159,6 +160,31 @@ def test_only_the_picked_attachments_are_downloaded(monkeypatch, tmp_path):
     backend_main._run_plm_attachment_job(job_id, "25", "D-1", ["F2"])
 
     assert downloaded == ["F2"]
+
+
+def test_automatic_job_preserves_duplicate_names_and_records_failed_attachments(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "plm.service.list_attached_files",
+        lambda **kwargs: {"success": True, "files": [
+            {"title": f"{name}.zip", "docId": "D", "fileId": name}
+            for name in ("first", "second", "broken")
+        ]},
+    )
+
+    def download(**kwargs):
+        if kwargs["file_id"] == "broken":
+            return {"success": False, "message": "download failed"}
+        return {"success": True, "data": make_zip({"dumpstate.log": kwargs["file_id"].encode()})}
+
+    monkeypatch.setattr("plm.service.download_attached_file", download)
+    analyzed = []
+    monkeypatch.setattr(backend_main, "_run_analyze_job", lambda job, paths, *a, **kw: analyzed.extend(paths))
+    job_id = backend_main._new_job("test")
+    backend_main._run_plm_attachment_job(job_id, "25", "D-1")
+    assert len(set(analyzed)) == 2
+    assert {Path(path).read_bytes() for path in analyzed} == {b"first", b"second"}
+    assert "broken.zip" in backend_main._get_job(job_id)["skipped_logs"][0]
 
 
 def test_a_picked_attachment_that_is_gone_lands_on_the_job(monkeypatch, tmp_path):
