@@ -15,7 +15,13 @@ class FakeBackend:
         self.content = "call drop"
         self.local_test = False
         self.job = {"status": "done", "current_file": "dump_P1_payload.json"}
+        self.scan = {"status": "done", "log_candidates": [
+            {"file_id": "F1", "route": ["dumpstate.log"], "path": "dumpstate.log",
+             "size": 100, "group": "", "kind": "log", "recommended": True,
+             "recommendation_score": 0.9}
+        ]}
         self.answer = {"answer": "원인 가설: IMS 오류. 추가 확인 필요.", "ids": ["log-1"], "references": []}
+        self.answers = []
         self.write_error = False
 
     def call(self, route, payload=None):
@@ -32,11 +38,17 @@ class FakeBackend:
             return {"comments": []}
         if route == "/plm/attachments/analyze":
             return {"job_id": "J1"}
+        if route == "/plm/attachments/logs":
+            return {"job_id": "JSCAN"}
+        if route == "/jobs/JSCAN":
+            return dict(self.scan)
         if route == "/jobs/J1":
             return dict(self.job)
         if route == "/plm/analysis-query":
             return {"query": "분석해 주세요"}
         if route == "/ask":
+            if self.answers:
+                return dict(self.answers.pop(0))
             return dict(self.answer)
         if route == "/plm/comment":
             if self.write_error:
@@ -138,6 +150,21 @@ class AgentTests(unittest.TestCase):
         self.config["mode"] = "auto"
         self.assertEqual(self.worker.run(), 1)
         self.assertEqual(self.api.count("/plm/comment"), 0)
+
+    def test_recommendation_expands_to_all_logs_when_evidence_is_empty(self):
+        self.api.scan["log_candidates"].append({
+            "file_id": "F1", "route": ["trace.pcap"], "path": "trace.pcap",
+            "size": 50, "group": "", "kind": "capture", "recommended": False,
+            "recommendation_score": 0.42,
+        })
+        self.api.answers = [
+            {"answer": "근거 없음", "ids": []},
+            {"answer": "패킷 근거를 포함한 원인 가설", "ids": ["packet-1"]},
+        ]
+        entry = self.worker.process("P1")
+        self.assertTrue(entry["expanded"])
+        self.assertEqual(len(entry["selected_logs"]), 2)
+        self.assertEqual(self.api.count("/plm/attachments/analyze"), 2)
 
     def test_llm_error_returned_as_http_success_never_posts(self):
         self.api.answer["answer"] = "LLM 추론 중 에러가 발생했습니다: model unavailable"

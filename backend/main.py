@@ -277,7 +277,18 @@ class PlmLogSelection(BaseModel):
     """사용자가 고른 로그 하나. `route` 는 압축 바깥에서 안으로 가는 멤버 이름들."""
 
     file_id: str = Field(min_length=1)
-    route: List[str] = Field(min_length=1)
+    # Empty means the attachment itself is a plain dumpstate, not a member of
+    # an archive.
+    route: List[str] = Field(default_factory=list)
+
+
+class PlmLogCandidate(PlmLogSelection):
+    """A scanned choice, retained so human selections can train recommendations."""
+
+    path: str = ""
+    size: int = 0
+    group: Any = ""
+    kind: str = "log"
 
 
 class PlmAttachmentAnalyzeRequest(BaseModel):
@@ -288,6 +299,10 @@ class PlmAttachmentAnalyzeRequest(BaseModel):
     file_ids: Optional[List[str]] = None
     # 고른 로그만 꺼내 분석한다. 비우면 첨부 안의 로그를 예전처럼 전부 꺼낸다.
     logs: Optional[List[PlmLogSelection]] = None
+    # Complete list shown to the chooser.  Storing selected and unselected rows
+    # makes a selection rate meaningful; agent rows are audit-only.
+    candidates: Optional[List[PlmLogCandidate]] = None
+    selection_source: str = Field(default="manual", pattern="^(manual|agent)$")
 
 
 class PlmCommentRequest(BaseModel):
@@ -897,7 +912,12 @@ def _run_plm_log_scan_job(
             seen = ", ".join(inside[:8]) if inside else "(목록을 읽지 못했습니다)"
             message = f"분석할 만한 로그 파일을 찾지 못했습니다.{note} 안에 있던 파일: {seen}"
 
-        _set_job(job_id, status="done", progress=100, log_candidates=candidates, message=message)
+        from plm.log_recommendation import recommend_candidates
+        candidates = recommend_candidates(candidates, division_code)
+        _set_job(
+            job_id, status="done", progress=100, log_candidates=candidates,
+            skipped_logs=failures, message=message,
+        )
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="로그 목록 만들기 실패")
 
@@ -1678,6 +1698,20 @@ def plm_attachment_analyze(
     caller = _caller(request)
     job_id = _new_job("PLM 첨부 처리 대기 중", owner=caller)
     if req.logs:
+        if req.candidates:
+            try:
+                from plm.log_recommendation import record_selection
+                record_selection(
+                    [item.model_dump() for item in req.candidates],
+                    [item.model_dump() for item in req.logs],
+                    division_code=req.division_code,
+                    defect_code=req.defect_code,
+                    user_id=caller,
+                    source=req.selection_source,
+                )
+            except Exception:
+                # Telemetry must not prevent the requested analysis.
+                logging.getLogger(__name__).exception("Could not record PLM log selection")
         _executor.submit(
             _run_plm_selected_logs_job, job_id, req.division_code, req.defect_code,
             [item.model_dump() for item in req.logs], caller,

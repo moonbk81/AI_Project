@@ -157,12 +157,14 @@ export const api = {
    * `logs` 를 주면 고른 로그만 꺼내 분석한다(목록에서 고른 경우).
    * `logs` 없이 `fileIds` 만 주면 그 첨부 안의 로그를 전부 꺼낸다.
    */
-  plmAnalyzeAttachments: (divisionCode, defectCode, fileIds, logs) =>
+  plmAnalyzeAttachments: (divisionCode, defectCode, fileIds, logs, candidates = null, selectionSource = "manual") =>
     post("/plm/attachments/analyze", {
       division_code: divisionCode,
       defect_code: defectCode,
       file_ids: fileIds && fileIds.length ? fileIds : null,
       logs: logs && logs.length ? logs : null,
+      candidates: candidates && candidates.length ? candidates : null,
+      selection_source: selectionSource,
     }),
 
   // The comment body is turned into PLM's markup server-side, so the caller

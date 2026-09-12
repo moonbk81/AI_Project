@@ -575,7 +575,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
 
       // id 는 첨부까지 포함해야 한다. 첨부 두 개에 같은 이름의 폴더가 들어 있는
       // 경우가 있다.
-      const addRow = (id, label, meta, items) => {
+      const addRow = (id, label, meta, items, recommended = false) => {
         const row = el("div", "row");
         const box = el("input");
         box.type = "checkbox";
@@ -586,6 +586,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
         });
         row.append(box, el("span", "row-name", label), el("span", "grow"), el("span", "row-meta", meta));
         logHost.append(row);
+        if (recommended) {
+          box.checked = true;
+          box.dispatchEvent(new Event("change"));
+        }
         return box;
       };
 
@@ -617,16 +621,25 @@ export async function renderPlm(mount, sourceFile, ctx) {
         const label = LOG_KIND_LABELS[candidate.kind]
           ? `${candidate.path} ${LOG_KIND_LABELS[candidate.kind]}`
           : candidate.path;
+        const score = Math.round(100 * (Number(candidate.recommendation_score) || 0));
+        const meta = candidate.recommended
+          ? `${sizeText(candidate.size)} · 추천 ${score}%`
+          : sizeText(candidate.size);
         rows.push(addRow(`${candidate.file_id}::${candidate.path}`, label,
-                         sizeText(candidate.size),
-                         [{ file_id: candidate.file_id, route: candidate.route }]));
+                         meta,
+                         [{ file_id: candidate.file_id, route: candidate.route }],
+                         Boolean(candidate.recommended)));
       }
 
       for (const [id, items] of groups) {
         const folder = items[0].group.split("/").pop();
         const total = items.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
-        rows.push(addRow(id, `${folder} 폴더 (로그 ${items.length}개)`, sizeText(total),
-                         items.map((item) => ({ file_id: item.file_id, route: item.route }))));
+        const recommended = items.some((item) => item.recommended);
+        const score = Math.round(100 * Math.max(...items.map((item) => Number(item.recommendation_score) || 0)));
+        rows.push(addRow(id, `${folder} 폴더 (로그 ${items.length}개)`,
+                         recommended ? `${sizeText(total)} · 추천 ${score}%` : sizeText(total),
+                         items.map((item) => ({ file_id: item.file_id, route: item.route })),
+                         recommended));
 
         const fold = el("details", "fold");
         fold.append(el("summary", null, `${folder} 안의 파일`));
@@ -650,7 +663,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         refreshAnalyze();
         try {
           const { job_id: jobId } = await api.plmAnalyzeAttachments(
-            state.division, defect.defectCode, null, logs,
+            state.division, defect.defectCode, null, logs, found, "manual",
           );
           followJob(jobId, {
             progressHost: analyzeHost,

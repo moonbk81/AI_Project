@@ -292,7 +292,9 @@ def test_a_log_attached_without_an_archive_is_offered_as_one_candidate(monkeypat
 
     job = backend_main._get_job(job_id)
     assert job["status"] == "done"
-    assert job["log_candidates"] == [{
+    assert [{key: item[key] for key in (
+        "file_id", "title", "path", "route", "size", "group", "kind"
+    )} for item in job["log_candidates"]] == [{
         "file_id": "F1",
         "title": "dumpState_1787.log",
         "path": "dumpState_1787.log",
@@ -301,6 +303,7 @@ def test_a_log_attached_without_an_archive_is_offered_as_one_candidate(monkeypat
         "group": False,
         "kind": "log",
     }]
+    assert job["log_candidates"][0]["recommended"] is True
     # 안을 훑을 것이 없으니 목록을 만드는 동안 내려받지도 않는다.
     assert downloads == []
 
@@ -421,6 +424,31 @@ def test_picking_logs_takes_the_selected_route(client, monkeypatch):
     })
 
     assert seen["fn"] == "_run_plm_selected_logs_job"
+
+
+def test_manual_picker_records_the_full_candidate_set(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(backend_main._executor, "submit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "plm.log_recommendation.record_selection",
+        lambda candidates, selected, **kwargs: seen.update(
+            candidates=candidates, selected=selected, **kwargs
+        ),
+    )
+    pool = [
+        {"file_id": "F1", "route": [], "path": "dumpstate.log", "kind": "log"},
+        {"file_id": "F1", "route": ["trace.pcap"], "path": "trace.pcap", "kind": "capture"},
+    ]
+
+    response = client.post("/plm/attachments/analyze", json={
+        "division_code": "25", "defect_code": "D-1",
+        "logs": [{"file_id": "F1", "route": []}],
+        "candidates": pool, "selection_source": "manual",
+    })
+
+    assert response.status_code == 200
+    assert len(seen["candidates"]) == 2 and len(seen["selected"]) == 1
+    assert seen["source"] == "manual" and seen["user_id"] == "test.user"
 
 
 def test_the_endpoint_answers_with_a_job_to_poll(client, monkeypatch):
