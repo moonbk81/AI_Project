@@ -126,6 +126,44 @@ const GAP_BANDS = 5;
 
 const CARDS = [
   {
+    chart: "private-network",
+    title: "Private Network 판정",
+    sub: "활성 기본망 기준 VPN · 기업망 · 5G NPN · 사설 주소 구분",
+    prompt: "활성 기본 NetworkAgent, IP/APN/프록시, VPN과 NPN 근거를 보고 실제 사설망 사용 여부와 오판 가능성을 설명해줘.",
+    render(series, panel) {
+      const tone = series.is_private_network
+        ? "critical"
+        : (series.is_private_address ? "warning" : "good");
+      const yesNo = (value) => (value ? "사용" : "아님");
+      const wrap = el("div", "stack");
+      wrap.append(tileRow([
+        tile("판정", series.classification_label || "판정 불가", "", series.confidence || "", tone),
+        tile("활성 VPN", yesNo(series.is_vpn_active), "", "기본 NetworkAgent 기준",
+             series.is_vpn_active ? "critical" : "good"),
+        tile("기업/5G 사설망", yesNo(series.is_enterprise_private || series.is_5g_private_candidate), "",
+             series.is_5g_private_candidate ? "NPN 후보" : "",
+             (series.is_enterprise_private || series.is_5g_private_candidate) ? "critical" : "good"),
+        tile("사설 IP", yesNo(series.is_private_address), "",
+             (series.private_addresses || []).join(", "), series.is_private_address ? "warning" : "good"),
+      ]));
+      const rows = [
+        { item: "Network ID", value: series.network_id || "N/A" },
+        { item: "Transport / RAT", value: [series.transport, series.radio_technology].filter(Boolean).join(" / ") || "N/A" },
+        { item: "Interface", value: series.interface || "N/A" },
+        { item: "APN / SSID", value: series.apn || series.ssid || "N/A" },
+        { item: "IP", value: (series.addresses || []).join(", ") || "N/A" },
+        { item: "Gateway", value: series.gateway || "N/A" },
+        { item: "Proxy", value: series.proxy || "N/A" },
+        { item: "Validated", value: series.validated ? "true" : "false" },
+      ];
+      wrap.append(frameTable(rows, ["item", "value"]));
+      for (const warning of series.warnings || []) {
+        wrap.append(el("p", "table-note", warning));
+      }
+      panel.content(wrap);
+    },
+  },
+  {
     chart: "service-state",
     title: "망 등록 상태 전이",
     sub: "Voice/Data 등록 상태 변화와 비행모드 ON/OFF",

@@ -82,6 +82,7 @@ from .pcap import (
     PcapOverview,
     build_pcap_overview,
 )
+from .private_network import PrivateNetworkOverview, build_private_network_overview
 from .power import (
     THERMAL_WARNING_C,
     PowerPanelSection,
@@ -170,6 +171,8 @@ __all__ = [
     "ANOMALY_KINDS",
     "PcapOverview",
     "build_pcap_overview",
+    "PrivateNetworkOverview",
+    "build_private_network_overview",
     "build_power_thermal_panel",
     "build_process_deaths",
     "build_system_kills",

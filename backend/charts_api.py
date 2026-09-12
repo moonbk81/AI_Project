@@ -41,6 +41,7 @@ from core.charts import (
     build_ntn_overview,
     build_pcap_overview,
     build_power_thermal_panel,
+    build_private_network_overview,
     build_rf_call_timeline,
     build_rilj_overview,
     build_service_state_series,
@@ -124,6 +125,7 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     "sip-flow": ChartSpec(build_sip_flow, source="ims_sip"),
     "internet-stall": ChartSpec(build_internet_stall_report, source="internet_stall"),
     "pcap": ChartSpec(build_pcap_overview, source="pcap"),
+    "private-network": ChartSpec(build_private_network_overview, source="private_network"),
     "ntn": ChartSpec(build_ntn_overview, source="ntn"),
 }
 

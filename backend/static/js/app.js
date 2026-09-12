@@ -2,7 +2,7 @@
 
 import { api, baseName, rememberKnoxId, rememberedKnoxId } from "./api.js";
 import { el } from "./viz.js";
-import { renderDashboard } from "./views/dashboard.js?v=20260828-data-stall-flow";
+import { renderDashboard } from "./views/dashboard.js?v=20260912-private-network";
 import { renderBoot } from "./views/boot.js";
 import { renderSatellite } from "./views/satellite.js";
 import { renderChat } from "./views/chat.js";

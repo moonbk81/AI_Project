@@ -2,6 +2,56 @@
 
 from rag_builders.common import append_payload, append_callback_payload, source_file_name
 
+
+def build_private_network_payloads(report_data, input_file):
+    """Add one compact, searchable document for the active network verdict."""
+    data = report_data.get("private_network") or {}
+    if not data or data.get("status") != "ok":
+        return []
+
+    source_file = source_file_name(input_file)
+    private_addresses = data.get("private_addresses") or []
+    capabilities = data.get("capabilities") or []
+    warnings = data.get("warnings") or []
+    evidence = data.get("evidence") or []
+    meta = {
+        "source_file": source_file,
+        "log_type": "Private_Network_Status",
+        "time": "dumpstate snapshot",
+        "classification": data.get("classification", "unknown"),
+        "classification_label": data.get("classification_label", "판정 불가"),
+        "private_network_kind": data.get("private_network_kind", "unknown"),
+        "is_private_network": bool(data.get("is_private_network")),
+        "is_private_address": bool(data.get("is_private_address")),
+        "is_vpn_active": bool(data.get("is_vpn_active")),
+        "is_enterprise_private": bool(data.get("is_enterprise_private")),
+        "is_5g_private_candidate": bool(data.get("is_5g_private_candidate")),
+        "confidence": data.get("confidence", "low"),
+        "network_id": data.get("active_default_network_id") or "Unknown",
+        "transport": data.get("transport") or "Unknown",
+        "rat": data.get("radio_technology") or "Unknown",
+        "interface": data.get("interface") or "Unknown",
+        "apn": data.get("apn") or "Unknown",
+        "private_addresses": ", ".join(private_addresses),
+        "proxy": data.get("proxy") or "",
+        "validated": bool(data.get("validated")),
+    }
+    document = (
+        "[dumpstate 사설망 판정] "
+        f"{data.get('summary') or data.get('classification_label', '판정 불가')}\n"
+        f"실제 사설망={meta['is_private_network']}, 사설 IP={meta['is_private_address']}, "
+        f"활성 VPN={meta['is_vpn_active']}, 기업망={meta['is_enterprise_private']}, "
+        f"5G NPN 후보={meta['is_5g_private_candidate']}, 신뢰도={meta['confidence']}\n"
+        f"capabilities={','.join(capabilities) or 'none'}"
+    )
+    if warnings:
+        document += "\n주의: " + " | ".join(str(item) for item in warnings[:3])
+    if evidence:
+        document += "\n근거: " + " | ".join(str(item) for item in evidence[:3])
+    payloads = []
+    append_payload(payloads, document, meta)
+    return payloads
+
 def build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata):
     rag_payload = []
     net_data = report_data.get("network_timeseries") or {}
@@ -271,6 +321,7 @@ def build_dns_health_warnings_payloads(report_data, input_file):
 
 def build_network_payloads(report_data, input_file, build_markdown_doc, extract_metadata):
     rag_payload = []
+    rag_payload.extend(build_private_network_payloads(report_data, input_file))
     rag_payload.extend(build_network_timeseries_payloads(report_data, build_markdown_doc, extract_metadata))
     rag_payload.extend(build_dns_query_payloads(report_data, input_file))
     rag_payload.extend(build_dns_health_warnings_payloads(report_data, input_file))

@@ -23,6 +23,7 @@ from parsers.diagnostic_parser import BinderWarningParser
 from parsers.rilj_parser import RiljParser
 from parsers.system_property_parser import SystemPropertyParser
 from parsers.emergency_call_parser import EmergencyCallParser
+from parsers.private_network_parser import PrivateNetworkParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
 from parsers.pcap_parser import analyze_pcaps
 from parsers.pcap_timebase import log_time_window
@@ -64,6 +65,7 @@ class LogOrchestrator:
         self.sys_prop_parser = SystemPropertyParser()
         self.build_info_parser = BuildInfoParser()
         self.emergency_call_parser = EmergencyCallParser(self._get_surrounding_context_logs)
+        self.private_network_parser = PrivateNetworkParser()
 
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
@@ -223,7 +225,7 @@ class LogOrchestrator:
             report_progress("파서 후보 라인 분류 완료. 병렬 분석 시작...", 15)
 
             result = {}
-            total_steps = 25
+            total_steps = 26
             completed_steps = 0
 
             def mark_step(label):
@@ -267,6 +269,12 @@ class LogOrchestrator:
                     # 볼 줄을 먼저 걸러 낸다.
                     executor.submit(run_parser_with_key, 'emergency_calls', self.emergency_call_parser.analyze, lines): 'emergency',
                     executor.submit(run_parser_with_key, 'build_info', self.build_info_parser.analyze, lines): 'build',
+                    executor.submit(
+                        run_parser_with_key,
+                        'private_network',
+                        self.private_network_parser.analyze,
+                        buckets['private_network'],
+                    ): 'private_network',
                     executor.submit(run_parser_with_key, 'ims_sip_data', self.ims_sip_parser.analyze, buckets['ims_sip']): 'ims_sip',
                 }
 
@@ -350,6 +358,13 @@ class LogOrchestrator:
                 executor.submit(self.datacall_parser.save_ui_report, "./result", self.base_name)
                 executor.submit(self.ntn_processor.build_and_save_payloads, "./payloads")
                 executor.submit(self.internet_stall_parser.save_ui_report, "./result", self.base_name, result['internet_stall'])
+                if 'private_network' in result:
+                    executor.submit(
+                        self.private_network_parser.save_ui_report,
+                        "./result",
+                        self.base_name,
+                        result['private_network'],
+                    )
                 if 'pcap_analysis' in result:
                     executor.submit(self._save_pcap_report, "./result", result['pcap_analysis'])
                 # 모든 작업 완료 대기

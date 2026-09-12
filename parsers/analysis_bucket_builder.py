@@ -21,6 +21,7 @@ class AnalysisBucketBuilder:
         'binder',
         'binder_context',
         'rilj',
+        'private_network',
     ]
 
     CRASH_KEYWORDS = [
@@ -130,6 +131,8 @@ class AnalysisBucketBuilder:
         buckets = self._new_buckets()
         state = {
             'in_proxy_histogram': False,
+            'in_vpn_management': False,
+            'vpn_management_lines': 0,
         }
 
         for idx, line in enumerate(lines):
@@ -140,6 +143,7 @@ class AnalysisBucketBuilder:
             self._collect_native_crash_bucket(buckets, lines, idx, line)
             self._collect_binder_buckets(buckets, lines, idx, line, state)
             self._collect_rilj_bucket(buckets, idx, line)
+            self._collect_private_network_bucket(buckets, idx, line, state)
 
         return self._materialise_and_print(buckets, lines)
 
@@ -257,6 +261,37 @@ class AnalysisBucketBuilder:
     def _collect_rilj_bucket(self, buckets, idx, line):
         if self.RILJ_TAG_REGEX.search(line):
             buckets['rilj'].add(idx)
+
+    def _collect_private_network_bucket(self, buckets, idx, line, state):
+        """Keep only the connectivity facts used by PrivateNetworkParser.
+
+        The main bucket builder is already doing the file-wide pass. Feeding
+        this compact bucket to the parser avoids yet another scan of a large
+        dumpstate and prevents unrelated VPN requests/offers from becoming
+        evidence.
+        """
+        if "Active default network:" in line or "NetworkAgentInfo{network{" in line:
+            buckets['private_network'].add(idx)
+
+        if "DUMP OF SERVICE vpn_management" in line:
+            state['in_vpn_management'] = True
+            state['vpn_management_lines'] = 0
+            buckets['private_network'].add(idx)
+            return
+
+        if not state['in_vpn_management']:
+            return
+
+        if line.strip().startswith("---------") and "dumpsys vpn_management" in line:
+            buckets['private_network'].add(idx)
+            state['in_vpn_management'] = False
+            return
+
+        # Enough for the active package/type/capabilities/mode fields while
+        # bounding a malformed dump that never prints its closing marker.
+        if state['vpn_management_lines'] < 80:
+            buckets['private_network'].add(idx)
+            state['vpn_management_lines'] += 1
 
     def _materialise_and_print(self, buckets, lines):
         """줄 번호 집합을 원본 순서의 라인 목록으로 바꿉니다."""

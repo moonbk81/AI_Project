@@ -70,6 +70,7 @@ def test_chart_list_is_the_registry(client):
     charts = client.get("/charts").json()["charts"]
 
     assert "service-state" in charts and "dns-errors" in charts
+    assert "private-network" in charts
 
 
 def test_a_chart_returns_its_builder_contract(client):
@@ -207,6 +208,7 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
     assert "field(\"Division\"" not in plm.text
     assert dashboard.status_code == 200 and "LLM 분석 요청" in dashboard.text
+    assert "Private Network 판정" in dashboard.text
     assert files.status_code == 200 and "ctx.filesChanged({ select: null, redraw: true })" in files.text
     assert "ctx.startChat(sectionAnalysisQuestion(\"대시보드\", spec, sourceFile))" in dashboard.text
     assert "통화 drop 구간 전후의 RSRP 변화" in dashboard.text
