@@ -460,6 +460,55 @@ def test_the_endpoint_answers_with_a_job_to_poll(client, monkeypatch):
     assert backend_main._get_job(body["job_id"])["status"] == "pending"
 
 
+def test_one_click_job_analyzes_only_recommended_candidates(monkeypatch):
+    candidates = [
+        {"file_id": "F1", "route": ["dumpstate.log"], "title": "a.zip",
+         "path": "dumpstate.log", "recommended": True, "recommendation_score": 0.9},
+        {"file_id": "F1", "route": ["trace.pcap"], "title": "a.zip",
+         "path": "trace.pcap", "recommended": False, "recommendation_score": 0.4},
+    ]
+    monkeypatch.setattr(
+        backend_main, "_run_plm_log_scan_job",
+        lambda job_id, *args: backend_main._set_job(
+            job_id, status="done", log_candidates=candidates, skipped_logs=[]
+        ),
+    )
+    seen = {}
+    monkeypatch.setattr(
+        backend_main, "_run_plm_selected_logs_job",
+        lambda job_id, division, defect, selections, owner: seen.update(
+            selections=selections, owner=owner
+        ),
+    )
+    monkeypatch.setattr("plm.log_recommendation.record_selection", lambda *args, **kwargs: None)
+    job_id = backend_main._new_job("test")
+
+    backend_main._run_plm_recommended_attachment_job(
+        job_id, "25", "D-1", owner="test.user"
+    )
+
+    assert seen["selections"] == [
+        {"file_id": "F1", "route": ["dumpstate.log"], "title": "a.zip"}
+    ]
+    assert seen["owner"] == "test.user"
+
+
+def test_recommended_analysis_endpoint_dispatches_one_job(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        backend_main._executor, "submit",
+        lambda fn, *args, **kwargs: seen.update(fn=fn.__name__, args=args),
+    )
+
+    response = client.post("/plm/attachments/recommended-analyze", json={
+        "division_code": "25", "defect_code": "D-1"
+    })
+
+    assert response.status_code == 200
+    assert seen["fn"] == "_run_plm_recommended_attachment_job"
+    assert seen["args"][1:3] == ("25", "D-1")
+
+
 # ------------------------------------------------------- chat analysis query
 
 

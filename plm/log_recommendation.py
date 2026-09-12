@@ -1,8 +1,8 @@
 """Persistent, explainable recommendations for PLM log candidates.
 
-Only explicit human choices train the recommender.  Agent recommendations are
-recorded for auditability but are excluded from the statistics, avoiding a
-self-reinforcing feedback loop.
+Only explicit human choices train the recommender. Agent and one-click UI
+recommendations are recorded for auditability but excluded from the statistics,
+avoiding a self-reinforcing feedback loop.
 """
 from __future__ import annotations
 
@@ -145,4 +145,3 @@ def recommend_candidates(
     if items and not any(item["recommended"] for item in items):
         max(items, key=lambda item: item["recommendation_score"])["recommended"] = True
     return items
-

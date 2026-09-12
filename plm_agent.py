@@ -205,12 +205,14 @@ class Worker:
                     self.save(entry, "no_logs")
                     return entry
                 entry["selected_logs"] = [
-                    {"file_id": item["file_id"], "route": item["route"]}
+                    {"file_id": item["file_id"], "route": item["route"],
+                     "title": item.get("title", "")}
                     for item in entry["candidates"] if item.get("recommended")
                 ]
                 if not entry["selected_logs"]:
                     best = max(entry["candidates"], key=lambda item: item.get("recommendation_score", 0))
-                    entry["selected_logs"] = [{"file_id": best["file_id"], "route": best["route"]}]
+                    entry["selected_logs"] = [{"file_id": best["file_id"], "route": best["route"],
+                                               "title": best.get("title", "")}]
                 self.save(entry, "selecting")
 
             while True:
@@ -239,7 +241,8 @@ class Worker:
                     "분석 과정(Thinking)은 완료되었으나, 최종 답변이 비어있습니다.",
                 )):
                     usable = False
-                all_logs = [{"file_id": item["file_id"], "route": item["route"]}
+                all_logs = [{"file_id": item["file_id"], "route": item["route"],
+                             "title": item.get("title", "")}
                             for item in entry["candidates"]]
                 if not usable and len(entry["selected_logs"]) < len(all_logs) and not entry.get("expanded"):
                     # Recommendation is an optimization, never a reason to lose

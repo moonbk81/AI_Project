@@ -280,6 +280,7 @@ class PlmLogSelection(BaseModel):
     # Empty means the attachment itself is a plain dumpstate, not a member of
     # an archive.
     route: List[str] = Field(default_factory=list)
+    title: str = ""
 
 
 class PlmLogCandidate(PlmLogSelection):
@@ -302,7 +303,15 @@ class PlmAttachmentAnalyzeRequest(BaseModel):
     # Complete list shown to the chooser.  Storing selected and unselected rows
     # makes a selection rate meaningful; agent rows are audit-only.
     candidates: Optional[List[PlmLogCandidate]] = None
-    selection_source: str = Field(default="manual", pattern="^(manual|agent)$")
+    selection_source: str = Field(default="manual", pattern="^(manual|agent|ui_auto)$")
+
+
+class PlmRecommendedAnalyzeRequest(BaseModel):
+    division_code: str = "25"
+    defect_code: str = Field(min_length=1)
+    # Optional narrowing for callers that want one-click analysis over only
+    # the attachments already checked in the picker.
+    file_ids: Optional[List[str]] = None
 
 
 class PlmCommentRequest(BaseModel):
@@ -999,6 +1008,75 @@ def _run_plm_selected_logs_job(
 
     except Exception as e:
         _set_job(job_id, status="error", error=str(e), message="선택한 로그 분석 실패")
+
+
+def _run_plm_recommended_attachment_job(
+    job_id: str,
+    division_code: str,
+    defect_code: str,
+    file_ids: Optional[List[str]] = None,
+    owner: str = "",
+):
+    """Scan, choose learned recommendations and analyze them as one durable job."""
+    try:
+        # Keep the public job running throughout. Reusing it for the scan would
+        # briefly mark it done; a browser poll in that window could stop before
+        # the analysis phase starts.
+        _set_job(job_id, status="running", progress=2, message="추천할 로그를 찾는 중...")
+        scan_job_id = _new_job("내부 추천 후보 검색", owner=owner)
+        _run_plm_log_scan_job(scan_job_id, division_code, defect_code, file_ids)
+        scan = _get_job(scan_job_id)
+        with _jobs_lock:
+            _jobs.pop(scan_job_id, None)
+        if scan.get("status") == "error":
+            _set_job(
+                job_id, status="error", error=scan.get("error"),
+                message=scan.get("message") or "추천 로그 검색 실패",
+            )
+            return
+        if scan.get("skipped_logs"):
+            names = "; ".join(scan["skipped_logs"])
+            _set_job(
+                job_id, status="error", error=names,
+                message="일부 첨부를 훑지 못해 추천 자동 분석을 중단했습니다.",
+            )
+            return
+
+        candidates = scan.get("log_candidates") or []
+        if not candidates:
+            _set_job(
+                job_id, status="done", progress=100,
+                message="추천할 수 있는 로그를 찾지 못했습니다.",
+            )
+            return
+        selections = [
+            {"file_id": item["file_id"], "route": item.get("route") or [],
+             "title": item.get("title") or ""}
+            for item in candidates if item.get("recommended")
+        ]
+        if not selections:
+            best = max(candidates, key=lambda item: item.get("recommendation_score", 0))
+            selections = [{"file_id": best["file_id"], "route": best.get("route") or [],
+                           "title": best.get("title") or ""}]
+
+        try:
+            from plm.log_recommendation import record_selection
+            record_selection(
+                candidates, selections, division_code=division_code,
+                defect_code=defect_code, user_id=owner, source="ui_auto",
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Could not record automatic PLM log selection")
+
+        _set_job(
+            job_id, status="running", progress=3, log_candidates=candidates,
+            message=f"추천 로그 {len(selections)}개를 자동 선택했습니다.",
+        )
+        _run_plm_selected_logs_job(
+            job_id, division_code, defect_code, selections, owner,
+        )
+    except Exception as e:
+        _set_job(job_id, status="error", error=str(e), message="추천 로그 자동 분석 실패")
 
 
 def _run_plm_attachment_job(
@@ -1721,6 +1799,20 @@ def plm_attachment_analyze(
     _executor.submit(
         _run_plm_attachment_job, job_id, req.division_code, req.defect_code, req.file_ids,
         caller,
+    )
+    return AnalyzeJobResponse(job_id=job_id)
+
+
+@app.post("/plm/attachments/recommended-analyze", response_model=AnalyzeJobResponse)
+def plm_recommended_attachment_analyze(
+    req: PlmRecommendedAnalyzeRequest, request: Request
+) -> AnalyzeJobResponse:
+    """Scan all eligible attachments and analyze learned recommendations."""
+    caller = _caller(request)
+    job_id = _new_job("추천 로그 자동 분석 대기 중", owner=caller)
+    _executor.submit(
+        _run_plm_recommended_attachment_job, job_id, req.division_code,
+        req.defect_code, req.file_ids, caller,
     )
     return AnalyzeJobResponse(job_id=job_id)
 

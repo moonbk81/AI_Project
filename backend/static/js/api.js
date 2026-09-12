@@ -166,6 +166,13 @@ export const api = {
       candidates: candidates && candidates.length ? candidates : null,
       selection_source: selectionSource,
     }),
+  /** 후보를 훑고 학습 추천 로그를 골라 분석까지 한 job에서 수행한다. */
+  plmAnalyzeRecommended: (divisionCode, defectCode, fileIds = null) =>
+    post("/plm/attachments/recommended-analyze", {
+      division_code: divisionCode,
+      defect_code: defectCode,
+      file_ids: fileIds && fileIds.length ? fileIds : null,
+    }),
 
   // The comment body is turned into PLM's markup server-side, so the caller
   // sends what the user typed.

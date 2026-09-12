@@ -454,6 +454,50 @@ export async function renderPlm(mount, sourceFile, ctx) {
       return;
     }
 
+    // 빠른 경로: 서버가 후보를 훑고, 수동 선택 이력으로 추천된 로그만 골라
+    // 추출과 분석까지 한 job 안에서 끝낸다. 원본을 Downloads 폴더에 저장하지
+    // 않으며 이 자동 선택 자체는 추천 학습 데이터에 섞지 않는다.
+    const autoRow = el("div", "row");
+    const autoAnalyze = el("button", "primary", "추천 로그 자동 분석");
+    const autoNote = el("span", "row-meta", "학습된 추천으로 다운로드·추출·분석");
+    const autoProgressHost = el("div");
+    let autoBusy = false;
+    const setAutoBusy = (value) => {
+      autoBusy = value;
+      autoAnalyze.disabled = value;
+      autoAnalyze.textContent = value ? "추천 로그 분석 중..." : "추천 로그 자동 분석";
+    };
+    autoAnalyze.type = "button";
+    autoAnalyze.addEventListener("click", async () => {
+      setAutoBusy(true);
+      try {
+        const { job_id: jobId } = await api.plmAnalyzeRecommended(
+          state.division, defect.defectCode,
+        );
+        followJob(jobId, {
+          progressHost: autoProgressHost,
+          defect,
+          setBusy: setAutoBusy,
+          onDone: activateAnalyzed,
+        });
+      } catch (error) {
+        autoProgressHost.replaceChildren(el("p", "card-note", String(error.message || error)));
+        setAutoBusy(false);
+      }
+    });
+    autoRow.append(autoAnalyze, el("span", "grow"), autoNote);
+    attachmentHost.append(autoRow, autoProgressHost);
+
+    const automatic = state.attachmentJobs[attachmentJobKey(defect)];
+    if (automatic?.job_id && !JOB_DONE.has(automatic.status)) {
+      followJob(automatic.job_id, {
+        progressHost: autoProgressHost,
+        defect,
+        setBusy: setAutoBusy,
+        onDone: activateAnalyzed,
+      });
+    }
+
     // 1단계: 열어 볼 첨부 고르기. 첨부가 여럿인 결함에서 전부 내려받아 여는 데
     // 걸리던 시간이 그대로 대기 시간이었다.
     const scanKey = attachmentJobKey(defect, "::scan");
@@ -544,7 +588,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         refresh();
       });
       allRow.append(selectAll, el("span", "row-name", `전체 선택 (분석 가능 첨부 ${boxes.length}개)`));
-      attachmentHost.prepend(allRow);
+      attachmentHost.insertBefore(allRow, autoProgressHost.nextSibling);
     } else if (!picked.size) {
       // 고를 수 있는 첨부가 하나뿐이면 고를 것이 없으므로 미리 체크해 둔다.
       boxes[0].box.checked = true;
@@ -627,7 +671,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
           : sizeText(candidate.size);
         rows.push(addRow(`${candidate.file_id}::${candidate.path}`, label,
                          meta,
-                         [{ file_id: candidate.file_id, route: candidate.route }],
+                         [{ file_id: candidate.file_id, route: candidate.route, title: candidate.title }],
                          Boolean(candidate.recommended)));
       }
 
@@ -638,7 +682,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
         const score = Math.round(100 * Math.max(...items.map((item) => Number(item.recommendation_score) || 0)));
         rows.push(addRow(id, `${folder} 폴더 (로그 ${items.length}개)`,
                          recommended ? `${sizeText(total)} · 추천 ${score}%` : sizeText(total),
-                         items.map((item) => ({ file_id: item.file_id, route: item.route })),
+                         items.map((item) => ({ file_id: item.file_id, route: item.route, title: item.title })),
                          recommended));
 
         const fold = el("details", "fold");
@@ -681,16 +725,6 @@ export async function renderPlm(mount, sourceFile, ctx) {
       logHost.append(analyze, analyzeHost);
       refreshAnalyze();
 
-      // 분석 잡이 돌고 있었다면 진행 상황을 이어서 보여 준다.
-      const running = state.attachmentJobs[attachmentJobKey(defect)];
-      if (running?.job_id) {
-        followJob(running.job_id, {
-          progressHost: analyzeHost,
-          defect,
-          setBusy: (value) => { analyzing = value; refreshAnalyze(); },
-          onDone: activateAnalyzed,
-        });
-      }
     };
 
     const setBusy = (value) => { busy = value; refresh(); };

@@ -5,12 +5,15 @@ PLM 결함에 붙은 첨부 파일에서 분석 가능한 로그를 뽑아 분�
 ## 무슨 일이 일어나는가
 
 1. 결함을 선택하면 첨부 목록을 조회합니다.
-2. 첨부 패널의 **"로그 추출해 분석"** 을 누르면 `POST /plm/attachments/analyze` 가
-   job 하나를 만듭니다. 결함을 고르는 동작이 긴 분석에 붙잡히지 않도록 일부러
-   버튼으로 분리해 둔 것입니다.
-3. 그 job 이 압축 첨부(ZIP·7z)를 내려받고, 압축 안(중첩 포함, 형식이 섞여도 됨)에서
-   **로그 파일 이름 패턴에 맞는 파일만** 추출한 뒤 분석까지 이어서 돌립니다.
-4. 화면은 `GET /jobs/{job_id}` 를 폴링해 진행 상황만 표시합니다.
+2. 빠른 경로인 **"추천 로그 자동 분석"** 은
+   `POST /plm/attachments/recommended-analyze` job 하나를 만듭니다.
+3. job은 압축 첨부(ZIP·7z)를 내려받고 중첩 압축까지 훑은 뒤, 사용자의 과거 수동
+   선택률로 추천된 로그만 추출·분석합니다. 이 자동 선택은 다시 학습 데이터로
+   사용하지 않습니다.
+4. 직접 고르려면 분석할 첨부를 체크하고 **"로그 파일 찾기"** 를 누릅니다. 후보별
+   추천 점수와 기본 선택을 확인·수정한 뒤 **"선택한 로그 분석"** 을 누릅니다.
+   이 명시적인 사용자 선택만 다음 추천에 반영됩니다.
+5. 화면은 `GET /jobs/{job_id}` 를 폴링해 진행 상황을 표시합니다.
 
 원본 파일이 필요하면 목록의 **"다운로드" 버튼**으로 브라우저를 통해 내려받습니다.
 
@@ -20,11 +23,23 @@ PLM 결함에 붙은 첨부 파일에서 분석 가능한 로그를 뽑아 분�
 |---|---|
 | `core/log_archive.py` | 압축 파일 열기/목록/추출(ZIP·7z), 로그 파일 이름 패턴. 형식은 매직 바이트로 판별한다(확장자가 틀려도 열린다). 웹 프레임워크·파일시스템·네트워크 의존 없음 |
 | `plm/log_pipeline.py` | 첨부 다운로드 → 추출 파이프라인. `download` 콜러블을 주입받고 진행 상황을 이벤트로 내보냄 |
+| `plm/log_recommendation.py` | 로그 계열별 수동 선택 이력 저장, 추천 점수 계산. LLM이나 별도 학습 실행 불필요 |
 | `backend/main.py` | `POST /plm/attachments/analyze` 에서 위 파이프라인을 job 으로 감싸고, 이벤트를 job 진행률로 옮김 |
 | `backend/static/js/views/plm.js` | 버튼과 진행 표시. `followJob` 이 job 을 폴링한다 |
 
 파이프라인이 웹 프레임워크를 모르기 때문에 브라우저 없이 테스트할 수 있습니다
 (`tests/test_log_archive.py`, `tests/test_plm_log_pipeline.py`).
+
+## 추천 이력
+
+선택 이력은 기본적으로 `agent_state/log_selection_history.sqlite3`에 저장됩니다.
+`PLM_LOG_SELECTION_DB` 환경 변수로 위치를 변경할 수 있습니다. 추천기는 사업부별로
+`dumpstate`, `bugreport`, `ap_silentlog`, 패킷 캡처, companion device, 기타 로그의
+수동 선택률을 집계합니다. 이력이 적을 때는 보수적인 기본 점수와 혼합하고, 후보가
+있는데 추천이 하나도 남지 않으면 가장 높은 후보 하나를 안전장치로 선택합니다.
+
+과거의 `AutoDownloadManager`처럼 서버 사용자의 Downloads 폴더에 원본을 저장하지
+않습니다. 원본은 분석 job의 임시 공간에서만 처리됩니다.
 
 ## 인식되는 로그 파일 이름
 
@@ -59,6 +74,12 @@ PLM 결함에 붙은 첨부 파일에서 분석 가능한 로그를 뽑아 분�
 첨부 목록까지만 표시됩니다. `plm/CONFIGURATION_GUIDE.md` 를 참고하세요.
 
 ## API
+
+HTTP 경로:
+
+- `POST /plm/attachments/recommended-analyze`: 전체 과정을 한 번에 수행
+- `POST /plm/attachments/logs`: 첨부 안의 후보와 추천 점수를 조회
+- `POST /plm/attachments/analyze`: 사용자가 고른 로그를 분석하고 수동 선택 이력을 저장
 
 ```python
 from core.log_archive import (
