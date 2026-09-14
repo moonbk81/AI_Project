@@ -28,6 +28,24 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def dedupe_same_file(candidates):
+    """Drop copies of one log, such as an extracted dump kept beside its archive.
+
+    Same byte size within one file family means the same dump in practice, so
+    keep the shallowest path and never pay to analyse the copy as well.
+    """
+    def key(item):
+        size = item.get("size")
+        return size if isinstance(size, int) and size > 0 else id(item)
+
+    shallowest = {}
+    for item in candidates:
+        kept = shallowest.get(key(item))
+        if kept is None or len(item.get("route") or []) < len(kept.get("route") or []):
+            shallowest[key(item)] = item
+    return [item for item in candidates if shallowest[key(item)] is item]
+
+
 def load_config(path):
     path = Path(path).resolve()
     config = json.loads(path.read_text(encoding="utf-8"))
@@ -204,15 +222,17 @@ class Worker:
                 if not entry["candidates"]:
                     self.save(entry, "no_logs")
                     return entry
+                # Analyze the single most likely log, not every recommended one:
+                # a large payload is what the model fails on.  Scores are shared
+                # by file family, so keep every candidate tied for the best one.
+                best = max(item.get("recommendation_score", 0) for item in entry["candidates"])
+                tied = [item for item in entry["candidates"]
+                        if item.get("recommendation_score", 0) == best]
                 entry["selected_logs"] = [
                     {"file_id": item["file_id"], "route": item["route"],
                      "title": item.get("title", "")}
-                    for item in entry["candidates"] if item.get("recommended")
+                    for item in dedupe_same_file(tied)
                 ]
-                if not entry["selected_logs"]:
-                    best = max(entry["candidates"], key=lambda item: item.get("recommendation_score", 0))
-                    entry["selected_logs"] = [{"file_id": best["file_id"], "route": best["route"],
-                                               "title": best.get("title", "")}]
                 self.save(entry, "selecting")
 
             while True:

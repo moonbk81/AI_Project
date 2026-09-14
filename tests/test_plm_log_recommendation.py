@@ -44,3 +44,24 @@ def test_recommender_always_keeps_a_fallback(tmp_path: Path):
              "kind": "other", "size": 1, "group": ""}]
     result = recommend_candidates(pool, "25", path=db)
     assert result[0]["recommended"] is True
+
+
+def test_only_the_full_dump_outranks_its_siblings(tmp_path: Path):
+    pool = [
+        {"file_id": "F1", "route": ["dumpstate.txt"], "path": "d/dumpstate.txt",
+         "size": 300, "group": "", "kind": "log"},
+        {"file_id": "F1", "route": ["dumpstate_board.txt"], "path": "d/dumpstate_board.txt",
+         "size": 200, "group": "", "kind": "log"},
+        {"file_id": "F1", "route": ["dumpstate_log.txt"], "path": "d/dumpstate_log.txt",
+         "size": 100, "group": "", "kind": "log"},
+        {"file_id": "F1", "route": ["dumpState_FOTA_PROVIDER_fit3plugin0.log"],
+         "path": "d/dumpState_FOTA_PROVIDER_fit3plugin0.log",
+         "size": 50, "group": "", "kind": "log"},
+    ]
+    by_path = {item["path"]: item for item in recommend_candidates(pool, "25", path=tmp_path / "c.sqlite3")}
+    full = by_path["d/dumpstate.txt"]["recommendation_score"]
+    assert by_path["d/dumpstate.txt"]["recommended"] is True
+    for other in ("d/dumpstate_board.txt", "d/dumpstate_log.txt",
+                  "d/dumpState_FOTA_PROVIDER_fit3plugin0.log"):
+        assert by_path[other]["recommendation_score"] < full
+        assert by_path[other]["recommended"] is False

@@ -34,7 +34,16 @@ def _family(candidate: Dict[str, Any]) -> str:
     if "g_manager" in path or "gear" in path:
         return "companion_device"
     name = path.rsplit("/", 1)[-1]
-    if name.startswith("dumpstate") or name == "act_dumpstate.txt":
+    # Only the full device dump is worth analysing on its own.  Its siblings
+    # share the "dumpstate" prefix but are a board-only excerpt or the dumpstate
+    # tool's own run log, and any other name after "dumpstate_" is a per-service
+    # dump such as dumpState_FOTA_PROVIDER_*.log, not a dumpstate at all.
+    stem = name.rsplit(".", 1)[0]
+    if stem.startswith("dumpstate_board"):
+        return "dumpstate_board"
+    if stem.startswith("dumpstate_log"):
+        return "dumpstate_log"
+    if stem in ("dumpstate", "act_dumpstate") or stem.startswith("dumpstate-"):
         return "dumpstate"
     if name.startswith("bugreport"):
         return "bugreport"
@@ -43,6 +52,8 @@ def _family(candidate: Dict[str, Any]) -> str:
 
 _PRIORS = {
     "dumpstate": 0.90,
+    "dumpstate_board": 0.55,
+    "dumpstate_log": 0.05,
     "bugreport": 0.88,
     "ap_silentlog": 0.72,
     "companion_device": 0.62,

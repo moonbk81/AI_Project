@@ -151,6 +151,30 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(self.worker.run(), 1)
         self.assertEqual(self.api.count("/plm/comment"), 0)
 
+    def test_only_the_best_scoring_logs_are_analyzed(self):
+        self.api.scan["log_candidates"].extend([
+            {"file_id": "F1", "route": ["dumpstate2.log"], "path": "dumpstate2.log",
+             "size": 120, "group": "", "kind": "log", "recommended": True,
+             "recommendation_score": 0.9},
+            {"file_id": "F1", "route": ["silent.log"], "path": "log/ap_silentlog/silent.log",
+             "size": 100, "group": "", "kind": "log", "recommended": True,
+             "recommendation_score": 0.72},
+        ])
+        entry = self.worker.process("P1")
+        # Both 0.9 candidates tie for best; the recommended 0.72 one is dropped.
+        self.assertEqual([log["route"] for log in entry["selected_logs"]],
+                         [["dumpstate.log"], ["dumpstate2.log"]])
+
+    def test_one_copy_of_a_duplicated_dump_is_analyzed(self):
+        self.api.scan["log_candidates"].append({
+            "file_id": "F1", "route": ["dump.zip", "dumpstate.log"],
+            "path": "dump.zip/dumpstate.log", "size": 100, "group": "", "kind": "log",
+            "recommended": True, "recommendation_score": 0.9,
+        })
+        entry = self.worker.process("P1")
+        # Same size as the outer copy, so only the shallower path is analysed.
+        self.assertEqual([log["route"] for log in entry["selected_logs"]], [["dumpstate.log"]])
+
     def test_recommendation_expands_to_all_logs_when_evidence_is_empty(self):
         self.api.scan["log_candidates"].append({
             "file_id": "F1", "route": ["trace.pcap"], "path": "trace.pcap",
