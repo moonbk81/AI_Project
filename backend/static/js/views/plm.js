@@ -24,6 +24,22 @@ const sizeText = (bytes) => {
     : `${(value / 1024).toFixed(1)} KB`;
 };
 
+/** May the active log's own defect still be selected for the user?
+ *
+ * Looking that defect up is a network round trip, and the result list is
+ * already clickable while it runs. A defect the user opened in that window has
+ * to win: swapping it out from under them looked like the screen jumping from
+ * the defect they clicked to an unrelated one.
+ *
+ * `before`/`now` are the selected defect codes on either side of the lookup,
+ * `null` when nothing was selected.
+ */
+export function autoSelectionStillApplies(code, before, now) {
+  if (!code) return false;        // 직접 올린 로그 — 짚을 결함이 없다
+  if (before !== now) return false;  // 기다리는 사이 사용자가 골랐다
+  return code !== now;
+}
+
 
 function input(placeholder, value = "") {
   const node = el("input", "text-input");
@@ -79,6 +95,12 @@ export async function renderPlm(mount, sourceFile, ctx) {
   if (!state.attachmentJobs) state.attachmentJobs = {};
   if (!state.attachmentPicks) state.attachmentPicks = {};
   const cache = createDefectCache(api, state.cache);
+
+  // 결함을 여는 일은 PLM 왕복 두 번이라 사람이 그 사이에 다른 결함을 열 수 있다.
+  // 늦게 끝난 쪽이 상세·첨부 칸을 덮어쓰면 하이라이트는 B, 내용은 A 가 된다.
+  // 매 선택에 번호를 붙여, 자기 번호가 밀린 그리기는 화면에 손대지 않는다.
+  let selectionToken = 0;
+  const staleSelection = (token) => token !== selectionToken;
 
   // ------------------------------------------------------------ 로컬 테스트
   // 사내망 밖에서는 PLM 에 닿지 않는다. 이 모드에서는 백엔드가 샘플로 답하고
@@ -233,10 +255,11 @@ export async function renderPlm(mount, sourceFile, ctx) {
   const detailHost = el("div", "stack");
   detail.body.append(detailHost);
 
-  const drawDetail = async (defect) => {
+  const drawDetail = async (defect, token) => {
     detailHost.replaceChildren(el("div", "empty", "불러오는 중..."));
 
     const { details, comments } = await cache.detail(state.division, defect);
+    if (staleSelection(token)) return;
     const full = details.defects?.[0] || defect;
 
     detailHost.replaceChildren();
@@ -443,9 +466,10 @@ export async function renderPlm(mount, sourceFile, ctx) {
     poll();
   };
 
-  const drawAttachments = async (defect) => {
+  const drawAttachments = async (defect, token) => {
     attachmentHost.replaceChildren(el("div", "empty", "불러오는 중..."));
     const listing = await cache.attachments(state.division, defect);
+    if (staleSelection(token)) return;
     const files = listing.files || [];
 
     attachmentHost.replaceChildren();
@@ -870,6 +894,7 @@ export async function renderPlm(mount, sourceFile, ctx) {
   }
 
   const selectDefect = async (defect) => {
+    const token = (selectionToken += 1);
     if (state.selected?.defectCode !== defect.defectCode) state.analysis = null;
     state.selected = defect;
     // The chat registers its answers against whichever defect is open here.
@@ -879,7 +904,8 @@ export async function renderPlm(mount, sourceFile, ctx) {
       title: defect.plmTitle || "",
     });
     drawResults();
-    await Promise.all([drawDetail(defect), drawAttachments(defect)]);
+    await Promise.all([drawDetail(defect, token), drawAttachments(defect, token)]);
+    if (staleSelection(token)) return;
     drawAnalysis(defect);
   };
 
@@ -956,11 +982,13 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // 파일이 바뀐 때만 짚는다. 매번 짚으면 사용자가 손으로 고른 결함을 덮어쓴다.
   if (sourceFile && state.autoDefectFor !== sourceFile) {
     state.autoDefectFor = sourceFile;
+    // 목록은 이미 눌리는 상태다. 기다리기 전후의 선택을 견줘 사람 손을 이긴다.
+    const before = state.selected?.defectCode ?? null;
     const code = await api.filesWithOwners()
       .then(({ defectCode }) => defectCode[sourceFile] || "")
       .catch(() => "");
     // 번호가 없으면(직접 올린 로그) 보고 있던 것을 그대로 둔다.
-    if (code && code !== state.selected?.defectCode) {
+    if (autoSelectionStillApplies(code, before, state.selected?.defectCode ?? null)) {
       state.selected = { defectCode: code };
       state.analysis = null;
     }
