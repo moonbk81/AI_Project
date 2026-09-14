@@ -24,20 +24,19 @@ const sizeText = (bytes) => {
     : `${(value / 1024).toFixed(1)} KB`;
 };
 
-/** May the active log's own defect still be selected for the user?
+/** May the active log's own defect be opened for the user?
  *
- * Looking that defect up is a network round trip, and the result list is
- * already clickable while it runs. A defect the user opened in that window has
- * to win: swapping it out from under them looked like the screen jumping from
- * the defect they clicked to an unrelated one.
+ * Only when they have nothing open. This exists for someone who arrived
+ * without searching PLM, not to pull anybody off a defect they chose -- doing
+ * that read as the screen jumping from the defect they clicked to whichever
+ * one the log at the top belongs to.
  *
- * `before`/`now` are the selected defect codes on either side of the lookup,
- * `null` when nothing was selected.
+ * `selected` is the open defect code (`null` for none) read *after* the
+ * lookup, which is a network round trip the result list stays clickable
+ * through: a defect clicked while it ran is the one to keep.
  */
-export function autoSelectionStillApplies(code, before, now) {
-  if (!code) return false;        // 직접 올린 로그 — 짚을 결함이 없다
-  if (before !== now) return false;  // 기다리는 사이 사용자가 골랐다
-  return code !== now;
+export function autoSelectionStillApplies(code, selected) {
+  return Boolean(code) && !selected;  // 번호 없는 로그는 직접 올린 것이다
 }
 
 
@@ -979,16 +978,15 @@ export async function renderPlm(mount, sourceFile, ctx) {
   // 번호는 분석할 때 적재 행에 찍어 둔 것이라 누가 열어도 따라온다. 결함이
   // 닫혔는지 열렸는지는 보지 않는다 -- 출처는 상태와 무관하다.
   //
-  // 파일이 바뀐 때만 짚는다. 매번 짚으면 사용자가 손으로 고른 결함을 덮어쓴다.
+  // 파일이 바뀐 때만, 그것도 열어 둔 결함이 없을 때만 짚는다. 사람이 고른
+  // 결함을 상단 로그의 것으로 바꾸면 눌러 둔 화면이 발밑에서 사라진다.
   if (sourceFile && state.autoDefectFor !== sourceFile) {
     state.autoDefectFor = sourceFile;
-    // 목록은 이미 눌리는 상태다. 기다리기 전후의 선택을 견줘 사람 손을 이긴다.
-    const before = state.selected?.defectCode ?? null;
     const code = await api.filesWithOwners()
       .then(({ defectCode }) => defectCode[sourceFile] || "")
       .catch(() => "");
-    // 번호가 없으면(직접 올린 로그) 보고 있던 것을 그대로 둔다.
-    if (autoSelectionStillApplies(code, before, state.selected?.defectCode ?? null)) {
+    // 기다리는 동안에도 목록은 눌린다. 선택은 돌아온 뒤에 읽어야 한다.
+    if (autoSelectionStillApplies(code, state.selected?.defectCode ?? null)) {
       state.selected = { defectCode: code };
       state.analysis = null;
     }

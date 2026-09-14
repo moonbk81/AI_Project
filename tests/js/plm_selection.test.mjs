@@ -1,9 +1,9 @@
 // backend/static/js/views/plm.js — 결함 선택이 사람 손을 이기지 않는지.
 //
-// The view opens the defect that owns the active log, but that lookup is a
-// network round trip and the result list is clickable the whole time. Clicking
-// a defect in that window used to be silently swapped for an unrelated one:
-// the user opened A, reached for its attachments, and the screen was on B.
+// The view opens the defect that owns the log shown at the top, which is for
+// whoever arrives without searching PLM. It used to do that over an open
+// defect too: the user opened A, reached for its attachments, and by the time
+// they pressed the scan button the screen had gone back to the top log's B.
 //
 // The same shape bit the two PLM calls behind a selection -- whichever landed
 // last wrote the detail and attachment panels, so the highlight could say B
@@ -21,33 +21,32 @@ const source = await readFile(
   "utf8",
 );
 
-test("a defect opened while the owner lookup ran is left alone", () => {
-  // 사용자가 기다리는 사이 A 를 열었다. 활성 로그 주인이 B 라도 A 가 이긴다.
-  assert.equal(autoSelectionStillApplies("B", null, "A"), false);
-  assert.equal(autoSelectionStillApplies("B", "C", "A"), false);
+test("an open defect is never traded for the active log's own", () => {
+  // 사용자가 A 를 열어 뒀다. 상단 로그 주인이 B 라도 A 가 남는다 -- 기다리는
+  // 사이에 눌렀든, 그리기 전부터 열려 있었든 마찬가지다.
+  assert.equal(autoSelectionStillApplies("B", "A"), false);
+  assert.equal(autoSelectionStillApplies("B", "B"), false);
 });
 
-test("the active log's defect opens when the user picked nothing", () => {
-  assert.equal(autoSelectionStillApplies("B", null, null), true);
-  assert.equal(autoSelectionStillApplies("B", "A", "A"), true);
+test("the active log's defect opens when nothing is open", () => {
+  assert.equal(autoSelectionStillApplies("B", null), true);
 });
 
-test("nothing happens without an owner, or when it is already open", () => {
-  // 직접 올린 로그는 결함 번호가 없다.
-  assert.equal(autoSelectionStillApplies("", null, null), false);
-  // 이미 그 결함을 보고 있으면 다시 그릴 이유가 없다.
-  assert.equal(autoSelectionStillApplies("B", "B", "B"), false);
+test("a log with no defect number leaves the screen alone", () => {
+  // 직접 올린 로그는 짚을 결함이 없다.
+  assert.equal(autoSelectionStillApplies("", null), false);
+  assert.equal(autoSelectionStillApplies("", "A"), false);
 });
 
-test("the owner lookup compares the selection across its await", () => {
+test("the selection is read after the owner lookup, not before", () => {
   const block = source.slice(source.indexOf("state.autoDefectFor = sourceFile"));
-  const before = block.indexOf("const before =");
   const await_ = block.indexOf("await api.filesWithOwners()");
   const guard = block.indexOf("autoSelectionStillApplies(");
 
-  assert.ok(before >= 0, "the pre-await selection has to be captured");
-  assert.ok(before < await_ && await_ < guard,
-            "capture before the await, decide after it");
+  assert.ok(await_ >= 0 && guard > await_,
+            "the list stays clickable through the lookup, so decide after it");
+  assert.ok(!block.slice(0, await_).includes("state.selected"),
+            "a selection read before the await would miss a click made during it");
 });
 
 test("a superseded selection stops drawing into the panels", () => {
