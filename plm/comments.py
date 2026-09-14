@@ -120,7 +120,16 @@ def is_excluded_comment_user(history_user: str) -> bool:
 
 
 def format_comment_line(comment: Dict[str, Any]) -> str:
-    """One developer comment as a bullet, prefixed with author and date."""
-    header = " · ".join(x for x in [comment.get("user", ""), comment.get("date", "")] if x)
-    text = comment.get("text", "")
+    """One developer comment as a bullet, prefixed with author and date.
+
+    Takes either shape a caller may hold: the flattened `user`/`date`/`text`
+    the PLM screen builds, or the `historyUser`/`historyDate`/`comment` rows
+    get_human_comments() returns. The standalone agent passes that response
+    straight through, and silently dropping its text left the query with an
+    empty bullet under a "개발자 코멘트" heading.
+    """
+    user = comment.get("user") or comment.get("historyUser") or ""
+    date = comment.get("date") or comment.get("historyDate") or ""
+    text = comment.get("text") or comment.get("comment") or ""
+    header = " · ".join(x for x in [user, date] if x)
     return f"- ({header}) {text}" if header else f"- {text}"

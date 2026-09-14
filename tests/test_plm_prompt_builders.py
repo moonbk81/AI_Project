@@ -50,6 +50,19 @@ def test_defect_query_with_reason_countermeasure_and_comments():
     )
 
 
+def test_defect_query_accepts_backend_comment_rows():
+    """The agent forwards /plm/defect-history/comments rows unchanged."""
+    query = build_defect_analysis_query(
+        {"defect_code": "D-3", "content": "C"},
+        comments=[
+            {"comment": "CS 망 연결 실패로 call drop", "historyDate": "2026-09-12 12:44",
+             "historyUser": "dev.kim", "commentId": "CMT_1"},
+        ],
+    )
+
+    assert "- (dev.kim · 2026-09-12 12:44) CS 망 연결 실패로 call drop" in query
+
+
 def test_empty_problem_still_builds_a_query():
     query = build_defect_analysis_query({})
     assert query.startswith("## PLM 결함 분석 요청")
