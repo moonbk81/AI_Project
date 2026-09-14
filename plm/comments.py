@@ -18,7 +18,8 @@ _ANALYSIS_COMMENT_HEADER = "🤖 AI 분석 결과"
 _AI_COMMENT_SIGNATURES = (_CHAT_COMMENT_HEADER, _ANALYSIS_COMMENT_HEADER)
 
 # System/automated registrants whose comments are not developer input.
-_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development", "CPP1 MAP PORTAL", "SYSTEM", "AutoAnalyzer")
+_EXCLUDED_COMMENT_USERS = ("utopia", "mx ax development", "CPP1 MAP PORTAL", "SYSTEM", "AutoAnalyzer",
+                           "소모전류")
 
 
 def format_analysis_as_comment(context: Dict[str, Any]) -> str:
