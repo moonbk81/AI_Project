@@ -16,6 +16,6 @@
     "enabled": false,
     "timezone": "Asia/Seoul",
     "weekdays": [0, 1, 2, 3, 4],
-    "time": "09:00"
+    "every_minutes": 60
   }
 }

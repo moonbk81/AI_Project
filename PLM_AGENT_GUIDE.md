@@ -29,12 +29,12 @@ cp plm/agent.example.json plm_agent.json
 | `system_code` | PLM 코멘트 등록에 사용하는 시스템 코드 |
 | `state_dir` | SQLite 처리 이력·초안 위치. 설정 파일 기준 상대 경로 |
 | `schedule.enabled` | `true`일 때 `watch` 실행 가능 |
-| `schedule.time` | 현지 시간 `HH:MM`, 예시값 `09:00` |
+| `schedule.every_minutes` | 실행 간격(분), `1`~`1440`, 기본값 `60` |
 | `schedule.timezone` | 기본 `Asia/Seoul` |
 | `schedule.weekdays` | 월요일 `0`부터 일요일 `6`, 예시는 평일 |
 
-예시 설정은 **작성자·담당자 미지정, 예약 비활성, 초안 모드**입니다.
-아직 실제 운영 시간을 정한 것이 아닙니다. PLM 인증/접속과 모델 설정은
+예시 설정은 **작성자·담당자 미지정, 예약 비활성, 초안 모드, 1시간 주기**입니다.
+아직 실제 운영 주기를 정한 것이 아닙니다. PLM 인증/접속과 모델 설정은
 기존 백엔드의 설정을 사용합니다. HTTP 프록시는 에이전트에서 사용하지 않습니다.
 
 ## 실행
@@ -58,7 +58,7 @@ python3 -m plm_agent --config plm_agent.json once
 # 실행 이력, entry_id 확인
 python3 -m plm_agent --config plm_agent.json history
 
-# 지정 시간에 반복 실행 (schedule.enabled=true 필요)
+# 주기 반복 실행 (schedule.enabled=true 필요)
 python3 -m plm_agent --config plm_agent.json watch
 ```
 
@@ -67,9 +67,12 @@ python3 -m plm_agent --config plm_agent.json watch
 OS 서비스 설치나 서버 재부팅 후 자동 시작 설정을 변경하지 않습니다.
 설정 변경 후에는 프로세스를 재시작합니다. 종료는 Ctrl+C입니다.
 
-예약 요일에 지정 시간이 지났다면 그날 한 번 보충 실행하며, 지난 날짜까지
-소급하지 않습니다. 예약 처리 여부는 SQLite에 저장됩니다. 완료한 예약 슬롯은
-재시작해도 반복하지 않습니다. 실패 건은 다음 예약이나 수동 `once`에서 다시
+`watch`는 예약 요일의 하루를 `every_minutes` 간격으로 나누고 각 칸을 한 번씩
+실행합니다. 시작 시점이 속한 칸이 아직 비어 있으면 곧바로 한 번 돕니다.
+절전이나 오래 걸린 분석으로 늦게 깨어나면 그 칸의 몫을 그때 채우며, 지나간
+칸까지 소급하지는 않습니다. 실행 여부는 SQLite에 저장되므로 완료한 칸은
+재시작해도 반복하지 않습니다. 한 칸이 통째로 지나가도록 에이전트가 떠 있지
+않았다면 그 칸은 건너뜁니다. 실패 건은 다음 주기나 수동 `once`에서 다시
 확인합니다. `once`는 실패가 하나라도 있으면 종료 코드 1, 성공이면 0입니다.
 `watch` 실패는 표준 로그에 남습니다. 별도 이메일/메신저 알림은 없습니다.
 

@@ -201,15 +201,38 @@ class AgentTests(unittest.TestCase):
             with locked_state(self.config):
                 pass
 
-    def test_schedule_korean_time_weekday_and_catchup(self):
+    def test_schedule_runs_once_per_interval_in_korean_time(self):
         self.config["schedule"]["enabled"] = True
-        before = datetime(2026, 9, 14, 23, 59, tzinfo=timezone.utc)  # Tue 08:59 KST
-        after = datetime(2026, 9, 15, 0, 0, tzinfo=timezone.utc)
-        self.assertIsNone(schedule_slot(self.config, before))
-        slot = schedule_slot(self.config, after)
+        nine = datetime(2026, 9, 15, 0, 0, tzinfo=timezone.utc)  # Tue 09:00 KST
+
+        # 한 칸 안에서는 몇 번을 물어도 같은 슬롯이라 한 번만 돈다.
+        slot = schedule_slot(self.config, nine)
         self.assertIsNotNone(slot)
-        self.assertEqual(slot, schedule_slot(self.config, after.replace(hour=2)))
+        self.assertEqual(slot, schedule_slot(self.config, nine.replace(minute=59)))
+        # 다음 칸은 다른 슬롯이다.
+        self.assertNotEqual(slot, schedule_slot(self.config, nine.replace(hour=1)))
+        # 날짜가 바뀌면 같은 시각이라도 다시 돈다.
+        self.assertNotEqual(slot, schedule_slot(self.config, nine.replace(day=16)))
+
+    def test_schedule_interval_is_configurable_and_weekdays_still_gate_it(self):
+        self.config["schedule"].update(enabled=True, every_minutes=15)
+        nine = datetime(2026, 9, 15, 0, 0, tzinfo=timezone.utc)  # Tue 09:00 KST
+        self.assertEqual(schedule_slot(self.config, nine),
+                         schedule_slot(self.config, nine.replace(minute=14)))
+        self.assertNotEqual(schedule_slot(self.config, nine),
+                            schedule_slot(self.config, nine.replace(minute=15)))
+        # 토요일은 weekdays 밖이라 주기와 무관하게 돌지 않는다.
         self.assertIsNone(schedule_slot(self.config, datetime(2026, 9, 12, 2, tzinfo=timezone.utc)))
+
+    def test_schedule_rejects_an_interval_outside_a_day(self):
+        source = Path(self.tmp.name) / "interval.json"
+        for bad in (0, -15, 1441, "60"):
+            source.write_text(json.dumps(dict(
+                backend_url="http://x", knox_id="a", main_owner_id="b",
+                schedule={"every_minutes": bad},
+            )))
+            with self.assertRaisesRegex(ValueError, "every_minutes"):
+                load_config(source)
 
     def test_completed_schedule_slot_survives_watch_restart(self):
         other = dict(self.config, state_dir=str(Path(self.tmp.name) / "watch"))

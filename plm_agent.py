@@ -74,12 +74,13 @@ def load_config(path):
     schedule.setdefault("enabled", False)
     schedule.setdefault("timezone", "Asia/Seoul")
     schedule.setdefault("weekdays", [0, 1, 2, 3, 4])
-    schedule.setdefault("time", "09:00")
+    schedule.setdefault("every_minutes", 60)
     ZoneInfo(schedule["timezone"])
-    datetime.strptime(schedule["time"], "%H:%M")
     if (type(schedule["enabled"]) is not bool or not schedule["weekdays"]
             or any(type(day) is not int or day not in range(7) for day in schedule["weekdays"])):
         raise ValueError("schedule: enabled는 bool, weekdays는 0(월)~6(일) 목록이어야 합니다")
+    if type(schedule["every_minutes"]) is not int or not 1 <= schedule["every_minutes"] <= 1440:
+        raise ValueError("schedule.every_minutes는 1~1440 사이의 정수여야 합니다")
     state_dir = Path(config.get("state_dir", "agent_state"))
     config["state_dir"] = str((path.parent / state_dir).resolve())
     return config
@@ -321,14 +322,22 @@ class Worker:
 
 
 def schedule_slot(config, now):
+    """The run this moment belongs to, or None on a weekday we skip.
+
+    The day is cut into `every_minutes` slots and each one runs once. Waking
+    late -- a suspended laptop, an analysis that outran its slot -- does that
+    slot's work on the spot instead of skipping it, and slots already done stay
+    done across a restart. Work is lost only when a whole slot passes with the
+    agent down.
+    """
     schedule = config["schedule"]
     local = now.astimezone(ZoneInfo(schedule["timezone"]))
-    hour, minute = map(int, schedule["time"].split(":"))
-    if (not schedule["enabled"] or local.weekday() not in schedule["weekdays"]
-            or (local.hour, local.minute) < (hour, minute)):
+    if not schedule["enabled"] or local.weekday() not in schedule["weekdays"]:
         return None
+    slot_of_day = (local.hour * 60 + local.minute) // schedule["every_minutes"]
     return digest([config["backend_url"], config["main_owner_id"], config["division_code"],
-                   config["status"], config["search_type"], config["local_test"], schedule, str(local.date())])
+                   config["status"], config["search_type"], config["local_test"], schedule,
+                   str(local.date()), slot_of_day])
 
 
 def main(argv=None):
@@ -371,7 +380,8 @@ def main(argv=None):
         elif args.command == "once":
             return int(worker.run() > 0)
         else:
-            LOG.info("예약 대기: %s %s", config["schedule"]["time"], config["schedule"]["timezone"])
+            LOG.info("주기 실행: %s분마다 (%s)",
+                     config["schedule"]["every_minutes"], config["schedule"]["timezone"])
             while True:
                 slot = schedule_slot(config, datetime.now().astimezone())
                 if slot and not db.execute("SELECT 1 FROM slots WHERE id=?", (slot,)).fetchone():
