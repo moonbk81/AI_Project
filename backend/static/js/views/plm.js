@@ -39,6 +39,68 @@ export function autoSelectionStillApplies(code, selected) {
   return Boolean(code) && !selected;  // 번호 없는 로그는 직접 올린 것이다
 }
 
+// 자동 갱신 주기. 사내 PLM 을 주기적으로 치는 일이라 아래로는 15 분까지만 연다.
+export const REFRESH_CHOICES = ["0", "15", "30", "60"];
+export const REFRESH_LABELS = { 0: "끔", 15: "15분마다", 30: "30분마다", 60: "1시간마다" };
+
+/** Run the search plmState describes, with no DOM in reach.
+ *
+ * Every control mirrors its choice into plmState, so the shell can repeat the
+ * last search on a timer while another view is on screen -- which is the whole
+ * point of the periodic refresh. `client` is the seam the tests hand a fake to.
+ */
+export async function runPlmSearch(state, client = api) {
+  if (state.method === "PLM 번호") {
+    const codes = (state.defectCode || "").split(/[,\s]+/).map((code) => code.trim()).filter(Boolean);
+    if (!codes.length) return { success: false, message: "PLM 번호를 입력하세요.", defects: [] };
+    return client.plmDefectDetails(state.division, codes);
+  }
+
+  const ownerId = state.method === "내 문제"
+    ? rememberedKnoxId()
+    : state.method === "그룹"
+      ? (await client.plmGroupUsers(state.group)).users.join(",")
+      : (state.user || "").trim();
+
+  if (!ownerId) return { success: false, message: "검색할 그룹이나 Knox ID 를 지정하세요.", defects: [] };
+
+  return client.plmQuickSearch({
+    division_code: state.division,
+    main_owner_id: ownerId,
+    status: (state.status || "Open").toLowerCase(),
+  });
+}
+
+/** Fold a search result into plmState, and say which defects are new.
+ *
+ * `seen` is what the user has had in front of them. A search they pressed is
+ * seen by definition; one the timer ran is not, and the difference is what the
+ * tab badge counts. The timer must not touch the selection either -- pulling a
+ * defect out from under someone mid-read is the bug this view already had once.
+ */
+export function applyPlmSearch(state, body, { seen }) {
+  const defects = body.defects || [];
+  const codes = defects.map((defect) => defect.defectCode);
+
+  state.defects = defects;
+  state.searchNote = body.success
+    ? `${fmt.count(defects.length)}건` + (body.truncated ? ` (전체 ${body.total_codes}건 중 일부)` : "")
+    : body.message || "검색 실패";
+
+  if (seen) {
+    state.seenCodes = codes;
+    state.newCodes = [];
+    return [];
+  }
+
+  const known = new Set(state.seenCodes || []);
+  const fresh = codes.filter((code) => !known.has(code));
+  // 아직 안 본 것만 쌓되, 그새 사라진 결함은 배지에서도 뺀다.
+  state.newCodes = [...new Set([...(state.newCodes || []), ...fresh])]
+    .filter((code) => codes.includes(code));
+  return fresh;
+}
+
 
 function input(placeholder, value = "") {
   const node = el("input", "text-input");
@@ -210,12 +272,24 @@ export async function renderPlm(mount, sourceFile, ctx) {
     state.group = groupPicker.value;
   });
 
+  // 같은 검색을 주기로 되풀이한다. 타이머는 껍데기(app.js)가 들고 있어 다른
+  // 탭에 가 있어도 계속 돌고, 새로 잡힌 결함 수는 PLM 탭 이름에 붙는다.
+  const refreshPicker = select(REFRESH_CHOICES, REFRESH_LABELS);
+  refreshPicker.value = String(state.refreshMinutes ?? 30);
+  refreshPicker.addEventListener("change", () => {
+    ctx.restartPlmRefresh(Number(refreshPicker.value));
+  });
+  const refreshNote = el("p", "card-note",
+    "검색 조건을 그대로 다시 실행합니다. 열어 둔 결함은 그대로 둡니다.");
+
   search.body.append(
     field("검색 방식", method.wrap),
     statusHost,
     targetHost,
     searchButton,
     searchNote,
+    field("자동 갱신", refreshPicker),
+    refreshNote,
   );
 
   // ------------------------------------------------------------------ 결과
@@ -248,6 +322,16 @@ export async function renderPlm(mount, sourceFile, ctx) {
     }
     resultsHost.append(list);
   };
+
+  // 껍데기의 타이머가 새 결과를 받아 두면 이 자리에서 다시 그린다. 화면 전체를
+  // 다시 그리면 훑어 둔 로그 목록이나 쓰다 만 코멘트가 날아가므로 목록만 손댄다.
+  state.redrawResults = () => {
+    searchNote.textContent = state.searchNote || "";
+    drawResults();
+  };
+  ctx.onLeave(() => {
+    state.redrawResults = null;
+  });
 
   // ------------------------------------------------------------------ 상세
   const detail = panel("결함 상세", "선택된 결함의 내용과 개발자 코멘트");
@@ -908,57 +992,23 @@ export async function renderPlm(mount, sourceFile, ctx) {
     drawAnalysis(defect);
   };
 
-  const searchByDefectCode = async () => {
-    const defectCodes = defectInput.value
-      .split(/[,\s]+/)
-      .map((code) => code.trim())
-      .filter(Boolean);
-
-    state.defectCode = defectInput.value;
-    if (!defectCodes.length) {
-      return { success: false, message: "PLM 번호를 입력하세요.", defects: [] };
-    }
-    return api.plmDefectDetails(state.division, defectCodes);
-  };
-
-  const ownerToSearch = async () => {
-    if (method.value === "내 문제") return rememberedKnoxId();
-    if (method.value === "그룹") {
-      return (await api.plmGroupUsers(groupPicker.value)).users.join(",");
-    }
-    return userInput.value.trim();
-  };
-
-  const searchByOwner = async () => {
-    const ownerId = await ownerToSearch();
-
-    if (!ownerId) {
-      return { success: false, message: "검색할 그룹이나 Knox ID 를 지정하세요.", defects: [] };
-    }
-
-    return api.plmQuickSearch({
-      division_code: state.division,
-      main_owner_id: ownerId,
-      status: status.value.toLowerCase(),
-    });
-  };
-
   searchButton.addEventListener("click", async () => {
     searchButton.disabled = true;
     searchNote.textContent = "검색 중...";
     try {
-      const body = method.value === "PLM 번호" ? await searchByDefectCode() : await searchByOwner();
-      state.defects = body.defects || [];
+      const body = await runPlmSearch(state);
+      applyPlmSearch(state, body, { seen: true });
       state.selected = null;
       state.analysis = null;
+      // 사람이 한 번 검색해야 되풀이할 조건이 생긴다.
+      state.searched = true;
       // Without this the previous defect stays on screen and, worse, stays in
       // ctx.activeDefect — the chat would file its answer against it.
       clearSelectionViews();
-      state.searchNote = body.success
-        ? `${fmt.count(body.defects?.length || 0)}건` + (body.truncated ? ` (전체 ${body.total_codes}건 중 일부)` : "")
-        : body.message || "검색 실패";
       searchNote.textContent = state.searchNote;
       drawResults();
+      // 주기는 마지막 검색부터 센다. 방금 본 목록을 곧바로 또 받지 않는다.
+      ctx.restartPlmRefresh();
     } catch (error) {
       state.searchNote = String(error.message || error);
       searchNote.textContent = state.searchNote;

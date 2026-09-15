@@ -7,7 +7,7 @@ import { renderBoot } from "./views/boot.js";
 import { renderSatellite } from "./views/satellite.js";
 import { renderChat } from "./views/chat.js";
 import { renderKnowledge } from "./views/knowledge.js";
-import { renderPlm } from "./views/plm.js";
+import { applyPlmSearch, renderPlm, runPlmSearch } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
 import { defectCacheKey } from "./views/plm_data.js";
 import { forgetChat, forgetMissingChats, restoreTurns, storableTurns } from "./chats.js";
@@ -40,6 +40,47 @@ const state = {
 
 const nodes = {};
 
+// PLM 자동 갱신은 껍데기가 들고 있다. 뷰 안에 두면 다른 탭으로 옮기는 순간
+// 화면과 함께 버려지는데, 탭 밖에서도 돌아야 쓸모가 있는 기능이다.
+let plmRefreshTimer = null;
+
+/** Repeat the last PLM search and re-arm, one interval from now.
+ *
+ * setTimeout rather than setInterval: a search against the corporate PLM can
+ * outlast a short interval, and overlapping runs would double the load and
+ * race each other into plmState.
+ */
+function schedulePlmRefresh() {
+  clearTimeout(plmRefreshTimer);
+  plmRefreshTimer = null;
+
+  const minutes = Number(state.plmState?.refreshMinutes) || 0;
+  // 되풀이할 검색이 없으면 깨어날 이유도 없다. 첫 검색이 시계를 건다.
+  if (!minutes || !state.plmState?.searched || !rememberedKnoxId()) return;
+
+  plmRefreshTimer = setTimeout(async () => {
+    await refreshPlmSearch();
+    schedulePlmRefresh();
+  }, minutes * 60 * 1000);
+}
+
+async function refreshPlmSearch() {
+  const plm = state.plmState;
+  // 사람이 한 번도 검색하지 않았으면 되풀이할 조건 자체가 없다.
+  if (!plm?.searched) return;
+
+  try {
+    const body = await runPlmSearch(plm);
+    // PLM 탭을 보고 있으면 결과가 눈앞에 있으니 새것으로 세지 않는다.
+    applyPlmSearch(plm, body, { seen: state.view === "plm" });
+    plm.redrawResults?.();
+    drawNav();
+  } catch (error) {
+    // 사내망이 잠깐 끊긴 것까지 화면에 올릴 것은 없다. 다음 주기에 다시 친다.
+    console.error("PLM 자동 갱신", error);
+  }
+}
+
 function setTheme(next) {
   document.documentElement.dataset.theme = next;
   try {
@@ -61,7 +102,10 @@ function drawNav() {
   if (!rememberedKnoxId()) return;
 
   for (const view of VIEWS) {
-    const button = el("button", "nav-item" + (view.id === state.view ? " active" : ""), view.label);
+    // 자동 갱신이 물어 온 새 결함 수. 탭을 열면 사라진다.
+    const fresh = view.id === "plm" ? state.plmState?.newCodes?.length || 0 : 0;
+    const label = fresh ? `${view.label} (${fresh})` : view.label;
+    const button = el("button", "nav-item" + (view.id === state.view ? " active" : ""), label);
     button.type = "button";
     button.addEventListener("click", () => {
       if (state.view === view.id) return;
@@ -94,6 +138,8 @@ function drawUser() {
     // 다음 사람이 앞사람의 파일 목록을 이어받지 않게 비운다.
     state.files = [];
     state.sourceFile = null;
+    // 이름표가 없으면 PLM 을 대신 칠 사람도 없다.
+    schedulePlmRefresh();
     drawNav();
     drawFilePicker();
     drawUser();
@@ -184,6 +230,13 @@ function rerender() {
 
   const view = VIEWS.find((entry) => entry.id === state.view) || VIEWS[0];
 
+  // PLM 화면을 열면 자동 갱신이 물어 온 것을 본 셈이므로 배지를 턴다.
+  if (view.id === "plm" && state.plmState?.newCodes?.length) {
+    state.plmState.newCodes = [];
+    state.plmState.seenCodes = (state.plmState.defects || []).map((defect) => defect.defectCode);
+    drawNav();
+  }
+
   if (view.needsFile && !state.sourceFile) {
     nodes.main.append(el("p", "card-note", "적재된 로그가 없습니다. '파일 · 분석'에서 로그를 올려 분석하세요."));
     return;
@@ -250,6 +303,15 @@ function rerender() {
           selected: null,
           analysis: null,
           searchNote: "",
+          // 같은 검색을 되풀이하는 주기(분). 0 이면 끈다.
+          refreshMinutes: 30,
+          // 사람이 한 번 검색해야 되풀이할 조건이 생긴다.
+          searched: false,
+          // 화면에서 이미 본 결함, 그리고 아직 못 본 것. 뒤가 탭 배지의 숫자다.
+          seenCodes: [],
+          newCodes: [],
+          // PLM 화면이 떠 있는 동안에만 채워지는, 결과 목록만 다시 그리는 손잡이.
+          redrawResults: null,
           attachmentJobs: {},
           // PLM responses keyed by `division:defectCode`. Re-entering the view
           // restores the selection, so without this every rerender() — a theme
@@ -261,6 +323,15 @@ function rerender() {
     },
     setActiveDefect(defect) {
       state.activeDefect = defect;
+    },
+    /** Re-arm the PLM refresh clock, optionally on a new interval.
+     *
+     *  Called on a change of interval and after a search the user pressed, so
+     *  the wait is counted from the results they are actually looking at.
+     */
+    restartPlmRefresh(minutes) {
+      if (minutes !== undefined) this.plmState.refreshMinutes = minutes;
+      schedulePlmRefresh();
     },
     /** Drop a defect's cached detail after writing to it — filing a comment
      *  changes the comment list the cache is holding. Shares the key helper

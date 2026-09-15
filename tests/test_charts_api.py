@@ -205,7 +205,9 @@ def test_the_browser_ui_and_its_assets_are_served(client):
     assert "drawLoginGate" in app.text
     assert "if (rememberedKnoxId()) await loadFiles();" in app.text
     assert "scanned?.job_id" in plm.text and "display_message" in plm.text
-    assert "PLM 번호" in plm.text and "searchByDefectCode" in plm.text
+    # 검색은 화면 없이도 돌아야 한다 -- 껍데기의 주기 갱신이 같은 것을 부른다.
+    assert "PLM 번호" in plm.text and "export async function runPlmSearch" in plm.text
+    assert "schedulePlmRefresh" in app.text
     assert "field(\"Division\"" not in plm.text
     assert dashboard.status_code == 200 and "LLM 분석 요청" in dashboard.text
     assert "Private Network 판정" in dashboard.text
