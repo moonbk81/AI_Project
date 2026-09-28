@@ -16,6 +16,16 @@ MO_LINES = [
     "[31/12/99 02:38:58.463900] [151] [ap] [RIL-IMSCALL] GET_CURRENT_CALLS -> 1 call(s)",
     "[31/12/99 02:38:58.465800] [151] [ap] [RIL_CPP] {[id=5,DIALING,toa=129,norm,mo,als=0,voc,noevp,9560959279,cli=0,name='',2}",
     "[31/12/99 02:38:58.485100] [152] [ap] [0,0137]< RIL_REQUEST_GET_CURRENT_CALLS",
+    "[31/12/99 02:39:02.182800] [346] [ap] 12-31 02:39:02.182+0000 185 346 [W][IMS-FW] [SIP]> INVITE sip:9560959279;phone-context=ims.mnc011.mcc404.3gppnetwork.org@ims.mnc011.mcc404.3gppnetwork.org;user=phone SIP/2.0",
+    "[31/12/99 02:39:02.210400] [346] [ap] 12-31 02:39:02.210+0000 185 346 [W][IMS-FW] Call-ID: _AmzwYN2my1Rhtvf-SJcTg..@2402:8100:6af2:ac53::37:3101:b901",
+    "[31/12/99 02:39:02.212300] [346] [ap] 12-31 02:39:02.212+0000 185 346 [W][IMS-FW] CSeq: 1 INVITE",
+    "[31/12/99 02:39:02.240200] [346] [ap] 12-31 02:39:02.240+0000 185 346 [W][IMS-FW] Content-Length: 0",
+    "[31/12/99 02:39:02.241500] [346] [ap] 12-31 02:39:02.241+0000 185 346 [W][IMS-FW] ",
+    "[31/12/99 02:39:08.837300] [346] [ap] 12-31 02:39:08.837+0000 185 346 [W][IMS-FW] [SIP]< SIP/2.0 180 Ringing",
+    "[31/12/99 02:39:08.853000] [346] [ap] 12-31 02:39:08.853+0000 185 346 [W][IMS-FW] Call-ID: _AmzwYN2my1Rhtvf-SJcTg..@2402:8100:6af2:ac53::37:3101:b901",
+    "[31/12/99 02:39:08.855000] [346] [ap] 12-31 02:39:08.855+0000 185 346 [W][IMS-FW] CSeq: 1 INVITE",
+    "[31/12/99 02:39:08.871000] [346] [ap] 12-31 02:39:08.871+0000 185 346 [W][IMS-FW] Content-Length: 0",
+    "[31/12/99 02:39:08.873000] [346] [ap] 12-31 02:39:08.873+0000 185 346 [W][IMS-FW] ",
     "[31/12/99 02:39:09.253700] [151] [ap] [RIL-IMSCALL] call ~ sid=1120794317 idx=5 DIALING -> ALERTING",
     "[31/12/99 02:39:35.238100] [152] [ap] [0,0164]> RIL_REQUEST_GET_CURRENT_CALLS",
     "[31/12/99 02:39:35.243200] [151] [ap] [RIL_CPP] [0164]> GET_CURRENT_CALLS ",
@@ -30,6 +40,11 @@ MO_LINES = [
 
 # callMT.txt 에서 발췌 — TAPI open 문제로 첫 INCOMING 뒤 UI 까지 가지 못한 사례
 MT_LINES = [
+    "[31/12/99 02:06:23.668300] [346] [ap] 12-31 02:06:23.668+0000 185 346 [W][IMS-FW] [SIP]< INVITE sip:+917290070351@[2402:8100:6af2:ac53::37:3101:b901]:6100 SIP/2.0",
+    "[31/12/99 02:06:23.670000] [346] [ap] 12-31 02:06:23.670+0000 185 346 [W][IMS-FW] Call-ID: LU-1789968831275873-50013530@ims333-013.dl.ims.sbc.nokia.com",
+    "[31/12/99 02:06:23.671000] [346] [ap] 12-31 02:06:23.671+0000 185 346 [W][IMS-FW] CSeq: 1 INVITE",
+    "[31/12/99 02:06:23.672000] [346] [ap] 12-31 02:06:23.672+0000 185 346 [W][IMS-FW] Content-Length: 0",
+    "[31/12/99 02:06:23.673000] [346] [ap] 12-31 02:06:23.673+0000 185 346 [W][IMS-FW] ",
     "[31/12/99 02:06:25.388300] [346] [ap] 12-31 02:06:25.387+0000 185 346 [I][IMS6.0] CallSession::NotifyIncomingCall(): :(7)",
     "[31/12/99 02:06:25.471500] [346] [ap] 12-31 02:06:25.471+0000 185 346 [W][IMS-FW] [TID:UNSL]< NOTIFY_INCOMING_CALL(10005)",
     "[31/12/99 02:06:26.371500] [245] [ap] [RIL-IMSBRIDGE] [rx] <- noti:CallIncomingInd sid=1593715712",
@@ -47,7 +62,7 @@ def test_line_parses_task_core_and_tags():
     rec = parse_line("[31/12/99 02:38:58.235400] [151] [ap] [RIL_CPP] [0136]> DIAL (num=1,clir=0)", 7)
     assert (rec.line_no, rec.time, rec.task, rec.core, rec.tag) == (7, "02:38:58.235400", 151, "ap", "RIL_CPP")
 
-    nested = parse_line(MT_LINES[0])
+    nested = parse_line(next(l for l in MT_LINES if "[IMS6.0]" in l))
     assert (nested.tag, nested.level) == ("IMS6.0", "I")
 
     word = parse_line("[31/12/99 01:33:16.943000] [173] [ap] ATD: ListenFD()")
@@ -96,6 +111,8 @@ def test_mo_call_reaches_alerting_and_ends_with_fail_cause():
     assert call["status"] == "연결 전 종료"
     assert call["checkpoints"]["ofono_dial"]["time"] == "02:38:58.221500"
     assert call["checkpoints"]["rild_dial"]["time"] == "02:38:58.235400"
+    assert call["checkpoints"]["sip_invite"]["time"] == "02:39:02.182800"
+    assert [m["method_code"] for m in call["sip_messages"]] == ["INVITE", "180 Ringing"]
 
     dial = next(r for r in call["ril_requests"] if r["name"] == "DIAL")
     assert (dial["token"], dial["latency_ms"]) == ("0136", 229.9)
@@ -111,7 +128,8 @@ def test_mt_call_stuck_before_ui_is_reported_at_ui_stage():
     assert call["status"] == "연결 전 로그 끝남"
     assert call["broken_at"]["stage"] == "ui_incoming"
     reached = [c["stage"] for c in call["chain"] if c["reached"]]
-    assert reached == ["ims_incoming", "bridge", "ril_call", "ofono_clcc"]
+    assert reached == ["sip_invite", "ims_incoming", "bridge", "ril_call", "ofono_clcc"]
+    assert call["sip_call_id"].startswith("LU-1789968831275873")
 
 
 def test_active_state_from_call_list_marks_connected():
@@ -129,3 +147,9 @@ def test_request_without_response_is_reported():
     ])
     assert result["kpi"]["unanswered_request_count"] == 1
     assert result["unanswered_requests"][0]["name"] == "ANSWER"
+
+
+def test_mo_without_invite_breaks_at_ims_stage():
+    no_sip = [l for l in MO_LINES if "[346]" not in l]
+    call = RtosCallFlowParser().analyze(no_sip[:14])["calls"][0]
+    assert call["broken_at"]["stage"] == "sip_invite"

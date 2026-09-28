@@ -718,7 +718,11 @@ def _sip_setup_latency_ms(sip_df: pd.DataFrame) -> Optional[int]:
     methods = sip_df["method_code"].astype(str)
 
     invite = times[methods.str.contains("INVITE", na=False)].min()
-    ok = times[methods.str.contains("200 OK", na=False)].max()
+    ok_rows = methods.str.contains("200 OK", na=False)
+    if "cseq" in sip_df.columns:
+        # BYE/PRACK 의 200 OK 까지 세면 통화 시간 전체가 설정 지연으로 잡힌다.
+        ok_rows &= sip_df["cseq"].astype(str).str.upper().str.endswith("INVITE")
+    ok = times[ok_rows].max()
     if pd.isna(invite) or pd.isna(ok) or ok < invite:
         return None
     return int((ok - invite).total_seconds() * 1000)

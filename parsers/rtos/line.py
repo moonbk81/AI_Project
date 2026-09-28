@@ -22,6 +22,8 @@ RTOS_LINE_RE = re.compile(
 NESTED_LOGCAT_RE = re.compile(
     r'^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+[+-]\d{4} +\d+ +\d+ +\[([VDIWEF])\]\[([^\]]+)\]\s*(.*)'
 )
+# 빌드에 따라 IMS 줄이 logcat 헤더 없이 `[I][IMS-FW]: 본문` 으로만 찍힌다 (콜론이 없기도 하다).
+SHORT_LEVEL_TAG_RE = re.compile(r'^\[([VDIWEF])\]\[([^\]]+)\]:? ?(.*)$')
 BRACKET_TAG_RE = re.compile(r'^\[([A-Za-z][\w\-. ]*?)\]\s*(.*)')
 WORD_TAG_RE = re.compile(r'^([A-Za-z_][\w]*):\s+(.*)')
 BUILD_KV_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$')
@@ -38,6 +40,7 @@ class RtosLine:
     level: Optional[str]
     msg: str
     extra: List[str] = field(default_factory=list)
+    date: str = ""  # MM-DD. Android 쪽 차트가 쓰는 "MM-DD HH:MM:SS.f" 시각을 만들 때 쓴다
 
 
 def _to_sec(dd, mm, yy, h, m, s) -> float:
@@ -49,11 +52,19 @@ def _to_sec(dd, mm, yy, h, m, s) -> float:
     return day * 86400 + int(h) * 3600 + int(m) * 60 + float(s)
 
 
+def split_level_tag(msg: str):
+    """IMS 계열 줄이면 (level, tag, 본문), 아니면 None. 두 가지 찍는 형식을 모두 받는다."""
+    nested = NESTED_LOGCAT_RE.match(msg) or SHORT_LEVEL_TAG_RE.match(msg)
+    if nested:
+        return nested.group(1), nested.group(2), nested.group(3)
+    return None
+
+
 def _split_tag(msg: str):
     """message 앞부분에서 (tag, level, 본문)을 뽑는다. 못 뽑으면 tag=None."""
-    nested = NESTED_LOGCAT_RE.match(msg)
-    if nested:
-        return nested.group(2), nested.group(1), nested.group(3)
+    leveled = split_level_tag(msg)
+    if leveled:
+        return leveled[1], leveled[0], leveled[2]
     bracket = BRACKET_TAG_RE.match(msg)
     if bracket:
         return bracket.group(1), None, bracket.group(2)
@@ -78,6 +89,7 @@ def parse_line(raw: str, line_no: int = 0) -> Optional[RtosLine]:
         tag=tag,
         level=level,
         msg=msg.rstrip(),
+        date=f"{mm}-{dd}",
     )
 
 
@@ -96,8 +108,9 @@ def parse_lines(lines, sort: bool = True) -> List[RtosLine]:
 
 def read_log_lines(path) -> List[str]:
     """BOM 을 보고 인코딩을 고른다. Windows 터미널로 저장한 로그는 UTF-16LE 로 온다."""
+    # splitlines() 는 \x1c, \u2028 같은 문자에서도 줄을 나눠 편집기/orchestrator 와 줄 번호가 어긋난다.
     with open(path, 'r', encoding=detect_text_encoding(path), errors='replace') as f:
-        return f.read().splitlines()
+        return f.read().split('\n')
 
 
 def parse_build_header(lines, max_lines: int = 60) -> dict:

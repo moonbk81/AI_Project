@@ -44,6 +44,13 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "last_reached_evidence": last,
             "fail_cause": call.get("fail_cause"),
             "fail_reason": call.get("fail_reason"),
+            "sip_call_id": call.get("sip_call_id"),
+            "sip_flow": [
+                {k: m.get(k) for k in ("time", "direction", "method_code", "cseq", "is_error", "key_headers")}
+                for m in call.get("sip_messages") or []
+            ],
+            "sip_final_response": call.get("sip_final_response"),
+            "sip_error": call.get("sip_error"),
             "ril_requests": [
                 {k: r.get(k) for k in ("name", "token", "req_time", "resp_time", "latency_ms", "response")}
                 for r in call.get("ril_requests", [])
@@ -61,6 +68,9 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "RTOS 콜은 UI/TAPI → ofono → rild → RIL-IMSCALL → IMS 계층을 거친다. "
             "broken_at 은 로그가 처음으로 비는 계층이다. 그 계층이 원인이라고 단정하지 말고 "
             "'직전 계층까지는 진행됐고 이 계층의 로그가 없다'고 말하라. "
-            "ACTIVE 없이 종료됐는데 broken_at 이 없으면 망/상대방 쪽(무응답, 거절)을 fail_cause 로 설명하라."
+            "ACTIVE 없이 종료됐는데 broken_at 이 없으면 망/상대방 쪽(무응답, 거절)을 fail_cause 로 설명하라. "
+            "sip_flow 가 있으면 망이 실제로 무엇을 보냈는지(18x/4xx/BYE Reason)를 근거로 삼고, "
+            "MO 인데 sip_flow 가 비어 있으면 INVITE 가 망으로 나가지 않은 것이다. "
+            "401/407 은 IMS 등록의 정상 인증 절차이므로 오류로 말하지 마라."
         ),
     }, ensure_ascii=False)

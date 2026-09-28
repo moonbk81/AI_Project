@@ -14,6 +14,7 @@ import re
 from core.telephony_constants import CALL_FAIL_REASON_MAP
 from parsers.base import BaseParser
 from parsers.rtos.line import parse_lines
+from parsers.rtos.sip import parse_sip_messages
 
 IMSCALL_NEW_RE = re.compile(r'call \+ sid=(\d+) idx=(\d+) (mo|mt) (\w+)')
 IMSCALL_TRANS_RE = re.compile(r'call ~ sid=(\d+) idx=(\d+) (\w+) -> (\w+)')
@@ -38,9 +39,11 @@ MO_CHAIN = [
     ("ofono_dial", "ofono → RIL DIAL"),
     ("rild_dial", "rild DIAL 수신"),
     ("ril_call", "RIL 호 생성"),
+    ("sip_invite", "IMS INVITE 송신"),
     ("alerting", "상대방 호출 중(ALERTING)"),
 ]
 MT_CHAIN = [
+    ("sip_invite", "망 INVITE 수신"),
     ("ims_incoming", "IMS 착신 수신"),
     ("bridge", "IMS → RIL 전달"),
     ("ril_call", "RIL 호 생성(INCOMING)"),
@@ -81,6 +84,10 @@ def _stage_of(rec):
     return None
 
 
+def _public_sip(message):
+    return {k: v for k, v in message.items() if k != "time_sec"}
+
+
 def _evidence(rec):
     return {"time": rec.time, "line_no": rec.line_no, "text": rec.msg}
 
@@ -109,7 +116,9 @@ class RtosCallFlowParser(BaseParser):
             elif rec.tag == "RIL_CPP":
                 self._track_call_list(rec, active)
 
+        sip_messages = parse_sip_messages(records)
         for call in calls:
+            self._attach_sip(call, sip_messages)
             self._attach_checkpoints(call, markers)
             self._attach_requests(call, request_order)
         self._attach_fail_causes(calls, fail_causes)
@@ -128,6 +137,8 @@ class RtosCallFlowParser(BaseParser):
             },
             "calls": [self._public(c) for c in calls],
             "unanswered_requests": unanswered[:MAX_UNANSWERED],
+            # 콜에 묶이지 않은 것(REGISTER, SUBSCRIBE)까지 전부. 기존 SIP 흐름 차트가 이걸 그린다.
+            "sip_messages": [_public_sip(m) for m in sip_messages],
         }
 
     def save_ui_report(self, output_dir="./result", base_name="", analysis=None):
@@ -233,6 +244,41 @@ class RtosCallFlowParser(BaseParser):
                 rec = next((r for r in candidates if start < r.sec <= post_end), None)
             if rec:
                 call["checkpoints"][stage] = _evidence(rec)
+
+    def _attach_sip(self, call, sip_messages):
+        """콜의 INVITE 를 찾아 그 Call-ID 의 메시지를 모두 붙인다.
+
+        MO 는 RIL 호 생성 뒤에 INVITE 를 보내고, MT 는 INVITE 를 받은 뒤에 RIL 호가 생긴다.
+        """
+        start = call["start_sec"]
+        outgoing = call["direction"] == "MO"
+        if outgoing:
+            lo, hi = start, start + POST_WINDOW_SEC
+        else:
+            lo, hi = start - PRE_WINDOW_SEC, start
+        invite = next((
+            m for m in sip_messages
+            if m["method_code"] == "INVITE" and m["is_outgoing"] == outgoing and lo <= m["time_sec"] <= hi
+        ), None)
+        call["sip_call_id"] = None
+        call["sip_messages"] = []
+        call["sip_final_response"] = None
+        call["sip_error"] = None
+        if not invite:
+            return
+        call["sip_call_id"] = invite["call_id"]
+        call["checkpoints"]["sip_invite"] = {
+            "time": invite["time"].split(" ")[-1], "line_no": invite["line_no"], "text": invite["raw_log"],
+        }
+        dialog = [m for m in sip_messages if m["call_id"] == invite["call_id"]]
+        call["sip_messages"] = [_public_sip(m) for m in dialog]
+        answers = [m for m in dialog if m["msg_type"] == "Resp" and m["cseq"].endswith("INVITE")
+                   and (m["status_code"] or 0) >= 200]
+        if answers:
+            call["sip_final_response"] = answers[-1]["method_code"]
+        errors = [m for m in dialog if m["is_error"]]
+        if errors:
+            call["sip_error"] = errors[0]["method_code"]
 
     def _attach_requests(self, call, request_order):
         lo = call["start_sec"] - PRE_WINDOW_SEC

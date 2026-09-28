@@ -135,8 +135,16 @@ function rtosCallBlock(call) {
   wrap.append(tileRow([
     tile(direction, call.status || "N/A", "", `sid ${call.sid || "-"}`, tone),
     tile("시작 / 종료", msTime(call.start_time), "", call.end_time ? `→ ${msTime(call.end_time)}` : "종료 로그 없음"),
-    tile("끊긴 지점", call.broken_label || "없음", "", "", call.broken_label ? "critical" : "good"),
-    tile("종료 원인", call.fail_cause || "-", "", call.fail_reason || ""),
+    tile("끊긴 지점", call.broken_label || "없음", "",
+         call.fail_cause ? `종료 원인 ${call.fail_cause} ${call.fail_reason || ""}` : "",
+         call.broken_label ? "critical" : "good"),
+    // 마지막 SIP 메시지가 망이 어디까지 알고 있는지를 보여준다 -- 착신에서 ↑ 180 Ringing 이면
+    // 망과 상대방은 이 단말이 울리고 있다고 알고 있다.
+    tile("IMS SIP 마지막", call.sip_last || "INVITE 없음", "",
+         call.sip_count
+           ? `메시지 ${call.sip_count}건${call.sip_final_response ? ` · 최종 ${call.sip_final_response}` : ""}`
+           : "",
+         call.sip_error ? "critical" : (call.sip_count ? "good" : "warning")),
   ]));
   wrap.append(frameTable((call.stages || []).map((stage) => ({
     단계: stage.label,
@@ -151,7 +159,59 @@ function rtosCallBlock(call) {
   return wrap;
 }
 
-// domain 이 없는 카드는 Android 세션 카드다. RTOS 세션에서는 domain: "rtos" 카드만 그린다.
+// SIP 래더: 왼쪽 세로선이 단말(UE), 오른쪽이 IMS 망. 위에서 아래로 시간 순서다.
+// 시각 간격이 아니라 메시지 순서로 줄을 세운다 -- 수 ms 와 수십 초가 섞여 있어서
+// 시간 축으로 그리면 메시지가 한 줄에 겹친다.
+const SIP_LADDER_MAX = 80;
+const SIP_ROW_PX = 30;
+
+function sipLadder(messages) {
+  const rows = (messages || []).slice(0, SIP_LADDER_MAX);
+  const color = (kind) => token(kind === "error" ? "--status-critical"
+    : kind === "success" ? "--status-good" : "--series-1");
+  const annotations = [];
+  rows.forEach((m, i) => {
+    const [from, to] = m.is_outgoing ? [0.02, 0.98] : [0.98, 0.02];
+    annotations.push({
+      x: to, y: i, ax: from, ay: i, xref: "x", yref: "y", axref: "x", ayref: "y",
+      showarrow: true, arrowhead: 3, arrowsize: 1, arrowwidth: 1.5, arrowcolor: color(m.kind), text: "",
+    });
+    annotations.push({
+      x: 0.5, y: i, xref: "x", yref: "y", yshift: 9, showarrow: false,
+      text: m.method_code, font: { size: 12, color: color(m.kind) },
+    });
+  });
+  const traces = [{
+    type: "scatter", mode: "markers", x: rows.map(() => 0.5), y: rows.map((_, i) => i),
+    marker: { size: 18, opacity: 0 },
+    customdata: rows.map((m) => [m.time_label, m.is_outgoing ? "UE → 망" : "망 → UE", m.cseq]),
+    text: rows.map((m) => m.method_code),
+    hovertemplate: "<b>%{text}</b><br>%{customdata[0]}<br>%{customdata[1]}<br>CSeq %{customdata[2]}<extra></extra>",
+    showlegend: false,
+  }];
+  const lifeline = (x) => ({
+    type: "line", xref: "x", yref: "paper", x0: x, x1: x, y0: 0, y1: 1,
+    line: { width: 2, color: token("--baseline") },
+  });
+  const height = Math.max(220, rows.length * SIP_ROW_PX + 70);
+  const layout = baseLayout({
+    margin: { l: 110, r: 24, t: 34, b: 12 },
+    xaxis: axis({ range: [-0.05, 1.05], showgrid: false, showline: false, showticklabels: false, fixedrange: true }),
+    yaxis: axis({
+      autorange: "reversed", showgrid: false, showline: false, fixedrange: true,
+      tickvals: rows.map((_, i) => i), ticktext: rows.map((m) => m.time_label),
+      tickfont: { size: 11 },
+    }),
+    shapes: [lifeline(0.02), lifeline(0.98)],
+    annotations: annotations.concat([
+      { x: 0.02, y: 1, xref: "x", yref: "paper", yanchor: "bottom", showarrow: false, text: "<b>UE</b>" },
+      { x: 0.98, y: 1, xref: "x", yref: "paper", yanchor: "bottom", showarrow: false, text: "<b>IMS 망</b>" },
+    ]),
+  });
+  return { traces, layout, height };
+}
+
+// domain 이 없는 카드는 Android 세션 카드다. RTOS 세션에서는 domain 에 "rtos" 가 든 카드만 그린다.
 const CARDS = [
   {
     domain: "rtos",
@@ -516,6 +576,9 @@ const CARDS = [
     },
   },
   {
+    // RTOS 도 IMS 콜이라 IMS-FW 가 같은 SIP 를 찍는다. 같은 카드를 양쪽에서 쓴다.
+    domain: ["android", "rtos"],
+    wide: true,
     chart: "sip-flow",
     title: "VoLTE / IMS SIP",
     sub: "단말과 IMS 망 사이 메시지",
@@ -523,15 +586,18 @@ const CARDS = [
     render(series, panel) {
       const kpi = series.kpi;
       panel.prepend(tileRow([
-        tile("SIP transaction", fmt.count(kpi.transaction_count)),
+        tile("SIP 메시지", fmt.count(kpi.transaction_count)),
         tile("오류 응답", fmt.count(kpi.error_count), "", kpi.error_count ? "4xx~6xx 발생" : "정상",
              kpi.error_count ? "critical" : "good"),
         tile("통화 설정 지연", kpi.setup_latency_ms === null ? "N/A" : fmt.count(kpi.setup_latency_ms),
-             kpi.setup_latency_ms === null ? "" : "ms"),
+             kpi.setup_latency_ms === null ? "" : "ms", "INVITE → 200 OK"),
       ]));
-      panel.content(table(["시각", "방향", "메시지", "CSeq", "판정"],
+      const rows = table(["시각", "방향", "메시지", "CSeq", "판정"],
         series.messages.map((m) => [m.time_label, m.is_outgoing ? "UE → 망" : "망 → UE",
-                                    m.method_code, m.cseq, m.kind === "error" ? "오류" : m.kind === "success" ? "성공" : ""])));
+                                    m.method_code, m.cseq, m.kind === "error" ? "오류" : m.kind === "success" ? "성공" : ""]));
+      const ladder = sipLadder(series.messages);
+      panel.plotHeight(ladder.height);
+      panel.draw(ladder.traces, ladder.layout, rows);
     },
   },
   {
@@ -1173,7 +1239,7 @@ export async function renderDashboard(mount, sourceFile, ctx) {
   // 있는지(no_data 가 아닌지)로 도메인을 가르고 그 도메인 카드만 그린다.
   const rtos = await api.chart("rtos-call-flow", sourceFile).catch(() => ({ status: "no_data" }));
   const domain = rtos.status === "no_data" ? "android" : "rtos";
-  const cards = CARDS.filter((spec) => (spec.domain || "android") === domain);
+  const cards = CARDS.filter((spec) => [].concat(spec.domain || "android").includes(domain));
 
   // 단말 KPI 는 Android 파서 결과로 만든다. RTOS 세션에는 채울 값이 없다.
   if (domain === "android") {

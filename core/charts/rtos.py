@@ -26,6 +26,14 @@ def _to_ms(time_text: Optional[str]) -> Optional[float]:
         return None
 
 
+def _sip_last(messages: List[Dict[str, Any]]) -> Optional[str]:
+    """마지막 SIP 메시지. ↑ 는 단말 → 망, ↓ 는 망 → 단말."""
+    if not messages:
+        return None
+    last = messages[-1]
+    return f"{'↑' if last.get('is_outgoing') else '↓'} {last.get('method_code')}"
+
+
 def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
     chain = call.get("chain") or []
     times = [_to_ms(stage.get("time")) for stage in chain if stage.get("reached")]
@@ -54,6 +62,10 @@ def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
         "broken_label": broken.get("label"),
         "fail_cause": call.get("fail_cause"),
         "fail_reason": call.get("fail_reason"),
+        "sip_final_response": call.get("sip_final_response"),
+        "sip_error": call.get("sip_error"),
+        "sip_count": len(call.get("sip_messages") or []),
+        "sip_last": _sip_last(call.get("sip_messages") or []),
         "stages": stages,
         "last_evidence": last,
     }

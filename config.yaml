@@ -453,6 +453,8 @@ log_guidelines:
       - 콜 경로는 UI/TAPI → ofono(`[0,토큰]> RIL_REQUEST_*`) → rild(`[RIL_CPP]`) → RIL-IMSCALL → IMS 스택이다. 착신은 반대로 IMS → RIL-IMSBRIDGE → RIL-IMSCALL → ofono → TAPI/UI 로 올라온다.
       - `broken_at`은 로그가 처음으로 비는 계층이다. "직전 계층까지는 진행됐고 이 계층의 로그가 없다"고 말하고, 마지막으로 확인된 줄(line 번호 포함)을 근거로 제시하라.
       - ACTIVE 없이 종료됐는데 끊긴 지점이 없으면 단말 내부가 아니라 망/상대방 쪽이다. LAST_CALL_FAIL_CAUSE 값으로 설명하라.
+      - IMS SIP 흐름이 있으면 망이 실제로 받은/보낸 메시지(18x, 4xx~6xx, BYE 의 Reason)를 근거로 삼아라. MO 인데 INVITE 가 없으면 단말이 INVITE 를 보내기 전에 멈춘 것이다. MT 에서 단말이 180 Ringing 을 보냈다면 망과 상대방은 단말이 울리고 있다고 알고 있다.
+      - REGISTER 에 대한 401/407 은 IMS 등록의 정상 인증 절차다. 오류로 말하지 마라.
       - 날짜 31/12/99 는 RTC 미설정 값이다. 실제 날짜로 읽지 마라.
     RTOS_RIL_Pending: |
       - ofono 가 보낸 RIL 요청 중 로그 끝까지 응답이 없는 것이다. 로그가 요청 직후에 끝났다면 잘린 것일 수 있으니, 요청 시각과 로그 끝 시각의 간격을 함께 말하라.

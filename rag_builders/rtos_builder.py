@@ -27,6 +27,23 @@ def _call_document(call):
     lines.append("- 계층별 진행:")
     lines.extend(reached)
 
+    sip = call.get("sip_messages") or []
+    if sip:
+        flow = " → ".join(
+            f"{'UE→망' if m.get('is_outgoing') else '망→UE'} {m['method_code']}({m['time'].split(' ')[-1]})"
+            for m in sip
+        )
+        lines.append(f"- IMS SIP 흐름 (Call-ID {call.get('sip_call_id')}): {flow}")
+        if call.get("sip_final_response"):
+            lines.append(f"- INVITE 최종 응답: {call['sip_final_response']}")
+        if call.get("sip_error"):
+            lines.append(f"- SIP 오류 응답: {call['sip_error']}")
+        reasons = [m["key_headers"]["Reason"] for m in sip if (m.get("key_headers") or {}).get("Reason")]
+        if reasons:
+            lines.append(f"- SIP Reason 헤더: {'; '.join(reasons)}")
+    elif call.get("direction") == "MO":
+        lines.append("- IMS SIP: 이 콜의 INVITE 가 로그에 없다 (단말이 망으로 INVITE 를 보내지 않았다).")
+
     broken = call.get("broken_at")
     if broken:
         lines.append(f"- 끊긴 지점: {broken['label']} 단계의 로그가 없다. 바로 앞 단계까지는 진행됐다.")
@@ -91,6 +108,10 @@ def build_rtos_payloads(report_data, input_file):
         }
         if broken:
             meta["broken_stage"] = broken.get("label")
+        if call.get("sip_final_response"):
+            meta["sip_final_response"] = call["sip_final_response"]
+        if call.get("sip_error"):
+            meta["sip_error"] = call["sip_error"]
         if call.get("fail_cause"):
             meta["fail_cause"] = call["fail_cause"]
             meta["fail_reason"] = call.get("fail_reason")

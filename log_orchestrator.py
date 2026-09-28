@@ -196,6 +196,10 @@ class LogOrchestrator:
             "rtos_call_flow": self.rtos_call_flow_parser.analyze(lines),
         }
         self.rtos_call_flow_parser.save_ui_report("./result", self.base_name, result["rtos_call_flow"])
+        # Android 와 같은 모양의 SIP 목록이라 기존 SIP 흐름 차트(sip-flow)가 그대로 읽는다.
+        os.makedirs("./result", exist_ok=True)
+        with open(os.path.join("./result", f"{self.base_name}_ims_sip.json"), "w", encoding="utf-8") as f:
+            json.dump(result["rtos_call_flow"].get("sip_messages", []), f, indent=4, ensure_ascii=False)
         with open(output_path, "w", encoding="utf-8") as j:
             json.dump(result, j, indent=4, ensure_ascii=False)
         report_progress("로그 분석 리포트 생성 완료.", 50)
