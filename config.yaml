@@ -182,6 +182,16 @@ routing_map:
     tools: []
     log_types:
       - Nitz_Time_Event
+  # domain: rtos 인 intent 는 RTOS 로그에서만 쓰이고, Android 로그의 라우팅 후보에서는 빠진다.
+  RTOS_Call_Analysis:
+    domain: rtos
+    desc: "RTOS 콜, 워치 통화, 발신 실패, 착신 안 뜸, 전화가 안 걸림, 전화가 안 옴, 통화 연결 안 됨, 통화 끊김, DIAL, GET_CURRENT_CALLS, LAST_CALL_FAIL_CAUSE, ofono, rild, TAPI, RIL-IMSCALL, IMS 착신, 어느 단계에서 멈췄는지"
+    tools:
+      - get_rtos_call_flow_analytics
+    log_types:
+      - RTOS_Call_Flow
+      - RTOS_RIL_Pending
+      - RTOS_Log_Summary
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)
@@ -438,6 +448,15 @@ log_guidelines:
       - BINDER_PROXY_LEAK_RCA에서 leaked_descriptor가 android.content.IIntentReceiver이면 개발 조치는 반드시 "동적 BroadcastReceiver register 후 unregister 누락 점검"으로 작성하라.
       - max_proxy_count 또는 max_count가 있으면 am_wtf 원본 로그 개수보다 해당 값을 장애 규모의 핵심 수치로 사용하라.
       - RCA_Event가 있을 때 일반론적 표현인 "시스템 리소스 부족", "소프트웨어 버그", "OS 업데이트", "공장 초기화" 같은 사용자 조치 중심 답변을 금지한다.
+    RTOS_Call_Flow: |
+      - RTOS(NuttX) 워치 로그다. Android 프레임워크(RILJ, Telecom, logcat 태그)를 전제로 설명하지 마라.
+      - 콜 경로는 UI/TAPI → ofono(`[0,토큰]> RIL_REQUEST_*`) → rild(`[RIL_CPP]`) → RIL-IMSCALL → IMS 스택이다. 착신은 반대로 IMS → RIL-IMSBRIDGE → RIL-IMSCALL → ofono → TAPI/UI 로 올라온다.
+      - `broken_at`은 로그가 처음으로 비는 계층이다. "직전 계층까지는 진행됐고 이 계층의 로그가 없다"고 말하고, 마지막으로 확인된 줄(line 번호 포함)을 근거로 제시하라.
+      - ACTIVE 없이 종료됐는데 끊긴 지점이 없으면 단말 내부가 아니라 망/상대방 쪽이다. LAST_CALL_FAIL_CAUSE 값으로 설명하라.
+      - 날짜 31/12/99 는 RTC 미설정 값이다. 실제 날짜로 읽지 마라.
+    RTOS_RIL_Pending: |
+      - ofono 가 보낸 RIL 요청 중 로그 끝까지 응답이 없는 것이다. 로그가 요청 직후에 끝났다면 잘린 것일 수 있으니, 요청 시각과 로그 끝 시각의 간격을 함께 말하라.
+
 # ==========================================
 # 5. 위성 통신(NTN) 분석 프롬프트 템플릿
 # ==========================================

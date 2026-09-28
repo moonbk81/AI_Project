@@ -27,6 +27,8 @@ from parsers.private_network_parser import PrivateNetworkParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
 from parsers.pcap_parser import analyze_pcaps
 from parsers.pcap_timebase import log_time_window
+from parsers.rtos import RtosCallFlowParser, is_rtos_log, parse_build_header
+from core.text_encoding import detect_text_encoding
 
 ProgressCallback = Optional[Callable[[str, int], None]]
 
@@ -66,6 +68,7 @@ class LogOrchestrator:
         self.build_info_parser = BuildInfoParser()
         self.emergency_call_parser = EmergencyCallParser(self._get_surrounding_context_logs)
         self.private_network_parser = PrivateNetworkParser()
+        self.rtos_call_flow_parser = RtosCallFlowParser()
 
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
@@ -184,6 +187,20 @@ class LogOrchestrator:
         except Exception as e:
             print(f"⚠️ pcap 리포트 저장 실패: {e}")
 
+    def _run_rtos_batch(self, lines, output_path, report_progress):
+        """RTOS 로그 전용 파이프라인. 결과에 log_domain 을 남겨 채팅/RAG 가 도메인을 안다."""
+        report_progress("RTOS 로그 감지. 콜 흐름 분석 중...", 15)
+        result = {
+            "log_domain": "rtos",
+            "rtos_build_info": parse_build_header(lines),
+            "rtos_call_flow": self.rtos_call_flow_parser.analyze(lines),
+        }
+        self.rtos_call_flow_parser.save_ui_report("./result", self.base_name, result["rtos_call_flow"])
+        with open(output_path, "w", encoding="utf-8") as j:
+            json.dump(result, j, indent=4, ensure_ascii=False)
+        report_progress("로그 분석 리포트 생성 완료.", 50)
+        return True
+
     def run_batch(self, output_path, progress_callback: ProgressCallback = None):
         """모든 파서를 무조건 가동하는 메인 파이프라인"""
         try:
@@ -192,8 +209,13 @@ class LogOrchestrator:
                     progress_callback(message, progress)
 
             report_progress("로그 파일 읽는 중...", 3)
-            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            encoding = detect_text_encoding(self.file_path)
+            with open(self.file_path, 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()
+
+            # RTOS(NuttX) 로그는 줄 형식부터 달라서 Android 파서가 전부 헛돈다.
+            if is_rtos_log(lines):
+                return self._run_rtos_batch(lines, output_path, report_progress)
 
             report_progress(f"{len(lines)}개 로그 라인 시간 인덱스 생성 중...", 6)
             self._build_time_index(lines)

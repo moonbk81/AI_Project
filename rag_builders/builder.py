@@ -7,6 +7,7 @@ from rag_builders.binder_builder import build_binder_context_payloads, build_bin
 from rag_builders.crash_builder import build_crash_payloads
 from rag_builders.device_builder import build_device_payloads
 from rag_builders.network_builder import build_network_payloads
+from rag_builders.rtos_builder import build_rtos_payloads
 from rag_builders.telephony_builder import build_telephony_payloads
 
 ProgressCallback = Optional[Callable[[int, int, str], None]]
@@ -20,6 +21,13 @@ def build_all_payloads(
     progress_callback: ProgressCallback = None,
 ):
     rag_payload = []
+    if report_data.get("log_domain") == "rtos":
+        # RTOS 리포트에는 Android 파서 결과가 없다. Android 빌더를 돌려봐야 빈 문서뿐이다.
+        rag_payload.extend(build_rtos_payloads(report_data, input_file))
+        if progress_callback:
+            progress_callback(1, 1, "rtos")
+        return rag_payload
+
     steps = [
         (
             "telephony",

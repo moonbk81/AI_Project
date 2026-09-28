@@ -124,7 +124,62 @@ function kpiBand(kpi) {
 // 처리량 차트에 음영으로 칠할 조용한 구간의 개수.
 const GAP_BANDS = 5;
 
+// RTOS 콜 한 통을 계층 순서대로 적는다. 처음으로 로그가 빈 계층이 끊긴 지점이다.
+// 로그는 마이크로초까지 찍지만 타일에는 밀리초면 충분하다. 넘치면 두 줄로 꺾인다.
+const msTime = (value) => (value ? String(value).replace(/(\.\d{3})\d+$/, "$1") : "-");
+
+function rtosCallBlock(call) {
+  const wrap = el("div", "stack");
+  const direction = call.direction === "MO" ? "발신(MO)" : "착신(MT)";
+  const tone = call.connected ? "good" : (call.broken_label ? "critical" : "warning");
+  wrap.append(tileRow([
+    tile(direction, call.status || "N/A", "", `sid ${call.sid || "-"}`, tone),
+    tile("시작 / 종료", msTime(call.start_time), "", call.end_time ? `→ ${msTime(call.end_time)}` : "종료 로그 없음"),
+    tile("끊긴 지점", call.broken_label || "없음", "", "", call.broken_label ? "critical" : "good"),
+    tile("종료 원인", call.fail_cause || "-", "", call.fail_reason || ""),
+  ]));
+  wrap.append(frameTable((call.stages || []).map((stage) => ({
+    단계: stage.label,
+    도달: stage.reached ? "✓" : "✗",
+    시각: stage.time || "-",
+    "경과(ms)": stage.offset_ms === null || stage.offset_ms === undefined ? "-" : stage.offset_ms,
+  })), ["단계", "도달", "시각", "경과(ms)"]));
+  if (call.broken_label && call.last_evidence) {
+    wrap.append(el("p", "table-note",
+      `마지막 확인 줄 (line ${call.last_evidence.line_no}): ${call.last_evidence.text}`));
+  }
+  return wrap;
+}
+
+// domain 이 없는 카드는 Android 세션 카드다. RTOS 세션에서는 domain: "rtos" 카드만 그린다.
 const CARDS = [
+  {
+    domain: "rtos",
+    wide: true,
+    chart: "rtos-call-flow",
+    title: "RTOS 콜 흐름",
+    sub: "UI/TAPI → ofono → rild → RIL-IMSCALL → IMS 계층별 진행과 끊긴 지점",
+    prompt: "각 콜이 어느 계층까지 진행됐고 어디서 로그가 끊겼는지, 마지막으로 확인된 줄과 종료 원인을 근거로 설명해줘.",
+    render(series, panel) {
+      const kpi = series.kpi || {};
+      const wrap = el("div", "stack");
+      wrap.append(tileRow([
+        tile("콜", kpi.call_count ?? 0, "건", `발신 ${kpi.mo_count ?? 0} · 착신 ${kpi.mt_count ?? 0}`),
+        tile("연결 성공", kpi.connected_count ?? 0, "건", "", "good"),
+        tile("중간에 끊긴 콜", kpi.broken_count ?? 0, "건", "", kpi.broken_count ? "critical" : "good"),
+        tile("응답 없는 RIL 요청", kpi.unanswered_request_count ?? 0, "건", "",
+             kpi.unanswered_request_count ? "warning" : "good"),
+      ]));
+      for (const call of series.calls || []) wrap.append(rtosCallBlock(call));
+      if ((series.unanswered_requests || []).length) {
+        wrap.append(el("p", "table-note", "응답 없는 RIL 요청 (ofono → rild)"));
+        wrap.append(frameTable(series.unanswered_requests.map((r) => ({
+          요청: r.name, token: r.token, 요청시각: r.req_time, line: r.req_line,
+        })), ["요청", "token", "요청시각", "line"]));
+      }
+      panel.content(wrap);
+    },
+  },
   {
     chart: "private-network",
     title: "Private Network 판정",
@@ -1114,14 +1169,24 @@ export async function renderDashboard(mount, sourceFile, ctx) {
              () => api.sessionReport(baseName(sourceFile), sourceFile),
              `session:${sourceFile}`);
 
-  api.kpi(sourceFile)
-    .then((kpi) => band.wrap.insertBefore(kpiBand(kpi), band.grid))
-    .catch(() => band.wrap.insertBefore(el("p", "card-note", "KPI 를 불러오지 못했습니다."), band.grid));
+  // RTOS 세션이면 Android 카드 20여 장이 전부 "데이터 없음" 으로 뜬다. 결과 파일이
+  // 있는지(no_data 가 아닌지)로 도메인을 가르고 그 도메인 카드만 그린다.
+  const rtos = await api.chart("rtos-call-flow", sourceFile).catch(() => ({ status: "no_data" }));
+  const domain = rtos.status === "no_data" ? "android" : "rtos";
+  const cards = CARDS.filter((spec) => (spec.domain || "android") === domain);
+
+  // 단말 KPI 는 Android 파서 결과로 만든다. RTOS 세션에는 채울 값이 없다.
+  if (domain === "android") {
+    api.kpi(sourceFile)
+      .then((kpi) => band.wrap.insertBefore(kpiBand(kpi), band.grid))
+      .catch(() => band.wrap.insertBefore(el("p", "card-note", "KPI 를 불러오지 못했습니다."), band.grid));
+  }
 
   // Every shell first: a chart drawn into a one-column grid freezes that
   // width and then hangs over its neighbours once the grid reflows.
-  const panels = CARDS.map((spec) => {
+  const panels = cards.map((spec) => {
     const panel = card(spec.title, spec.sub);
+    if (spec.wide) panel.section.classList.add("wide");
     if (ctx?.startChat) {
       panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("대시보드", spec, sourceFile)), "primary");
     }
@@ -1130,7 +1195,8 @@ export async function renderDashboard(mount, sourceFile, ctx) {
   });
 
   for (const { spec, panel } of panels) {
-    api.chart(spec.chart, sourceFile)
+    const request = spec.chart === "rtos-call-flow" ? Promise.resolve(rtos) : api.chart(spec.chart, sourceFile);
+    request
       .then((series) => (series.status === "ok" ? spec.render(series, panel, sourceFile) : panel.empty(series.status)))
       .catch((error) => {
         console.error(spec.chart, error);

@@ -25,6 +25,7 @@ from agent_toolkit import (
     get_data_stall_and_recovery_analytics,
     get_dns_latency_analytics,
     get_internet_stall_analytics,
+    get_rtos_call_flow_analytics,
     get_pcap_analytics,
     get_network_oos_analytics,
     get_ntn_spacex_analytics,
@@ -111,6 +112,7 @@ class RilRagChat:
             "get_recent_data_usage_analytics": get_recent_data_usage_analytics,
             "get_binder_warning_analytics": get_binder_warning_analytics,
             "get_datacall_setup_analytics": get_datacall_setup_analytics,
+            "get_rtos_call_flow_analytics": get_rtos_call_flow_analytics,
         }
 
     def _load_config(self):
@@ -157,8 +159,23 @@ class RilRagChat:
             print(f"[WARN] log_guidelines 로드 실패: {e}")
             return PROMPTS.get("log_guidelines", {}) if isinstance(PROMPTS, dict) else {}
 
-    def _get_semantic_routing(self, query):
-        return get_semantic_routing(query, self.routing_map, self.embed_model)
+    def _get_semantic_routing(self, query, routing_map=None):
+        return get_semantic_routing(query, routing_map or self._routing_map_for("android"), self.embed_model)
+
+    @staticmethod
+    def _log_domain(current_base, result_dir="./result"):
+        """RTOS 분석 결과 파일이 있으면 RTOS 로그다. 통합 리포트는 커서 질문마다 열지 않는다."""
+        if not current_base or current_base == "Unknown":
+            return "android"
+        if os.path.exists(os.path.join(result_dir, f"{current_base}_rtos_call_flow.json")):
+            return "rtos"
+        return "android"
+
+    def _routing_map_for(self, domain):
+        return {
+            name: node for name, node in self.routing_map.items()
+            if (node.get("domain") or "android") == domain
+        }
 
     def ingest_file(self, file_path, force=False, model_name="default", uploaded_by="", defect_code="", progress_callback=None):
         return ingest_payload_file(
@@ -382,7 +399,22 @@ class RilRagChat:
             )
             search_query = f"{last_msg} 관련 후속 질문: {user_query}"
 
-        if self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
+        # RTOS 로그와 Android 로그는 intent 가 섞이면 안 된다. RTOS 로그에 Android 통화
+        # 도구를 붙이면 빈 결과만 오고, 반대면 Android 질문이 RTOS intent 로 샌다.
+        # 라우팅 래퍼는 map 을 안 주면 Android intent 만 본다.
+        if self._log_domain(current_base) == "rtos":
+            rtos_map = self._routing_map_for("rtos")
+            if len(rtos_map) == 1:
+                intent, node = next(iter(rtos_map.items()))
+                routing_result = {
+                    "intents": [intent],
+                    "tools": list(node.get("tools", [])),
+                    "log_types": list(node.get("log_types", [])),
+                    "reason": "RTOS 로그",
+                }
+            else:
+                routing_result = self._get_semantic_routing(search_query, rtos_map)
+        elif self.routing_mode == "llm": routing_result = self._get_llm_routing(search_query)
         elif self.routing_mode == "hybrid": routing_result = self._get_hybrid_routing(search_query)
         else: routing_result = self._get_semantic_routing(search_query)
 
@@ -682,8 +714,8 @@ class RilRagChat:
     def _extract_json_object(self, text: str) -> dict:
         return extract_json_object(text)
 
-    def _get_llm_routing(self, query: str) -> dict:
-        return get_llm_routing(query, self.routing_map, self.llm_model_name)
+    def _get_llm_routing(self, query: str, routing_map=None) -> dict:
+        return get_llm_routing(query, routing_map or self._routing_map_for("android"), self.llm_model_name)
 
-    def _get_hybrid_routing(self, query: str) -> dict:
-        return get_hybrid_routing(query, self.routing_map, self.embed_model, self.llm_model_name)
+    def _get_hybrid_routing(self, query: str, routing_map=None) -> dict:
+        return get_hybrid_routing(query, routing_map or self._routing_map_for("android"), self.embed_model, self.llm_model_name)
