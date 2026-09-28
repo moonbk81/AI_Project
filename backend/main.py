@@ -536,6 +536,7 @@ _RESULT_ARTIFACTS = {
     "internet_stall",
     "pcap",
     "private_network",
+    "rtos_call_flow",
 }
 _ARTIFACT_DIRS = ("./payloads", "./result", "./temp_logs")
 # 같은 payload 의 대화를 두 요청이 동시에 저장하면 반쯤 쓰인 파일이 남는다.

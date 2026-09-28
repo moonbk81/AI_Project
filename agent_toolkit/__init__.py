@@ -33,6 +33,10 @@ from agent_toolkit.satellite_tools import (
     get_ntn_spacex_analytics,
 )
 
+from agent_toolkit.rtos_tools import (
+    get_rtos_call_flow_analytics,
+)
+
 from agent_toolkit.kpi_tools import (
     get_device_health_kpi,
 )
@@ -53,4 +57,5 @@ __all__ = [
     "get_binder_warning_analytics",
     "get_ntn_spacex_analytics",
     "get_device_health_kpi",
+    "get_rtos_call_flow_analytics",
 ]
