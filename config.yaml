@@ -200,6 +200,14 @@ routing_map:
     log_types:
       - RTOS_OemHook_Flow
       - RTOS_Log_Summary
+  RTOS_CPU_Analysis:
+    domain: rtos
+    desc: "CPU, CPU 점유율, CPU 사용률, 과부하, 부하, 느림, 버벅, 느려짐, 응답 지연, 어떤 프로세스가 CPU 를 잡아먹는지, 태스크별 점유, Idle_Task, idle, PID, ESAR, ims_service, dbusdaemon, ofonod"
+    tools:
+      - get_rtos_cpu_usage_analytics
+    log_types:
+      - RTOS_CPU_Usage
+      - RTOS_Log_Summary
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)

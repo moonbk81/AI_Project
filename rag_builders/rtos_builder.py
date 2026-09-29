@@ -138,7 +138,37 @@ def build_rtos_payloads(report_data, input_file):
             **{k: v for k, v in (oem.get("kpi") or {}).items()},
         })
 
+    cpu = report_data.get("rtos_cpu") or {}
+    if cpu.get("samples"):
+        append_payload(rag_payload, _cpu_document(cpu), {
+            "log_type": "RTOS_CPU_Usage",
+            "source_file": source_file,
+            "time": cpu["samples"][0].get("time"),
+            **{k: v for k, v in (cpu.get("kpi") or {}).items() if v is not None},
+        })
+
     return rag_payload
+
+
+def _cpu_document(cpu):
+    kpi = cpu.get("kpi") or {}
+    lines = [
+        "[RTOS CPU 점유율] 태스크별 CPU 점유율 스냅샷 (전체 = 100 - Idle_Task)",
+        f"- 스냅샷 {kpi.get('sample_count', 0)}개 ({kpi.get('first_time')} ~ {kpi.get('last_time')}), "
+        f"전체 평균 {kpi.get('avg_total')}%, 최고 {kpi.get('max_total')}% ({kpi.get('max_total_time')}), "
+        f"최저 Idle {kpi.get('min_idle')}%",
+        f"- {kpi.get('busy_threshold')}% 이상 과부하 스냅샷 {kpi.get('busy_sample_count', 0)}개, "
+        f"과부하 구간 {kpi.get('busy_window_count', 0)}개",
+    ]
+    tasks = (cpu.get("tasks") or [])[:8]
+    if tasks:
+        lines.append("- 많이 쓰는 태스크 (평균 / 최대): " + ", ".join(
+            f"{t['name']}(PID {t['pid']}{', ' + t['role'] if t.get('role') else ''}) {t['avg']}% / {t['max']}%"
+            for t in tasks))
+    for w in cpu.get("busy_windows") or []:
+        top = ", ".join(f"{t['name']}({t['pid']}) {t['avg']}%" for t in w.get("top_tasks") or [])
+        lines.append(f"- 과부하 {w['start_time']} ~ {w['end_time']} 최고 {w['peak_total']}%: {top}")
+    return "\n".join(lines)
 
 
 def _oem_hook_document(oem):

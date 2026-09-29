@@ -547,7 +547,140 @@ function nitzCard(series, panel) {
   }
 }
 
+// ---- RTOS CPU 점유율 ----
+
+const cpuPct = (value) => (value === null || value === undefined ? "-" : `${value}%`);
+const cpuMs = (value) => (value ? String(value).replace(/(\.\d{3})\d+$/, "$1") : "-");
+const cpuTaskLabel = (t) => `${t.name} (${t.pid})`;
+
+function rtosCpuTrendCard(series, panel) {
+  const kpi = series.kpi || {};
+  const busy = kpi.busy_sample_count || 0;
+  panel.prepend(tileRow([
+    tile("전체 CPU 평균", cpuPct(kpi.avg_total), "", `스냅샷 ${kpi.sample_count}개 · 100 − Idle`,
+         kpi.avg_total >= kpi.busy_threshold ? "critical" : (kpi.avg_total >= 70 ? "warning" : "good")),
+    tile("최고", cpuPct(kpi.max_total), "", `${cpuMs(kpi.max_total_time)} · 최저 Idle ${cpuPct(kpi.min_idle)}`,
+         kpi.max_total >= kpi.busy_threshold ? "critical" : "good"),
+    tile(`${kpi.busy_threshold}% 이상`, `${busy} / ${kpi.sample_count}`, "",
+         busy ? `과부하 구간 ${kpi.busy_window_count}개` : "과부하 없음", busy ? "critical" : "good"),
+    tile("가장 많이 쓴 태스크", kpi.top_task || "-", "",
+         kpi.top_task ? `PID ${kpi.top_task_pid} · 평균 ${cpuPct(kpi.top_task_avg)}` : ""),
+  ]));
+
+  // 전체 + 상위 3 태스크 = 4 계열. 색은 계열 순서대로 고정해서 준다.
+  const colors = seriesColors();
+  const traces = [lineTrace("전체 (100 − Idle)", series.x, series.total, colors[0], {
+    hovertemplate: "전체 %{y}%<extra></extra>",
+  })];
+  series.series.forEach((s, i) => {
+    traces.push(lineTrace(cpuTaskLabel(s), series.x, s.values, colors[i + 1], {
+      hovertemplate: `${cpuTaskLabel(s)} %{y}%<extra></extra>`,
+    }));
+  });
+  // 끝점에 계열 이름을 직접 붙인다. 범례와 같이 있어 색만으로 구분하지 않는다.
+  const lastPoint = (ys) => {
+    for (let i = ys.length - 1; i >= 0; i -= 1) if (ys[i] !== null && ys[i] !== undefined) return i;
+    return -1;
+  };
+  const annotations = traces.map((t) => {
+    const i = lastPoint(t.y);
+    return i < 0 ? null : {
+      x: t.x[i], y: t.y[i], xanchor: "left", xshift: 8, showarrow: false,
+      text: t.name, font: { size: 11, color: token("--text-secondary") },
+    };
+  }).filter(Boolean);
+  // 끝점이 붙어 있으면 이름이 겹친다. 위에서부터 최소 간격(축 단위 %)만큼 밀어 내린다.
+  const LABEL_GAP = 6;
+  annotations.sort((a, b) => b.y - a.y);
+  annotations.forEach((label, i) => {
+    if (i > 0 && label.y > annotations[i - 1].y - LABEL_GAP) label.y = annotations[i - 1].y - LABEL_GAP;
+    label.yanchor = "middle";
+  });
+  // 바닥(0%) 밑으로 밀려난 이름은 축 밖이라 안 보인다. 아래에서부터 다시 밀어 올린다.
+  for (let i = annotations.length - 1; i >= 0; i -= 1) {
+    const floor = i === annotations.length - 1 ? 0 : annotations[i + 1].y + LABEL_GAP;
+    if (annotations[i].y < floor) annotations[i].y = floor;
+  }
+  panel.draw(traces, baseLayout({
+    margin: { l: 56, r: 150, t: 36, b: 44 },
+    showlegend: true,
+    hovermode: "x unified",
+    xaxis: axis({ type: "date", tickformat: "%H:%M:%S" }),
+    yaxis: axis({ range: [0, 105], ticksuffix: "%", title: { text: "CPU 점유율", font: { size: 11 } } }),
+    shapes: [{
+      type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: kpi.busy_threshold, y1: kpi.busy_threshold,
+      line: { width: 1, dash: "dot", color: token("--baseline") },
+    }],
+    annotations: annotations.concat([{
+      xref: "paper", x: 0, y: kpi.busy_threshold, yanchor: "bottom", showarrow: false,
+      text: `과부하 기준 ${kpi.busy_threshold}%`, font: { size: 11, color: token("--text-muted") },
+    }]),
+  }), frameTable(series.samples.map((s) => ({
+    시각: cpuMs(s.time),
+    전체: cpuPct(s.total),
+    Idle: cpuPct(s.idle),
+    "상위 태스크": s.top.map((t) => `${t.name}(${t.pid}) ${t.cpu}%`).join(", "),
+    line: s.line_no,
+  })), ["시각", "전체", "Idle", "상위 태스크", "line"]));
+}
+
+const CPU_BAR_TASKS = 12;
+
+function rtosCpuTasksCard(series, panel) {
+  const rows = series.tasks.slice(0, CPU_BAR_TASKS).reverse();
+  panel.plotHeight(Math.max(260, rows.length * 26 + 60));
+  panel.draw([barTrace("평균", rows.map((t) => t.avg), rows.map(cpuTaskLabel), seriesColors()[0], {
+    orientation: "h",
+    customdata: rows.map((t) => [t.max, cpuMs(t.max_time), t.role || "-", t.pri]),
+    hovertemplate: "<b>%{y}</b><br>평균 %{x}% · 최대 %{customdata[0]}% (%{customdata[1]})"
+      + "<br>역할 %{customdata[2]} · PRI %{customdata[3]}<extra></extra>",
+  })], baseLayout({
+    margin: { l: 150, r: 24, t: 8, b: 44 },
+    xaxis: axis({ ticksuffix: "%", title: { text: "평균 CPU 점유율 (스냅샷 평균)", font: { size: 11 } } }),
+    yaxis: axis({ automargin: true }),
+  }), frameTable(series.tasks.map((t) => ({
+    PID: t.pid, 이름: t.name, 역할: t.role || "-", PRI: t.pri,
+    "평균(%)": t.avg, "최대(%)": t.max, 최대시각: cpuMs(t.max_time), "찍힌 스냅샷": t.seen,
+  })), ["PID", "이름", "역할", "PRI", "평균(%)", "최대(%)", "최대시각", "찍힌 스냅샷"]));
+}
+
+function rtosBusyWindowsCard(series, panel) {
+  const windows = series.busy_windows || [];
+  if (!windows.length) {
+    panel.note(`${series.kpi.busy_threshold}% 이상인 스냅샷이 없습니다.`);
+    return;
+  }
+  const wrap = el("div", "stack");
+  wrap.append(frameTable(windows.map((w) => ({
+    시작: cpuMs(w.start_time), 끝: cpuMs(w.end_time), 스냅샷: w.sample_count, 최고: cpuPct(w.peak_total),
+    "많이 쓴 태스크 (구간 평균)": w.top_tasks.map((t) => `${t.name}(${t.pid}) ${t.avg}%`).join(", "),
+    line: w.line_no,
+  })), ["시작", "끝", "스냅샷", "최고", "많이 쓴 태스크 (구간 평균)", "line"]));
+  wrap.append(el("p", "table-note",
+    "스냅샷이 5초 넘게 벌어지면 구간을 끊는다 — 그 사이는 찍히지 않아 알 수 없는 시간이다."));
+  panel.content(wrap);
+}
+
+// domain 이 없는 카드는 Android 세션 카드다. RTOS 세션에서는 domain 에 "rtos" 가 든 카드만 그린다.
 const CARDS = [
+  {
+    domain: "rtos", chart: "rtos-cpu", title: "RTOS CPU 점유율 추이", wide: true,
+    sub: "전체(100 − Idle_Task)와 평균 상위 3 태스크. 점선은 과부하 기준",
+    prompt: "전체 CPU 점유율 추이와 과부하 스냅샷, 그때 CPU 를 많이 쓴 태스크를 근거로 시스템이 느려질 만한 구간과 원인 태스크를 설명해줘.",
+    render: rtosCpuTrendCard,
+  },
+  {
+    domain: "rtos", chart: "rtos-cpu", title: "태스크별 CPU 점유",
+    sub: "스냅샷 평균 상위 12개. 막대에 올리면 최대값과 역할",
+    prompt: "태스크별 평균/최대 CPU 점유율을 보고 어떤 태스크가 CPU 를 많이 쓰는지, 역할(rild/ofono/secril/IMS)과 함께 설명해줘.",
+    render: rtosCpuTasksCard,
+  },
+  {
+    domain: "rtos", chart: "rtos-cpu", title: "과부하 구간",
+    sub: "연속으로 과부하 기준 이상인 스냅샷 묶음과 그 구간의 상위 태스크",
+    prompt: "과부하 구간마다 어떤 태스크가 CPU 를 잡고 있었는지, 같은 시각에 어떤 동작(콜, IPC, IMS)이 있었는지 근거로 설명해줘.",
+    render: rtosBusyWindowsCard,
+  },
   {
     chart: "boot",
     title: "부팅 지연 구간",
@@ -597,7 +730,12 @@ export async function renderBoot(mount, sourceFile, ctx) {
   const band = section("시스템 진단");
   mount.append(band.wrap);
 
-  const panels = CARDS.map((spec) => {
+  // RTOS 세션이면 Android 카드가 전부 "데이터 없음" 으로 뜬다. 대시보드와 같은 방법으로 도메인을 가른다.
+  const rtos = await api.chart("rtos-call-flow", sourceFile).catch(() => ({ status: "no_data" }));
+  const domain = rtos.status === "no_data" ? "android" : "rtos";
+  const cards = CARDS.filter((spec) => [].concat(spec.domain || "android").includes(domain));
+
+  const panels = cards.map((spec) => {
     const panel = card(spec.title, spec.sub);
     if (ctx?.startChat) {
       panel.action("LLM 분석 요청", () => ctx.startChat(sectionAnalysisQuestion("시스템 진단 탭", spec, sourceFile)), "primary");
@@ -608,8 +746,14 @@ export async function renderBoot(mount, sourceFile, ctx) {
     return { spec, panel };
   });
 
+  // 같은 차트를 여러 카드가 나눠 쓴다 (rtos-cpu 세 장). 한 번만 받는다.
+  const requests = new Map();
+  const fetchChart = (name) => {
+    if (!requests.has(name)) requests.set(name, api.chart(name, sourceFile));
+    return requests.get(name);
+  };
   for (const { spec, panel } of panels) {
-    api.chart(spec.chart, sourceFile)
+    fetchChart(spec.chart)
       .then((series) => (series.status === "ok" ? spec.render(series, panel) : panel.empty(series.status)))
       .catch((error) => {
         console.error(spec.chart, error);

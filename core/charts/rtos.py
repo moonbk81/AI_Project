@@ -143,3 +143,61 @@ def build_rtos_oem_hook(data: Optional[Dict[str, Any]]) -> RtosOemHookOverview:
         requests=requests,
         unmatched_unsol=list(data.get("unmatched_unsol") or []),
     )
+
+
+# 스냅샷 사이가 이보다 벌어지면 선을 끊는다. 모르는 시간을 이어 그리면 계속 그 값이었던 것처럼 읽힌다
+CPU_LINE_BREAK_SEC = 5.0
+
+
+@dataclass(frozen=True)
+class RtosCpuUsageOverview:
+    status: str
+    kpi: Dict[str, Any] = field(default_factory=dict)
+    x: List[Optional[str]] = field(default_factory=list)
+    total: List[Optional[float]] = field(default_factory=list)
+    series: List[Dict[str, Any]] = field(default_factory=list)
+    samples: List[Dict[str, Any]] = field(default_factory=list)
+    tasks: List[Dict[str, Any]] = field(default_factory=list)
+    busy_windows: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _plot_time(sample: Dict[str, Any]) -> str:
+    # RTOS 날짜는 연도가 믿을 수 없어서(31/12/99) 시각만 쓴다. 축도 시각만 보여준다
+    return f"2000-{sample.get('date') or '01-01'} {sample['time']}"
+
+
+def build_rtos_cpu_usage(data: Optional[Dict[str, Any]]) -> RtosCpuUsageOverview:
+    if not data:
+        return RtosCpuUsageOverview(status="no_data")
+    samples = data.get("samples") or []
+    if not samples:
+        return RtosCpuUsageOverview(status="no_cpu_samples", kpi=dict(data.get("kpi") or {}))
+
+    top = data.get("top_series") or []
+    x: List[Optional[str]] = []
+    total: List[Optional[float]] = []
+    lines: Dict[str, List[Optional[float]]] = {str(t["pid"]): [] for t in top}
+    prev = None
+    for sample in samples:
+        at = _to_ms(sample.get("time"))
+        if prev is not None and at is not None and at - prev > CPU_LINE_BREAK_SEC * 1000:
+            x.append(None)
+            total.append(None)
+            for values in lines.values():
+                values.append(None)
+        prev = at
+        x.append(_plot_time(sample))
+        total.append(sample.get("total"))
+        for pid, values in lines.items():
+            values.append((sample.get("series") or {}).get(pid, 0.0))
+
+    return RtosCpuUsageOverview(
+        status="ok",
+        kpi=dict(data.get("kpi") or {}),
+        x=x,
+        total=total,
+        series=[{"pid": t["pid"], "name": t["name"], "values": lines[str(t["pid"])]} for t in top],
+        samples=samples,
+        tasks=list(data.get("tasks") or []),
+        busy_windows=list(data.get("busy_windows") or []),
+    )

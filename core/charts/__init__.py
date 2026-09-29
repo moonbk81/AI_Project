@@ -83,7 +83,14 @@ from .pcap import (
     build_pcap_overview,
 )
 from .private_network import PrivateNetworkOverview, build_private_network_overview
-from .rtos import RtosCallFlowOverview, RtosOemHookOverview, build_rtos_call_flow, build_rtos_oem_hook
+from .rtos import (
+    RtosCallFlowOverview,
+    RtosCpuUsageOverview,
+    RtosOemHookOverview,
+    build_rtos_call_flow,
+    build_rtos_cpu_usage,
+    build_rtos_oem_hook,
+)
 from .power import (
     THERMAL_WARNING_C,
     PowerPanelSection,
@@ -178,6 +185,8 @@ __all__ = [
     "build_rtos_call_flow",
     "RtosOemHookOverview",
     "build_rtos_oem_hook",
+    "RtosCpuUsageOverview",
+    "build_rtos_cpu_usage",
     "build_power_thermal_panel",
     "build_process_deaths",
     "build_system_kills",

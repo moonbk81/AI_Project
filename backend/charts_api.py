@@ -46,6 +46,7 @@ from core.charts import (
     build_rilj_overview,
     build_rtos_call_flow,
     build_rtos_oem_hook,
+    build_rtos_cpu_usage,
     build_service_state_series,
     build_signal_level_series,
     build_sip_flow,
@@ -131,6 +132,7 @@ CHART_BUILDERS: Dict[str, ChartSpec] = {
     "ntn": ChartSpec(build_ntn_overview, source="ntn"),
     "rtos-call-flow": ChartSpec(build_rtos_call_flow, source="rtos_call_flow"),
     "rtos-oem-hook": ChartSpec(build_rtos_oem_hook, source="rtos_oem_hook"),
+    "rtos-cpu": ChartSpec(build_rtos_cpu_usage, source="rtos_cpu"),
 }
 
 

@@ -129,3 +129,34 @@ def get_rtos_oem_hook_analytics(base_name: str, result_dir: str = "./result") ->
             "MALFORMED_PARCEL 은 rild 가 응답을 보냈지만 ofono(ril_oem_request_raw_cb)가 parcel 을 못 읽은 것이다."
         ),
     }, ensure_ascii=False)
+
+
+def get_rtos_cpu_usage_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """RTOS 태스크별 CPU 점유율 스냅샷을 요약한다. 전체 부하, 과부하 구간, 많이 쓰는 태스크."""
+    path = os.path.join(result_dir, f"{base_name}_rtos_cpu.json")
+    data = _load_json(path)
+    if not data:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "RTOS CPU 점유율 분석 결과 파일이 없습니다.",
+            "expected_file": path,
+        }, ensure_ascii=False)
+
+    return json.dumps({
+        "status": "OK",
+        "kpi": data.get("kpi", {}),
+        "top_tasks": (data.get("tasks") or [])[:15],
+        "busy_windows": data.get("busy_windows", []),
+        "samples": [
+            {"time": s.get("time"), "total": s.get("total"), "top": s.get("top")}
+            for s in data.get("samples", []) or []
+        ][:200],
+        "analysis_rule": (
+            "전체 CPU 점유율은 100 - Idle_Task 다. 0.1% 이상인 태스크만 찍히므로 목록에 없는 태스크는 0% 로 본다. "
+            "스냅샷은 띄엄띄엄 찍힌다 — 스냅샷 사이의 시간은 모르는 구간이니 '계속 과부하였다'고 말하지 말고 "
+            "'찍힌 스냅샷 N개 중 M개가 90% 이상'처럼 말하라. "
+            "avg 는 전체 스냅샷 평균(안 찍힌 스냅샷 0%), max 는 한 스냅샷의 최댓값이다. "
+            "태스크는 PID 로 구분한다 (ims_service, aero 는 PID 가 여럿이다). "
+            "role 에 '(추정)' 이 붙은 것은 로그의 태스크 번호로 추정한 역할이다."
+        ),
+    }, ensure_ascii=False)
