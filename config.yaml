@@ -192,6 +192,14 @@ routing_map:
       - RTOS_Call_Flow
       - RTOS_RIL_Pending
       - RTOS_Log_Summary
+  RTOS_OemHook_Analysis:
+    domain: rtos
+    desc: "OEM_HOOK_RAW, oem hook, OEM 명령, raw IPC, IPC 전달, cpif, 모뎀으로 IPC, 모뎀 응답, IPC 응답 없음, General Response, GR 에러, funcId, CP_IMS IPC, UNSOL_OEM_HOOK_RAW, malformed parcel, secril 에서 모뎀까지"
+    tools:
+      - get_rtos_oem_hook_analytics
+    log_types:
+      - RTOS_OemHook_Flow
+      - RTOS_Log_Summary
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)

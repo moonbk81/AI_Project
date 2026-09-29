@@ -74,3 +74,58 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "401/407 은 IMS 등록의 정상 인증 절차이므로 오류로 말하지 마라."
         ),
     }, ensure_ascii=False)
+
+
+def get_rtos_oem_hook_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """RIL_REQUEST_OEM_HOOK_RAW 가 ofono → rild → secril → cpif → 모뎀 → 응답까지 이어졌는지 요약한다."""
+    path = os.path.join(result_dir, f"{base_name}_rtos_oem_hook.json")
+    data = _load_json(path)
+    if not data:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "RTOS OEM_HOOK_RAW 분석 결과 파일이 없습니다.",
+            "expected_file": path,
+        }, ensure_ascii=False)
+
+    requests = []
+    for req in data.get("requests", []) or []:
+        tx = req.get("tx") or {}
+        rx = req.get("modem_rx") or {}
+        requests.append({
+            "token": req.get("token"),
+            "req_time": req.get("req_time"),
+            "func": f"{req.get('func_id')} {req.get('func_name')}" if req.get("func_id") else None,
+            "path": req.get("path"),
+            "raw_size": req.get("raw_size"),
+            "status": req.get("status"),
+            "verdict": req.get("verdict"),
+            "broken_at": (req.get("broken_at") or {}).get("label"),
+            "chain": [{"stage": c["label"], "reached": c["reached"], "time": c.get("time")}
+                      for c in req.get("chain", [])],
+            "ipc_tx": {k: tx.get(k) for k in ("main", "sub", "type", "len", "seq", "time")} if tx else None,
+            "modem_rx": {k: rx.get(k) for k in ("main", "sub", "type", "seq", "ack", "time", "gen")} if rx else None,
+            "expected_response": req.get("expected_response"),
+            "modem_error": req.get("modem_error_label"),
+            "tx_rx_ms": req.get("tx_rx_ms"),
+            "ril_error": req.get("ril_error"),
+            "evidence": req.get("ofono_error_evidence") or (req.get("checkpoints") or {}).get("modem_rx"),
+        })
+
+    return json.dumps({
+        "status": "OK",
+        "kpi": data.get("kpi", {}),
+        "requests": requests,
+        "unmatched_unsol": data.get("unmatched_unsol", []),
+        "analysis_rule": (
+            "OEM_HOOK_RAW 는 ofono → rild(token) → secril → funcId 분기로 간다. "
+            "path=raw_ipc(CP_IMS 0x0F, GPS, SMARTAS, TAS, MCPTT)만 cpif(/dev/umts_ipc0)로 IPC 를 쓰고, "
+            "path=local(UICC 0x15, FACTORY 0x12, MISC 0x11)은 secril 이 안에서 처리하므로 모뎀 응답이 없는 게 정상이다. "
+            "raw IPC 는 cpif 쓰기가 성공하면 곧바로 ofono 요청이 성공으로 완료되고, 모뎀 응답은 나중에 "
+            "UNSOL_OEM_HOOK_RAW 로 따로 온다. 그러니 ofono 요청 성공만으로 모뎀이 받았다고 말하지 마라. "
+            "모뎀 응답은 RX 의 ack_seq 가 TX 의 msg_seq 와 같은 것으로 이었다. "
+            "SET/EXEC 는 General Response(GEN_CMD)로, GET 은 같은 MAIN/SUB 의 RESP 로 응답이 오고, "
+            "GET 을 거절하면 에러 GR 이 온다. General Response 에러 0x8000 은 성공이다. "
+            "EVENT/CFRM 타입 IPC 는 모뎀이 응답하지 않는 게 정상이다. "
+            "MALFORMED_PARCEL 은 rild 가 응답을 보냈지만 ofono(ril_oem_request_raw_cb)가 parcel 을 못 읽은 것이다."
+        ),
+    }, ensure_ascii=False)

@@ -241,6 +241,57 @@ const CARDS = [
     },
   },
   {
+    domain: "rtos",
+    wide: true,
+    chart: "rtos-oem-hook",
+    title: "RTOS OEM_HOOK_RAW 전달",
+    sub: "ofono → rild → secril → cpif(IPC TX) → 모뎀 응답(RX) → UNSOL 전달, 요청별로 끊긴 지점",
+    prompt: "OEM_HOOK_RAW 요청마다 cpif 로 IPC 가 나갔는지, 모뎀이 응답했는지(General Response 에러 포함), 응답이 ofono 까지 왔는지 근거 줄과 함께 설명해줘.",
+    render(series, panel) {
+      const kpi = series.kpi || {};
+      const expected = (series.requests || []).filter((r) => r.expects_modem_response).length;
+      const wrap = el("div", "stack");
+      wrap.append(tileRow([
+        tile("요청", kpi.request_count ?? 0, "건",
+             `cpif IPC ${kpi.raw_ipc_count ?? 0} · 내부 처리 ${kpi.local_count ?? 0}`),
+        tile("정상", kpi.ok_count ?? 0, "건", "", "good"),
+        tile("문제", kpi.problem_count ?? 0, "건",
+             kpi.pending_count ? `로그 끝남 ${kpi.pending_count}건 별도` : "",
+             kpi.problem_count ? "critical" : "good"),
+        // EVENT/CFRM IPC 는 모뎀이 응답하지 않으니 분모에서 뺀다.
+        tile("모뎀 응답", `${kpi.modem_answered_count ?? 0} / ${expected}`, "",
+             kpi.modem_error_count ? `오류 응답 ${kpi.modem_error_count}건` : "응답이 필요한 IPC 기준",
+             (kpi.modem_answered_count ?? 0) < expected || kpi.modem_error_count ? "critical" : "good"),
+      ]));
+      const verdictMark = { ok: "✓", problem: "✗", pending: "…" };
+      wrap.append(frameTable(series.requests.map((r) => ({
+        token: r.token,
+        시각: msTime(r.req_time),
+        funcId: r.func || "-",
+        경로: r.path === "raw_ipc" ? "cpif" : (r.path === "local" ? "내부" : "-"),
+        "IPC TX": r.ipc ? `${r.ipc} (m:${r.tx_seq})` : "-",
+        "모뎀 응답": r.modem_rx
+          ? `${r.modem_rx}${r.modem_error_label ? ` ${r.modem_error_label}` : ""}`
+          : (r.expected_response ? `없음 (기대: ${r.expected_response})` : "-"),
+        "TX→RX(ms)": r.tx_rx_ms ?? "-",
+        결과: `${verdictMark[r.verdict] || ""} ${r.status}`,
+      })), ["token", "시각", "funcId", "경로", "IPC TX", "모뎀 응답", "TX→RX(ms)", "결과"]));
+      for (const r of series.requests.filter((req) => req.verdict !== "ok")) {
+        const path = r.chain.map((s) => `${s.label} ${s.reached ? "✓" : "✗"}`).join(" → ");
+        const evidence = r.error_evidence || r.last_evidence;
+        wrap.append(el("p", "table-note",
+          `token ${r.token}: ${path}${evidence ? ` · line ${evidence.line_no}: ${evidence.text}` : ""}`));
+      }
+      if ((series.unmatched_unsol || []).length) {
+        wrap.append(el("p", "table-note", "요청과 묶이지 않은 UNSOL_OEM_HOOK_RAW (모뎀이 먼저 보낸 IPC)"));
+        wrap.append(frameTable(series.unmatched_unsol.map((u) => ({
+          시각: msTime(u.time), IPC: `${u.main} / ${u.sub} / ${u.type}`, len: u.len, line: u.line_no,
+        })), ["시각", "IPC", "len", "line"]));
+      }
+      panel.content(wrap);
+    },
+  },
+  {
     chart: "private-network",
     title: "Private Network 판정",
     sub: "활성 기본망 기준 VPN · 기업망 · 5G NPN · 사설 주소 구분",

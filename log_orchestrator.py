@@ -27,7 +27,7 @@ from parsers.private_network_parser import PrivateNetworkParser
 from parsers.analysis_bucket_builder import AnalysisBucketBuilder
 from parsers.pcap_parser import analyze_pcaps
 from parsers.pcap_timebase import log_time_window
-from parsers.rtos import RtosCallFlowParser, is_rtos_log, parse_build_header
+from parsers.rtos import RtosCallFlowParser, RtosOemHookParser, is_rtos_log, parse_build_header
 from core.text_encoding import detect_text_encoding
 
 ProgressCallback = Optional[Callable[[str, int], None]]
@@ -69,6 +69,7 @@ class LogOrchestrator:
         self.emergency_call_parser = EmergencyCallParser(self._get_surrounding_context_logs)
         self.private_network_parser = PrivateNetworkParser()
         self.rtos_call_flow_parser = RtosCallFlowParser()
+        self.rtos_oem_hook_parser = RtosOemHookParser()
 
         self.bucket_builder = AnalysisBucketBuilder(self._add_context_window)
         self._time_index = None
@@ -194,8 +195,10 @@ class LogOrchestrator:
             "log_domain": "rtos",
             "rtos_build_info": parse_build_header(lines),
             "rtos_call_flow": self.rtos_call_flow_parser.analyze(lines),
+            "rtos_oem_hook": self.rtos_oem_hook_parser.analyze(lines),
         }
         self.rtos_call_flow_parser.save_ui_report("./result", self.base_name, result["rtos_call_flow"])
+        self.rtos_oem_hook_parser.save_ui_report("./result", self.base_name, result["rtos_oem_hook"])
         # Android 와 같은 모양의 SIP 목록이라 기존 SIP 흐름 차트(sip-flow)가 그대로 읽는다.
         os.makedirs("./result", exist_ok=True)
         with open(os.path.join("./result", f"{self.base_name}_ims_sip.json"), "w", encoding="utf-8") as f:

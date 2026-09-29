@@ -129,4 +129,37 @@ def build_rtos_payloads(report_data, input_file):
             "count": len(unanswered),
         })
 
+    oem = report_data.get("rtos_oem_hook") or {}
+    if oem.get("requests"):
+        append_payload(rag_payload, _oem_hook_document(oem), {
+            "log_type": "RTOS_OemHook_Flow",
+            "source_file": source_file,
+            "time": oem["requests"][0].get("req_time"),
+            **{k: v for k, v in (oem.get("kpi") or {}).items()},
+        })
+
     return rag_payload
+
+
+def _oem_hook_document(oem):
+    kpi = oem.get("kpi") or {}
+    lines = [
+        "[RTOS OEM_HOOK_RAW 전달] ofono → rild → secril → cpif → 모뎀 → 응답",
+        f"- 요청 {kpi.get('request_count', 0)}건: cpif 로 IPC 를 쓰는 raw IPC {kpi.get('raw_ipc_count', 0)}건, "
+        f"secril 내부 처리 {kpi.get('local_count', 0)}건",
+        f"- 정상 {kpi.get('ok_count', 0)}건, 문제 {kpi.get('problem_count', 0)}건, "
+        f"로그가 먼저 끝남 {kpi.get('pending_count', 0)}건, 모뎀 오류 응답 {kpi.get('modem_error_count', 0)}건",
+    ]
+    for req in oem.get("requests") or []:
+        if req.get("verdict") == "ok":
+            continue
+        tx = req.get("tx") or {}
+        ipc = f" IPC {tx.get('main')}/{tx.get('sub')}/{tx.get('type')} seq={tx.get('seq')}" if tx else ""
+        lines.append(
+            f"- token {req.get('token')} ({req.get('req_time')}) funcId {req.get('func_id')} {req.get('func_name')}{ipc}: "
+            f"{req.get('status')}"
+        )
+        evidence = req.get("ofono_error_evidence")
+        if evidence:
+            lines.append(f"  - 근거 (line {evidence['line_no']}): {evidence['text']}")
+    return "\n".join(lines)

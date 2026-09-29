@@ -84,3 +84,62 @@ def build_rtos_call_flow(data: Optional[Dict[str, Any]]) -> RtosCallFlowOverview
         calls=calls,
         unanswered_requests=unanswered,
     )
+
+
+@dataclass(frozen=True)
+class RtosOemHookOverview:
+    status: str
+    kpi: Dict[str, Any] = field(default_factory=dict)
+    requests: List[Dict[str, Any]] = field(default_factory=list)
+    unmatched_unsol: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _ipc_label(ipc: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not ipc:
+        return None
+    return f"{ipc.get('main')} / {ipc.get('sub')} / {ipc.get('type')}"
+
+
+def _oem_request_row(req: Dict[str, Any]) -> Dict[str, Any]:
+    tx = req.get("tx") or {}
+    rx = req.get("modem_rx") or {}
+    gen = rx.get("gen") or {}
+    broken = req.get("broken_at") or {}
+    reached = [stage for stage in req.get("chain") or [] if stage.get("reached")]
+    last = (req.get("checkpoints") or {}).get(reached[-1]["stage"]) if reached else None
+    return {
+        "token": req.get("token"),
+        "req_time": req.get("req_time"),
+        "func": f"{req.get('func_id')} {req.get('func_name')}" if req.get("func_id") else None,
+        "path": req.get("path"),
+        "raw_size": req.get("raw_size"),
+        "ipc": _ipc_label(tx),
+        "tx_seq": f"{tx['seq']:02x}" if tx.get("seq") is not None else None,
+        "modem_rx": (f"{rx.get('main')} {rx.get('sub')} {rx.get('type')}" if rx and not gen
+                     else (f"GR {gen.get('main')} {gen.get('sub')}" if gen else None)),
+        "modem_error_label": req.get("modem_error_label"),
+        "tx_rx_ms": req.get("tx_rx_ms"),
+        "expects_modem_response": bool(req.get("expects_modem_response")),
+        "expected_response": req.get("expected_response"),
+        "verdict": req.get("verdict"),
+        "status": req.get("status"),
+        "broken_label": broken.get("label"),
+        "chain": [{"label": s.get("label"), "reached": bool(s.get("reached")), "time": s.get("time")}
+                  for s in req.get("chain") or []],
+        "last_evidence": last,
+        "error_evidence": req.get("ofono_error_evidence"),
+    }
+
+
+def build_rtos_oem_hook(data: Optional[Dict[str, Any]]) -> RtosOemHookOverview:
+    if not data:
+        return RtosOemHookOverview(status="no_data")
+    requests = [_oem_request_row(req) for req in data.get("requests") or []]
+    if not requests:
+        return RtosOemHookOverview(status="no_oem_hook", kpi=dict(data.get("kpi") or {}))
+    return RtosOemHookOverview(
+        status="ok",
+        kpi=dict(data.get("kpi") or {}),
+        requests=requests,
+        unmatched_unsol=list(data.get("unmatched_unsol") or []),
+    )

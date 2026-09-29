@@ -46,6 +46,7 @@ LOG_TYPE_WORDS = {
     "RILJ_Transaction": "모뎀 명령(RIL) 기록",
     "RTOS_Call_Flow": "RTOS 콜 흐름 기록",
     "RTOS_Log_Summary": "RTOS 로그 요약",
+    "RTOS_OemHook_Flow": "RTOS OEM_HOOK_RAW 전달 기록",
     "RTOS_RIL_Pending": "RTOS 응답 없는 RIL 요청",
     "Radio_Power_Event": "무선 전원 이벤트",
     "SetupDataCall_Failed": "데이터 연결 설정 실패 기록",
@@ -69,6 +70,7 @@ INTENT_WORDS = {
     "Nitz_Time_Analysis": "망 시각 동기 분석",
     "Packet_Capture": "패킷 캡처 분석",
     "RTOS_Call_Analysis": "RTOS 콜 분석",
+    "RTOS_OemHook_Analysis": "RTOS OEM_HOOK_RAW 분석",
     "Radio_Power": "무선 전원 분석",
     "System_Kill_WTF": "시스템 강제 종료 분석",
     "Time_Context_Inference": "발생 시점 추론",
@@ -91,6 +93,7 @@ TOOL_WORDS = {
     "get_radio_power_analytics": "무선 전원 분석",
     "get_recent_data_usage_analytics": "최근 데이터 사용량 분석",
     "get_rtos_call_flow_analytics": "RTOS 콜 흐름 분석",
+    "get_rtos_oem_hook_analytics": "RTOS OEM_HOOK_RAW 전달 분석",
 }
 
 # 우리가 만든 RCA 문서 이름과 이벤트 분류 라벨. 로그에 찍힌 문자열이 아니라 이

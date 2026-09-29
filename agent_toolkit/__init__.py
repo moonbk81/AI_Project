@@ -35,6 +35,7 @@ from agent_toolkit.satellite_tools import (
 
 from agent_toolkit.rtos_tools import (
     get_rtos_call_flow_analytics,
+    get_rtos_oem_hook_analytics,
 )
 
 from agent_toolkit.kpi_tools import (
@@ -58,4 +59,5 @@ __all__ = [
     "get_ntn_spacex_analytics",
     "get_device_health_kpi",
     "get_rtos_call_flow_analytics",
+    "get_rtos_oem_hook_analytics",
 ]

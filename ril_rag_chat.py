@@ -26,6 +26,7 @@ from agent_toolkit import (
     get_dns_latency_analytics,
     get_internet_stall_analytics,
     get_rtos_call_flow_analytics,
+    get_rtos_oem_hook_analytics,
     get_pcap_analytics,
     get_network_oos_analytics,
     get_ntn_spacex_analytics,
@@ -113,6 +114,7 @@ class RilRagChat:
             "get_binder_warning_analytics": get_binder_warning_analytics,
             "get_datacall_setup_analytics": get_datacall_setup_analytics,
             "get_rtos_call_flow_analytics": get_rtos_call_flow_analytics,
+            "get_rtos_oem_hook_analytics": get_rtos_oem_hook_analytics,
         }
 
     def _load_config(self):
