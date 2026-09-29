@@ -78,6 +78,8 @@ class LiveDeviceMonitor:
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
         self._proc = None
+        # 받은 줄을 실시간으로 넘겨받을 곳 (콜 테스트). 링 버퍼를 다시 보낸 줄은 넘기지 않는다
+        self._listeners: List[Callable[[str], None]] = []
         self._reset(None, DEFAULT_INTERVAL_SEC)
 
     def _reset(self, serial, interval):
@@ -97,6 +99,9 @@ class LiveDeviceMonitor:
         self.analysis: Dict = {}
         self._analyzed_count = -1
         self._last_uptime: Optional[int] = None
+        # 콜 테스트가 "도중에 워치가 죽었나" 를 보는 눈금
+        self.reboot_count = 0
+        self.disconnect_count = 0
 
     # ---- 제어 ----
 
@@ -184,11 +189,14 @@ class LiveDeviceMonitor:
     def _set_connected(self, connected: bool) -> None:
         if connected != self.connected:
             self.connected = connected
+            if not connected:
+                self.disconnect_count += 1
             self._event("info" if connected else "critical", "단말 연결됨" if connected else "단말 연결 끊김")
 
     def _check_alerts(self, sample: Dict) -> None:
         up = sample["uptime"].get("uptime_min")
         if up is not None and self._last_uptime is not None and up < self._last_uptime:
+            self.reboot_count += 1
             self._event("critical", f"재부팅 감지 (uptime {self._last_uptime}분 → {up}분)")
         if up is not None:
             self._last_uptime = up
@@ -251,7 +259,19 @@ class LiveDeviceMonitor:
             self._seen_set.add(key)
             self.lines.append(line)
             self.line_count += 1
+            listeners = list(self._listeners)
+        for listener in listeners:
+            listener(line)
         return True
+
+    def add_listener(self, listener: Callable[[str], None]) -> None:
+        with self._lock:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[str], None]) -> None:
+        with self._lock:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
 
     def _analyze_if_new(self) -> None:
         with self._lock:

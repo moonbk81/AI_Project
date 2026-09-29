@@ -138,6 +138,106 @@ function analysisBlock(analysis) {
   return wrap;
 }
 
+// ---- 콜 테스트 (telephonytool) ----
+
+const RESULT_TEXT = { pass: "✓ 성공", fail: "✗ 실패", stopped: "중지", device_lost: "✗ 단말 끊김" };
+const ms = (value) => (value === null || value === undefined ? "-" : `${Number(value).toLocaleString()}`);
+
+function numberInput(value, min, max) {
+  const input = el("input");
+  input.type = "number";
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(value);
+  input.style.width = "90px";
+  return input;
+}
+
+function callTestForm() {
+  const mode = el("select");
+  for (const [value, label] of [["mo", "발신 (MO)"], ["mt", "착신 (MT, 자동 응답)"]]) {
+    const option = el("option", null, label);
+    option.value = value;
+    mode.append(option);
+  }
+  const number = el("input");
+  number.placeholder = "걸 번호 (긴급 번호 불가)";
+  number.inputMode = "tel";
+  const inputs = {
+    count: numberInput(3, 1, 100),
+    hold_sec: numberInput(10, 0, 600),
+    gap_sec: numberInput(5, 0, 600),
+    setup_timeout_sec: numberInput(60, 10, 300),
+    incoming_timeout_sec: numberInput(120, 10, 1800),
+    answer_delay_sec: numberInput(2, 0, 60),
+  };
+  const numberField = field("번호", number);
+  const setupField = field("연결 제한(초)", inputs.setup_timeout_sec);
+  const incomingField = field("착신 대기(초)", inputs.incoming_timeout_sec);
+  const answerField = field("응답까지(초)", inputs.answer_delay_sec);
+  // .field 의 display:flex 가 .hidden 보다 뒤에 있어 class 로는 안 숨는다
+  const show = (node, visible) => { node.style.display = visible ? "" : "none"; };
+  const sync = () => {
+    const mo = mode.value === "mo";
+    show(numberField, mo);
+    show(setupField, mo);
+    show(incomingField, !mo);
+    show(answerField, !mo);
+  };
+  mode.addEventListener("change", sync);
+  sync();
+  const row = el("div", "live-controls");
+  row.append(field("방식", mode), numberField, field("반복", inputs.count), field("통화 유지(초)", inputs.hold_sec),
+             field("다음까지(초)", inputs.gap_sec), setupField, incomingField, answerField);
+  const read = () => Object.assign({ mode: mode.value, number: number.value.trim() },
+    Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, Number(input.value)])));
+  return { row, read };
+}
+
+function callTestResults(status) {
+  const wrap = el("div", "stack");
+  const summary = status.summary || {};
+  const cfg = status.config || {};
+  const ims = status.ims_registered === true ? "등록됨" : (status.ims_registered === false ? "미등록" : "확인 전");
+  wrap.append(tileRow([
+    tile("상태", status.phase || "대기", "", status.error || (status.running ? "진행 중" : ""),
+         status.error ? "critical" : (status.running ? "warning" : "good")),
+    tile("IMS 등록", ims, "", "콜은 IMS 등록 상태에서만 된다",
+         status.ims_registered === true ? "good" : (status.ims_registered === false ? "critical" : "")),
+    tile("진행", `${summary.done ?? 0} / ${cfg.count ?? "-"}`, "",
+         cfg.mode ? (cfg.mode === "mo" ? `발신 ${cfg.number}` : "착신 자동 응답") : ""),
+    tile("성공률", summary.pass_rate === null || summary.pass_rate === undefined ? "-" : `${summary.pass_rate}%`, "",
+         summary.avg_active_ms ? `평균 연결 ${ms(summary.avg_active_ms)} ms` : "",
+         summary.done && summary.passed < summary.done ? "critical" : "good"),
+  ]));
+  if (status.current?.timeline?.length) {
+    wrap.append(el("p", "table-note",
+      `${status.current.n}회차 진행: ` + status.current.timeline.map((t) => `${t.state} ${clock(t.time)}`).join(" → ")));
+  }
+  if ((status.iterations || []).length) {
+    wrap.append(frameTable(status.iterations.map((i) => ({
+      회차: i.n, 시작: clock(i.start), 결과: RESULT_TEXT[i.result] || i.result, 이유: i.reason || "-",
+      [i.mode === "mt" ? "착신(ms)" : "ALERTING(ms)"]: ms(i.mode === "mt" ? i.incoming_ms : i.alerting_ms),
+      "ACTIVE(ms)": ms(i.active_ms),
+      "끊긴 지점": i.broken_at || "-",
+      "종료 원인": i.fail_cause ? `${i.fail_cause} ${i.fail_reason || ""}` : "-",
+      SIP: i.sip_error || i.sip_final_response || "-",
+      "CPU 최고": i.cpu_max === null || i.cpu_max === undefined ? "-" : `${i.cpu_max}%`,
+    })), ["회차", "시작", "결과", "이유", status.config?.mode === "mt" ? "착신(ms)" : "ALERTING(ms)",
+          "ACTIVE(ms)", "끊긴 지점", "종료 원인", "SIP", "CPU 최고"]));
+  }
+  if ((status.sent || []).length) {
+    const fold = el("details", "fold");
+    fold.append(el("summary", null, `telephonytool 에 보낸 명령 ${status.sent.length}개`));
+    const pre = el("pre", "log-tail");
+    pre.textContent = status.sent.map((s) => `${clock(s.time)}  ${s.command}`).join("\n")
+      + (status.tool_output?.length ? `\n\n--- telephonytool 출력 ---\n${status.tool_output.join("\n")}` : "");
+    fold.append(pre);
+    wrap.append(fold);
+  }
+  return wrap;
+}
+
 export async function renderLive(mount, _sourceFile, ctx) {
   const band = section("실시간 단말");
   mount.append(band.wrap);
@@ -163,6 +263,22 @@ export async function renderLive(mount, _sourceFile, ctx) {
   row.append(field("단말", deviceSelect), field("간격", intervalSelect), refreshButton, startButton, stopButton, analyzeButton);
   const statusLine = el("p", "table-note", "");
   control.body.append(row, statusLine);
+
+  // ---- 콜 테스트 ----
+  const callPanel = panel("콜 테스트 (telephonytool)",
+    "IMS 등록을 확인한 뒤 발신을 반복하거나, 걸려 오는 콜에 자동 응답한다. 결과는 받은 로그로 판정한다.");
+  callPanel.section.classList.add("wide");
+  band.grid.append(callPanel.section);
+  const form = callTestForm();
+  const callStart = el("button", "primary", "테스트 시작");
+  const callStop = el("button", null, "테스트 중지");
+  callStart.type = "button";
+  callStop.type = "button";
+  const callButtons = el("div", "live-controls");
+  callButtons.append(callStart, callStop);
+  const callNote = el("p", "table-note", "실시간 모니터가 단말에 붙어 로그를 받는 중이어야 한다.");
+  const callHost = el("div");
+  callPanel.body.append(form.row, callButtons, callNote, callHost);
 
   // ---- 카드 ----
   const trend = card("CPU 추이", "전체와 최근 구간 평균 상위 3 태스크. 점선은 90%");
@@ -220,6 +336,11 @@ export async function renderLive(mount, _sourceFile, ctx) {
       logPre.textContent = (status.log_tail || []).join("\n");
       logs.content(logPre);
       logPre.scrollTop = logPre.scrollHeight;
+
+      const test = await api.callTestStatus();
+      callStart.disabled = test.running || !(status.running && status.connected && status.log_streaming);
+      callStop.disabled = !test.running;
+      callHost.replaceChildren(callTestResults(test));
     } catch (error) {
       console.error("live status", error);
       statusLine.textContent = `상태를 불러오지 못했습니다: ${error.message}`;
@@ -249,6 +370,28 @@ export async function renderLive(mount, _sourceFile, ctx) {
     }
   });
   grep.addEventListener("change", poll);
+  callStart.addEventListener("click", async () => {
+    const config = form.read();
+    if (config.mode === "mo" && !config.number) {
+      callNote.textContent = "걸 번호를 넣어 주세요.";
+      return;
+    }
+    const what = config.mode === "mo" ? `${config.number} 로 ${config.count}번 발신` : `착신 ${config.count}번 자동 응답`;
+    // 실제로 전화가 걸린다. 한 번 더 묻는다
+    if (!window.confirm(`${what} 테스트를 시작할까요?`)) return;
+    try {
+      await api.callTestStart(config);
+      callNote.textContent = `${what} 테스트를 시작했습니다.`;
+    } catch (error) {
+      callNote.textContent = `시작하지 못했습니다: ${error.message}`;
+    }
+    poll();
+  });
+  callStop.addEventListener("click", async () => {
+    callNote.textContent = "중지하는 중 — 진행 중인 콜을 끊고 telephonytool 을 q 로 끝냅니다.";
+    await api.callTestStop().catch((error) => { callNote.textContent = `중지하지 못했습니다: ${error.message}`; });
+    poll();
+  });
 
   // 탭을 떠나면 화면 갱신만 멈춘다. 서버의 모니터는 계속 돈다.
   ctx?.onLeave?.(() => {

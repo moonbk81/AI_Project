@@ -1591,8 +1591,59 @@ def live_stop(request: Request) -> Dict[str, Any]:
     from backend.live_device import monitor
 
     _require_caller(request)
+    # 콜 테스트는 모니터의 로그로 판정한다. 모니터보다 먼저 멈춘다 (진행 중인 콜은 끊고 끝낸다)
+    if _call_test_runner is not None and _call_test_runner.running:
+        _call_test_runner.stop()
     monitor.stop()
     return monitor.status()
+
+
+_call_test_runner = None
+
+
+def _call_test():
+    global _call_test_runner
+    if _call_test_runner is None:
+        from backend.call_test import CallTestRunner
+        from backend.live_device import monitor
+
+        _call_test_runner = CallTestRunner(monitor)
+    return _call_test_runner
+
+
+class CallTestStartRequest(BaseModel):
+    mode: str = "mo"
+    number: str = ""
+    count: int = 1
+    hold_sec: int = 10
+    gap_sec: int = 5
+    setup_timeout_sec: int = 60
+    incoming_timeout_sec: int = 120
+    answer_delay_sec: int = 2
+
+
+@app.post("/live/call-test/start")
+def call_test_start(req: CallTestStartRequest, request: Request) -> Dict[str, Any]:
+    _require_caller(request)
+    runner = _call_test()
+    try:
+        runner.start(**req.dict())
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return runner.status()
+
+
+@app.post("/live/call-test/stop")
+def call_test_stop(request: Request) -> Dict[str, Any]:
+    _require_caller(request)
+    runner = _call_test()
+    runner.stop()
+    return runner.status()
+
+
+@app.get("/live/call-test/status")
+def call_test_status() -> Dict[str, Any]:
+    return _call_test().status()
 
 
 @app.get("/live/status")
@@ -1626,6 +1677,8 @@ def _stop_live_monitor() -> None:
     # 떼어 둔 adb logcat 이 백엔드보다 오래 살지 않게 한다
     from backend.live_device import monitor
 
+    if _call_test_runner is not None and _call_test_runner.running:
+        _call_test_runner.stop()
     if monitor.running:
         monitor.stop()
 

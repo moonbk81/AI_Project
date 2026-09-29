@@ -106,6 +106,9 @@ export const api = {
   liveStop: () => post("/live/stop", {}),
   liveStatus: (grep) => get("/live/status", grep ? { grep } : undefined),
   liveAnalyze: () => post("/live/analyze", {}),
+  callTestStart: (config) => post("/live/call-test/start", config),
+  callTestStop: () => post("/live/call-test/stop", {}),
+  callTestStatus: () => get("/live/call-test/status"),
 
   // Returns the builder's contract; `status` says whether there is anything to draw.
   chart: (name, sourceFile) =>
