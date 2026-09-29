@@ -1558,6 +1558,78 @@ async def create_analyze_job(
     return AnalyzeJobResponse(job_id=job_id)
 
 
+# ---- 실시간 단말 (adb) ----
+# 워치는 이 PC 에 꽂힌 것 하나라 모니터도 하나다. 워치에는 ps/free/uptime/logcat 만 보낸다.
+
+
+class LiveStartRequest(BaseModel):
+    serial: str
+    interval: int = 5
+
+
+@app.get("/live/devices")
+def live_devices() -> Dict[str, Any]:
+    from backend.live_device import list_devices
+
+    return {"devices": list_devices()}
+
+
+@app.post("/live/start")
+def live_start(req: LiveStartRequest, request: Request) -> Dict[str, Any]:
+    from backend.live_device import list_devices, monitor
+
+    _require_caller(request)
+    known = {d["serial"]: d for d in list_devices()}
+    if known.get(req.serial, {}).get("state") != "device":
+        raise HTTPException(status_code=400, detail=f"adb 로 연결된 단말이 아닙니다: {req.serial}")
+    monitor.start(req.serial, req.interval)
+    return monitor.status()
+
+
+@app.post("/live/stop")
+def live_stop(request: Request) -> Dict[str, Any]:
+    from backend.live_device import monitor
+
+    _require_caller(request)
+    monitor.stop()
+    return monitor.status()
+
+
+@app.get("/live/status")
+def live_status(grep: str = "", tail: int = 80) -> Dict[str, Any]:
+    from backend.live_device import monitor
+
+    return monitor.status(tail=max(0, min(500, tail)), grep=grep)
+
+
+@app.post("/live/analyze", response_model=AnalyzeJobResponse)
+def live_analyze(request: Request) -> AnalyzeJobResponse:
+    """지금까지 받은 로그를 복사해서 업로드한 로그처럼 분석한다. 모니터는 계속 돈다."""
+    from backend.live_device import monitor
+
+    x_knox_id = _require_caller(request)
+    source = monitor.capture_path
+    if not source or not os.path.exists(source) or os.path.getsize(source) == 0:
+        raise HTTPException(status_code=400, detail="아직 받은 로그가 없습니다.")
+    job_id = _new_job("작업 대기 중", owner=x_knox_id)
+    upload_dir = os.path.join("./temp_logs", "backend_uploads", job_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%H%M%S")
+    path = os.path.join(upload_dir, os.path.basename(source).replace(".txt", f"_{stamp}.txt"))
+    shutil.copyfile(source, path)
+    _analysis_executor.submit(_run_analyze_job, job_id, [path], False, "", "", x_knox_id)
+    return AnalyzeJobResponse(job_id=job_id)
+
+
+@app.on_event("shutdown")
+def _stop_live_monitor() -> None:
+    # 떼어 둔 adb logcat 이 백엔드보다 오래 살지 않게 한다
+    from backend.live_device import monitor
+
+    if monitor.running:
+        monitor.stop()
+
+
 @app.get("/jobs", response_model=JobsResponse)
 def list_jobs(limit: int = 20) -> JobsResponse:
     with _jobs_lock:

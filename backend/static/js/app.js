@@ -9,6 +9,7 @@ import { renderChat } from "./views/chat.js";
 import { renderKnowledge } from "./views/knowledge.js";
 import { applyPlmSearch, renderPlm, runPlmSearch } from "./views/plm.js";
 import { renderFiles } from "./views/files.js";
+import { renderLive } from "./views/live.js";
 import { defectCacheKey } from "./views/plm_data.js";
 import { forgetChat, forgetMissingChats, restoreTurns, storableTurns } from "./chats.js";
 
@@ -20,6 +21,7 @@ const VIEWS = [
   { id: "knowledge", label: "분석 사례", render: renderKnowledge, needsFile: false },
   { id: "plm", label: "PLM", render: renderPlm, needsFile: false },
   { id: "files", label: "파일 · 분석", render: renderFiles, needsFile: false },
+  { id: "live", label: "실시간 단말", render: renderLive, needsFile: false },
 ];
 
 const state = {

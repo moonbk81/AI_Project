@@ -100,6 +100,13 @@ export const api = {
     return response.json();
   },
 
+  // 실시간 단말 (adb). 워치에는 ps/free/uptime/logcat 만 보낸다.
+  liveDevices: () => get("/live/devices").then((body) => body.devices || []),
+  liveStart: (serial, interval) => post("/live/start", { serial, interval }),
+  liveStop: () => post("/live/stop", {}),
+  liveStatus: (grep) => get("/live/status", grep ? { grep } : undefined),
+  liveAnalyze: () => post("/live/analyze", {}),
+
   // Returns the builder's contract; `status` says whether there is anything to draw.
   chart: (name, sourceFile) =>
     get(`/charts/${name}`, { source_file: sourceFile }).then((body) => body.series),
