@@ -126,6 +126,24 @@ class TestMergeLogFilesKeepsContextTogether:
         assert "\x00" not in text
         assert "[31/12/99 07:02:20.391900] [372] [ap]" in text
 
+    def test_rtos_lines_repeated_across_files_appear_once(self, tmp_path):
+        # lastword 링버퍼는 같이 올린 콜 로그와 겹친다. 같은 줄이 두 번 나오면 안 된다.
+        shared = "[31/12/99 07:02:20.391900] [372] [ap] shared\n"
+        first = tmp_path / "callincoming.txt"
+        first.write_text(shared + shared + "[31/12/99 07:02:20.400000] [372] [ap] only call\n", encoding="utf-8")
+        second = tmp_path / "lastword"
+        second.write_text("CHIP=best1700\r\n" + shared.replace("\n", "\r\n") + "[31/12/99 07:02:21.000000] [151] [ap] only lw\r\n",
+                          encoding="utf-8")
+        merged_path = tmp_path / "merged.log"
+
+        merge_log_files([str(first), str(second)], str(merged_path))
+        lines = merged_path.read_text(encoding="utf-8").splitlines()
+
+        # 한 파일 안의 반복은 남기고, 다른 파일에서 다시 나온 줄만 뺀다.
+        assert sum(1 for l in lines if l.endswith("shared")) == 2
+        assert any("only call" in l for l in lines) and any("only lw" in l for l in lines)
+        assert "CHIP=best1700" in lines
+
 
 class TestKeywordScorerHandlesKorean:
     """한글 질의에서도 키워드 항이 살아 있게 한다."""

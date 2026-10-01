@@ -15,6 +15,7 @@ from typing import Callable, Iterable, Optional
 from core.text_encoding import detect_text_encoding
 from log_orchestrator import LogOrchestrator
 from parsers.pcap_parser import is_pcap_name
+from parsers.rtos.line import RTOS_LINE_RE
 from prepare_rag_payload import RagPayloadBuilder
 
 
@@ -94,16 +95,27 @@ def merge_log_files(file_paths, output_path):
         return 1 if timestamp[:2] <= "06" else 0
 
     all_lines = []
+    # RTOS lastword 는 크래시 직전 링버퍼라 함께 올린 콜 로그와 대부분 겹친다. 앞 파일에
+    # 이미 나온 RTOS 줄은 건너뛴다. 타임스탬프가 µs 단위라 다른 줄이 같을 일은 없고,
+    # 한 파일 안의 반복은 그대로 둔다.
+    rtos_seen = set()
     for file_index, fp in enumerate(file_paths):
         # 첫 타임스탬프가 나오기 전의 머리말은 파일 맨 앞에 그대로 둔다.
         last_cycle, last_key = 0, "00-00 00:00:00.000"
+        rtos_here = set()
         with open(fp, 'r', encoding=detect_text_encoding(fp), errors='ignore') as f:
             for line_number, line in enumerate(f):
+                if RTOS_LINE_RE.search(line):
+                    body = line.rstrip('\r\n')
+                    if body in rtos_seen:
+                        continue
+                    rtos_here.add(body)
                 match = time_pattern.search(line)
                 if match:
                     last_key = match.group(1)
                     last_cycle = year_cycle(last_key)
                 all_lines.append((last_cycle, last_key, file_index, line_number, line))
+        rtos_seen |= rtos_here
 
     all_lines.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
 
