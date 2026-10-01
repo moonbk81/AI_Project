@@ -147,7 +147,40 @@ def build_rtos_payloads(report_data, input_file):
             **{k: v for k, v in (cpu.get("kpi") or {}).items() if v is not None},
         })
 
+    for crash in (report_data.get("rtos_crash") or {}).get("crashes") or []:
+        append_payload(rag_payload, _crash_document(crash), {
+            "log_type": "RTOS_Crash",
+            "source_file": source_file,
+            "time": crash.get("time"),
+            "task": crash.get("task_name") or crash.get("task_id"),
+            "line_no": crash.get("line_no"),
+        })
+
     return rag_payload
+
+
+def _crash_document(crash):
+    task = crash.get("task_name") or crash.get("task_id")
+    lines = [f"[RTOS 크래시] {crash.get('time')} 태스크 {task}({crash.get('task_id')}) assert 로 죽음 (line {crash.get('line_no')})"]
+    lib, nuttx = crash.get("lib_assert"), crash.get("nuttx_assert")
+    if lib:
+        lines.append(f"- 실패한 조건: `{lib['expr']}` — {lib['file']}:{lib['line']} {lib.get('function') or ''}")
+    if nuttx:
+        lines.append(f"- NuttX assert 위치: {nuttx['file']}:{nuttx['line']} (process {crash.get('process')})")
+    regs = crash.get("registers") or {}
+    if regs:
+        lines.append("- 레지스터: " + ", ".join(f"{k}={regs[k]}" for k in ("PC", "LR", "SP") if k in regs))
+    for s in crash.get("stacks") or []:
+        if s.get("used") is not None:
+            lines.append(f"- {s['kind']} 스택 {s['used']} / {int(s['size'])} 바이트 사용 ({s['used_pct']}%)")
+    for bt in crash.get("backtraces") or []:
+        lines.append(f"- backtrace({bt['task_id']}): " + " ".join(bt["addresses"]))
+    for finding in crash.get("findings") or []:
+        lines.append(f"- 판단: {finding}")
+    if crash.get("before_task"):
+        lines.append("- 죽기 직전 같은 태스크 로그:")
+        lines.extend(f"  {l}" for l in crash["before_task"])
+    return "\n".join(lines)
 
 
 def _cpu_document(cpu):

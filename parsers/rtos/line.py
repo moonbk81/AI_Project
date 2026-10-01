@@ -17,7 +17,7 @@ from typing import List, Optional
 from core.text_encoding import detect_text_encoding
 
 RTOS_LINE_RE = re.compile(
-    r'\[(\d{2})/(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2}\.\d+)\] \[(\d+)\] \[([a-z0-9]+)\] ?(.*)'
+    r'\[(\d{2})/(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2}\.\d+)\] \[ *(\d+)\] \[([a-z0-9]+)\] ?(.*)'
 )
 NESTED_LOGCAT_RE = re.compile(
     r'^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+[+-]\d{4} +\d+ +\d+ +\[([VDIWEF])\]\[([^\]]+)\]\s*(.*)'

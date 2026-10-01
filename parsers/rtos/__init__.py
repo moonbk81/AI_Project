@@ -2,6 +2,7 @@ from .line import RtosLine, is_rtos_log, parse_build_header, parse_line, parse_l
 from .call_flow import RtosCallFlowParser
 from .oem_hook import RtosOemHookParser
 from .cpu import RtosCpuUsageParser
+from .crash import RtosCrashParser
 
 __all__ = [
     "RtosLine",
@@ -13,4 +14,5 @@ __all__ = [
     "RtosCallFlowParser",
     "RtosOemHookParser",
     "RtosCpuUsageParser",
+    "RtosCrashParser",
 ]

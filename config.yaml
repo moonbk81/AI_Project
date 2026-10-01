@@ -208,6 +208,14 @@ routing_map:
     log_types:
       - RTOS_CPU_Usage
       - RTOS_Log_Summary
+  RTOS_Crash_Analysis:
+    domain: rtos
+    desc: "크래시, 죽음, 죽었다, 재부팅, 리부팅, 리셋, assert, assertion failed, dump_assert_info, lastword, 덤프, backtrace, 레지스터, PC, LR, 스택, stack overflow, abort, panic, hard fault, refcount, dbus 크래시, 어디서 죽었는지"
+    tools:
+      - get_rtos_crash_analytics
+    log_types:
+      - RTOS_Crash
+      - RTOS_Log_Summary
 
 # ==========================================
 # 2. LLM 시스템 및 역할 프롬프트 (System Roles)

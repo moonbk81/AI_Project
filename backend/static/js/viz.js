@@ -76,6 +76,7 @@ const EMPTY_TEXT = {
   no_errors: "실패/차단 기록이 없습니다 (정상).",
   no_calls: "통화 세션 로그가 없습니다.",
   no_oem_hook: "RIL_REQUEST_OEM_HOOK_RAW 요청 로그가 없습니다.",
+  no_rtos_crash: "assert 덤프(dump_assert_info, assertion failed)가 없습니다.",
   no_cpu_samples: "태스크별 CPU 점유율(PID ... CPU: x%) 로그가 없습니다.",
   no_emergency_calls: "긴급호(911/112 등) 발신이 없습니다.",
   no_ntn_events: "NTN 관련 이벤트가 없습니다.",

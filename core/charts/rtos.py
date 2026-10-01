@@ -201,3 +201,19 @@ def build_rtos_cpu_usage(data: Optional[Dict[str, Any]]) -> RtosCpuUsageOverview
         tasks=list(data.get("tasks") or []),
         busy_windows=list(data.get("busy_windows") or []),
     )
+
+
+@dataclass(frozen=True)
+class RtosCrashOverview:
+    status: str
+    kpi: Dict[str, Any] = field(default_factory=dict)
+    crashes: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def build_rtos_crash(data: Optional[Dict[str, Any]]) -> RtosCrashOverview:
+    if not data:
+        return RtosCrashOverview(status="no_data")
+    crashes = data.get("crashes") or []
+    if not crashes:
+        return RtosCrashOverview(status="no_rtos_crash", kpi=dict(data.get("kpi") or {}))
+    return RtosCrashOverview(status="ok", kpi=dict(data.get("kpi") or {}), crashes=list(crashes))

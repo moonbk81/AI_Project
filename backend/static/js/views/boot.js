@@ -661,8 +661,72 @@ function rtosBusyWindowsCard(series, panel) {
   panel.content(wrap);
 }
 
+function rtosCrash(crash) {
+  const lib = crash.lib_assert;
+  const nuttx = crash.nuttx_assert;
+  const task = crash.task_name || crash.task_id;
+  const node = fold(`[${cpuMs(crash.time)}] ${task} (${crash.task_id}) — ${lib ? lib.expr : nuttx?.message || "assert"}`,
+                    { open: true });
+
+  const wrap = el("div", "triage");
+  const facts = el("dl", "triage-facts");
+  const regs = crash.registers || {};
+  const stack = (crash.stacks || [])[0];
+  const rows = [
+    ["실패한 조건", lib ? `${lib.expr} — ${lib.file}:${lib.line} ${lib.function || ""}` : null],
+    ["NuttX assert 위치", nuttx ? `${nuttx.file}:${nuttx.line}` : null],
+    ["태스크 / 프로세스", `${task} (${crash.task_id}) / ${crash.process || "-"}`],
+    ["PC / LR / SP", ["PC", "LR", "SP"].map((k) => regs[k] || "-").join(" / ")],
+    ["스택", stack && stack.used !== undefined
+      ? `${stack.kind} ${stack.used} / ${Number(stack.size)} 바이트 (${stack.used_pct}%)${stack.overflow ? " — 넘침" : ""}` : null],
+    ["버전", crash.version],
+    ["재부팅", crash.reboot ? `line ${crash.reboot.line_no} 부터 부팅 로그` : "로그 안에 없음"],
+  ];
+  for (const [label, value] of rows) {
+    if (!value) continue;
+    facts.append(el("dt", null, label));
+    facts.append(el("dd", null, value));
+  }
+  wrap.append(facts);
+  const signals = el("div", "triage-signals");
+  for (const finding of crash.findings || []) {
+    const item = el("div", "triage-signal");
+    item.append(el("p", null, finding));
+    signals.append(item);
+  }
+  if (signals.children.length) wrap.append(signals);
+  node.append(wrap);
+
+  for (const bt of crash.backtraces || []) {
+    node.append(el("h4", "sub-head", `Backtrace (태스크 ${bt.task_id}) — 주소 ${bt.addresses.length}개`));
+    const rows = [];
+    for (let i = 0; i < bt.addresses.length; i += 8) rows.push(bt.addresses.slice(i, i + 8).join(" "));
+    node.append(el("pre", null, rows.join("\n")));
+  }
+  node.append(el("p", "table-note", "주소를 함수 이름으로 바꾸려면 같은 빌드의 ELF 로 addr2line 을 돌려야 합니다."));
+  const regRows = Object.entries(regs).map(([name, value]) => ({ 레지스터: name, 값: value }));
+  if (regRows.length) {
+    const regFold = fold(`레지스터 (${regRows.length}개)`);
+    regFold.append(frameTable(regRows, ["레지스터", "값"]));
+    node.append(regFold);
+  }
+  for (const [label, lines] of [["죽기 직전 같은 태스크 로그", crash.before_task],
+                                ["같은 시간대 전체 로그 (5초 전부터)", crash.before_all],
+                                ["Stack dump", crash.stack_dump]]) {
+    const logs = logFold(label, lines);
+    if (logs) node.append(logs);
+  }
+  return node;
+}
+
 // domain 이 없는 카드는 Android 세션 카드다. RTOS 세션에서는 domain 에 "rtos" 가 든 카드만 그린다.
 const CARDS = [
+  {
+    domain: "rtos", chart: "rtos-crash", title: "RTOS assert 크래시", wide: true,
+    sub: "죽은 태스크, 실패한 조건, 레지스터, backtrace, 직전 로그",
+    prompt: "assert 로 죽은 태스크와 실패한 조건, 죽기 직전 같은 태스크 로그와 같은 시간대 다른 태스크 로그를 근거로 크래시 원인 후보와 다음에 확인할 코드를 정리해줘.",
+    render: eventListCard((series) => series.crashes, rtosCrash, "assert 덤프가 없습니다."),
+  },
   {
     domain: "rtos", chart: "rtos-cpu", title: "RTOS CPU 점유율 추이", wide: true,
     sub: "전체(100 − Idle_Task)와 평균 상위 3 태스크. 점선은 과부하 기준",

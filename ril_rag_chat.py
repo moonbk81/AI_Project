@@ -28,6 +28,7 @@ from agent_toolkit import (
     get_rtos_call_flow_analytics,
     get_rtos_oem_hook_analytics,
     get_rtos_cpu_usage_analytics,
+    get_rtos_crash_analytics,
     get_pcap_analytics,
     get_network_oos_analytics,
     get_ntn_spacex_analytics,
@@ -117,6 +118,7 @@ class RilRagChat:
             "get_rtos_call_flow_analytics": get_rtos_call_flow_analytics,
             "get_rtos_oem_hook_analytics": get_rtos_oem_hook_analytics,
             "get_rtos_cpu_usage_analytics": get_rtos_cpu_usage_analytics,
+            "get_rtos_crash_analytics": get_rtos_crash_analytics,
         }
 
     def _load_config(self):

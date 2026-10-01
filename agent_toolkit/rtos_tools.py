@@ -160,3 +160,48 @@ def get_rtos_cpu_usage_analytics(base_name: str, result_dir: str = "./result") -
             "role 에 '(추정)' 이 붙은 것은 로그의 태스크 번호로 추정한 역할이다."
         ),
     }, ensure_ascii=False)
+
+
+def get_rtos_crash_analytics(base_name: str, result_dir: str = "./result") -> str:
+    """RTOS assert 덤프를 요약한다. 죽은 태스크, 실패한 조건, 레지스터, backtrace, 직전 로그, 재부팅."""
+    path = os.path.join(result_dir, f"{base_name}_rtos_crash.json")
+    data = _load_json(path)
+    if not data:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": "RTOS 크래시 분석 결과 파일이 없습니다.",
+            "expected_file": path,
+        }, ensure_ascii=False)
+
+    crashes = []
+    for c in data.get("crashes") or []:
+        regs = c.get("registers") or {}
+        crashes.append({
+            "time": c.get("time"),
+            "line_no": c.get("line_no"),
+            "task": c.get("task_name") or c.get("task_id"),
+            "task_id": c.get("task_id"),
+            "process": c.get("process"),
+            "lib_assert": c.get("lib_assert"),
+            "nuttx_assert": c.get("nuttx_assert"),
+            "version": c.get("version"),
+            "registers": {k: regs.get(k) for k in ("PC", "LR", "SP", "xPSR", "EXC_RETURN") if k in regs},
+            "stacks": c.get("stacks"),
+            "backtraces": c.get("backtraces"),
+            "reboot": c.get("reboot"),
+            "findings": c.get("findings"),
+            "before_task": c.get("before_task"),
+            "before_all": c.get("before_all"),
+        })
+    return json.dumps({
+        "status": "OK",
+        "kpi": data.get("kpi", {}),
+        "crashes": crashes,
+        "analysis_rule": (
+            "lib_assert 는 라이브러리(D-Bus 등)가 먼저 찍은 원래 실패 조건이고, nuttx_assert 는 그걸 abort 로 넘긴 자리다. "
+            "원인을 말할 때는 lib_assert 의 조건·파일·함수를 앞세워라. "
+            "backtrace 와 PC/LR 은 주소뿐이다 — 같은 빌드 ELF 없이 함수 이름을 지어내지 마라. "
+            "before_task 는 죽은 태스크의 직전 로그, before_all 은 같은 시간대 전체 태스크 로그(크래시 5초 전부터)다. "
+            "스택 used 는 (base + size) - sp 로 계산한 값이다. findings 는 텍스트로만 판단한 것이니 그대로 인용해도 된다."
+        ),
+    }, ensure_ascii=False)

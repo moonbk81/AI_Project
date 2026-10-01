@@ -86,9 +86,11 @@ from .private_network import PrivateNetworkOverview, build_private_network_overv
 from .rtos import (
     RtosCallFlowOverview,
     RtosCpuUsageOverview,
+    RtosCrashOverview,
     RtosOemHookOverview,
     build_rtos_call_flow,
     build_rtos_cpu_usage,
+    build_rtos_crash,
     build_rtos_oem_hook,
 )
 from .power import (
@@ -187,6 +189,8 @@ __all__ = [
     "build_rtos_oem_hook",
     "RtosCpuUsageOverview",
     "build_rtos_cpu_usage",
+    "RtosCrashOverview",
+    "build_rtos_crash",
     "build_power_thermal_panel",
     "build_process_deaths",
     "build_system_kills",

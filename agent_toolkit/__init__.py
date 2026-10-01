@@ -37,6 +37,7 @@ from agent_toolkit.rtos_tools import (
     get_rtos_call_flow_analytics,
     get_rtos_oem_hook_analytics,
     get_rtos_cpu_usage_analytics,
+    get_rtos_crash_analytics,
 )
 
 from agent_toolkit.kpi_tools import (
@@ -62,4 +63,5 @@ __all__ = [
     "get_rtos_call_flow_analytics",
     "get_rtos_oem_hook_analytics",
     "get_rtos_cpu_usage_analytics",
+    "get_rtos_crash_analytics",
 ]
