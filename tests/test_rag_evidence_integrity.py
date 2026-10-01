@@ -108,6 +108,24 @@ class TestMergeLogFilesKeepsContextTogether:
 
         assert lines[0].startswith("==========")
 
+    def test_utf16_log_is_decoded_when_merged(self, tmp_path):
+        # Windows 터미널로 저장한 RTOS 로그는 UTF-16LE 다. utf-8 로 읽으면 글자마다
+        # \x00 이 끼어 RTOS 판별이 실패하고 Android 파이프라인으로 빠진다.
+        first = tmp_path / "callincoming.txt"
+        first.write_text(
+            "[31/12/99 07:02:20.391900] [372] [ap] [I][IMS6.0] SendInviteResp\r\n",
+            encoding="utf-16",
+        )
+        second = tmp_path / "lastword"
+        second.write_text("CHIP=best1700\n[31/12/99 07:02:21.000000] [151] [ap] x\n", encoding="utf-8")
+        merged_path = tmp_path / "merged.log"
+
+        merge_log_files([str(first), str(second)], str(merged_path))
+        text = merged_path.read_text(encoding="utf-8")
+
+        assert "\x00" not in text
+        assert "[31/12/99 07:02:20.391900] [372] [ap]" in text
+
 
 class TestKeywordScorerHandlesKorean:
     """한글 질의에서도 키워드 항이 살아 있게 한다."""

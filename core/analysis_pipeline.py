@@ -12,6 +12,7 @@ import os
 import re
 from typing import Callable, Iterable, Optional
 
+from core.text_encoding import detect_text_encoding
 from log_orchestrator import LogOrchestrator
 from parsers.pcap_parser import is_pcap_name
 from prepare_rag_payload import RagPayloadBuilder
@@ -46,7 +47,7 @@ def slice_log_by_time(input_path, output_path, start_time_str, end_time_str):
 
     crosses_year = bool(start_time_str) and bool(end_time_str) and start_time_str > end_time_str
 
-    with open(input_path, 'r', encoding='utf-8', errors='ignore') as fin, \
+    with open(input_path, 'r', encoding=detect_text_encoding(input_path), errors='ignore') as fin, \
          open(output_path, 'w', encoding='utf-8') as fout:
         for line in fin:
             match = pattern.search(line)
@@ -80,7 +81,7 @@ def merge_log_files(file_paths, output_path):
     # 것으로 보고, 상반기를 다음 해로 취급한다. 단말 로그가 반년을 넘기지는 않는다.
     months = set()
     for fp in file_paths:
-        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(fp, 'r', encoding=detect_text_encoding(fp), errors='ignore') as f:
             for line in f:
                 match = time_pattern.search(line)
                 if match:
@@ -96,7 +97,7 @@ def merge_log_files(file_paths, output_path):
     for file_index, fp in enumerate(file_paths):
         # 첫 타임스탬프가 나오기 전의 머리말은 파일 맨 앞에 그대로 둔다.
         last_cycle, last_key = 0, "00-00 00:00:00.000"
-        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(fp, 'r', encoding=detect_text_encoding(fp), errors='ignore') as f:
             for line_number, line in enumerate(f):
                 match = time_pattern.search(line)
                 if match:
