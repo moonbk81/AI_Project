@@ -21,7 +21,7 @@ const VIEWS = [
   { id: "knowledge", label: "분석 사례", render: renderKnowledge, needsFile: false },
   { id: "plm", label: "PLM", render: renderPlm, needsFile: false },
   { id: "files", label: "파일 · 분석", render: renderFiles, needsFile: false },
-  { id: "live", label: "실시간 단말", render: renderLive, needsFile: false },
+  { id: "live", label: "실시간 RTOS 단말", render: renderLive, needsFile: false },
 ];
 
 const state = {

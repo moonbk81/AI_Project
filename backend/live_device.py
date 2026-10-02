@@ -35,6 +35,8 @@ MAX_LOG_LINES = 50000       # 화면·분석에 쓰는 최근 줄. 파일에는 
 MAX_EVENTS = 200
 DEDUP_WINDOW = 20000        # 재연결하면 logcat 이 링 버퍼를 다시 보낸다 — 최근 줄 해시로 거른다
 LOG_RETRY_SEC = 3
+# 이만큼 단말이 안 보이면 USB 가 빠졌다고 보고 모니터를 멈춘다. 재부팅은 이보다 짧아서 다시 붙어 로그를 잇는다
+DISCONNECT_STOP_SEC = 60
 BUSY_THRESHOLD = 90.0
 TOP_TASKS = 15
 CAPTURE_DIR = os.path.join("./temp_logs", "live")
@@ -68,12 +70,14 @@ def _now() -> str:
 
 class LiveDeviceMonitor:
     def __init__(self, adb: str = "adb", runner: Runner = _run, popen=subprocess.Popen,
-                 capture_dir: str = CAPTURE_DIR, analyze_every_sec: float = 5.0):
+                 capture_dir: str = CAPTURE_DIR, analyze_every_sec: float = 5.0,
+                 disconnect_stop_sec: float = DISCONNECT_STOP_SEC):
         self.adb = adb
         self.runner = runner
         self.popen = popen
         self.capture_dir = capture_dir
         self.analyze_every_sec = analyze_every_sec
+        self.disconnect_stop_sec = disconnect_stop_sec
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
@@ -102,6 +106,8 @@ class LiveDeviceMonitor:
         # 콜 테스트가 "도중에 워치가 죽었나" 를 보는 눈금
         self.reboot_count = 0
         self.disconnect_count = 0
+        self._lost_since: Optional[float] = None
+        self.stop_reason: Optional[str] = None
 
     # ---- 제어 ----
 
@@ -138,6 +144,15 @@ class LiveDeviceMonitor:
             t.join(timeout=COMMAND_TIMEOUT_SEC + 2)
         self._threads = []
         self._event("info", "모니터 중지")
+
+    def _stop_lost(self) -> None:
+        # 폴링 스레드에서 부른다. 자기 자신을 join 할 수 없으니 멈추라고만 알리고 두 스레드가 스스로 끝난다
+        self.stop_reason = f"단말이 {int(self.disconnect_stop_sec)}초 넘게 안 보여 자동 중지 (USB 분리?)"
+        self._event("critical", self.stop_reason)
+        self._stop.set()
+        proc = self._proc
+        if proc and proc.poll() is None:
+            proc.terminate()
 
     # ---- 폴링 ----
 
@@ -212,7 +227,13 @@ class LiveDeviceMonitor:
 
     def _poll_loop(self) -> None:
         while not self._stop.is_set():
-            self.poll_once()
+            if self.poll_once() is None:
+                self._lost_since = self._lost_since or time.monotonic()
+                if time.monotonic() - self._lost_since >= self.disconnect_stop_sec:
+                    self._stop_lost()
+                    return
+            else:
+                self._lost_since = None
             self._analyze_if_new()
             self._stop.wait(self.interval)
 
@@ -315,6 +336,7 @@ class LiveDeviceMonitor:
                 "serial": self.serial,
                 "interval": self.interval,
                 "started_at": self.started_at,
+                "stop_reason": self.stop_reason,
                 "connected": self.connected,
                 "log_streaming": self.log_streaming,
                 "line_count": self.line_count,

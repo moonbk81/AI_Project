@@ -138,3 +138,17 @@ def test_log_stream_is_saved_deduped_and_analyzed(tmp_path):
     assert status["series"][0]["total"] == 38.0
     assert m.status(grep="RIL_CPP")["log_tail"] == [LOGCAT[1].rstrip("\n")]
     assert status["running"] is False
+
+
+def test_stops_itself_when_device_stays_gone(tmp_path):
+    adb = FakeAdb()
+    adb.online = False
+    m = LiveDeviceMonitor(runner=adb.run, popen=FakeLogcat, capture_dir=str(tmp_path), disconnect_stop_sec=0)
+    m.start("411E0A2E31781C7B", 3)
+    deadline = time.time() + 5
+    while time.time() < deadline and m.running:
+        time.sleep(0.05)
+    status = m.status()
+    assert status["running"] is False, "USB 가 빠진 채로 두면 시작 상태로 남지 않는다"
+    assert "자동 중지" in status["stop_reason"]
+    assert any(e["level"] == "critical" and "자동 중지" in e["text"] for e in status["events"])

@@ -1,4 +1,4 @@
-// 실시간 단말 — adb 로 이 PC 에 꽂힌 RTOS 워치를 몇 초마다 본다.
+// 실시간 RTOS 단말 — adb 로 이 PC 에 꽂힌 RTOS 워치를 몇 초마다 본다.
 // 워치에는 ps/free/uptime/logcat 만 보낸다 (backend/live_device.py). 모니터는 서버에서 돌아서
 // 탭을 떠나도 로그를 계속 받고, 워치가 죽으면 그 직전까지의 로그가 파일로 남는다.
 
@@ -239,7 +239,7 @@ function callTestResults(status) {
 }
 
 export async function renderLive(mount, _sourceFile, ctx) {
-  const band = section("실시간 단말");
+  const band = section("실시간 RTOS 단말");
   mount.append(band.wrap);
 
   // ---- 조작 ----
@@ -327,7 +327,9 @@ export async function renderLive(mount, _sourceFile, ctx) {
       statusLine.textContent = status.running
         ? `${status.connected ? "연결됨" : "연결 끊김"} · ${status.serial} · ${status.interval}초 간격 · `
           + `로그 ${status.log_streaming ? "수신 중" : "끊김"} ${status.line_count.toLocaleString()}줄 · 저장: ${status.capture_path}`
-        : (status.capture_path ? `중지됨 · 마지막 저장: ${status.capture_path}` : "모니터가 꺼져 있습니다.");
+        : (status.capture_path
+          ? `${status.stop_reason || "중지됨"} · 마지막 저장: ${status.capture_path}`
+          : "모니터가 꺼져 있습니다.");
       drawTrend(trend, tilesHost, status, slotsFor);
       tasks.content(tasksTable(status.latest));
       stack.content(stackTable(status.latest));
