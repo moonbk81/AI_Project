@@ -200,3 +200,51 @@ def test_device_lost_stops_the_test():
     assert status["error"] and "끊기거나" in status["error"]
     assert [i["result"] for i in status["iterations"]] == ["device_lost"]
     assert session.closed
+
+
+# ---- telephonyd 세대 SDK 의 telephonytool ----
+
+def _sem_state(monitor, call_id, state):
+    names = {0: "ACTIVE", 2: "DIALING", 3: "ALERTING", 6: "DISCONNECTED"}
+    monitor.emit(f"call changed call_id : {call_id}")
+    monitor.emit(f"call state: {names[state]} ({state}) ")
+
+
+def sem_mo_ok(session, command):
+    m = session.monitor
+    cid = "/ril_0/voicecall01"
+    if command == "get-ims-registration 0 1":
+        # tapi_ims_is_registered 는 SDK 스텁이라 -ENOTSUP 이 온다
+        session.later(0.01, lambda: m.emit("telephonytool_cmd_ims_get_registration: ims_registered: -134 - 0"))
+    elif command.startswith("dial "):
+        session.later(0.01, lambda: _sem_state(m, cid, 2))
+        session.later(0.03, lambda: _sem_state(m, cid, 3))
+        session.later(0.06, lambda: _sem_state(m, cid, 0))
+    elif command.startswith("hangup"):
+        session.later(0.01, lambda: _sem_state(m, cid, 6))
+
+
+def sem_mo_rejected(session, command):
+    m = session.monitor
+    if command == "get-ims-registration 0 1":
+        sem_mo_ok(session, command)
+    elif command.startswith("dial "):
+        # 콜백 없이 call domain 줄만 오는 경우
+        session.later(0.01, lambda: m.emit("[TCORE_CALL] call + ims bid=7 idx=1 mo DIALING"))
+        session.later(0.03, lambda: m.emit("[TCORE_CALL] call - ims bid=7 idx=1"))
+
+
+def test_unsupported_ims_query_still_runs_and_new_state_format_parses():
+    status, session = _run(sem_mo_ok, count=1)
+    assert status["ims_registered"] is None and "지원하지 않아" in status["ims_note"]
+    assert status["error"] is None
+    first = status["iterations"][0]
+    assert first["result"] == "pass"
+    assert [t["state"] for t in first["timeline"]] == ["DIALING", "ALERTING", "ACTIVE", "DISCONNECTED"]
+
+
+def test_tcore_call_lines_are_the_fallback():
+    status, _ = _run(sem_mo_rejected, count=1)
+    it = status["iterations"][0]
+    assert it["result"] == "fail" and it["reason"] == "연결 전에 종료"
+    assert [t["state"] for t in it["timeline"]] == ["DIALING", "DISCONNECTED"]

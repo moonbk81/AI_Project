@@ -1,6 +1,15 @@
 """RIL_REQUEST_OEM_HOOK_RAW 한 건이 cpif 를 거쳐 모뎀까지 갔다가 응답이 돌아왔는지 따라간다.
 
-요청 한 건이 지나가는 계층과 로그 (secril 소스 기준):
+telephonyd 세대 (2026-10 ~, ofono/rild 제거). secril 은 telephonyd 안에서 in-process 로 돈다:
+  요청    `[RILJ] [0096]> OEM_HOOK_RAW imsservice#5 hex=0f0002... len=13`   ← trace 번호, 요청자#serial
+  secril  (아래 ofono 세대와 같다: SecRilProxy::OnRequest(59) → oem func id → SendRawIpc → TX)
+  완료    `[RILJ] [0096]< OEM_HOOK_RAW imsservice#5 hex=ff len=1 3ms` (실패면 `error: GENERIC_FAILURE(2)`)
+  모뎀    `[RILD] [B] RX: ...`
+  전달    `[RILJ] [UNSL]< OEM_HOOK_RAW hex=0c004346800102... len=12`  ← RX 프레임 그대로, 32바이트까지만
+  오래 걸리면 `[RILJ] [0096]! OEM_HOOK_RAW imsservice#5 STUCK 5000ms (...)` 가 반복된다.
+  요청 hex 의 첫 바이트가 funcId 다.
+
+ofono 세대 (~ 2026-09). 요청 한 건이 지나가는 계층과 로그 (secril 소스 기준):
   ofono   `[0,0096]> RIL_REQUEST_OEM_HOOK_RAW`                    ← token
   rild    `[RIL_CPP] [0096]> OEM_HOOK_RAW (raw_size=21)`          ← 같은 token
   secril  `[RILD] SecRilProxy::OnRequest(59) RIL_REQUEST_OEM_HOOK_RAW`   ← 여기부터 token 없음
@@ -13,11 +22,13 @@
   전달    `[0,UNSOL]< UNSOL_OEM_HOOK_RAW 12` + `oem_hook_raw_ind: len=12 data=.. [0C 00 43 46 80 ...]`
 
 이어 붙이는 열쇠:
-- ofono ↔ rild 는 token, rild → secril → funcId 는 순서(FIFO). secril 은 요청을 한 줄로 처리한다.
+- ofono ↔ rild 는 token(telephonyd 는 trace 번호), 그 뒤 secril → funcId 는 순서(FIFO).
+  secril 은 요청을 한 줄로 처리한다.
 - TX ↔ RX 는 모뎀이 TX 의 msg_seq(m:) 를 RX 의 ack_seq(a:) 로 돌려주는 것으로 잇는다.
   secril 은 raw IPC 응답을 seq 로 확인하지 않으니 이 매칭은 우리가 하는 것이다.
 - General Response payload 는 `recv_main recv_sub recv_type err_lo err_hi`, 0x8000 이 성공이다.
-- ofono 의 oem_hook_raw_ind hex 는 RX 프레임 그대로라 바이트 2,3 이 RX 의 m:, a: 다.
+- UNSOL_OEM_HOOK_RAW 의 hex(ofono oem_hook_raw_ind, telephonyd [UNSL]<)는 RX 프레임 그대로라
+  바이트 2,3 이 RX 의 m:, a: 다.
 UICC(0x15)·FACTORY(0x12)·MISC(0x11) 같은 funcId 는 secril 매니저가 안에서 처리하고 cpif 로 가지 않는다.
 """
 
@@ -35,6 +46,12 @@ RILD_REQ_RE = re.compile(r'^\[RIL_CPP\] \[(\d+)\]> OEM_HOOK_RAW(?: \(raw_size=(\
 RILD_DONE_RE = re.compile(r'^\[RIL_CPP\] RequestComplete OEM_HOOK_RAW\b')
 # rild 는 응답을 보냈는데 ofono 가 parcel 을 못 읽으면 `<` 줄 없이 이것만 남는다
 OFONO_PARCEL_ERR_RE = re.compile(r'ril_oem_request_raw_cb: malformed parcel')
+RILJ_REQ_RE = re.compile(r'^\[RILJ(?:-SEM)?\] \[(\d+)\]> OEM_HOOK_RAW (\S+#\d+)(?: hex=([0-9a-fA-F]+))?\S*(?: len=(\d+))?')
+RILJ_RESP_RE = re.compile(
+    r'^\[RILJ(?:-SEM)?\] \[(\d+)\]< OEM_HOOK_RAW \S+#\d+(?: error: (\w+)\(-?\d+\))?(?: hex=\S+)?(?: len=(\d+))?'
+)
+RILJ_STUCK_RE = re.compile(r'^\[RILJ(?:-SEM)?\] \[(\d+)\]! OEM_HOOK_RAW .*STUCK (\d+)ms')
+RILJ_UNSOL_RE = re.compile(r'^\[RILJ(?:-SEM)?\] \[UNSL\]< OEM_HOOK_RAW(?: hex=([0-9a-fA-F]+))?\S*(?: len=(\d+))?')
 SECRIL_REQ_RE = re.compile(r'SecRilProxy::OnRequest\(59\)')
 FUNC_ID_RE = re.compile(r'GetMessage : oem func id = 0x([0-9A-Fa-f]+)')
 SEND_RAW_RE = re.compile(r'Calling SendRawIpc funcId=0x([0-9A-Fa-f]+) len=(\d+)')
@@ -111,7 +128,28 @@ LOCAL_CHAIN = [
     ("rild_done", "rild 응답 송신"),
     ("complete", "ofono 요청 완료"),
 ]
+SEMTEL_RAW_CHAIN = [
+    ("client_req", "telephonyd → secril 요청"),
+    ("secril", "secril 수신"),
+    ("func", "funcId 분기"),
+    ("cpif_tx", "cpif 송신(TX)"),
+    ("complete", "secril 요청 완료"),
+    ("modem_rx", "모뎀 응답(RX)"),
+    ("unsol", "UNSOL_OEM_HOOK_RAW 전달"),
+]
+SEMTEL_LOCAL_CHAIN = [
+    ("client_req", "telephonyd → secril 요청"),
+    ("secril", "secril 수신"),
+    ("func", "funcId 분기"),
+    ("complete", "secril 요청 완료"),
+]
+CHAINS = {
+    "ofono": {"raw_ipc": RAW_CHAIN, "local": LOCAL_CHAIN},
+    "telephonyd": {"raw_ipc": SEMTEL_RAW_CHAIN, "local": SEMTEL_LOCAL_CHAIN},
+}
 MODEM_STAGES = {"modem_rx", "unsol"}
+# secril 앞 단계 — 세대마다 다르다
+PRE_SECRIL_STAGES = ("rild", "client_req")
 
 
 def _evidence(rec):
@@ -164,11 +202,20 @@ def _expected_response(tx):
     return None
 
 
-def _decode_ind(rec, m):
-    """oem_hook_raw_ind 의 hex 는 IPC 프레임이다: len(2) seq ack main sub type ..."""
-    data = _hex_bytes(m.group(2))
+def _packed_hex(text):
+    """`0f0002` 처럼 붙여 쓴 hex (telephonyd [RILJ])."""
+    text = text or ""
+    return [int(text[i:i + 2], 16) for i in range(0, len(text) - 1, 2)]
+
+
+def _func_info(func):
+    return f"0x{func:02X}", OEM_FUNC_NAMES.get(func, "UNKNOWN"), "raw_ipc" if func in RAW_IPC_FUNCS else "local"
+
+
+def _decode_ind(rec, data, length):
+    """UNSOL_OEM_HOOK_RAW 의 hex 는 IPC 프레임이다: len(2) seq ack main sub type ..."""
     ind = {"time": rec.time, "sec": rec.sec, "line_no": rec.line_no, "text": rec.msg,
-           "len": int(m.group(1)), "seq": None, "ack": None, "main": None, "sub": None, "type": None,
+           "len": length, "seq": None, "ack": None, "main": None, "sub": None, "type": None,
            "gen_error": None, "matched": False}
     if len(data) >= 7:
         ind.update(seq=data[2], ack=data[3],
@@ -191,9 +238,38 @@ class RtosOemHookParser(BaseParser):
 
         for rec in records:
             msg = rec.msg
+            m = RILJ_REQ_RE.match(msg)
+            if m:
+                req = self._new_request(rec, "telephonyd", m.group(1), checkpoint="client_req", client=m.group(2))
+                req["raw_size"] = int(m.group(4)) if m.group(4) else None
+                data = _packed_hex(m.group(3))
+                req["hex_func"] = data[0] if data else None
+                by_token[("RILJ", m.group(1))] = req
+                requests.append(req)
+                continue
+            m = RILJ_RESP_RE.match(msg)
+            if m:
+                req = by_token.pop(("RILJ", m.group(1)), None)
+                if req:
+                    req["checkpoints"]["complete"] = _evidence(rec)
+                    req["complete_sec"] = rec.sec
+                    req["ril_error"] = m.group(2)
+                    req["resp_len"] = int(m.group(3)) if m.group(3) else None
+                continue
+            m = RILJ_STUCK_RE.match(msg)
+            if m:
+                req = by_token.get(("RILJ", m.group(1)))
+                if req:
+                    req["stuck_ms"] = int(m.group(2))
+                continue
+            m = RILJ_UNSOL_RE.match(msg)
+            if m:
+                data = _packed_hex(m.group(1))
+                inds.append(_decode_ind(rec, data, int(m.group(2)) if m.group(2) else len(data)))
+                continue
             m = OFONO_REQ_RE.match(msg)
             if m:
-                req = self._new_request(rec, m)
+                req = self._new_request(rec, "ofono", m.group(2), checkpoint="ofono_req", slot=int(m.group(1)))
                 by_token[(m.group(1), m.group(2))] = req
                 requests.append(req)
                 continue
@@ -224,10 +300,10 @@ class RtosOemHookParser(BaseParser):
                     by_token.pop((str(req["slot"]), req["token"]), None)
                     req["complete_sec"] = rec.sec
                     req["ril_error"] = "MALFORMED_PARCEL"
-                    req["ofono_error_evidence"] = _evidence(rec)
+                    req["error_evidence"] = _evidence(rec)
                 continue
             if SECRIL_REQ_RE.search(msg):
-                req = self._oldest(requests, rec, has="rild", missing="secril")
+                req = self._oldest(requests, rec, has=PRE_SECRIL_STAGES, missing="secril")
                 if req:
                     req["checkpoints"]["secril"] = _evidence(rec)
                 continue
@@ -235,11 +311,8 @@ class RtosOemHookParser(BaseParser):
             if m:
                 req = self._oldest(requests, rec, has="secril", missing="func")
                 if req:
-                    func = int(m.group(1), 16)
                     req["checkpoints"]["func"] = _evidence(rec)
-                    req["func_id"] = f"0x{func:02X}"
-                    req["func_name"] = OEM_FUNC_NAMES.get(func, "UNKNOWN")
-                    req["path"] = "raw_ipc" if func in RAW_IPC_FUNCS else "local"
+                    req["func_id"], req["func_name"], req["path"] = _func_info(int(m.group(1), 16))
                 continue
             m = SEND_RAW_RE.search(msg)
             if m:
@@ -265,9 +338,12 @@ class RtosOemHookParser(BaseParser):
                 continue
             m = OFONO_IND_RE.search(msg)
             if m:
-                inds.append(_decode_ind(rec, m))
+                inds.append(_decode_ind(rec, _hex_bytes(m.group(2)), int(m.group(1))))
 
         for req in requests:
+            # secril 로그가 없어도 telephonyd 요청 hex 첫 바이트로 funcId 는 안다
+            if req["func_id"] is None and req.get("hex_func") is not None:
+                req["func_id"], req["func_name"], req["path"] = _func_info(req["hex_func"])
             if req["tx"]:
                 self._attach_rx(req, rx_dumps)
                 self._attach_ind(req, inds)
@@ -276,6 +352,7 @@ class RtosOemHookParser(BaseParser):
         unmatched = [i for i in inds if not i["matched"]]
         public = [self._public(r) for r in requests]
         return {
+            "stack": "telephonyd" if any(r["stack"] == "telephonyd" for r in requests) else "ofono",
             "kpi": {
                 "request_count": len(public),
                 "raw_ipc_count": sum(1 for r in public if r["path"] == "raw_ipc"),
@@ -303,25 +380,27 @@ class RtosOemHookParser(BaseParser):
     # ---- 수집 ----
 
     @staticmethod
-    def _new_request(rec, m):
+    def _new_request(rec, stack, token, checkpoint, slot=None, client=None):
         return {
-            "slot": int(m.group(1)), "token": m.group(2),
+            "stack": stack, "slot": slot, "token": token, "client": client,
             "req_time": rec.time, "req_sec": rec.sec, "req_line": rec.line_no,
-            "checkpoints": {"ofono_req": _evidence(rec)},
-            "raw_size": None, "func_id": None, "func_name": None, "path": None,
+            "checkpoints": {checkpoint: _evidence(rec)},
+            "raw_size": None, "func_id": None, "func_name": None, "path": None, "hex_func": None,
             "send": None, "send_error": None, "tx": None, "rx": None, "ind": None,
-            "complete_sec": None, "ril_error": None, "resp_len": None, "ofono_error_evidence": None,
+            "complete_sec": None, "ril_error": None, "resp_len": None, "error_evidence": None,
+            "stuck_ms": None,
         }
 
     @staticmethod
     def _oldest(requests, rec, has, missing):
         """secril 은 요청을 순서대로 처리한다. 앞 단계는 지났고 이 단계는 아직인 가장 오래된 요청.
 
-        ofono 가 이미 실패 응답을 받은 요청(secril 이 앞에서 거절한 것)은 건너뛴다.
+        이미 실패 응답을 받은 요청(secril 이 앞에서 거절한 것)은 건너뛴다.
         """
+        has = (has,) if isinstance(has, str) else has
         for req in requests:
             cps = req["checkpoints"]
-            if has in cps and missing not in cps:
+            if any(h in cps for h in has) and missing not in cps:
                 if req["complete_sec"] is not None and req["complete_sec"] <= rec.sec:
                     continue
                 return req
@@ -374,7 +453,7 @@ class RtosOemHookParser(BaseParser):
     # ---- 판정 ----
 
     def _finalize(self, req, last_sec):
-        chain = RAW_CHAIN if req["path"] == "raw_ipc" else LOCAL_CHAIN
+        chain = CHAINS[req["stack"]]["raw_ipc" if req["path"] == "raw_ipc" else "local"]
         tx_type = (req["tx"] or {}).get("type")
         no_response_ipc = tx_type in NO_RESPONSE_TX_TYPES
         if no_response_ipc:
@@ -403,7 +482,7 @@ class RtosOemHookParser(BaseParser):
             if tail_short:
                 verdict, status = "pending", f"{missing[1]} 전에 로그 끝남"
             elif missing[0] == "unsol":
-                verdict, status = "problem", "모뎀 응답이 ofono 로 전달 안 됨"
+                verdict, status = "problem", "모뎀 응답이 UNSOL_OEM_HOOK_RAW 로 안 올라옴"
             elif missing[0] == "modem_rx":
                 verdict, status = "problem", "모뎀 응답 없음"
             else:
@@ -429,7 +508,7 @@ class RtosOemHookParser(BaseParser):
                 out["gen"] = dict(d["gen"], error_label=gen_error_label(d["gen"]["error"]))
             return out
         out = {k: v for k, v in req.items()
-               if k not in ("req_sec", "complete_sec", "send", "tx", "rx", "ind")}
+               if k not in ("req_sec", "complete_sec", "send", "tx", "rx", "ind", "hex_func")}
         out["send_result"] = req["send"]["result"] if req["send"] else None
         out["tx"] = ipc(req["tx"])
         out["modem_rx"] = ipc(req["rx"])

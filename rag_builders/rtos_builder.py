@@ -10,15 +10,26 @@ from rag_builders.common import append_payload, source_file_name
 
 def _call_document(call):
     direction = "발신(MO)" if call.get("direction") == "MO" else "착신(MT)"
+    title = (f"{direction} 시도 (호 생성 전에 실패)" if call.get("dial_failed")
+             else f"{direction} 콜 sid={call.get('sid')} idx={call.get('idx')}")
     lines = [
-        f"[RTOS 콜 흐름] {direction} 콜 sid={call.get('sid')} idx={call.get('idx')}",
+        f"[RTOS 콜 흐름] {title}",
         f"- 시작 {call.get('start_time')} / 종료 {call.get('end_time') or '로그 안에서 종료 확인 안 됨'}",
         f"- 결과: {call.get('status')}",
     ]
     states = " → ".join(f"{s['state']}({s['time']})" for s in call.get("states", []))
-    lines.append(f"- 호 상태 전이: {states}")
+    if states:
+        lines.append(f"- 호 상태 전이: {states}")
     if call.get("fail_cause"):
         lines.append(f"- 종료 원인(LAST_CALL_FAIL_CAUSE): {call['fail_cause']} {call.get('fail_reason')}")
+    ims_end = call.get("ims_end")
+    if ims_end:
+        detail = (f" reason={ims_end['reason']}" if ims_end.get("reason") else "") + \
+                 (f" code={ims_end['error_code']}" if ims_end.get("error_code") else "")
+        lines.append(f"- imsservice 종료 통지: {ims_end['kind']}{detail} (line {ims_end['line_no']})")
+    dial_error = call.get("dial_error")
+    if dial_error:
+        lines.append(f"- 발신을 접은 줄 (line {dial_error['line_no']}): {dial_error['text']}")
 
     reached = []
     for stage in call.get("chain", []):
@@ -53,11 +64,13 @@ def _call_document(call):
 
     slow = [r for r in call.get("ril_requests", []) if r.get("latency_ms") is not None]
     if slow:
-        req_text = ", ".join(f"{r['name']}[{r['token']}] {r['latency_ms']}ms" for r in slow[:8])
-        lines.append(f"- RIL 요청 응답 시간: {req_text}")
+        req_text = ", ".join(
+            f"{r['name']}[{r['token']}] {r['latency_ms']}ms" + (f" {r['error']}" if r.get("error") else "")
+            for r in slow[:8])
+        lines.append(f"- 요청 응답 시간: {req_text}")
     pending = [r for r in call.get("ril_requests", []) if r.get("resp_time") is None]
     if pending:
-        lines.append("- 응답 없는 RIL 요청: " + ", ".join(f"{r['name']}({r['req_time']})" for r in pending))
+        lines.append("- 응답 없는 요청: " + ", ".join(f"{r['name']}({r['req_time']})" for r in pending))
     return "\n".join(lines)
 
 
@@ -119,8 +132,11 @@ def build_rtos_payloads(report_data, input_file):
 
     unanswered = flow.get("unanswered_requests") or []
     if unanswered:
-        text = "[RTOS 응답 없는 RIL 요청] ofono 가 보낸 요청 중 로그가 끝날 때까지 응답(<)이 없는 것:\n" + "\n".join(
-            f"- {r['name']} token={r['token']} 요청 {r['req_time']} (line {r['req_line']})" for r in unanswered
+        sender = "telephonyd 경계(TAPI/RILJ/IPCT)에서" if flow.get("stack") == "telephonyd" else "ofono 가"
+        text = f"[RTOS 응답 없는 RIL 요청] {sender} 보낸 요청 중 로그가 끝날 때까지 응답(<)이 없는 것:\n" + "\n".join(
+            f"- {r['name']} token={r['token']} 요청 {r['req_time']} (line {r['req_line']})"
+            + (f" — {r['stuck_ms']}ms 째 STUCK" if r.get("stuck_ms") else "")
+            for r in unanswered
         )
         append_payload(rag_payload, text, {
             "log_type": "RTOS_RIL_Pending",
@@ -206,8 +222,9 @@ def _cpu_document(cpu):
 
 def _oem_hook_document(oem):
     kpi = oem.get("kpi") or {}
+    path = ("telephonyd → secril" if oem.get("stack") == "telephonyd" else "ofono → rild → secril")
     lines = [
-        "[RTOS OEM_HOOK_RAW 전달] ofono → rild → secril → cpif → 모뎀 → 응답",
+        f"[RTOS OEM_HOOK_RAW 전달] {path} → cpif → 모뎀 → 응답",
         f"- 요청 {kpi.get('request_count', 0)}건: cpif 로 IPC 를 쓰는 raw IPC {kpi.get('raw_ipc_count', 0)}건, "
         f"secril 내부 처리 {kpi.get('local_count', 0)}건",
         f"- 정상 {kpi.get('ok_count', 0)}건, 문제 {kpi.get('problem_count', 0)}건, "
@@ -222,7 +239,7 @@ def _oem_hook_document(oem):
             f"- token {req.get('token')} ({req.get('req_time')}) funcId {req.get('func_id')} {req.get('func_name')}{ipc}: "
             f"{req.get('status')}"
         )
-        evidence = req.get("ofono_error_evidence")
+        evidence = req.get("error_evidence") or req.get("ofono_error_evidence")
         if evidence:
             lines.append(f"  - 근거 (line {evidence['line_no']}): {evidence['text']}")
     return "\n".join(lines)

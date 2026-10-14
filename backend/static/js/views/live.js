@@ -198,11 +198,12 @@ function callTestResults(status) {
   const wrap = el("div", "stack");
   const summary = status.summary || {};
   const cfg = status.config || {};
-  const ims = status.ims_registered === true ? "등록됨" : (status.ims_registered === false ? "미등록" : "확인 전");
+  const ims = status.ims_registered === true ? "등록됨"
+    : (status.ims_registered === false ? "미등록" : (status.ims_note ? "확인 불가" : "확인 전"));
   wrap.append(tileRow([
     tile("상태", status.phase || "대기", "", status.error || (status.running ? "진행 중" : ""),
          status.error ? "critical" : (status.running ? "warning" : "good")),
-    tile("IMS 등록", ims, "", "콜은 IMS 등록 상태에서만 된다",
+    tile("IMS 등록", ims, "", status.ims_note || "콜은 IMS 등록 상태에서만 된다",
          status.ims_registered === true ? "good" : (status.ims_registered === false ? "critical" : "")),
     tile("진행", `${summary.done ?? 0} / ${cfg.count ?? "-"}`, "",
          cfg.mode ? (cfg.mode === "mo" ? `발신 ${cfg.number}` : "착신 자동 응답") : ""),
@@ -292,7 +293,7 @@ export async function renderLive(mount, _sourceFile, ctx) {
   const logs = card("로그", "최근 줄. 검색어를 넣으면 받은 로그 전체에서 거른다");
   logs.section.classList.add("wide");
   const grep = el("input");
-  grep.placeholder = "검색 (예: OEM_HOOK_RAW, RIL_CPP, CPU:)";
+  grep.placeholder = "검색 (예: OEM_HOOK_RAW, RILJ, TCORE_CALL, CPU:)";
   grep.style.width = "min(480px, 100%)";
   const logPre = el("pre", "log-tail");
   logs.prepend(grep);

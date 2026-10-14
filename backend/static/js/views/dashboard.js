@@ -133,10 +133,12 @@ function rtosCallBlock(call) {
   const direction = call.direction === "MO" ? "발신(MO)" : "착신(MT)";
   const tone = call.connected ? "good" : (call.broken_label ? "critical" : "warning");
   wrap.append(tileRow([
-    tile(direction, call.status || "N/A", "", `sid ${call.sid || "-"}`, tone),
+    tile(direction, call.status || "N/A", "", call.dial_failed ? "호 생성 전" : `sid ${call.sid || "-"}`, tone),
     tile("시작 / 종료", msTime(call.start_time), "", call.end_time ? `→ ${msTime(call.end_time)}` : "종료 로그 없음"),
     tile("끊긴 지점", call.broken_label || "없음", "",
-         call.fail_cause ? `종료 원인 ${call.fail_cause} ${call.fail_reason || ""}` : "",
+         call.fail_cause
+           ? `종료 원인 ${call.fail_cause} ${call.fail_reason || ""}${call.ims_end ? ` (IMS ${call.ims_end})` : ""}`
+           : "",
          call.broken_label ? "critical" : "good"),
     // 마지막 SIP 메시지가 망이 어디까지 알고 있는지를 보여준다 -- 착신에서 ↑ 180 Ringing 이면
     // 망과 상대방은 이 단말이 울리고 있다고 알고 있다.
@@ -218,7 +220,7 @@ const CARDS = [
     wide: true,
     chart: "rtos-call-flow",
     title: "RTOS 콜 흐름",
-    sub: "UI/TAPI → ofono → rild → RIL-IMSCALL → IMS 계층별 진행과 끊긴 지점",
+    sub: "UI/TAPI → telephonyd → imsservice MakeCall → call domain → IMS 계층별 진행과 끊긴 지점 (옛 빌드는 ofono → rild)",
     prompt: "각 콜이 어느 계층까지 진행됐고 어디서 로그가 끊겼는지, 마지막으로 확인된 줄과 종료 원인을 근거로 설명해줘.",
     render(series, panel) {
       const kpi = series.kpi || {};
@@ -232,10 +234,11 @@ const CARDS = [
       ]));
       for (const call of series.calls || []) wrap.append(rtosCallBlock(call));
       if ((series.unanswered_requests || []).length) {
-        wrap.append(el("p", "table-note", "응답 없는 RIL 요청 (ofono → rild)"));
+        wrap.append(el("p", "table-note", "응답 없는 요청"));
         wrap.append(frameTable(series.unanswered_requests.map((r) => ({
-          요청: r.name, token: r.token, 요청시각: r.req_time, line: r.req_line,
-        })), ["요청", "token", "요청시각", "line"]));
+          계층: r.layer || "-", 요청: r.name, token: r.token, 요청시각: r.req_time,
+          대기: r.stuck_ms ? `STUCK ${r.stuck_ms}ms` : "-", line: r.req_line,
+        })), ["계층", "요청", "token", "요청시각", "대기", "line"]));
       }
       panel.content(wrap);
     },
@@ -245,8 +248,8 @@ const CARDS = [
     wide: true,
     chart: "rtos-oem-hook",
     title: "RTOS OEM_HOOK_RAW 전달",
-    sub: "ofono → rild → secril → cpif(IPC TX) → 모뎀 응답(RX) → UNSOL 전달, 요청별로 끊긴 지점",
-    prompt: "OEM_HOOK_RAW 요청마다 cpif 로 IPC 가 나갔는지, 모뎀이 응답했는지(General Response 에러 포함), 응답이 ofono 까지 왔는지 근거 줄과 함께 설명해줘.",
+    sub: "telephonyd → secril → cpif(IPC TX) → 모뎀 응답(RX) → UNSOL 전달, 요청별로 끊긴 지점 (옛 빌드는 ofono → rild)",
+    prompt: "OEM_HOOK_RAW 요청마다 cpif 로 IPC 가 나갔는지, 모뎀이 응답했는지(General Response 에러 포함), 응답이 UNSOL 로 올라왔는지 근거 줄과 함께 설명해줘.",
     render(series, panel) {
       const kpi = series.kpi || {};
       const expected = (series.requests || []).filter((r) => r.expects_modem_response).length;

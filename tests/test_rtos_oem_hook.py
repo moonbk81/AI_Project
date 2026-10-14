@@ -129,7 +129,7 @@ def test_local_func_with_malformed_parcel_in_ofono():
     assert req["tx"] is None, "SIM 매니저가 처리하는 요청에 다른 IPC 를 붙이면 안 된다"
     assert req["ril_error"] == "MALFORMED_PARCEL"
     assert req["broken_at"]["stage"] == "complete"
-    assert req["ofono_error_evidence"]["line_no"] == 8
+    assert req["error_evidence"]["line_no"] == 8
 
 
 def test_secril_rejected_request_does_not_steal_next_func_id():
@@ -247,3 +247,52 @@ def test_exec_is_answered_by_general_response():
     assert req["expected_response"] == "GEN_CMD / GEN_PHONE_RES"
     assert req["modem_rx"]["main"] == "GEN_CMD", "EXEC 에 RESP 를 붙이면 안 된다"
     assert req["verdict"] == "ok"
+
+
+# ---- telephonyd 세대: ofono/rild 대신 [RILJ] 한 쌍이 secril 경계를 찍는다 (telephony/trace/rilj.cpp)
+
+def _sem_request(trace, t0, raw_size, tx, hex_head="0f00"):
+    return [
+        _line(f"{t0}.100000", 160, f"[RILJ] [{trace}]> OEM_HOOK_RAW imsservice#5 hex={hex_head}0200 len={raw_size}"),
+        _line(f"{t0}.101000", 160, "[RILD] SecRilProxy::OnRequest(59) RIL_REQUEST_OEM_HOOK_RAW"),
+        _line(f"{t0}.120000", 346, "[RILD] GetMessage : oem func id = 0x0F"),
+        _line(f"{t0}.122000", 345, f"[RILD] DoOemRawIpc: Calling SendRawIpc funcId=0x0F len={raw_size - 4}"),
+        _line(f"{t0}.123000", 345, f"[RILD] [B] TX: {tx}"),
+        _line(f"{t0}.124000", 345, "[RILD] DoOemRawIpc: SendRawIpc success (ret=0)"),
+        _line(f"{t0}.130000", 160, f"[RILJ] [{trace}]< OEM_HOOK_RAW imsservice#5 hex=ff len=1 30ms"),
+    ]
+
+
+SEM_RAW_OK = _sem_request("0096", "07:49:27", 13, "(M)IMS_CMD (S)IMS_ENGINE (T)SET l:9 m:46 a:00 [ 01 00 ]") + [
+    _line("07:49:28.603500", 373, "[RILD] [B] RX: (M)GEN_CMD (S)GEN_PHONE_RES (T)RESP l:c m:43 a:46 [ 16 09 03 00 80 ]"),
+    _line("07:49:28.927600", 160, "[RILJ] [UNSL]< OEM_HOOK_RAW hex=0c0043468001021609030080 len=12"),
+]
+
+
+def test_telephonyd_raw_ipc_follows_rilj_pair_and_unsol():
+    result, reqs = _by_token(SEM_RAW_OK + TAIL)
+    assert result["stack"] == "telephonyd"
+    req = reqs["0096"]
+    assert (req["client"], req["raw_size"], req["func_name"], req["path"]) == ("imsservice#5", 13, "CP_IMS", "raw_ipc")
+    assert [s["stage"] for s in req["chain"]] == [
+        "client_req", "secril", "func", "cpif_tx", "complete", "modem_rx", "unsol"]
+    assert all(s["reached"] for s in req["chain"])
+    assert req["unsol_time"] == "07:49:28.927600"
+    assert req["verdict"] == "ok"
+    assert result["kpi"]["unmatched_unsol_count"] == 0
+
+
+def test_telephonyd_error_response_and_stuck_request():
+    lines = [
+        _line("07:50:00.100000", 160, "[RILJ] [0200]> OEM_HOOK_RAW imsservice#9 hex=15000300 len=4"),
+        _line("07:50:00.200000", 160, "[RILJ] [0200]< OEM_HOOK_RAW imsservice#9 error: RADIO_NOT_AVAILABLE(1) 100ms"),
+        _line("07:50:01.000000", 160, "[RILJ] [0201]> OEM_HOOK_RAW imsservice#10 hex=0f000300 len=4"),
+        _line("07:50:06.000000", 160, "[RILJ] [0201]! OEM_HOOK_RAW imsservice#10 STUCK 5000ms (no completion from secril yet)"),
+    ]
+    _, reqs = _by_token(lines + TAIL)
+    assert reqs["0200"]["ril_error"] == "RADIO_NOT_AVAILABLE"
+    assert reqs["0200"]["verdict"] == "problem"
+    # secril 로그가 없어도 요청 hex 첫 바이트로 funcId 를 안다
+    assert (reqs["0200"]["func_id"], reqs["0200"]["path"]) == ("0x15", "local")
+    assert reqs["0201"]["stuck_ms"] == 5000
+    assert reqs["0201"]["broken_at"]["stage"] == "secril"

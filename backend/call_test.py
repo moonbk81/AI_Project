@@ -1,16 +1,20 @@
 """워치에서 telephonytool 로 발신(MO)·착신(MT) 콜 테스트를 반복한다.
 
-telephonytool (rtos/frameworks/connectivity/telephony/tools/telephony_tool.c):
+telephonytool (sec/frameworks/telephony_service/tools/telephony_tool.c — 2026-10 ofono 제거 때 Samsung TAPI SDK 로 포팅):
 - `telephonytool>` 프롬프트에서 stdin 으로 한 줄씩 명령을 받는다 → `adb shell telephonytool` 에 흘려 넣는다
 - `q` 로 끝난다. stdin 이 끊겨도 readline 이 실패해서 끝난다 — 워치에 신호를 보낼 일이 없다
   (남은 셸에 SIGINT 를 보냈다가 워치가 크래시한 적이 있다)
 - 결과는 syslog 로 나간다 → 실시간 모니터의 logcat 으로 받는다
-  - `listen-call 0 0` 뒤 콜 상태 콜백: `call changed call_id : /ril_0/voicecall01` 다음 줄 `call state: 3`
-  - `get-ims-registration 0 1` → `telephonytool_cmd_ims_get_registration: ims_registered: 0 - 1` (ret - status)
+  - `listen-call 0 0` 뒤 콜 상태 콜백: `call changed call_id : /ril_0/voicecall01` 다음 줄
+    `call state: ALERTING (3)` (ofono 세대는 `call state: 3`)
+  - `get-ims-registration 0 1` → `telephonytool_cmd_ims_get_registration: ims_registered: 0 - 1` (ret - status).
+    SDK 가 tapi_ims_is_registered 를 아직 구현하지 않아(ts_stubs.c) ret 이 0 이 아니면 등록 여부를 모른다
+    → 확인 없이 진행한다. 등록이 안 됐으면 call domain 이 발신을 바로 거절해서 그 회차가 실패로 남는다.
 - `!` 로 시작하는 줄은 워치에서 system() 을 부른다 → 여기서 보내는 명령은 COMMAND_PATTERNS 로만 만든다
 
 콜 상태(tapi_call.h): 0 ACTIVE, 1 HELD, 2 DIALING, 3 ALERTING, 4 INCOMING, 5 WAITING, 6 DISCONNECTED.
-콜 상태 콜백이 없는 빌드에 대비해 RIL-IMSCALL 의 `call + ... mo DIALING` / `call ~ ... A -> B` 도 본다.
+콜 상태 콜백이 없는 빌드에 대비해 call domain 의 `call + ... mo DIALING` / `call ~ ... A -> B` 도 본다
+(telephonyd `[TCORE_CALL] call + ims bid=..`, ofono 세대 `[RIL-IMSCALL] call + sid=..`).
 콜은 IMS 등록 상태에서만 된다 → 시작 전에 등록을 확인한다.
 """
 
@@ -26,6 +30,7 @@ from datetime import datetime
 from typing import Deque, Dict, List, Optional
 
 from parsers.rtos import RtosCallFlowParser
+from parsers.rtos.call_flow import IMSCALL_END_RE, IMSCALL_NEW_RE, IMSCALL_TRANS_RE
 
 COMMAND_PATTERNS = [
     re.compile(r'^dial 0 \+?[0-9*#]{2,20} 0$'),
@@ -43,11 +48,8 @@ EMERGENCY_NUMBERS = {"112", "911", "999", "000", "08", "110", "118", "119", "120
                      "100", "101", "102", "108", "1098", "1091"}
 
 CALL_ID_RE = re.compile(r'call changed call_id : (\S+)')
-CALL_STATE_RE = re.compile(r'call state: (-?\d+)')
+CALL_STATE_RE = re.compile(r'call state: (?:\w+ \()?(-?\d+)')
 IMS_REG_RE = re.compile(r'ims_registered: (-?\d+) - (\d+)')
-IMSCALL_NEW_RE = re.compile(r'call \+ sid=(\d+) idx=(\d+) (mo|mt) (\w+)')
-IMSCALL_TRANS_RE = re.compile(r'call ~ sid=(\d+) idx=(\d+) (\w+) -> (\w+)')
-IMSCALL_END_RE = re.compile(r'call - sid=(\d+)')
 
 STATE_NAMES = {0: "ACTIVE", 1: "HELD", 2: "DIALING", 3: "ALERTING", 4: "INCOMING", 5: "WAITING", 6: "DISCONNECTED"}
 NAME_STATES = {v: k for k, v in STATE_NAMES.items()}
@@ -147,6 +149,7 @@ class CallTestRunner:
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
         self.ims_registered: Optional[bool] = None
+        self.ims_note: Optional[str] = None
         self.iterations: List[Dict] = []
         self.current: Optional[Dict] = None
 
@@ -201,8 +204,7 @@ class CallTestRunner:
             self._set_phase("telephonytool 시작")
             self.session = self.session_factory(self.config["serial"])
             self._sleep(self.tool_ready_sec)
-            self._check_ims()
-            if self.ims_registered is not True:
+            if not self._check_ims():
                 return
             self.session.send("listen-call 0 0")
             for n in range(1, self.config["count"] + 1):
@@ -242,7 +244,8 @@ class CallTestRunner:
         except (OSError, ValueError, RuntimeError):
             pass
 
-    def _check_ims(self) -> None:
+    def _check_ims(self) -> bool:
+        """콜을 걸어도 되면 True. 등록 여부를 모르는 빌드(SDK 미구현)도 True 다."""
         self._set_phase("IMS 등록 확인")
         self.session.send("get-ims-registration 0 1")
         deadline = time.time() + IMS_CHECK_TIMEOUT_SEC
@@ -254,13 +257,19 @@ class CallTestRunner:
             m = IMS_REG_RE.search(line)
             if m:
                 with self._lock:
-                    self.ims_registered = m.group(1) == "0" and m.group(2) == "1"
+                    if m.group(1) != "0":
+                        self.ims_registered = None
+                        self.ims_note = (f"이 빌드는 IMS 등록 조회를 지원하지 않아 (ret={m.group(1)}) 확인 없이 진행합니다. "
+                                         "미등록이면 발신이 바로 실패합니다.")
+                        return True
+                    self.ims_registered = m.group(2) == "1"
                     if not self.ims_registered:
                         self.error = f"IMS 미등록 (ret={m.group(1)}, registered={m.group(2)}) — 콜 테스트를 하지 않았습니다."
-                return
+                return self.ims_registered
         with self._lock:
             self.ims_registered = None
             self.error = "IMS 등록 상태를 확인하지 못했습니다 (telephonytool 응답 없음)."
+        return False
 
     # 로그에서 콜 상태를 뽑는다. 콜백의 call_id 줄 뒤에 state 줄이 온다
     def _drain(self, until: float) -> List[Dict]:
@@ -424,6 +433,7 @@ class CallTestRunner:
                 "finished_at": self.finished_at,
                 "error": self.error,
                 "ims_registered": self.ims_registered,
+                "ims_note": self.ims_note,
                 "summary": {
                     "done": len(done), "passed": len(passed),
                     "pass_rate": round(len(passed) * 100.0 / len(done), 1) if done else None,

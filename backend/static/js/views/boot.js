@@ -736,7 +736,7 @@ const CARDS = [
   {
     domain: "rtos", chart: "rtos-cpu", title: "태스크별 CPU 점유",
     sub: "스냅샷 평균 상위 12개. 막대에 올리면 최대값과 역할",
-    prompt: "태스크별 평균/최대 CPU 점유율을 보고 어떤 태스크가 CPU 를 많이 쓰는지, 역할(rild/ofono/secril/IMS)과 함께 설명해줘.",
+    prompt: "태스크별 평균/최대 CPU 점유율을 보고 어떤 태스크가 CPU 를 많이 쓰는지, 역할(telephonyd/secril/IMS)과 함께 설명해줘.",
     render: rtosCpuTasksCard,
   },
   {

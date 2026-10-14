@@ -52,9 +52,12 @@ def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
     reached = [stage for stage in chain if stage.get("reached")]
     last = checkpoints.get(reached[-1]["stage"]) if reached else None
     broken = call.get("broken_at") or {}
+    ims_end = call.get("ims_end") or {}
     return {
         "direction": call.get("direction"),
         "sid": call.get("sid"),
+        "dial_failed": bool(call.get("dial_failed")),
+        "ims_end": ims_end.get("kind"),
         "start_time": call.get("start_time"),
         "end_time": call.get("end_time"),
         "status": call.get("status"),
@@ -67,7 +70,8 @@ def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
         "sip_count": len(call.get("sip_messages") or []),
         "sip_last": _sip_last(call.get("sip_messages") or []),
         "stages": stages,
-        "last_evidence": last,
+        # 호가 생기기 전에 접힌 발신은 접은 줄이 가장 직접적인 근거다
+        "last_evidence": call.get("dial_error") or last,
     }
 
 
@@ -127,7 +131,7 @@ def _oem_request_row(req: Dict[str, Any]) -> Dict[str, Any]:
         "chain": [{"label": s.get("label"), "reached": bool(s.get("reached")), "time": s.get("time")}
                   for s in req.get("chain") or []],
         "last_evidence": last,
-        "error_evidence": req.get("ofono_error_evidence"),
+        "error_evidence": req.get("error_evidence") or req.get("ofono_error_evidence"),
     }
 
 

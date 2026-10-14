@@ -153,3 +153,116 @@ def test_mo_without_invite_breaks_at_ims_stage():
     no_sip = [l for l in MO_LINES if "[346]" not in l]
     call = RtosCallFlowParser().analyze(no_sip[:14])["calls"][0]
     assert call["broken_at"]["stage"] == "sip_invite"
+
+
+# ---- telephonyd 세대 (ofono/rild 제거 후). 줄 모양은 telephony/trace/rilj.cpp, call_tracker.cpp,
+# telephony_service/sdk/ts_core.c 의 포맷 문자열 그대로다.
+
+def _t(time, msg, task=160):
+    return f"[01/01/00 {time}] [{task}] [ap] {msg}"
+
+
+def _sip(time, first, call_id, cseq):
+    ims = f"01-01 {time[:12]}+0000 185 346 [W][IMS-FW]"
+    return [
+        _t(time, f"{ims} {first}", 346),
+        _t(time[:-3] + "100", f"{ims} Call-ID: {call_id}", 346),
+        _t(time[:-3] + "200", f"{ims} CSeq: {cseq}", 346),
+        _t(time[:-3] + "300", f"{ims} Content-Length: 0", 346),
+        _t(time[:-3] + "400", f"{ims} ", 346),
+    ]
+
+
+SEM_MO_LINES = [
+    _t("00:10:00.100000", "[TAPI_FWK] Dialing: 01012345678 (hide=0)", 180),
+    _t("00:10:00.101000", "[TAPI_CLIENT] tapi_call_fwk: > CALL_DIAL serial=12 ev=0 len=88", 180),
+    _t("00:10:00.105000", "[TAPI_SERVER] > CALL_DIAL tapi_call_fwk#12 len=88"),
+    _t("00:10:00.106000", '[IPCT] [0042]> MakeCall domain.call#3 {peer="01012345678" type=1}'),
+    *_sip("00:10:00.200000", "[SIP]> INVITE sip:01012345678@ims.example SIP/2.0", "mo-1@ue", "1 INVITE"),
+    _t("00:10:00.300000", "[IPCT] [0042]< MakeCall domain.call#3 {sid=7} 194ms"),
+    _t("00:10:00.301000", "[TCORE_CALL] call + ims bid=7 idx=1 mo DIALING"),
+    _t("00:10:00.302000", "[TAPI_SERVER] < CALL_DIAL tapi_call_fwk#12 197ms"),
+    *_sip("00:10:02.000000", "[SIP]< SIP/2.0 180 Ringing", "mo-1@ue", "1 INVITE"),
+    _t("00:10:02.100000", "[TCORE_CALL] call ~ ims bid=7 idx=1 DIALING -> ALERTING"),
+    _t("00:10:05.000000", "[TCORE_CALL] call ~ ims bid=7 idx=1 ALERTING -> ACTIVE"),
+    _t("00:10:06.000000", "[RILJ] [0051]> SIGNAL_STRENGTH wcm#9"),
+    _t("00:10:11.000000", "[RILJ] [0051]! SIGNAL_STRENGTH wcm#9 STUCK 5000ms (no completion from secril yet)"),
+    _t("00:10:20.000000", "[IPCT] [UNSL]< CallEnded {sid=7 reason=200/1}"),
+    _t("00:10:20.001000", "[TCORE_CALL_IMS] call ended sid=7 reason=200/1"),
+    _t("00:10:20.002000", "[TCORE_CALL] call - ims bid=7 idx=1"),
+]
+
+SEM_DIAL_REJECTED = [
+    _t("00:20:00.100000", "[TAPI_CLIENT] telephonytool: > CALL_DIAL serial=3 ev=0 len=88", 190),
+    _t("00:20:00.102000", "[TAPI_SERVER] > CALL_DIAL telephonytool#3 len=88"),
+    _t("00:20:00.103000", "[TCORE_CALL] dial: imsservice attached but not IMS-registered, no CS fallback"),
+    _t("00:20:00.104000", "[TAPI_SERVER] < CALL_DIAL telephonytool#3 error: GENERIC_FAILURE(2) 2ms"),
+]
+
+SEM_MT_LINES = [
+    *_sip("00:30:00.000000", "[SIP]< INVITE sip:+821011112222@[2402::1]:6100 SIP/2.0", "mt-1@net", "1 INVITE"),
+    _t("00:30:00.500000", "01-01 00:30:00.500+0000 185 346 [I][IMS6.0] CallSession::NotifyIncomingCall(): :(7)", 346),
+    _t("00:30:00.600000", '[IPCT] [UNSL]< CallIncomingInd {sid=9 type=1 peer="sip:+821033334444@ims"}'),
+    _t("00:30:00.601000", "[TCORE_CALL] call + ims bid=9 idx=2 mt INCOMING"),
+    _t("00:30:00.610000", "[TAPI_CLIENT] tapi_call_fwk: > GET_CURRENT_CALLS serial=20 ev=0 len=0", 180),
+    _t("00:30:00.620000", "[TAPI_CLIENT] tapi_call_fwk: < GET_CURRENT_CALLS serial=20 ev=0 status=0 -> 0 10ms", 180),
+    _t("00:30:30.000000", "[IPCT] [UNSL]< CallBusy {sid=9}"),
+    _t("00:30:30.001000", "[TCORE_CALL] call - ims bid=9 idx=2"),
+]
+
+
+def test_telephonyd_mo_call_follows_new_layers():
+    result = RtosCallFlowParser().analyze(SEM_MO_LINES)
+
+    assert result["stack"] == "telephonyd"
+    call = result["calls"][0]
+    assert (call["direction"], call["sid"], call["idx"]) == ("MO", "7", 1)
+    assert [s["state"] for s in call["states"]] == ["DIALING", "ALERTING", "ACTIVE"]
+    assert call["connected"] is True and call["status"] == "통화 후 종료"
+    reached = [c["stage"] for c in call["chain"] if c["reached"]]
+    assert reached == ["ui_dial", "server_dial", "ims_dial", "ims_dial_resp", "ril_call",
+                       "sip_invite", "alerting", "active"]
+    # INVITE 가 `call +` 보다 먼저 나가도 MakeCall 요청 뒤라 이 콜의 것이다
+    assert call["sip_call_id"] == "mo-1@ue"
+    assert call["fail_cause"] == "16"
+    assert call["ims_end"]["kind"] == "CallEnded" and call["ims_end"]["reason"] == "200/1"
+
+    names = {(r["layer"], r["name"]): r for r in call["ril_requests"]}
+    make = names[("telephonyd → imsservice", "MakeCall")]
+    assert (make["token"], make["latency_ms"], make["response"]) == ("0042", 194.0, "{sid=7}")
+    assert names[("TAPI → telephonyd", "CALL_DIAL")]["latency_ms"] == 197.0
+
+    stuck = result["unanswered_requests"]
+    assert [(r["name"], r["token"], r["client"], r["stuck_ms"]) for r in stuck] == \
+        [("SIGNAL_STRENGTH", "0051", "wcm#9", 5000)]
+
+
+def test_telephonyd_dial_rejected_before_call_entry_is_a_failed_call():
+    result = RtosCallFlowParser().analyze(SEM_DIAL_REJECTED)
+
+    assert result["kpi"]["dial_failed_count"] == 1
+    call = result["calls"][0]
+    assert call["dial_failed"] is True and call["sid"] is None
+    assert call["status"] == "발신 실패 (호 생성 전)"
+    assert call["broken_at"]["stage"] == "ims_dial"
+    assert "not IMS-registered" in call["dial_error"]["text"]
+    dial = next(r for r in call["ril_requests"] if r["name"] == "CALL_DIAL")
+    assert dial["error"] == "GENERIC_FAILURE(2)"
+
+
+def test_telephonyd_dial_that_became_a_call_is_not_counted_as_failed():
+    result = RtosCallFlowParser().analyze(SEM_MO_LINES + SEM_DIAL_REJECTED)
+    assert result["kpi"]["call_count"] == 2
+    assert [c["dial_failed"] for c in result["calls"]] == [False, True]
+
+
+def test_telephonyd_mt_call_stuck_before_ui_and_busy_cause():
+    result = RtosCallFlowParser().analyze(SEM_MT_LINES)
+
+    call = result["calls"][0]
+    assert (call["direction"], call["sid"]) == ("MT", "9")
+    reached = [c["stage"] for c in call["chain"] if c["reached"]]
+    assert reached == ["sip_invite", "ims_incoming", "bridge", "ril_call", "client_clcc"]
+    assert call["broken_at"]["stage"] == "ui_incoming"
+    assert call["status"] == "연결 전 종료"
+    assert call["fail_cause"] == "17"

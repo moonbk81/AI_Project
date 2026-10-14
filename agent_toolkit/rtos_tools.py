@@ -32,6 +32,8 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
         calls.append({
             "direction": call.get("direction"),
             "sid": call.get("sid"),
+            "dial_failed": call.get("dial_failed"),
+            "dial_error": call.get("dial_error"),
             "start_time": call.get("start_time"),
             "end_time": call.get("end_time"),
             "status": call.get("status"),
@@ -44,6 +46,7 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "last_reached_evidence": last,
             "fail_cause": call.get("fail_cause"),
             "fail_reason": call.get("fail_reason"),
+            "ims_end": call.get("ims_end"),
             "sip_call_id": call.get("sip_call_id"),
             "sip_flow": [
                 {k: m.get(k) for k in ("time", "direction", "method_code", "cseq", "is_error", "key_headers")}
@@ -52,7 +55,8 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "sip_final_response": call.get("sip_final_response"),
             "sip_error": call.get("sip_error"),
             "ril_requests": [
-                {k: r.get(k) for k in ("name", "token", "req_time", "resp_time", "latency_ms", "response")}
+                {k: r.get(k) for k in ("layer", "name", "token", "client", "req_time", "resp_time",
+                                       "latency_ms", "response", "error", "stuck_ms")}
                 for r in call.get("ril_requests", [])
             ],
         })
@@ -60,12 +64,19 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
     report = _load_report_json(base_name, result_dir)
     return json.dumps({
         "status": "OK",
+        "stack": data.get("stack", "ofono"),
         "build_info": report.get("rtos_build_info", {}),
         "kpi": data.get("kpi", {}),
         "calls": calls,
         "unanswered_requests": data.get("unanswered_requests", []),
         "analysis_rule": (
-            "RTOS 콜은 UI/TAPI → ofono → rild → RIL-IMSCALL → IMS 계층을 거친다. "
+            "stack=telephonyd 이면 콜은 UI/TAPI SDK → telephonyd(TAPI_SERVER) → imsservice MakeCall(IPCT) "
+            "→ call domain 호 생성(TCORE_CALL) → IMS 계층을 거친다. ofono/rild/D-Bus 는 이 빌드에 없다. "
+            "call domain 은 MakeCall 응답(sid)을 받아야 호를 만들기 때문에, dial_failed=true 인 콜은 호가 생기기 전에 "
+            "발신이 접힌 것이다 — dial_error 줄을 근거로 말하라. 종료 원인은 ims_end(CallEnded/CallBusy/CallError)다. "
+            "CallEnded 는 telephonyd 가 SIP 사유와 상관없이 NORMAL_CLEARING 으로 보고하니 실제 사유는 ims_end.reason 과 "
+            "SIP 흐름으로 말하라. stack=ofono 이면 UI/TAPI → ofono → rild → RIL-IMSCALL → IMS 계층이다. "
+            "ril_requests 의 stuck_ms 는 응답 없이 그만큼 기다린 요청이다. "
             "broken_at 은 로그가 처음으로 비는 계층이다. 그 계층이 원인이라고 단정하지 말고 "
             "'직전 계층까지는 진행됐고 이 계층의 로그가 없다'고 말하라. "
             "ACTIVE 없이 종료됐는데 broken_at 이 없으면 망/상대방 쪽(무응답, 거절)을 fail_cause 로 설명하라. "
@@ -77,7 +88,7 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
 
 
 def get_rtos_oem_hook_analytics(base_name: str, result_dir: str = "./result") -> str:
-    """RIL_REQUEST_OEM_HOOK_RAW 가 ofono → rild → secril → cpif → 모뎀 → 응답까지 이어졌는지 요약한다."""
+    """RIL_REQUEST_OEM_HOOK_RAW 가 telephonyd(또는 ofono → rild) → secril → cpif → 모뎀 → 응답까지 이어졌는지 요약한다."""
     path = os.path.join(result_dir, f"{base_name}_rtos_oem_hook.json")
     data = _load_json(path)
     if not data:
@@ -93,6 +104,7 @@ def get_rtos_oem_hook_analytics(base_name: str, result_dir: str = "./result") ->
         rx = req.get("modem_rx") or {}
         requests.append({
             "token": req.get("token"),
+            "client": req.get("client"),
             "req_time": req.get("req_time"),
             "func": f"{req.get('func_id')} {req.get('func_name')}" if req.get("func_id") else None,
             "path": req.get("path"),
@@ -108,25 +120,31 @@ def get_rtos_oem_hook_analytics(base_name: str, result_dir: str = "./result") ->
             "modem_error": req.get("modem_error_label"),
             "tx_rx_ms": req.get("tx_rx_ms"),
             "ril_error": req.get("ril_error"),
-            "evidence": req.get("ofono_error_evidence") or (req.get("checkpoints") or {}).get("modem_rx"),
+            "stuck_ms": req.get("stuck_ms"),
+            "evidence": (req.get("error_evidence") or req.get("ofono_error_evidence")
+                         or (req.get("checkpoints") or {}).get("modem_rx")),
         })
 
     return json.dumps({
         "status": "OK",
+        "stack": data.get("stack", "ofono"),
         "kpi": data.get("kpi", {}),
         "requests": requests,
         "unmatched_unsol": data.get("unmatched_unsol", []),
         "analysis_rule": (
-            "OEM_HOOK_RAW 는 ofono → rild(token) → secril → funcId 분기로 간다. "
+            "stack=telephonyd 이면 OEM_HOOK_RAW 는 telephonyd 가 [RILJ] trace 번호(token)로 secril 에 넘기고, "
+            "secril → funcId 분기로 간다 (ofono/rild 없음, secril 은 telephonyd 안에서 돈다). "
+            "stack=ofono 이면 ofono → rild(token) → secril → funcId 분기다. "
             "path=raw_ipc(CP_IMS 0x0F, GPS, SMARTAS, TAS, MCPTT)만 cpif(/dev/umts_ipc0)로 IPC 를 쓰고, "
             "path=local(UICC 0x15, FACTORY 0x12, MISC 0x11)은 secril 이 안에서 처리하므로 모뎀 응답이 없는 게 정상이다. "
-            "raw IPC 는 cpif 쓰기가 성공하면 곧바로 ofono 요청이 성공으로 완료되고, 모뎀 응답은 나중에 "
-            "UNSOL_OEM_HOOK_RAW 로 따로 온다. 그러니 ofono 요청 성공만으로 모뎀이 받았다고 말하지 마라. "
+            "raw IPC 는 cpif 쓰기가 성공하면 곧바로 요청이 성공으로 완료되고, 모뎀 응답은 나중에 "
+            "UNSOL_OEM_HOOK_RAW 로 따로 온다. 그러니 요청 성공만으로 모뎀이 받았다고 말하지 마라. "
             "모뎀 응답은 RX 의 ack_seq 가 TX 의 msg_seq 와 같은 것으로 이었다. "
             "SET/EXEC 는 General Response(GEN_CMD)로, GET 은 같은 MAIN/SUB 의 RESP 로 응답이 오고, "
             "GET 을 거절하면 에러 GR 이 온다. General Response 에러 0x8000 은 성공이다. "
             "EVENT/CFRM 타입 IPC 는 모뎀이 응답하지 않는 게 정상이다. "
-            "MALFORMED_PARCEL 은 rild 가 응답을 보냈지만 ofono(ril_oem_request_raw_cb)가 parcel 을 못 읽은 것이다."
+            "MALFORMED_PARCEL 은 (ofono 세대) rild 가 응답을 보냈지만 ofono(ril_oem_request_raw_cb)가 parcel 을 못 읽은 것이다. "
+            "stuck_ms 는 secril 완료 없이 그만큼 기다린 요청이다 (telephonyd STUCK 줄)."
         ),
     }, ensure_ascii=False)
 

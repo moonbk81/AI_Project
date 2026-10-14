@@ -185,7 +185,7 @@ routing_map:
   # domain: rtos 인 intent 는 RTOS 로그에서만 쓰이고, Android 로그의 라우팅 후보에서는 빠진다.
   RTOS_Call_Analysis:
     domain: rtos
-    desc: "RTOS 콜, 워치 통화, 발신 실패, 착신 안 뜸, 전화가 안 걸림, 전화가 안 옴, 통화 연결 안 됨, 통화 끊김, DIAL, GET_CURRENT_CALLS, LAST_CALL_FAIL_CAUSE, ofono, rild, TAPI, RIL-IMSCALL, IMS 착신, 어느 단계에서 멈췄는지"
+    desc: "RTOS 콜, 워치 통화, 발신 실패, 착신 안 뜸, 전화가 안 걸림, 전화가 안 옴, 통화 연결 안 됨, 통화 끊김, DIAL, GET_CURRENT_CALLS, LAST_CALL_FAIL_CAUSE, telephonyd, CALL_DIAL, MakeCall, TCORE_CALL, IPCT, ofono, rild, TAPI, RIL-IMSCALL, IMS 착신, 어느 단계에서 멈췄는지"
     tools:
       - get_rtos_call_flow_analytics
     log_types:
@@ -473,15 +473,16 @@ log_guidelines:
       - max_proxy_count 또는 max_count가 있으면 am_wtf 원본 로그 개수보다 해당 값을 장애 규모의 핵심 수치로 사용하라.
       - RCA_Event가 있을 때 일반론적 표현인 "시스템 리소스 부족", "소프트웨어 버그", "OS 업데이트", "공장 초기화" 같은 사용자 조치 중심 답변을 금지한다.
     RTOS_Call_Flow: |
-      - RTOS(NuttX) 워치 로그다. Android 프레임워크(RILJ, Telecom, logcat 태그)를 전제로 설명하지 마라.
-      - 콜 경로는 UI/TAPI → ofono(`[0,토큰]> RIL_REQUEST_*`) → rild(`[RIL_CPP]`) → RIL-IMSCALL → IMS 스택이다. 착신은 반대로 IMS → RIL-IMSBRIDGE → RIL-IMSCALL → ofono → TAPI/UI 로 올라온다.
+      - RTOS(NuttX) 워치 로그다. Android 프레임워크(Telecom, logcat 태그)를 전제로 설명하지 마라. 로그의 `[RILJ]` 는 Android RIL.java 가 아니라 telephonyd 가 secril 경계에서 찍는 trace 다.
+      - 2026-10 이후 빌드(stack=telephonyd)는 ofono/D-Bus/rild 가 없다. 발신 경로는 UI/TAPI SDK(`[TAPI_CLIENT] > CALL_DIAL`) → telephonyd(`[TAPI_SERVER] > CALL_DIAL`) → imsservice MakeCall(`[IPCT]`) → call domain 호 생성(`[TCORE_CALL] call + ims bid=..`) → IMS 스택이다. 착신은 IMS → `[IPCT] CallIncomingInd` → call domain → TAPI 호 목록 → UI 로 올라온다. 호는 MakeCall 응답 뒤에 생기므로 "호 생성 전 발신 실패"는 telephonyd/imsservice 경계에서 접힌 것이다.
+      - 옛 빌드(stack=ofono)의 콜 경로는 UI/TAPI → ofono(`[0,토큰]> RIL_REQUEST_*`) → rild(`[RIL_CPP]`) → RIL-IMSCALL → IMS 스택이다. 착신은 반대로 IMS → RIL-IMSBRIDGE → RIL-IMSCALL → ofono → TAPI/UI 로 올라온다. 두 세대를 섞어 설명하지 마라.
       - `broken_at`은 로그가 처음으로 비는 계층이다. "직전 계층까지는 진행됐고 이 계층의 로그가 없다"고 말하고, 마지막으로 확인된 줄(line 번호 포함)을 근거로 제시하라.
-      - ACTIVE 없이 종료됐는데 끊긴 지점이 없으면 단말 내부가 아니라 망/상대방 쪽이다. LAST_CALL_FAIL_CAUSE 값으로 설명하라.
+      - ACTIVE 없이 종료됐는데 끊긴 지점이 없으면 단말 내부가 아니라 망/상대방 쪽이다. LAST_CALL_FAIL_CAUSE 값으로 설명하라. telephonyd 세대는 imsservice 종료 통지(CallEnded/CallBusy/CallError)가 원인이고, CallEnded 는 사유와 상관없이 NORMAL_CLEARING 으로 보고되니 SIP 흐름과 reason 을 함께 보라.
       - IMS SIP 흐름이 있으면 망이 실제로 받은/보낸 메시지(18x, 4xx~6xx, BYE 의 Reason)를 근거로 삼아라. MO 인데 INVITE 가 없으면 단말이 INVITE 를 보내기 전에 멈춘 것이다. MT 에서 단말이 180 Ringing 을 보냈다면 망과 상대방은 단말이 울리고 있다고 알고 있다.
       - REGISTER 에 대한 401/407 은 IMS 등록의 정상 인증 절차다. 오류로 말하지 마라.
       - 날짜 31/12/99 는 RTC 미설정 값이다. 실제 날짜로 읽지 마라.
     RTOS_RIL_Pending: |
-      - ofono 가 보낸 RIL 요청 중 로그 끝까지 응답이 없는 것이다. 로그가 요청 직후에 끝났다면 잘린 것일 수 있으니, 요청 시각과 로그 끝 시각의 간격을 함께 말하라.
+      - 로그 끝까지 응답이 없는 요청이다 (telephonyd 세대는 TAPI/RILJ/IPCT 경계, 옛 빌드는 ofono → rild). STUCK 이 붙었으면 telephonyd 가 그만큼 기다렸다고 찍은 것이다. 로그가 요청 직후에 끝났다면 잘린 것일 수 있으니, 요청 시각과 로그 끝 시각의 간격을 함께 말하라.
 
 # ==========================================
 # 5. 위성 통신(NTN) 분석 프롬프트 템플릿

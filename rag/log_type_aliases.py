@@ -22,7 +22,7 @@ LOG_TYPE_ALIASES = {
     "IMS_SIP_Message": "VoLTE IMS 통화 신호 / SIP 메시지 / 통화 연결 거절 응답 코드",
     "RILJ_Transaction": "모뎀 요청 응답 / RIL 명령 실패 / 문자 SMS 전송 실패 / 통화 요청 / 모뎀 에러 코드",
     "RTOS_Call_Flow": "워치 통화 발신 착신 / 전화 안 걸림 안 옴 / 통화 연결 실패 끊김 / 어느 단계에서 멈춤",
-    "RTOS_RIL_Pending": "RIL 요청 응답 없음 / rild 멈춤 / 모뎀 명령 대기",
+    "RTOS_RIL_Pending": "RIL 요청 응답 없음 / telephonyd STUCK / rild 멈춤 / 모뎀 명령 대기",
     "RTOS_Log_Summary": "RTOS 워치 로그 요약 / 빌드 버전 / 콜 건수",
     # 네트워크 / 데이터
     "OOS_Event": "망 이탈 음영 지역 / 신호 없음 서비스 안됨 / 기지국 연결 끊김",

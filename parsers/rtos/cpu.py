@@ -31,7 +31,11 @@ TOP_PER_SAMPLE = 5
 MAX_SAMPLES = 3000
 
 # 로그의 태스크 번호로 추정한 역할 (OEM_HOOK_RAW 추적에서 본 태스크: 345 가 IPC TX, 373 이 RX, 346 이 GetMessage)
+# rild·ofonod·dbusdaemon 은 2026-10 telephonyd 로 바뀌기 전 빌드에만 있다
 TASK_ROLES = {
+    "telephonyd": "telephonyd (libtelephony 루프·secril 진입)",
+    "imsattach": "telephonyd → imsservice attach",
+    "wcm": "wcm (TAPI 클라이언트)",
     "rild": "rild (libril)",
     "ofonod": "ofono",
     "ESAR": "secril 이벤트 처리·IPC 송신 (추정)",
