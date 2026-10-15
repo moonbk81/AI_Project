@@ -47,6 +47,8 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "fail_cause": call.get("fail_cause"),
             "fail_reason": call.get("fail_reason"),
             "ims_end": call.get("ims_end"),
+            "ended_by": call.get("ended_by"),
+            "ims_registration": call.get("ims_registration"),
             "sip_call_id": call.get("sip_call_id"),
             "sip_flow": [
                 {k: m.get(k) for k in ("time", "direction", "method_code", "cseq", "is_error", "key_headers")}
@@ -82,7 +84,11 @@ def get_rtos_call_flow_analytics(base_name: str, result_dir: str = "./result") -
             "ACTIVE 없이 종료됐는데 broken_at 이 없으면 망/상대방 쪽(무응답, 거절)을 fail_cause 로 설명하라. "
             "sip_flow 가 있으면 망이 실제로 무엇을 보냈는지(18x/4xx/BYE Reason)를 근거로 삼고, "
             "MO 인데 sip_flow 가 비어 있으면 INVITE 가 망으로 나가지 않은 것이다. "
-            "401/407 은 IMS 등록의 정상 인증 절차이므로 오류로 말하지 마라."
+            "401/407 은 IMS 등록의 정상 인증 절차이므로 오류로 말하지 마라. "
+            "ended_by.side 는 콜을 먼저 끝낸 쪽이다 — local 은 이 단말(BYE/CANCEL 송신 또는 착신 거절), "
+            "remote 는 상대방이나 망(BYE/CANCEL 수신 또는 INVITE 에 3xx~6xx 응답)이다. "
+            "ims_registration 은 콜 직전 마지막 RegistrationStatus 통지다. registered=false 면 발신 실패의 "
+            "첫 번째 원인 후보로 말하고, null 이면 로그에 통지가 없어 등록 여부를 모른다고 말하라."
         ),
     }, ensure_ascii=False)
 

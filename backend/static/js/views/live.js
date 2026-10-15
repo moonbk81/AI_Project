@@ -222,10 +222,11 @@ function callTestResults(status) {
       "ACTIVE(ms)": ms(i.active_ms),
       "끊긴 지점": i.broken_at || "-",
       "종료 원인": i.fail_cause ? `${i.fail_cause} ${i.fail_reason || ""}` : "-",
+      "끊은 쪽": i.ended_by === "local" ? "단말" : (i.ended_by === "remote" ? "상대방/망" : "-"),
       SIP: i.sip_error || i.sip_final_response || "-",
       "CPU 최고": i.cpu_max === null || i.cpu_max === undefined ? "-" : `${i.cpu_max}%`,
     })), ["회차", "시작", "결과", "이유", status.config?.mode === "mt" ? "착신(ms)" : "ALERTING(ms)",
-          "ACTIVE(ms)", "끊긴 지점", "종료 원인", "SIP", "CPU 최고"]));
+          "ACTIVE(ms)", "끊긴 지점", "종료 원인", "끊은 쪽", "SIP", "CPU 최고"]));
   }
   if ((status.sent || []).length) {
     const fold = el("details", "fold");

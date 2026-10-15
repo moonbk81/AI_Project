@@ -132,9 +132,19 @@ function rtosCallBlock(call) {
   const wrap = el("div", "stack");
   const direction = call.direction === "MO" ? "발신(MO)" : "착신(MT)";
   const tone = call.connected ? "good" : (call.broken_label ? "critical" : "warning");
+  // 콜 직전 RegistrationStatus 통지. 통지가 없으면 모른다 (null)
+  const ims = call.ims_registered === true ? "IMS 등록됨"
+    : (call.ims_registered === false ? "IMS 미등록" : "IMS 등록 모름");
+  const endedBy = call.ended_by === "local" ? "이 단말이 끊음"
+    : (call.ended_by === "remote" ? "상대방/망이 끊음" : "");
   wrap.append(tileRow([
-    tile(direction, call.status || "N/A", "", call.dial_failed ? "호 생성 전" : `sid ${call.sid || "-"}`, tone),
-    tile("시작 / 종료", msTime(call.start_time), "", call.end_time ? `→ ${msTime(call.end_time)}` : "종료 로그 없음"),
+    tile(direction, call.status || "N/A", "",
+         `${call.dial_failed ? "호 생성 전" : `sid ${call.sid || "-"}`} · ${ims}`,
+         call.ims_registered === false ? "critical" : tone),
+    tile("시작 / 종료", msTime(call.start_time), "",
+         call.end_time
+           ? `→ ${msTime(call.end_time)}${endedBy ? ` · ${endedBy} (${call.ended_by_message})` : ""}`
+           : "종료 로그 없음"),
     tile("끊긴 지점", call.broken_label || "없음", "",
          call.fail_cause
            ? `종료 원인 ${call.fail_cause} ${call.fail_reason || ""}${call.ims_end ? ` (IMS ${call.ims_end})` : ""}`

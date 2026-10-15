@@ -53,6 +53,8 @@ def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
     last = checkpoints.get(reached[-1]["stage"]) if reached else None
     broken = call.get("broken_at") or {}
     ims_end = call.get("ims_end") or {}
+    registration = call.get("ims_registration")
+    ended_by = call.get("ended_by") or {}
     return {
         "direction": call.get("direction"),
         "sid": call.get("sid"),
@@ -69,6 +71,10 @@ def _call_row(call: Dict[str, Any]) -> Dict[str, Any]:
         "sip_error": call.get("sip_error"),
         "sip_count": len(call.get("sip_messages") or []),
         "sip_last": _sip_last(call.get("sip_messages") or []),
+        # 콜 앞에 RegistrationStatus 통지가 없으면 None (모름)
+        "ims_registered": registration.get("registered") if registration else None,
+        "ended_by": ended_by.get("side"),
+        "ended_by_message": ended_by.get("message"),
         "stages": stages,
         # 호가 생기기 전에 접힌 발신은 접은 줄이 가장 직접적인 근거다
         "last_evidence": call.get("dial_error") or last,

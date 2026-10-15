@@ -152,3 +152,13 @@ def test_stops_itself_when_device_stays_gone(tmp_path):
     assert status["running"] is False, "USB 가 빠진 채로 두면 시작 상태로 남지 않는다"
     assert "자동 중지" in status["stop_reason"]
     assert any(e["level"] == "critical" and "자동 중지" in e["text"] for e in status["events"])
+
+
+def test_monitor_remembers_last_ims_registration(tmp_path):
+    m = _monitor(tmp_path, FakeAdb())
+    for registered in (0, 1):
+        m._accept(f"[01/01/00 00:04:55.4{registered}0000] [160] [ap] [IPCT] [UNSL]< RegistrationStatus "
+                  f"{{registered={registered} features=0x{registered} net={registered} err=0}}")
+    reg = m.status()["ims_registration"]
+    assert reg["registered"] is True and reg["time"] == "00:04:55.410000"
+    assert reg["text"].startswith("[IPCT] [UNSL]< RegistrationStatus {registered=1")

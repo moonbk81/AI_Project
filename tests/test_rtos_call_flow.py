@@ -266,3 +266,48 @@ def test_telephonyd_mt_call_stuck_before_ui_and_busy_cause():
     assert call["broken_at"]["stage"] == "ui_incoming"
     assert call["status"] == "연결 전 종료"
     assert call["fail_cause"] == "17"
+
+
+REG_OFF = _t("00:09:00.000000", "[IPCT] [UNSL]< RegistrationStatus {registered=0 features=0x0 net=0 err=0}")
+REG_ON = _t("00:09:00.100000", "[IPCT] [UNSL]< RegistrationStatus {registered=1 features=0x1 net=1 err=0}")
+
+
+def test_telephonyd_call_carries_ims_registration_and_remote_hangup():
+    # rt_call.log (2026-10-15): 부팅 직후 미등록 → 등록 통지, 통화 중 망에서 BYE 가 와서 끝났다
+    lines = [REG_OFF, REG_ON, *SEM_MO_LINES[:-3],
+             *_sip("00:10:19.900000", "[SIP]< BYE sip:ue@[2001::1]:5060 SIP/2.0", "mo-1@ue", "2 BYE"),
+             *SEM_MO_LINES[-3:]]
+    result = RtosCallFlowParser().analyze(lines)
+
+    call = result["calls"][0]
+    assert call["ims_registration"]["registered"] is True
+    assert call["ims_registration"]["features"] == "0x1"
+    assert call["ims_registration"]["time"] == "00:09:00.100000"
+    assert [r["registered"] for r in result["ims_registrations"]] == [False, True]
+    assert call["ended_by"]["side"] == "remote" and call["ended_by"]["message"] == "↓ BYE"
+
+
+def test_registration_after_the_dial_is_not_attached():
+    late = _t("00:20:30.000000", "[IPCT] [UNSL]< RegistrationStatus {registered=0 features=0x0 net=0 err=0}")
+    call = RtosCallFlowParser().analyze([*SEM_DIAL_REJECTED, late])["calls"][0]
+    assert call["dial_failed"] is True
+    assert call["ims_registration"] is None and call["ended_by"] is None
+
+
+def test_ended_by_local_cancel_and_mt_reject():
+    from parsers.rtos.call_flow import ended_by
+
+    def msg(out, kind, code, cseq):
+        return {"is_outgoing": out, "msg_type": kind, "method_code": code, "cseq": cseq,
+                "status_code": int(code.split()[0]) if kind == "Resp" else None,
+                "time": "01-01 00:00:01.000000", "line_no": 1}
+
+    mo_cancel = [msg(True, "Req", "INVITE", "1 INVITE"), msg(False, "Resp", "180 RINGING", "1 INVITE"),
+                 msg(True, "Req", "CANCEL", "1 CANCEL"), msg(False, "Resp", "487 REQUEST TERMINATED", "1 INVITE")]
+    assert ended_by(mo_cancel)["side"] == "local"
+    mt_reject = [msg(False, "Req", "INVITE", "1 INVITE"), msg(True, "Resp", "486 BUSY HERE", "1 INVITE")]
+    assert ended_by(mt_reject) == {"side": "local", "message": "↑ 486 BUSY HERE", "time": "00:00:01.000000",
+                                   "line_no": 1}
+    mo_busy = [msg(True, "Req", "INVITE", "1 INVITE"), msg(False, "Resp", "486 BUSY HERE", "1 INVITE")]
+    assert ended_by(mo_busy)["side"] == "remote"
+    assert ended_by([msg(True, "Req", "INVITE", "1 INVITE"), msg(False, "Resp", "200 OK", "1 INVITE")]) is None

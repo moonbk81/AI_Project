@@ -8,8 +8,10 @@ telephonytool (sec/frameworks/telephony_service/tools/telephony_tool.c — 2026-
   - `listen-call 0 0` 뒤 콜 상태 콜백: `call changed call_id : /ril_0/voicecall01` 다음 줄
     `call state: ALERTING (3)` (ofono 세대는 `call state: 3`)
   - `get-ims-registration 0 1` → `telephonytool_cmd_ims_get_registration: ims_registered: 0 - 1` (ret - status).
-    SDK 가 tapi_ims_is_registered 를 아직 구현하지 않아(ts_stubs.c) ret 이 0 이 아니면 등록 여부를 모른다
-    → 확인 없이 진행한다. 등록이 안 됐으면 call domain 이 발신을 바로 거절해서 그 회차가 실패로 남는다.
+    SDK 가 tapi_ims_is_registered 를 아직 구현하지 않아(ts_stubs.c) ret 이 0 이 아니다
+    → 실시간 모니터가 받아 둔 imsservice 통지 `[IPCT] [UNSL]< RegistrationStatus {registered=1 ...}` 로 판정한다.
+    통지가 링 버퍼에서 밀려나 없으면 확인 없이 진행한다. 미등록이면 call domain 이 발신을 바로 거절해서
+    그 회차가 실패로 남는다.
 - `!` 로 시작하는 줄은 워치에서 system() 을 부른다 → 여기서 보내는 명령은 COMMAND_PATTERNS 로만 만든다
 
 콜 상태(tapi_call.h): 0 ACTIVE, 1 HELD, 2 DIALING, 3 ALERTING, 4 INCOMING, 5 WAITING, 6 DISCONNECTED.
@@ -256,20 +258,36 @@ class CallTestRunner:
                 continue
             m = IMS_REG_RE.search(line)
             if m:
+                if m.group(1) != "0":
+                    return self._check_ims_from_log(f"이 빌드는 IMS 등록 조회를 지원하지 않아 (ret={m.group(1)})",
+                                                    fallback=True)
                 with self._lock:
-                    if m.group(1) != "0":
-                        self.ims_registered = None
-                        self.ims_note = (f"이 빌드는 IMS 등록 조회를 지원하지 않아 (ret={m.group(1)}) 확인 없이 진행합니다. "
-                                         "미등록이면 발신이 바로 실패합니다.")
-                        return True
                     self.ims_registered = m.group(2) == "1"
                     if not self.ims_registered:
                         self.error = f"IMS 미등록 (ret={m.group(1)}, registered={m.group(2)}) — 콜 테스트를 하지 않았습니다."
                 return self.ims_registered
+        return self._check_ims_from_log("telephonytool 응답 없음", fallback=False)
+
+    def _check_ims_from_log(self, why: str, fallback: bool) -> bool:
+        """telephonytool 로 모를 때 모니터가 받아 둔 RegistrationStatus 로 판정한다.
+
+        통지도 없으면 fallback=True(조회 미지원)는 확인 없이 진행하고, False(응답 없음)는 멈춘다.
+        """
+        reg = getattr(self.monitor, "ims_registration", None)
         with self._lock:
+            if reg:
+                self.ims_registered = reg["registered"]
+                self.ims_note = f"{why} 로그의 RegistrationStatus ({reg['time']}) 로 판정: {reg['text']}"
+                if not self.ims_registered:
+                    self.error = f"IMS 미등록 ({reg['time']} RegistrationStatus) — 콜 테스트를 하지 않았습니다."
+                return self.ims_registered
             self.ims_registered = None
-            self.error = "IMS 등록 상태를 확인하지 못했습니다 (telephonytool 응답 없음)."
-        return False
+            if fallback:
+                self.ims_note = (f"{why} 로그에 RegistrationStatus 통지도 없어 확인 없이 진행합니다. "
+                                 "미등록이면 발신이 바로 실패합니다.")
+                return True
+            self.error = f"IMS 등록 상태를 확인하지 못했습니다 ({why})."
+            return False
 
     # 로그에서 콜 상태를 뽑는다. 콜백의 call_id 줄 뒤에 state 줄이 온다
     def _drain(self, until: float) -> List[Dict]:
@@ -405,6 +423,7 @@ class CallTestRunner:
             "broken_at": (call.get("broken_at") or {}).get("label"),
             "fail_cause": call.get("fail_cause"), "fail_reason": call.get("fail_reason"),
             "sip_final_response": call.get("sip_final_response"), "sip_error": call.get("sip_error"),
+            "ended_by": (call.get("ended_by") or {}).get("side"),
             "cpu_max": self._cpu_max(cur["start"]),
             "log_lines": len(lines),
         }

@@ -24,6 +24,8 @@ from datetime import datetime
 from typing import Callable, Deque, Dict, List, Optional
 
 from parsers.rtos import RtosCallFlowParser, RtosOemHookParser
+from parsers.rtos.call_flow import parse_ims_registration
+from parsers.rtos.line import parse_line
 from parsers.rtos.device_status import cpu_total, parse_free, parse_ps, parse_uptime
 
 SAFE_COMMANDS = ("ps", "free", "uptime")
@@ -106,6 +108,8 @@ class LiveDeviceMonitor:
         # 콜 테스트가 "도중에 워치가 죽었나" 를 보는 눈금
         self.reboot_count = 0
         self.disconnect_count = 0
+        # 마지막으로 받은 imsservice RegistrationStatus. 부팅 직후에 찍혀서 콜 테스트가 시작될 때는 이미 지나가 있다
+        self.ims_registration: Optional[Dict] = None
         self._lost_since: Optional[float] = None
         self.stop_reason: Optional[str] = None
 
@@ -212,6 +216,7 @@ class LiveDeviceMonitor:
         up = sample["uptime"].get("uptime_min")
         if up is not None and self._last_uptime is not None and up < self._last_uptime:
             self.reboot_count += 1
+            self.ims_registration = None  # 재부팅 전 상태다. 다시 붙으면 새 통지가 온다
             self._event("critical", f"재부팅 감지 (uptime {self._last_uptime}분 → {up}분)")
         if up is not None:
             self._last_uptime = up
@@ -281,9 +286,18 @@ class LiveDeviceMonitor:
             self.lines.append(line)
             self.line_count += 1
             listeners = list(self._listeners)
+        if "RegistrationStatus" in line:
+            self._track_ims_registration(line)
         for listener in listeners:
             listener(line)
         return True
+
+    def _track_ims_registration(self, line: str) -> None:
+        rec = parse_line(line)
+        reg = parse_ims_registration(rec.msg) if rec else None
+        if reg:
+            with self._lock:
+                self.ims_registration = {**reg, "time": rec.time, "text": rec.msg}
 
     def add_listener(self, listener: Callable[[str], None]) -> None:
         with self._lock:
@@ -339,6 +353,7 @@ class LiveDeviceMonitor:
                 "stop_reason": self.stop_reason,
                 "connected": self.connected,
                 "log_streaming": self.log_streaming,
+                "ims_registration": self.ims_registration,
                 "line_count": self.line_count,
                 "capture_path": self.capture_path,
                 "latest": dict(self.latest, tasks=self.latest["tasks"][:TOP_TASKS]) if self.latest else None,

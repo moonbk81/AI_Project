@@ -105,8 +105,9 @@ def mt_ok(session, command):
         session.later(0.01, lambda: _state(m, cid, 6))
 
 
-def _run(behavior, **kwargs):
+def _run(behavior, ims_registration=None, **kwargs):
     monitor = FakeMonitor()
+    monitor.ims_registration = ims_registration
     sessions = []
 
     def factory(serial):
@@ -248,3 +249,22 @@ def test_tcore_call_lines_are_the_fallback():
     it = status["iterations"][0]
     assert it["result"] == "fail" and it["reason"] == "연결 전에 종료"
     assert [t["state"] for t in it["timeline"]] == ["DIALING", "DISCONNECTED"]
+
+
+REG = "[IPCT] [UNSL]< RegistrationStatus {registered=%d features=0x1 net=1 err=0}"
+
+
+def test_unsupported_ims_query_falls_back_to_logged_registration():
+    reg = {"registered": True, "features": "0x1", "net": "1", "err": "0",
+           "time": "00:04:55.463800", "text": REG % 1}
+    status, session = _run(sem_mo_ok, ims_registration=reg, count=1)
+    assert status["ims_registered"] is True and "RegistrationStatus (00:04:55.463800)" in status["ims_note"]
+    assert status["error"] is None and status["iterations"][0]["result"] == "pass"
+
+
+def test_logged_unregistered_stops_before_dialing():
+    reg = {"registered": False, "features": "0x0", "net": "0", "err": "0",
+           "time": "00:04:55.400300", "text": REG % 0}
+    status, session = _run(sem_mo_ok, ims_registration=reg, count=1)
+    assert status["ims_registered"] is False and "IMS 미등록" in status["error"]
+    assert not any(c["command"].startswith("dial ") for c in session.sent)

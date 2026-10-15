@@ -27,6 +27,17 @@ def _call_document(call):
         detail = (f" reason={ims_end['reason']}" if ims_end.get("reason") else "") + \
                  (f" code={ims_end['error_code']}" if ims_end.get("error_code") else "")
         lines.append(f"- imsservice 종료 통지: {ims_end['kind']}{detail} (line {ims_end['line_no']})")
+    ended = call.get("ended_by")
+    if ended:
+        who = "이 단말" if ended["side"] == "local" else "상대방/망"
+        lines.append(f"- 콜을 끝낸 쪽: {who} ({ended['message']}, {ended['time']})")
+    registration = call.get("ims_registration")
+    if registration:
+        state = "등록됨" if registration["registered"] else "미등록"
+        lines.append(f"- 콜 직전 IMS 등록: {state} ({registration['time']}, line {registration['line_no']}: "
+                     f"{registration['text']})")
+    else:
+        lines.append("- 콜 직전 IMS 등록: 로그에 RegistrationStatus 통지가 없어 알 수 없다")
     dial_error = call.get("dial_error")
     if dial_error:
         lines.append(f"- 발신을 접은 줄 (line {dial_error['line_no']}): {dial_error['text']}")

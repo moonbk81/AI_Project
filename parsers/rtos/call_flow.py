@@ -12,6 +12,8 @@ telephonyd (2026-10 ~): ofono / D-Bus / rild 를 지우고 Samsung TAPI SDK → 
   telephonyd 가 받은 CALL_DIAL 중 호가 안 생긴 것을 발신 실패로 따로 만든다.
   종료 원인은 imsservice 통지(CallEnded/CallBusy/CallError)로 본다. LAST_CALL_FAIL_CAUSE 는 call domain 이
   직접 답해서 [RILJ] 에 안 찍힌다.
+  IMS 등록은 imsservice 통지 `[IPCT] [UNSL]< RegistrationStatus {registered=1 features=0x1 net=1 err=0}` 로 본다
+  (telephonytool 의 tapi_ims_is_registered 는 SDK 스텁이다). 부팅 직후 한두 번 찍히고 바뀔 때만 다시 찍힌다.
 
 ofono (~ 2026-09):
   MO: UI/TAPI → ofono(RIL_REQUEST_DIAL) → rild(RIL_CPP DIAL) → RIL-IMSCALL 호 생성 → ALERTING → ACTIVE
@@ -119,6 +121,41 @@ SID_STAGES = {"bridge", "ims_dial_resp"}
 # imsservice 통지 → telephonyd 가 LAST_CALL_FAIL_CAUSE 로 돌려주는 값 (domains/call/adaptor/ims_adaptor.cpp).
 # CallEnded 는 SIP 사유와 상관없이 NORMAL 로 보고한다 (TODO 상태) — 실제 사유는 ims_end 에 남긴다.
 IMS_END_CAUSES = {"CallEnded": "16", "CallBusy": "17", "CallError": "65535"}
+REG_FIELD_RE = re.compile(r'(\w+)=(\S+)')
+MAX_REGISTRATIONS = 50
+
+
+def parse_ims_registration(msg):
+    """`[IPCT] [UNSL]< RegistrationStatus {registered=1 features=0x1 net=1 err=0}` → dict, 아니면 None."""
+    noti = IPCT_NOTI_RE.match(msg)
+    if not noti or noti.group(1) != "RegistrationStatus":
+        return None
+    fields = dict(REG_FIELD_RE.findall(noti.group(2) or ""))
+    if "registered" not in fields:
+        return None
+    return {
+        "registered": fields["registered"] == "1",
+        "features": fields.get("features"),
+        "net": fields.get("net"),
+        "err": fields.get("err"),
+    }
+
+
+def ended_by(sip_dialog):
+    """콜을 먼저 끝낸 쪽. BYE/CANCEL 을 보낸 쪽, 또는 INVITE 에 3xx~6xx 로 답한 쪽이다.
+
+    단말이 보냈으면 local(이 단말), 망에서 왔으면 remote(상대방이나 망). 끝내는 메시지가 없으면 None.
+    """
+    for m in sip_dialog:
+        hangup = m["msg_type"] == "Req" and m["method_code"] in ("BYE", "CANCEL")
+        rejected = (m["msg_type"] == "Resp" and (m.get("cseq") or "").endswith("INVITE")
+                    and (m.get("status_code") or 0) >= 300)
+        if not (hangup or rejected):
+            continue
+        return {"side": "local" if m["is_outgoing"] else "remote",
+                "message": f"{'↑' if m['is_outgoing'] else '↓'} {m['method_code']}",
+                "time": m["time"].split(" ")[-1], "line_no": m["line_no"]}
+    return None
 
 
 def _stage_of(rec):
@@ -235,6 +272,7 @@ class RtosCallFlowParser(BaseParser):
         fail_causes = []
         ims_ends = []
         dial_failures = []
+        registrations = []
         calls = []
         active = []
 
@@ -255,6 +293,9 @@ class RtosCallFlowParser(BaseParser):
                 noti = IPCT_NOTI_RE.match(rec.msg)
                 if noti and noti.group(1) in IMS_END_CAUSES:
                     ims_ends.append((rec, noti.group(1), noti.group(2) or ""))
+                reg = parse_ims_registration(rec.msg)
+                if reg:
+                    registrations.append((rec, reg))
             if DIAL_FAIL_RE.match(rec.msg):
                 dial_failures.append(rec)
 
@@ -275,6 +316,7 @@ class RtosCallFlowParser(BaseParser):
         self._attach_fail_causes(calls, fail_causes)
         self._attach_ims_ends(calls, ims_ends)
         for call in calls:
+            self._attach_registration(call, registrations)
             self._finalize(call, chains[call["direction"]])
 
         unanswered = [r for r in request_order if r["resp_time"] is None]
@@ -291,6 +333,7 @@ class RtosCallFlowParser(BaseParser):
             },
             "calls": [self._public(c) for c in calls],
             "unanswered_requests": [self._public_request(r) for r in unanswered[:MAX_UNANSWERED]],
+            "ims_registrations": [{**reg, **_evidence(rec)} for rec, reg in registrations[-MAX_REGISTRATIONS:]],
             # 콜에 묶이지 않은 것(REGISTER, SUBSCRIBE)까지 전부. 기존 SIP 흐름 차트가 이걸 그린다.
             "sip_messages": [_public_sip(m) for m in sip_messages],
         }
@@ -485,6 +528,7 @@ class RtosCallFlowParser(BaseParser):
         call["sip_messages"] = []
         call["sip_final_response"] = None
         call["sip_error"] = None
+        call["ended_by"] = None
         if not invite:
             return
         call["sip_call_id"] = invite["call_id"]
@@ -500,6 +544,7 @@ class RtosCallFlowParser(BaseParser):
         errors = [m for m in dialog if m["is_error"]]
         if errors:
             call["sip_error"] = errors[0]["method_code"]
+        call["ended_by"] = ended_by(dialog)
 
     def _attach_requests(self, call, request_order):
         lo = call["start_sec"] - PRE_WINDOW_SEC
@@ -531,6 +576,13 @@ class RtosCallFlowParser(BaseParser):
             }
             if call["fail_cause"] is None:
                 self._set_fail_cause(call, IMS_END_CAUSES[kind])
+
+    @staticmethod
+    def _attach_registration(call, registrations):
+        """발신/착신이 시작되기 전 마지막 IMS 등록 상태. 콜 앞에 통지가 없으면 None 이다."""
+        begin = min([call["start_sec"], *call["_cp_sec"].values()])
+        before = [(rec, reg) for rec, reg in registrations if rec.sec <= begin]
+        call["ims_registration"] = {**before[-1][1], **_evidence(before[-1][0])} if before else None
 
     @staticmethod
     def _set_fail_cause(call, cause):
