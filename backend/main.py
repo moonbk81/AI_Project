@@ -1561,6 +1561,7 @@ async def create_analyze_job(
 
 # ---- 실시간 단말 (adb) ----
 # 워치는 이 PC 에 꽂힌 것 하나라 모니터도 하나다. 워치에는 ps/free/uptime/logcat 만 보낸다.
+# 예외는 버튼으로 부르는 서비스 시작(START_COMMANDS)과 재부팅(adb reboot)뿐이다.
 
 
 class LiveStartRequest(BaseModel):
@@ -1597,6 +1598,36 @@ def live_stop(request: Request) -> Dict[str, Any]:
         _call_test_runner.stop()
     monitor.stop()
     return monitor.status()
+
+
+@app.post("/live/reboot")
+def live_reboot(request: Request) -> Dict[str, Any]:
+    """`adb reboot`. 로그는 새 파일로 다시 시작한다. 콜 테스트 중에는 하지 않는다."""
+    from backend.live_device import monitor
+
+    _require_caller(request)
+    if _call_test_runner is not None and _call_test_runner.running:
+        raise HTTPException(status_code=400, detail="콜 테스트 중에는 재부팅할 수 없습니다. 테스트를 먼저 멈추세요.")
+    try:
+        return monitor.reboot_device()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+class LiveServiceStartRequest(BaseModel):
+    name: str
+
+
+@app.post("/live/service/start")
+def live_service_start(req: LiveServiceStartRequest, request: Request) -> Dict[str, Any]:
+    """ims_service 같은 서비스가 안 떠 있으면 띄운다. 화면 버튼으로만 부른다."""
+    from backend.live_device import monitor
+
+    _require_caller(request)
+    try:
+        return monitor.start_service(req.name)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 _call_test_runner = None

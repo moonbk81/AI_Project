@@ -162,3 +162,107 @@ def test_monitor_remembers_last_ims_registration(tmp_path):
     reg = m.status()["ims_registration"]
     assert reg["registered"] is True and reg["time"] == "00:04:55.410000"
     assert reg["text"].startswith("[IPCT] [UNSL]< RegistrationStatus {registered=1")
+
+
+IMS_ROW = ("  201   201 100 RR       Task      - Waiting  Semaphore 0000000000000000 0008064 0002008  24.9%   "
+           "1.0% ims_service\n")
+
+
+class ServiceAdb(FakeAdb):
+    """`ims_service &` 를 받으면 그 뒤 ps 에 ims_service 가 보인다. hang=True 면 명령이 안 끝난다."""
+
+    def __init__(self, hang=False, comes_up=True):
+        super().__init__()
+        self.started = False
+        self.hang = hang
+        self.comes_up = comes_up
+
+    def run(self, args, timeout):
+        if args[-1].endswith(" &"):
+            self.calls.append(args)
+            self.started = self.comes_up
+            if self.hang:
+                raise subprocess.TimeoutExpired(args, timeout)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        result = super().run(args, timeout)
+        if args[-1] == "ps" and self.started:
+            result.stdout += IMS_ROW
+        return result
+
+
+def _service_monitor(tmp_path, adb, monkeypatch):
+    m = _monitor(tmp_path, adb)
+    m.serial = "411E0A2E31781C7B"
+    m.connected = True
+    monkeypatch.setattr(type(m), "running", property(lambda self: True))
+    monkeypatch.setattr("backend.live_device.SERVICE_CHECK_SEC", 0)
+    return m
+
+
+def test_service_status_comes_from_latest_ps(tmp_path):
+    m = _monitor(tmp_path, FakeAdb())
+    assert m.status()["services"]["ims_service"] == {"running": None, "pid": None}, "ps 전에는 모른다"
+    m.serial = "X"
+    m.poll_once()
+    assert m.status()["services"]["ims_service"] == {"running": False, "pid": None}
+
+
+def test_start_service_sends_only_the_allowed_command_and_checks_ps(tmp_path, monkeypatch):
+    adb = ServiceAdb()
+    m = _service_monitor(tmp_path, adb, monkeypatch)
+    result = m.start_service("ims_service")
+    assert result == {"name": "ims_service", "command": "ims_service &", "running": True, "pid": 201}
+    sent = [c[-1] for c in adb.calls if "shell" in c]
+    assert set(sent) <= set(SAFE_COMMANDS) | {"ims_service &"} and sent.count("ims_service &") == 1
+    assert any(e["text"] == "ims_service 시작됨 (PID 201)" for e in m.events)
+
+    with pytest.raises(RuntimeError, match="이미 돌고"):
+        m.start_service("ims_service")
+    with pytest.raises(ValueError):
+        m.start_service("reboot")
+    assert [c[-1] for c in adb.calls].count("ims_service &") == 1
+
+
+def test_start_service_that_holds_the_shell_is_checked_by_ps(tmp_path, monkeypatch):
+    m = _service_monitor(tmp_path, ServiceAdb(hang=True), monkeypatch)
+    assert m.start_service("ims_service")["running"] is True
+
+    m2 = _service_monitor(tmp_path, ServiceAdb(comes_up=False), monkeypatch)
+    assert m2.start_service("ims_service")["running"] is False
+    assert any("ps 에 보이지 않습니다" in e["text"] for e in m2.events)
+
+
+def test_start_service_needs_a_connected_monitor(tmp_path):
+    with pytest.raises(RuntimeError, match="실시간 모니터"):
+        _monitor(tmp_path, ServiceAdb()).start_service("ims_service")
+
+
+class RebootAdb(FakeAdb):
+    def run(self, args, timeout):
+        if args[-1] == "reboot":
+            self.calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return super().run(args, timeout)
+
+
+def test_reboot_sends_adb_reboot_and_starts_a_new_log(tmp_path, monkeypatch):
+    adb = RebootAdb()
+    m = _service_monitor(tmp_path, adb, monkeypatch)
+    m.capture_path = str(tmp_path / "live_old.txt")
+    m._accept(LOGCAT[0].rstrip("\n"))
+    m.ims_registration = {"registered": True}
+
+    result = m.reboot_device()
+    assert ["adb", "-s", "411E0A2E31781C7B", "reboot"] in adb.calls
+    assert not any("shell" in c and c[-1] == "reboot" for c in adb.calls), "셸 reboot 이 아니라 adb reboot"
+    assert result["previous_capture_path"].endswith("live_old.txt")
+    assert m.capture_path != result["previous_capture_path"] and m.capture_path.startswith(str(tmp_path))
+    assert m.line_count == 0 and not m.lines and m.ims_registration is None
+    # 앞 부팅과 같은 줄이 다시 와도 새 로그에서는 받는다 (RTC 가 없어 타임스탬프가 겹친다)
+    assert m._accept(LOGCAT[0].rstrip("\n")) is True
+    assert any(e["text"].startswith("재부팅 요청") for e in m.events)
+
+
+def test_reboot_needs_a_connected_monitor(tmp_path):
+    with pytest.raises(RuntimeError, match="실시간 모니터"):
+        _monitor(tmp_path, RebootAdb()).reboot_device()

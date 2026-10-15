@@ -7,6 +7,12 @@
 - 로그: `adb logcat` 을 계속 읽는다. 링 버퍼를 먼저 다시 보내고 새 줄을 이어 보낸다(읽어도 지워지지 않는다).
   받는 대로 파일에 적는다 — 워치가 죽어도 죽기 직전까지의 로그가 PC 에 남는다.
   줄 형식이 로그 파일과 같아서 OEM_HOOK_RAW·콜 흐름 파서를 그대로 돌린다.
+- 서비스 시작: 가끔 ims_service 가 안 떠 있다. 화면 버튼을 눌렀을 때만 `ims_service &` 처럼 백그라운드로 띄운다
+  (adbd 가 `sh -c` 로 돌려서 셸은 바로 끝나고 서비스만 남는다). 명령은 START_COMMANDS 와 똑같은 것만 보낸다.
+  자동으로 띄우지는 않는다. 떠 있는지는 폴링한 ps 의 태스크 이름으로 본다.
+- 재부팅: 버튼으로 `adb reboot` 을 보내면 로그를 새 파일로 다시 시작한다 (받은 줄·분석·중복 거르기도 비운다).
+  RTC 가 없어 재부팅 뒤 타임스탬프가 앞 부팅과 겹친다 — 한 파일에 섞으면 시간 순서가 꼬인다.
+  스스로 재부팅한 경우(크래시)는 직전 로그와 이어 봐야 해서 파일을 그대로 잇는다.
 
 백엔드는 여러 사람이 쓰지만 단말은 이 PC 에 꽂힌 것뿐이라 모니터는 하나다.
 """
@@ -29,6 +35,10 @@ from parsers.rtos.line import parse_line
 from parsers.rtos.device_status import cpu_total, parse_free, parse_ps, parse_uptime
 
 SAFE_COMMANDS = ("ps", "free", "uptime")
+# 워치 상태를 바꾸는 명령이라 SAFE_COMMANDS 와 따로 둔다. 키는 ps 에 보이는 태스크 이름이다
+START_COMMANDS = {"ims_service": "ims_service &", "telephonyd": "telephonyd &"}
+SERVICE_CHECK_SEC = 8     # 띄운 뒤 ps 에 보일 때까지 기다리는 시간
+REBOOT_TIMEOUT_SEC = 15
 COMMAND_TIMEOUT_SEC = 10
 MIN_INTERVAL_SEC = 3
 DEFAULT_INTERVAL_SEC = 5
@@ -86,6 +96,7 @@ class LiveDeviceMonitor:
         self._proc = None
         # 받은 줄을 실시간으로 넘겨받을 곳 (콜 테스트). 링 버퍼를 다시 보낸 줄은 넘기지 않는다
         self._listeners: List[Callable[[str], None]] = []
+        self._service_lock = threading.Lock()  # 같은 서비스를 두 번 띄우지 않는다
         self._reset(None, DEFAULT_INTERVAL_SEC)
 
     def _reset(self, serial, interval):
@@ -125,10 +136,7 @@ class LiveDeviceMonitor:
         with self._lock:
             self._reset(serial, max(MIN_INTERVAL_SEC, int(interval or DEFAULT_INTERVAL_SEC)))
             self.started_at = _now()
-            os.makedirs(self.capture_dir, exist_ok=True)
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_serial = re.sub(r"[^A-Za-z0-9_.-]", "_", serial)
-            self.capture_path = os.path.join(self.capture_dir, f"live_{safe_serial}_{stamp}.txt")
+            self.capture_path = self._new_capture_path()
         self._stop.clear()
         self._threads = [
             threading.Thread(target=self._poll_loop, name="live-poll", daemon=True),
@@ -137,6 +145,46 @@ class LiveDeviceMonitor:
         for t in self._threads:
             t.start()
         self._event("info", f"모니터 시작 ({serial}, {self.interval}초 간격)")
+
+    def _new_capture_path(self) -> str:
+        os.makedirs(self.capture_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_serial = re.sub(r"[^A-Za-z0-9_.-]", "_", self.serial or "")
+        path = os.path.join(self.capture_dir, f"live_{safe_serial}_{stamp}.txt")
+        if path == self.capture_path:  # 같은 초 안에 다시 만들면 덮어 이어 쓰지 않게 한다
+            path = path.replace(".txt", f"_{int(time.time() * 1000) % 1000:03d}.txt")
+        return path
+
+    def reboot_device(self) -> Dict:
+        """`adb reboot` 을 보내고 로그를 새 파일로 다시 시작한다. 모니터는 계속 돌며 다시 붙는다."""
+        if not (self.running and self.connected):
+            raise RuntimeError("실시간 모니터가 단말에 붙어 있어야 합니다.")
+        try:
+            result = self.runner([self.adb, "-s", self.serial, "reboot"], REBOOT_TIMEOUT_SEC)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self._event("critical", f"재부팅 명령 실패: {exc}")
+            raise RuntimeError(f"재부팅 명령을 보내지 못했습니다: {exc}")
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            self._event("critical", f"재부팅 명령 실패 (exit {result.returncode}) {detail}")
+            raise RuntimeError(f"재부팅 명령이 실패했습니다 (exit {result.returncode}) {detail}")
+        old = self.capture_path
+        with self._lock:
+            self.capture_path = self._new_capture_path()
+            self.lines.clear()
+            self.line_count = 0
+            self._seen.clear()
+            self._seen_set.clear()
+            self.analysis = {}
+            self._analyzed_count = -1
+            self.ims_registration = None
+            self._last_uptime = None  # 요청한 재부팅이라 "재부팅 감지" 경고로 세지 않는다
+        # 지금 logcat 은 앞 부팅 것이다. 호스트 adb 만 끊으면 로그 루프가 새 파일로 다시 붙는다
+        proc = self._proc
+        if proc and proc.poll() is None:
+            proc.terminate()
+        self._event("warning", f"재부팅 요청 (adb reboot) — 로그를 새 파일로 시작: {self.capture_path}")
+        return {"previous_capture_path": old, "capture_path": self.capture_path}
 
     def stop(self) -> None:
         self._stop.set()
@@ -170,6 +218,64 @@ class LiveDeviceMonitor:
         if result.returncode != 0 or "error:" in (result.stderr or ""):
             return None
         return result.stdout
+
+    # ---- 서비스 ----
+
+    @staticmethod
+    def services(tasks: Optional[List[Dict]]) -> Dict[str, Dict]:
+        """START_COMMANDS 의 서비스가 ps 태스크 목록에 있는지. 목록이 없으면(ps 전) running 은 None."""
+        result = {}
+        for name in START_COMMANDS:
+            found = [t for t in tasks or [] if t["name"] == name]
+            result[name] = {"running": bool(found) if tasks is not None else None,
+                            "pid": found[0]["pid"] if found else None}
+        return result
+
+    def start_service(self, name: str) -> Dict:
+        """서비스가 안 떠 있으면 백그라운드로 띄우고, ps 에 보일 때까지 확인한다."""
+        command = START_COMMANDS.get(name)
+        if command is None:
+            raise ValueError(f"시작할 수 없는 서비스: {name}")
+        if not (self.running and self.connected):
+            raise RuntimeError("실시간 모니터가 단말에 붙어 있어야 합니다.")
+        if not self._service_lock.acquire(blocking=False):
+            raise RuntimeError("다른 서비스를 시작하는 중입니다.")
+        try:
+            ps_out = self._shell("ps")
+            if ps_out is None:
+                raise RuntimeError("ps 를 받지 못했습니다 (단말 연결 확인).")
+            before = self.services(parse_ps(ps_out))[name]
+            if before["running"]:
+                raise RuntimeError(f"{name} 는 이미 돌고 있습니다 (PID {before['pid']}).")
+            self._event("warning", f"{name} 가 안 떠 있어 시작합니다: {command}")
+            try:
+                result = self.runner([self.adb, "-s", self.serial, "shell", command], COMMAND_TIMEOUT_SEC)
+            except OSError as exc:
+                self._event("critical", f"{name} 시작 명령 실패: {exc}")
+                raise RuntimeError(f"{name} 시작 명령을 보내지 못했습니다: {exc}")
+            except subprocess.TimeoutExpired:
+                # 백그라운드로 뜬 서비스가 셸 출력을 쥐고 있으면 adb shell 이 안 끝난다.
+                # 끊기는 건 호스트 adb 뿐이고 워치의 서비스는 남는다 → ps 로 확인한다
+                result = None
+                self._event("warning", f"{name} 시작 명령이 {COMMAND_TIMEOUT_SEC}초 안에 안 끝나 ps 로 확인합니다")
+            if result is not None and result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                self._event("critical", f"{name} 시작 명령 실패 (exit {result.returncode}) {detail}")
+                raise RuntimeError(f"{name} 시작 명령이 실패했습니다 (exit {result.returncode}) {detail}")
+            deadline = time.time() + SERVICE_CHECK_SEC
+            while True:
+                ps_out = self._shell("ps")
+                now = self.services(parse_ps(ps_out))[name] if ps_out is not None else {"running": None, "pid": None}
+                if now["running"] or time.time() >= deadline or self._stop.is_set():
+                    break
+                time.sleep(1)
+            if now["running"]:
+                self._event("info", f"{name} 시작됨 (PID {now['pid']})")
+            else:
+                self._event("critical", f"{name} 를 시작했지만 {SERVICE_CHECK_SEC}초 안에 ps 에 보이지 않습니다")
+            return {"name": name, "command": command, **now}
+        finally:
+            self._service_lock.release()
 
     def poll_once(self) -> Optional[Dict]:
         ps_out = self._shell("ps")
@@ -254,8 +360,11 @@ class LiveDeviceMonitor:
                 return
             # 단말이 빠져 있으면 logcat 은 바로 끝난다. 3초마다 다시 부르므로 줄이 실제로 온 경우만 알린다
             received = 0
-            with open(self.capture_path, "a", encoding="utf-8") as capture:
+            path = self.capture_path
+            with open(path, "a", encoding="utf-8") as capture:
                 for raw in self._proc.stdout:
+                    if self.capture_path != path:
+                        break  # 재부팅으로 새 파일을 시작했다. 남은 줄은 앞 부팅 것이다
                     line = raw.rstrip("\r\n")
                     if not received:
                         self.log_streaming = True
@@ -354,6 +463,7 @@ class LiveDeviceMonitor:
                 "connected": self.connected,
                 "log_streaming": self.log_streaming,
                 "ims_registration": self.ims_registration,
+                "services": self.services(self.latest["tasks"] if self.latest else None),
                 "line_count": self.line_count,
                 "capture_path": self.capture_path,
                 "latest": dict(self.latest, tasks=self.latest["tasks"][:TOP_TASKS]) if self.latest else None,

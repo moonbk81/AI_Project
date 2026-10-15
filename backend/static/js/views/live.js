@@ -260,11 +260,44 @@ export async function renderLive(mount, _sourceFile, ctx) {
   const startButton = el("button", "primary", "시작");
   const stopButton = el("button", null, "중지");
   const analyzeButton = el("button", null, "지금까지 로그 분석");
-  for (const button of [refreshButton, startButton, stopButton, analyzeButton]) button.type = "button";
+  const rebootButton = el("button", "danger", "단말 재부팅");
+  for (const button of [refreshButton, startButton, stopButton, analyzeButton, rebootButton]) button.type = "button";
   const row = el("div", "live-controls");
-  row.append(field("단말", deviceSelect), field("간격", intervalSelect), refreshButton, startButton, stopButton, analyzeButton);
+  row.append(field("단말", deviceSelect), field("간격", intervalSelect), refreshButton, startButton, stopButton,
+             analyzeButton, rebootButton);
   const statusLine = el("p", "table-note", "");
   control.body.append(row, statusLine);
+
+  // ---- 서비스 ----
+  // 가끔 ims_service 가 안 뜬다. 최근 ps 로 보고, 안 떠 있을 때만 버튼으로 `ims_service &` 를 보낸다
+  const servicePanel = panel("서비스", "최근 ps 의 태스크 이름으로 본다. 안 떠 있으면 버튼으로 백그라운드 실행(`이름 &`)한다.");
+  servicePanel.section.classList.add("wide");
+  band.grid.append(servicePanel.section);
+  const serviceRow = el("div", "live-controls");
+  const serviceNote = el("p", "table-note", "");
+  servicePanel.body.append(serviceRow, serviceNote);
+  const serviceButtons = {};
+  let serviceBusy = false;
+  const drawServices = (status) => {
+    const services = status.services || {};
+    for (const [name, info] of Object.entries(services)) {
+      if (!serviceButtons[name]) {
+        const label = el("span", "table-note", "");
+        const button = el("button", null, `${name} 시작`);
+        button.type = "button";
+        button.addEventListener("click", () => startService(name));
+        const group = el("div", "live-controls");
+        group.append(label, button);
+        serviceRow.append(group);
+        serviceButtons[name] = { label, button };
+      }
+      const { label, button } = serviceButtons[name];
+      label.textContent = info.running === true ? `${name}: 돌고 있음 (PID ${info.pid})`
+        : (info.running === false ? `${name}: 안 떠 있음` : `${name}: 확인 전`);
+      label.style.color = info.running === false ? "var(--status-critical)" : "";
+      button.disabled = serviceBusy || info.running !== false || !(status.running && status.connected);
+    }
+  };
 
   // ---- 콜 테스트 ----
   const callPanel = panel("콜 테스트 (telephonytool)",
@@ -326,12 +359,14 @@ export async function renderLive(mount, _sourceFile, ctx) {
       startButton.disabled = status.running || deviceSelect.value === "";
       stopButton.disabled = !status.running;
       analyzeButton.disabled = !status.line_count;
+      rebootButton.disabled = !(status.running && status.connected);
       statusLine.textContent = status.running
         ? `${status.connected ? "연결됨" : "연결 끊김"} · ${status.serial} · ${status.interval}초 간격 · `
           + `로그 ${status.log_streaming ? "수신 중" : "끊김"} ${status.line_count.toLocaleString()}줄 · 저장: ${status.capture_path}`
         : (status.capture_path
           ? `${status.stop_reason || "중지됨"} · 마지막 저장: ${status.capture_path}`
           : "모니터가 꺼져 있습니다.");
+      drawServices(status);
       drawTrend(trend, tilesHost, status, slotsFor);
       tasks.content(tasksTable(status.latest));
       stack.content(stackTable(status.latest));
@@ -374,6 +409,33 @@ export async function renderLive(mount, _sourceFile, ctx) {
     }
   });
   grep.addEventListener("change", poll);
+  rebootButton.addEventListener("click", async () => {
+    if (!window.confirm("단말을 재부팅할까요? (adb reboot) 로그는 새 파일로 다시 시작합니다.")) return;
+    rebootButton.disabled = true;
+    try {
+      // 이전·새 로그 경로는 이벤트에 남는다. 상태 줄은 바로 다음 갱신에서 새 경로로 바뀐다
+      await api.liveReboot();
+    } catch (error) {
+      statusLine.textContent = `재부팅하지 못했습니다: ${error.message}`;
+    }
+    poll();
+  });
+  const startService = async (name) => {
+    if (!window.confirm(`워치에서 ${name} 를 시작할까요? (adb shell "${name} &")`)) return;
+    serviceBusy = true;
+    for (const { button } of Object.values(serviceButtons)) button.disabled = true;
+    serviceNote.textContent = `${name} 시작하는 중 — 뜰 때까지 ps 로 확인합니다.`;
+    try {
+      const result = await api.liveServiceStart(name);
+      serviceNote.textContent = result.running
+        ? `${name} 시작됨 (PID ${result.pid}).`
+        : `${name} 를 시작했지만 ps 에 아직 보이지 않습니다. 이벤트와 로그를 확인하세요.`;
+    } catch (error) {
+      serviceNote.textContent = `${name} 를 시작하지 못했습니다: ${error.message}`;
+    }
+    serviceBusy = false;
+    poll();
+  };
   callStart.addEventListener("click", async () => {
     const config = form.read();
     if (config.mode === "mo" && !config.number) {
