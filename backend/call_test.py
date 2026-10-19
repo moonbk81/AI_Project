@@ -12,6 +12,12 @@ telephonytool (sec/frameworks/telephony_service/tools/telephony_tool.c — 2026-
     → 실시간 모니터가 받아 둔 imsservice 통지 `[IPCT] [UNSL]< RegistrationStatus {registered=1 ...}` 로 판정한다.
     통지가 링 버퍼에서 밀려나 없으면 확인 없이 진행한다. 미등록이면 call domain 이 발신을 바로 거절해서
     그 회차가 실패로 남는다.
+- 망 등록은 SDK 가 구현해 둔 동기 조회다 (sdk/tapi_manager_impl.c, telephonyd 가 나눠 준 캐시를 읽는다):
+  `get-voice-registered 0` → `telephonytool_cmd_is_voice_registered, slotId : 0 value :1`
+  `get-data-registered 0`  → `telephonytool_cmd_get_ps_attached, slotId : 0 result : 1`
+  `get-voice-nwtype 0` / `get-ps-nwtype 0` → `... value :13` / `... result : 13` (tapi_network_type, 13 = LTE)
+  캐시에 값이 없으면 앞에 `[TAPI_CLIENT] telephonytool: tapi_network_is_voice_registered cache miss -> -N` 이
+  찍히고 값은 0 으로 나온다 → 미등록이 아니라 모름이다.
 - `!` 로 시작하는 줄은 워치에서 system() 을 부른다 → 여기서 보내는 명령은 COMMAND_PATTERNS 로만 만든다
 
 콜 상태(tapi_call.h): 0 ACTIVE, 1 HELD, 2 DIALING, 3 ALERTING, 4 INCOMING, 5 WAITING, 6 DISCONNECTED.
@@ -29,7 +35,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Tuple
 
 from parsers.rtos import RtosCallFlowParser
 from parsers.rtos.call_flow import IMSCALL_END_RE, IMSCALL_NEW_RE, IMSCALL_TRANS_RE
@@ -42,6 +48,8 @@ COMMAND_PATTERNS = [
     re.compile(r'^listen-call 0 0$'),
     re.compile(r'^get-call 0$'),
     re.compile(r'^get-ims-registration 0 1$'),
+    re.compile(r'^get-(?:voice|data)-registered 0$'),
+    re.compile(r'^get-(?:voice|ps)-nwtype 0$'),
     re.compile(r'^q$'),
 ]
 NUMBER_RE = re.compile(r'^\+?[0-9*#]{2,20}$')
@@ -53,12 +61,33 @@ CALL_ID_RE = re.compile(r'call changed call_id : (\S+)')
 CALL_STATE_RE = re.compile(r'call state: (?:\w+ \()?(-?\d+)')
 IMS_REG_RE = re.compile(r'ims_registered: (-?\d+) - (\d+)')
 
+# (쪽, 항목, 명령, 결과 줄, 캐시가 비었을 때 찍히는 SDK 함수 이름)
+NET_QUERIES = [
+    ("voice", "registered", "get-voice-registered 0",
+     re.compile(r'telephonytool_cmd_is_voice_registered, slotId\s*:\s*0\s+value\s*:\s*(-?\d+)'),
+     "tapi_network_is_voice_registered"),
+    ("voice", "rat", "get-voice-nwtype 0",
+     re.compile(r'telephonytool_cmd_get_voice_networktype, slotId\s*:\s*0\s+value\s*:\s*(-?\d+)'),
+     "tapi_network_get_voice_network_type"),
+    ("data", "registered", "get-data-registered 0",
+     re.compile(r'telephonytool_cmd_get_ps_attached, slotId\s*:\s*0\s+result\s*:\s*(-?\d+)'),
+     "tapi_data_is_registered"),
+    ("data", "rat", "get-ps-nwtype 0",
+     re.compile(r'telephonytool_cmd_get_ps_network_type, slotId\s*:\s*0\s+result\s*:\s*(-?\d+)'),
+     "tapi_data_get_network_type"),
+]
+CACHE_MISS_RE = re.compile(r'\[TAPI_CLIENT\] \S+: (tapi_\w+) cache miss -> (-?\d+)')
+# include/tapi.h tapi_network_type
+NETWORK_TYPES = {0: "UNKNOWN", 1: "GPRS", 2: "EDGE", 3: "UMTS", 8: "HSDPA", 9: "HSUPA", 12: "HSPA",
+                 13: "LTE", 19: "LTE_CA"}
+
 STATE_NAMES = {0: "ACTIVE", 1: "HELD", 2: "DIALING", 3: "ALERTING", 4: "INCOMING", 5: "WAITING", 6: "DISCONNECTED"}
 NAME_STATES = {v: k for k, v in STATE_NAMES.items()}
 ENDED = "DISCONNECTED"
 
 TOOL_READY_SEC = 8        # telephonytool 이 tapi 에 붙는 데 걸리는 시간 (문서 예시로 약 0.5초)
 IMS_CHECK_TIMEOUT_SEC = 8
+NET_QUERY_TIMEOUT_SEC = 5
 HANGUP_TIMEOUT_SEC = 15
 ANSWER_TIMEOUT_SEC = 20
 QUIT_TIMEOUT_SEC = 8
@@ -141,7 +170,10 @@ class CallTestRunner:
         self._pending_call_id: Optional[str] = None
         self.session: Optional[TelephonyToolSession] = None
         self.tool_ready_sec = TOOL_READY_SEC
+        self.net_query_timeout_sec = NET_QUERY_TIMEOUT_SEC
         self._device_lost = lambda: False
+        # 마지막 등록 상태 조회 (등록 상태 확인 버튼이나 콜 테스트 시작). 콜 테스트를 새로 해도 지우지 않는다
+        self.registration: Optional[Dict] = None
         self._reset({})
 
     def _reset(self, config: Dict) -> None:
@@ -167,8 +199,7 @@ class CallTestRunner:
             raise RuntimeError("콜 테스트가 이미 돌고 있습니다.")
         if mode not in ("mo", "mt"):
             raise ValueError("mode 는 mo(발신) 또는 mt(착신) 입니다.")
-        if not (self.monitor.running and self.monitor.connected and self.monitor.log_streaming):
-            raise RuntimeError("실시간 모니터가 단말에 붙어 로그를 받는 중이어야 합니다 (콜 결과를 로그로 판정한다).")
+        self._require_monitor()
         config = {
             "mode": mode, "number": validate_number(number) if mode == "mo" else None,
             "count": max(1, min(100, int(count))), "hold_sec": max(0, min(600, int(hold_sec))),
@@ -181,6 +212,21 @@ class CallTestRunner:
             self.started_at = _now()
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="call-test", daemon=True)
+        self._thread.start()
+
+    def _require_monitor(self) -> None:
+        if not (self.monitor.running and self.monitor.connected and self.monitor.log_streaming):
+            raise RuntimeError("실시간 모니터가 단말에 붙어 로그를 받는 중이어야 합니다 (결과를 로그로 판정한다).")
+
+    def check_registration(self) -> None:
+        """콜 없이 망(CS/PS)·IMS 등록 상태만 조회한다. 지난 콜 테스트 결과는 그대로 둔다."""
+        if self.running:
+            raise RuntimeError("콜 테스트나 등록 상태 확인이 이미 돌고 있습니다.")
+        self._require_monitor()
+        with self._lock:
+            self.phase = "등록 상태 확인"
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run_check, name="registration-check", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -197,16 +243,51 @@ class CallTestRunner:
     def _on_line(self, line: str) -> None:
         self._lines.put(line)
 
-    def _run(self) -> None:
+    def _watch_device(self) -> None:
         reboot0, disconnect0 = self.monitor.reboot_count, self.monitor.disconnect_count
         self._device_lost = lambda: (not self.monitor.connected or self.monitor.reboot_count != reboot0
                                      or self.monitor.disconnect_count != disconnect0)
+        self._lines = queue.Queue()
+
+    def _run_check(self) -> None:
+        self._watch_device()
+        self.monitor.add_listener(self._on_line)
+        session = None
+        try:
+            self._set_phase("등록 상태 확인 — telephonytool 시작")
+            session = self.session = self.session_factory(self.monitor.serial)
+            self._sleep(self.tool_ready_sec)
+            self._set_phase("등록 상태 확인 — 조회 중")
+            self._record_registration(self._ims_status())
+            phase = "등록 상태 확인 끝"
+        except Exception as exc:  # noqa: BLE001 — 화면에 원인을 보여준다
+            phase = f"등록 상태 확인 실패: {exc}"
+        finally:
+            self.monitor.remove_listener(self._on_line)
+            if session:
+                session.close()
+        if self._device_lost():
+            phase = "등록 상태 확인 중 단말 연결이 끊기거나 재부팅됐습니다."
+        self._set_phase(phase)
+
+    def _record_registration(self, ims: Dict) -> None:
+        network = self._query_network()
+        with self._lock:
+            self.registration = {"time": _now(), **network,
+                                 "ims": {k: ims[k] for k in ("registered", "source", "note")}}
+
+    def _run(self) -> None:
+        self._watch_device()
         self.monitor.add_listener(self._on_line)
         try:
             self._set_phase("telephonytool 시작")
             self.session = self.session_factory(self.config["serial"])
             self._sleep(self.tool_ready_sec)
-            if not self._check_ims():
+            ims = self._ims_status()
+            # IMS 가 안 돼도 망 등록은 본다 — 미등록 원인이 망 쪽인지 가른다
+            self._set_phase("망 등록 확인")
+            self._record_registration(ims)
+            if not self._check_ims(ims):
                 return
             self.session.send("listen-call 0 0")
             for n in range(1, self.config["count"] + 1):
@@ -246,48 +327,87 @@ class CallTestRunner:
         except (OSError, ValueError, RuntimeError):
             pass
 
-    def _check_ims(self) -> bool:
-        """콜을 걸어도 되면 True. 등록 여부를 모르는 빌드(SDK 미구현)도 True 다."""
+    def _ims_status(self) -> Dict:
+        """IMS 등록 여부. telephonytool 이 모르면(SDK 스텁) 모니터가 받아 둔 RegistrationStatus 로 본다.
+
+        answered 는 telephonytool 이 답을 했는지(미지원이라도) — 답이 없으면 telephonytool 자체가 이상하다.
+        """
         self._set_phase("IMS 등록 확인")
         self.session.send("get-ims-registration 0 1")
         deadline = time.time() + IMS_CHECK_TIMEOUT_SEC
+        why = "telephonytool 응답 없음"
+        answered = False
         while time.time() < deadline and not self._stopping():
             try:
                 line = self._lines.get(timeout=0.3)
             except queue.Empty:
                 continue
             m = IMS_REG_RE.search(line)
-            if m:
-                if m.group(1) != "0":
-                    return self._check_ims_from_log(f"이 빌드는 IMS 등록 조회를 지원하지 않아 (ret={m.group(1)})",
-                                                    fallback=True)
-                with self._lock:
-                    self.ims_registered = m.group(2) == "1"
-                    if not self.ims_registered:
-                        self.error = f"IMS 미등록 (ret={m.group(1)}, registered={m.group(2)}) — 콜 테스트를 하지 않았습니다."
-                return self.ims_registered
-        return self._check_ims_from_log("telephonytool 응답 없음", fallback=False)
-
-    def _check_ims_from_log(self, why: str, fallback: bool) -> bool:
-        """telephonytool 로 모를 때 모니터가 받아 둔 RegistrationStatus 로 판정한다.
-
-        통지도 없으면 fallback=True(조회 미지원)는 확인 없이 진행하고, False(응답 없음)는 멈춘다.
-        """
+            if not m:
+                continue
+            answered = True
+            if m.group(1) == "0":
+                return {"registered": m.group(2) == "1", "source": "telephonytool", "answered": True,
+                        "note": None, "detail": f"ret={m.group(1)}, registered={m.group(2)}"}
+            why = f"이 빌드는 IMS 등록 조회를 지원하지 않아 (ret={m.group(1)})"
+            break
         reg = getattr(self.monitor, "ims_registration", None)
+        if reg:
+            return {"registered": reg["registered"], "source": "log", "answered": answered,
+                    "note": f"{why} 로그의 RegistrationStatus ({reg['time']}) 로 판정: {reg['text']}",
+                    "detail": f"{reg['time']} RegistrationStatus"}
+        return {"registered": None, "source": None, "answered": answered,
+                "note": f"{why} 로그에 RegistrationStatus 통지도 없습니다.", "detail": why}
+
+    def _check_ims(self, ims: Dict) -> bool:
+        """콜을 걸어도 되면 True. 등록 여부를 모르는 빌드(SDK 미구현)도 True 다."""
         with self._lock:
-            if reg:
-                self.ims_registered = reg["registered"]
-                self.ims_note = f"{why} 로그의 RegistrationStatus ({reg['time']}) 로 판정: {reg['text']}"
-                if not self.ims_registered:
-                    self.error = f"IMS 미등록 ({reg['time']} RegistrationStatus) — 콜 테스트를 하지 않았습니다."
-                return self.ims_registered
-            self.ims_registered = None
-            if fallback:
-                self.ims_note = (f"{why} 로그에 RegistrationStatus 통지도 없어 확인 없이 진행합니다. "
-                                 "미등록이면 발신이 바로 실패합니다.")
-                return True
-            self.error = f"IMS 등록 상태를 확인하지 못했습니다 ({why})."
-            return False
+            self.ims_registered = ims["registered"]
+            self.ims_note = ims["note"]
+            if ims["registered"] is False:
+                self.error = f"IMS 미등록 ({ims['detail']}) — 콜 테스트를 하지 않았습니다."
+                return False
+            if ims["registered"] is None:
+                if not ims["answered"]:
+                    self.error = f"IMS 등록 상태를 확인하지 못했습니다 ({ims['detail']})."
+                    return False
+                self.ims_note += " 확인 없이 진행합니다. 미등록이면 발신이 바로 실패합니다."
+            return True
+
+    def _query_network(self) -> Dict:
+        """CS(voice)·PS(data) 등록과 RAT. 값을 못 받거나 SDK 캐시가 비어 있으면 None 과 note 를 남긴다."""
+        result = {side: {"registered": None, "rat": None, "notes": []} for side in ("voice", "data")}
+        for side, key, command, pattern, func in NET_QUERIES:
+            if self._stopping():
+                break
+            self.session.send(command)
+            value, missed = self._await_value(pattern, func)
+            if value is None:
+                result[side]["notes"].append(f"{command}: 응답 없음")
+            elif missed is not None:
+                result[side]["notes"].append(f"{command}: SDK 캐시에 값 없음 ({func} → {missed})")
+            elif key == "registered":
+                result[side]["registered"] = value == 1
+            else:
+                result[side]["rat"] = NETWORK_TYPES.get(value, str(value))
+        return result
+
+    def _await_value(self, pattern, func) -> Tuple[Optional[int], Optional[str]]:
+        missed = None
+        deadline = time.time() + self.net_query_timeout_sec
+        while time.time() < deadline and not self._stopping():
+            try:
+                line = self._lines.get(timeout=0.3)
+            except queue.Empty:
+                continue
+            miss = CACHE_MISS_RE.search(line)
+            if miss and miss.group(1) == func:
+                missed = miss.group(2)
+                continue
+            m = pattern.search(line)
+            if m:
+                return int(m.group(1)), missed
+        return None, missed
 
     # 로그에서 콜 상태를 뽑는다. 콜백의 call_id 줄 뒤에 state 줄이 온다
     def _drain(self, until: float) -> List[Dict]:
@@ -453,6 +573,7 @@ class CallTestRunner:
                 "error": self.error,
                 "ims_registered": self.ims_registered,
                 "ims_note": self.ims_note,
+                "registration": self.registration,
                 "summary": {
                     "done": len(done), "passed": len(passed),
                     "pass_rate": round(len(passed) * 100.0 / len(done), 1) if done else None,

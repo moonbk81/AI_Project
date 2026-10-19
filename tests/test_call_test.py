@@ -116,6 +116,7 @@ def _run(behavior, ims_registration=None, **kwargs):
 
     runner = CallTestRunner(monitor, session_factory=factory)
     runner.tool_ready_sec = 0
+    runner.net_query_timeout_sec = 0.2
     params = dict(mode="mo", number="9560959279", count=2, hold_sec=0, gap_sec=0, setup_timeout_sec=10)
     params.update(kwargs)
     runner.start(**params)
@@ -147,7 +148,9 @@ def test_mo_repeats_and_passes():
     assert [t["state"] for t in first["timeline"]] == ["DIALING", "ALERTING", "ACTIVE", "DISCONNECTED"]
     assert first["alerting_ms"] < first["active_ms"]
     commands = [s["command"] for s in session.sent]
-    assert commands[:3] == ["get-ims-registration 0 1", "listen-call 0 0", "dial 0 9560959279 0"]
+    # IMS 다음 망 등록(CS/PS 와 RAT)을 묻고 나서 콜을 건다
+    assert commands[:7] == ["get-ims-registration 0 1", "get-voice-registered 0", "get-voice-nwtype 0",
+                            "get-data-registered 0", "get-ps-nwtype 0", "listen-call 0 0", "dial 0 9560959279 0"]
     assert "hangup_0 0 /ril_0/voicecall01" in commands
     assert session.closed and status["phase"] == "끝남"
 
@@ -268,3 +271,66 @@ def test_logged_unregistered_stops_before_dialing():
     status, session = _run(sem_mo_ok, ims_registration=reg, count=1)
     assert status["ims_registered"] is False and "IMS 미등록" in status["error"]
     assert not any(c["command"].startswith("dial ") for c in session.sent)
+
+
+NET_ANSWERS = {
+    "get-voice-registered 0": "telephonytool_cmd_is_voice_registered, slotId : 0 value :1 ",
+    "get-voice-nwtype 0": "telephonytool_cmd_get_voice_networktype, slotId : 0 value :13 ",
+    "get-data-registered 0": "telephonytool_cmd_get_ps_attached, slotId : 0 result : 1 ",
+    "get-ps-nwtype 0": "telephonytool_cmd_get_ps_network_type, slotId : 0 result : 13 ",
+}
+
+
+def net_ok(session, command):
+    """망 조회에 답한다. voice 등록은 SDK 캐시가 비어 있어 cache miss 뒤 0 이 온다."""
+    m = session.monitor
+    if command == "get-voice-registered 0":
+        session.later(0.01, lambda: m.emit(
+            "[TAPI_CLIENT] telephonytool: tapi_network_is_voice_registered cache miss -> -2"))
+        session.later(0.02, lambda: m.emit("telephonytool_cmd_is_voice_registered, slotId : 0 value :0 "))
+    elif command in NET_ANSWERS:
+        session.later(0.01, lambda: m.emit(NET_ANSWERS[command]))
+    else:
+        sem_mo_ok(session, command)
+
+
+def _check(behavior, ims_registration=None):
+    monitor = FakeMonitor()
+    monitor.ims_registration = ims_registration
+    sessions = []
+
+    def factory(serial):
+        sessions.append(FakeSession(monitor, behavior))
+        return sessions[-1]
+
+    runner = CallTestRunner(monitor, session_factory=factory)
+    runner.tool_ready_sec = 0
+    runner.net_query_timeout_sec = 0.5
+    runner.check_registration()
+    runner._thread.join(timeout=20)
+    return runner.status(), sessions[0]
+
+
+def test_registration_check_reads_network_and_ims_without_calling():
+    reg = {"registered": True, "features": "0x1", "net": "1", "err": "0",
+           "time": "00:04:55.463800", "text": REG % 1}
+    status, session = _check(net_ok, ims_registration=reg)
+    sent = [c["command"] for c in session.sent]
+    assert not any(c.startswith(("dial", "listen-call", "answer")) for c in sent)
+    assert session.closed and status["phase"] == "등록 상태 확인 끝"
+    r = status["registration"]
+    assert r["data"] == {"registered": True, "rat": "LTE", "notes": []}
+    # cache miss 뒤의 0 은 미등록이 아니라 모름이다
+    assert r["voice"]["registered"] is None and r["voice"]["rat"] == "LTE"
+    assert "SDK 캐시에 값 없음" in r["voice"]["notes"][0]
+    assert r["ims"]["registered"] is True and r["ims"]["source"] == "log"
+    assert status["iterations"] == [] and status["error"] is None
+
+
+def test_call_test_records_network_even_when_ims_is_off():
+    status, session = _run(ims_off, count=1)
+    assert "IMS 미등록" in status["error"]
+    r = status["registration"]
+    assert r["ims"]["registered"] is False and r["ims"]["source"] == "telephonytool"
+    assert [c["command"] for c in session.sent][1:5] == list(NET_ANSWERS)
+    assert r["voice"]["notes"] == ["get-voice-registered 0: 응답 없음", "get-voice-nwtype 0: 응답 없음"]

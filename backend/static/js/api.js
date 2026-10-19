@@ -110,6 +110,7 @@ export const api = {
   liveReboot: () => post("/live/reboot", {}),
   callTestStart: (config) => post("/live/call-test/start", config),
   callTestStop: () => post("/live/call-test/stop", {}),
+  callTestCheck: () => post("/live/call-test/check", {}),
   callTestStatus: () => get("/live/call-test/status"),
 
   // Returns the builder's contract; `status` says whether there is anything to draw.

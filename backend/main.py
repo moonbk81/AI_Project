@@ -1665,6 +1665,18 @@ def call_test_start(req: CallTestStartRequest, request: Request) -> Dict[str, An
     return runner.status()
 
 
+@app.post("/live/call-test/check")
+def call_test_check(request: Request) -> Dict[str, Any]:
+    """콜 없이 망(CS/PS)·IMS 등록 상태만 telephonytool 로 조회한다."""
+    _require_caller(request)
+    runner = _call_test()
+    try:
+        runner.check_registration()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return runner.status()
+
+
 @app.post("/live/call-test/stop")
 def call_test_stop(request: Request) -> Dict[str, Any]:
     _require_caller(request)

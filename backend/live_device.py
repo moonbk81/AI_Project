@@ -31,6 +31,7 @@ from typing import Callable, Deque, Dict, List, Optional
 
 from parsers.rtos import RtosCallFlowParser, RtosOemHookParser
 from parsers.rtos.call_flow import parse_ims_registration
+from parsers.rtos.nitz import parse_nitz
 from parsers.rtos.line import parse_line
 from parsers.rtos.device_status import cpu_total, parse_free, parse_ps, parse_uptime
 
@@ -121,6 +122,8 @@ class LiveDeviceMonitor:
         self.disconnect_count = 0
         # 마지막으로 받은 imsservice RegistrationStatus. 부팅 직후에 찍혀서 콜 테스트가 시작될 때는 이미 지나가 있다
         self.ims_registration: Optional[Dict] = None
+        # 마지막 NITZ, 찍힌 자리별 (telephonytool = tapi 클라이언트까지 옴, rilj = secril 이 올림)
+        self.nitz: Dict[str, Dict] = {}
         self._lost_since: Optional[float] = None
         self.stop_reason: Optional[str] = None
 
@@ -178,6 +181,7 @@ class LiveDeviceMonitor:
             self.analysis = {}
             self._analyzed_count = -1
             self.ims_registration = None
+            self.nitz = {}
             self._last_uptime = None  # 요청한 재부팅이라 "재부팅 감지" 경고로 세지 않는다
         # 지금 logcat 은 앞 부팅 것이다. 호스트 adb 만 끊으면 로그 루프가 새 파일로 다시 붙는다
         proc = self._proc
@@ -323,6 +327,7 @@ class LiveDeviceMonitor:
         if up is not None and self._last_uptime is not None and up < self._last_uptime:
             self.reboot_count += 1
             self.ims_registration = None  # 재부팅 전 상태다. 다시 붙으면 새 통지가 온다
+            self.nitz = {}
             self._event("critical", f"재부팅 감지 (uptime {self._last_uptime}분 → {up}분)")
         if up is not None:
             self._last_uptime = up
@@ -397,6 +402,8 @@ class LiveDeviceMonitor:
             listeners = list(self._listeners)
         if "RegistrationStatus" in line:
             self._track_ims_registration(line)
+        if "utcoff = " in line or "NITZ" in line or "UNSOL_1008" in line:
+            self._track_nitz(line)
         for listener in listeners:
             listener(line)
         return True
@@ -407,6 +414,15 @@ class LiveDeviceMonitor:
         if reg:
             with self._lock:
                 self.ims_registration = {**reg, "time": rec.time, "text": rec.msg}
+
+    def _track_nitz(self, line: str) -> None:
+        rec = parse_line(line)
+        nitz = parse_nitz(rec.msg if rec else line)
+        if nitz:
+            with self._lock:
+                count = self.nitz.get(nitz["source"], {}).get("count", 0) + 1
+                self.nitz[nitz["source"]] = {**nitz, "time": rec.time if rec else None,
+                                             "text": rec.msg if rec else line.strip(), "count": count}
 
     def add_listener(self, listener: Callable[[str], None]) -> None:
         with self._lock:
@@ -463,6 +479,7 @@ class LiveDeviceMonitor:
                 "connected": self.connected,
                 "log_streaming": self.log_streaming,
                 "ims_registration": self.ims_registration,
+                "nitz": dict(self.nitz),
                 "services": self.services(self.latest["tasks"] if self.latest else None),
                 "line_count": self.line_count,
                 "capture_path": self.capture_path,

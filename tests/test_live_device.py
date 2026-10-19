@@ -266,3 +266,16 @@ def test_reboot_sends_adb_reboot_and_starts_a_new_log(tmp_path, monkeypatch):
 def test_reboot_needs_a_connected_monitor(tmp_path):
     with pytest.raises(RuntimeError, match="실시간 모니터"):
         _monitor(tmp_path, RebootAdb()).reboot_device()
+
+
+def test_monitor_keeps_last_nitz_per_source(tmp_path):
+    m = _monitor(tmp_path, FakeAdb())
+    m._accept("[01/01/00 00:05:01.100000] [151] [ap] [RILJ] [UNSL]< NITZ_TIME_RECEIVED {26/10/19,03:25:09+36,0}")
+    m._accept("[01/01/00 00:05:01.120000] [210] [ap] sec = 9 min = 25 hour = 3                 "
+              "mday = 19 mon = 10 year = 2026 dst = 0 utcoff = 32400 ")
+    m._accept("[01/01/00 00:05:02.120000] [210] [ap] sec = 10 min = 25 hour = 3                 "
+              "mday = 19 mon = 10 year = 2026 dst = 0 utcoff = 32400 ")
+    nitz = m.status()["nitz"]
+    assert nitz["telephonytool"]["count"] == 2 and nitz["telephonytool"]["local"] == "2026-10-19 12:25:10"
+    assert nitz["telephonytool"]["time"] == "00:05:02.120000"
+    assert nitz["rilj"]["utc"] == "2026-10-19 03:25:09" and nitz["rilj"]["utcoff_min"] == 540

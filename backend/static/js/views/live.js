@@ -194,17 +194,54 @@ function callTestForm() {
   return { row, read };
 }
 
-function callTestResults(status) {
+const regText = (value) => (value === true ? "등록됨" : (value === false ? "미등록" : "모름"));
+const regTone = (value) => (value === true ? "good" : (value === false ? "critical" : "warning"));
+
+// 망(CS/PS)·IMS 등록. 조회 전이면 IMS 만 모니터가 받아 둔 RegistrationStatus 로 보여준다
+function registrationRow(reg, monitorIms, nitz) {
+  const side = (label, info) => tile(label, reg ? regText(info.registered) : "확인 전", "",
+    reg ? [info.rat, ...(info.notes || [])].filter(Boolean).join(" · ") : "등록 상태 확인 버튼으로 조회",
+    reg ? regTone(info.registered) : "");
+  const ims = reg?.ims;
+  const imsTile = ims
+    ? tile("IMS 등록", regText(ims.registered), "", ims.note || "telephonytool 조회", regTone(ims.registered))
+    : (monitorIms
+      ? tile("IMS 등록", regText(monitorIms.registered), "", `로그 ${monitorIms.time} RegistrationStatus`,
+             regTone(monitorIms.registered))
+      : tile("IMS 등록", "확인 전", "", "로그에 RegistrationStatus 가 아직 없다"));
+  return tileRow([
+    side("음성(CS) 등록", reg?.voice || {}),
+    side("데이터(PS) 등록", reg?.data || {}),
+    imsTile,
+    tile("확인 시각", reg ? clock(reg.time) : "-", "", "콜은 IMS 등록 상태에서만 된다"),
+    nitzTile(nitz),
+  ]);
+}
+
+const utcoffText = (min) => `UTC${min < 0 ? "-" : "+"}${String(Math.floor(Math.abs(min) / 60)).padStart(2, "0")}:`
+  + String(Math.abs(min) % 60).padStart(2, "0");
+
+// 망이 내려 준 시각. telephonytool 이 받았으면 tapi 클라이언트까지 온 것, RILJ 에만 있으면 SDK 에서 멈춘 것
+function nitzTile(nitz) {
+  const tool = nitz?.telephonytool;
+  const rilj = nitz?.rilj;
+  const shown = tool || rilj;
+  if (!shown) return tile("NITZ", "수신 전", "", "망이 시각을 내려 주면 telephonytool 이 받는다");
+  const where = tool ? `telephonytool ${tool.count}회` : `RILJ 만 ${rilj.count}회 — telephonytool 에는 안 옴`;
+  return tile("NITZ", shown.local.split(" ").pop(), "",
+    `${shown.local.split(" ")[0]} ${utcoffText(shown.utcoff_min)} · DST ${shown.dst} · UTC ${shown.utc.split(" ").pop()}`
+    + ` · ${where} · 마지막 ${clock(shown.time)}`,
+    tool ? "good" : "warning");
+}
+
+function callTestResults(status, monitorIms, nitz) {
   const wrap = el("div", "stack");
   const summary = status.summary || {};
   const cfg = status.config || {};
-  const ims = status.ims_registered === true ? "등록됨"
-    : (status.ims_registered === false ? "미등록" : (status.ims_note ? "확인 불가" : "확인 전"));
+  wrap.append(registrationRow(status.registration, monitorIms, nitz));
   wrap.append(tileRow([
     tile("상태", status.phase || "대기", "", status.error || (status.running ? "진행 중" : ""),
          status.error ? "critical" : (status.running ? "warning" : "good")),
-    tile("IMS 등록", ims, "", status.ims_note || "콜은 IMS 등록 상태에서만 된다",
-         status.ims_registered === true ? "good" : (status.ims_registered === false ? "critical" : "")),
     tile("진행", `${summary.done ?? 0} / ${cfg.count ?? "-"}`, "",
          cfg.mode ? (cfg.mode === "mo" ? `발신 ${cfg.number}` : "착신 자동 응답") : ""),
     tile("성공률", summary.pass_rate === null || summary.pass_rate === undefined ? "-" : `${summary.pass_rate}%`, "",
@@ -307,10 +344,12 @@ export async function renderLive(mount, _sourceFile, ctx) {
   const form = callTestForm();
   const callStart = el("button", "primary", "테스트 시작");
   const callStop = el("button", null, "테스트 중지");
+  const callCheck = el("button", null, "등록 상태 확인");
   callStart.type = "button";
   callStop.type = "button";
+  callCheck.type = "button";
   const callButtons = el("div", "live-controls");
-  callButtons.append(callStart, callStop);
+  callButtons.append(callCheck, callStart, callStop);
   const callNote = el("p", "table-note", "실시간 모니터가 단말에 붙어 로그를 받는 중이어야 한다.");
   const callHost = el("div");
   callPanel.body.append(form.row, callButtons, callNote, callHost);
@@ -379,7 +418,8 @@ export async function renderLive(mount, _sourceFile, ctx) {
       const test = await api.callTestStatus();
       callStart.disabled = test.running || !(status.running && status.connected && status.log_streaming);
       callStop.disabled = !test.running;
-      callHost.replaceChildren(callTestResults(test));
+      callCheck.disabled = callStart.disabled;
+      callHost.replaceChildren(callTestResults(test, status.ims_registration, status.nitz));
     } catch (error) {
       console.error("live status", error);
       statusLine.textContent = `상태를 불러오지 못했습니다: ${error.message}`;
@@ -450,6 +490,15 @@ export async function renderLive(mount, _sourceFile, ctx) {
       callNote.textContent = `${what} 테스트를 시작했습니다.`;
     } catch (error) {
       callNote.textContent = `시작하지 못했습니다: ${error.message}`;
+    }
+    poll();
+  });
+  callCheck.addEventListener("click", async () => {
+    callNote.textContent = "telephonytool 로 망(CS/PS)·IMS 등록 상태를 조회합니다. 콜은 걸지 않습니다.";
+    try {
+      await api.callTestCheck();
+    } catch (error) {
+      callNote.textContent = `조회하지 못했습니다: ${error.message}`;
     }
     poll();
   });
