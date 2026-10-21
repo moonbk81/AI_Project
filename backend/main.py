@@ -1561,7 +1561,7 @@ async def create_analyze_job(
 
 # ---- 실시간 단말 (adb) ----
 # 워치는 이 PC 에 꽂힌 것 하나라 모니터도 하나다. 워치에는 ps/free/uptime/logcat 만 보낸다.
-# 예외는 버튼으로 부르는 서비스 시작(START_COMMANDS)과 재부팅(adb reboot)뿐이다.
+# 예외는 버튼으로 부르는 서비스 시작(START_COMMANDS)·재부팅(adb reboot)·콜 테스트·semtelcli iil 시험뿐이다.
 
 
 class LiveStartRequest(BaseModel):
@@ -1688,6 +1688,39 @@ def call_test_stop(request: Request) -> Dict[str, Any]:
 @app.get("/live/call-test/status")
 def call_test_status() -> Dict[str, Any]:
     return _call_test().status()
+
+
+_semtelcli_runner = None
+
+
+def _semtelcli():
+    global _semtelcli_runner
+    if _semtelcli_runner is None:
+        from backend.live_device import monitor
+        from backend.semtelcli_test import SemtelcliIilRunner
+
+        _semtelcli_runner = SemtelcliIilRunner(monitor)
+    return _semtelcli_runner
+
+
+class SemtelcliIilRequest(BaseModel):
+    preset: str
+    params: Dict[str, str] = {}
+
+
+@app.post("/live/semtelcli/iil")
+def semtelcli_iil(req: SemtelcliIilRequest, request: Request) -> Dict[str, Any]:
+    """`semtelcli iil ...` 하나를 돌린다. 명령은 고른 선택지로만 만든다. 40초 안에 끝난다."""
+    _require_caller(request)
+    try:
+        return _semtelcli().run(req.preset, req.params)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/live/semtelcli/status")
+def semtelcli_status() -> Dict[str, Any]:
+    return _semtelcli().status()
 
 
 @app.get("/live/status")

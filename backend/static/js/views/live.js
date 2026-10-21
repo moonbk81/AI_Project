@@ -277,6 +277,81 @@ function callTestResults(status, monitorIms, nitz) {
   return wrap;
 }
 
+// ---- semtelcli iil (imsservice IIL 을 secril 에 넣어 보기) ----
+
+const VERDICT_TEXT = { pass: "✓ OK", fail: "✗ 실패" };
+
+// 시험·인자는 서버가 준 선택지(IIL_PRESETS)로만 그린다. 고른 값이 그대로 semtelcli 인자가 된다
+function iilForm(presets) {
+  const preset = el("select");
+  for (const p of presets) {
+    const option = el("option", null, p.label);
+    option.value = p.id;
+    preset.append(option);
+  }
+  const argsRow = el("div", "live-controls");
+  const note = el("p", "table-note", "");
+  let selects = {};
+  const sync = () => {
+    const p = presets.find((x) => x.id === preset.value);
+    selects = {};
+    argsRow.replaceChildren();
+    for (const arg of p?.args || []) {
+      const select = el("select");
+      for (const [value, label] of arg.choices) {
+        const option = el("option", null, label);
+        option.value = value;
+        if (value === arg.default) option.selected = true;
+        select.append(option);
+      }
+      selects[arg.key] = select;
+      argsRow.append(field(arg.label, select));
+    }
+    note.textContent = p?.description || "";
+  };
+  preset.addEventListener("change", sync);
+  sync();
+  const read = () => ({
+    preset: preset.value,
+    params: Object.fromEntries(Object.entries(selects).map(([key, select]) => [key, select.value])),
+  });
+  // 확인 창에 보일 명령. 서버가 같은 규칙으로 만든다 (backend/semtelcli_test.py build_command)
+  const command = () => ["semtelcli", "iil", preset.value, ...Object.values(selects).map((s) => s.value)].join(" ");
+  return { preset, argsRow, note, read, command };
+}
+
+function iilResults(status) {
+  const wrap = el("div", "stack");
+  const history = status.history || [];
+  if (!history.length) {
+    wrap.append(el("p", "table-note", "아직 보낸 시험이 없습니다."));
+    return wrap;
+  }
+  wrap.append(frameTable(history.map((r) => ({
+    시각: clock(r.time),
+    시험: r.label,
+    명령: r.command.replace(/^semtelcli iil /, ""),
+    결과: VERDICT_TEXT[r.verdict] || r.verdict,
+    이유: r.reason,
+    RSP: r.response ? `status=${r.response.status}` : "-",
+    "돌려받은 IPC": r.answers.length ? r.answers.map((a) => a.ipc).join(", ") : "-",
+    "secril 로그": r.logs.length,
+    "걸린 시간(ms)": ms(r.elapsed_ms),
+  })), ["시각", "시험", "명령", "결과", "이유", "RSP", "돌려받은 IPC", "secril 로그", "걸린 시간(ms)"]));
+  const last = history[0];
+  const fold = el("details", "fold");
+  fold.append(el("summary", null, `마지막 시험 자세히 (${clock(last.time)} ${last.command})`));
+  const pre = el("pre", "log-tail");
+  const answers = last.answers.map((a) => `  ${a.ipc} len=${a.ipc_len}:${a.data ? ` ${a.data}` : ""}`);
+  pre.textContent = `--- semtelcli 출력 ---\n${last.output.join("\n")}`
+    + (answers.length ? `\n\n--- secril 이 돌려 보낸 IPC (UNSOL_OEM_HOOK_RAW) ---\n${answers.join("\n")}` : "")
+    + `\n\n--- 그동안 받은 secril 로그 (IMS-MGR, HalIoChannel, IIL ...) ${last.logs.length}줄 ---\n`
+    + (last.logs.length ? last.logs.join("\n") : "(없음 — 모니터 로그 스트림을 확인)");
+  fold.append(pre);
+  wrap.append(fold);
+  return wrap;
+}
+
 export async function renderLive(mount, _sourceFile, ctx) {
   const band = section("실시간 RTOS 단말");
   mount.append(band.wrap);
@@ -354,6 +429,23 @@ export async function renderLive(mount, _sourceFile, ctx) {
   const callHost = el("div");
   callPanel.body.append(form.row, callButtons, callNote, callHost);
 
+  // ---- semtelcli iil ----
+  const iilPanel = panel("IIL 시험 (semtelcli iil)",
+    "imsservice 가 보낼 IIL 을 OEM_HOOK_RAW 로 secril 에 넣고, 응답과 secril 이 돌려 보낸 IIL·로그를 본다. "
+    + "망이 IMS 등록을 거절해도 secril IIL 경로를 확인할 수 있다.");
+  iilPanel.section.classList.add("wide");
+  band.grid.append(iilPanel.section);
+  const iilStatus = await api.semtelcliStatus().catch(() => ({ presets: [], history: [] }));
+  const iil = iilForm(iilStatus.presets || []);
+  const iilRun = el("button", "primary", "보내기");
+  iilRun.type = "button";
+  const iilTop = el("div", "live-controls");
+  iilTop.append(field("시험", iil.preset), iilRun);
+  const iilNote = el("p", "table-note", "실시간 모니터가 단말에 붙어 있어야 한다. 한 번에 최대 40초쯤 걸린다.");
+  const iilHost = el("div");
+  iilPanel.body.append(iilTop, iil.argsRow, iil.note, iilNote, iilHost);
+  let iilBusy = false;
+
   // ---- 카드 ----
   const trend = card("CPU 추이", "전체와 최근 구간 평균 상위 3 태스크. 점선은 90%");
   trend.section.classList.add("wide");
@@ -420,6 +512,15 @@ export async function renderLive(mount, _sourceFile, ctx) {
       callStop.disabled = !test.running;
       callCheck.disabled = callStart.disabled;
       callHost.replaceChildren(callTestResults(test, status.ims_registration, status.nitz));
+
+      const iilState = await api.semtelcliStatus();
+      iilRun.disabled = iilBusy || Boolean(iilState.running) || !(status.running && status.connected);
+      // 펼쳐 둔 자세히 보기가 2초마다 접히지 않게, 새 결과가 생겼을 때만 다시 그린다
+      const iilKey = `${iilState.history.length}:${iilState.history[0]?.time || ""}`;
+      if (iilHost.dataset.key !== iilKey) {
+        iilHost.dataset.key = iilKey;
+        iilHost.replaceChildren(iilResults(iilState));
+      }
     } catch (error) {
       console.error("live status", error);
       statusLine.textContent = `상태를 불러오지 못했습니다: ${error.message}`;
@@ -505,6 +606,23 @@ export async function renderLive(mount, _sourceFile, ctx) {
   callStop.addEventListener("click", async () => {
     callNote.textContent = "중지하는 중 — 진행 중인 콜을 끊고 telephonytool 을 q 로 끝냅니다.";
     await api.callTestStop().catch((error) => { callNote.textContent = `중지하지 못했습니다: ${error.message}`; });
+    poll();
+  });
+
+  iilRun.addEventListener("click", async () => {
+    const command = iil.command();
+    if (!window.confirm(`워치의 secril 에 IIL 을 넣습니다.\n\nadb shell ${command}\n\n보낼까요?`)) return;
+    iilBusy = true;
+    iilRun.disabled = true;
+    iilNote.textContent = `${command} — 응답과 secril 이 돌려 보내는 IIL 을 기다리는 중 (최대 40초)`;
+    try {
+      const { preset, params } = iil.read();
+      const result = await api.semtelcliIil(preset, params);
+      iilNote.textContent = `${VERDICT_TEXT[result.verdict] || result.verdict} — ${result.reason}`;
+    } catch (error) {
+      iilNote.textContent = `보내지 못했습니다: ${error.message}`;
+    }
+    iilBusy = false;
     poll();
   });
 

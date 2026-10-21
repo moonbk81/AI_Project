@@ -112,6 +112,8 @@ export const api = {
   callTestStop: () => post("/live/call-test/stop", {}),
   callTestCheck: () => post("/live/call-test/check", {}),
   callTestStatus: () => get("/live/call-test/status"),
+  semtelcliIil: (preset, params) => post("/live/semtelcli/iil", { preset, params }),
+  semtelcliStatus: () => get("/live/semtelcli/status"),
 
   // Returns the builder's contract; `status` says whether there is anything to draw.
   chart: (name, sourceFile) =>
